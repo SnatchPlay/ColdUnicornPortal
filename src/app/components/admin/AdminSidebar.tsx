@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
-import { LayoutDashboard, Users, GitBranch, Trello, Settings, LogOut, X, TrendingUp, UserCheck } from 'lucide-react';
+import { LayoutDashboard, Users, GitBranch, Trello, Settings, LogOut, X,
+  UserCheck, DollarSign, Bot, TrendingUp } from 'lucide-react';
 import { Logo } from '../Logo';
 import { mockUsers } from '../../data/mock';
 
 const ADMIN_USER = mockUsers.find(u => u.role === 'admin')!;
 
-export type AdminTab = 'overview' | 'clients' | 'crm' | 'pdca' | 'users' | 'settings';
+export type AdminTab = 'overview' | 'clients' | 'crm' | 'lg-pipeline' | 'pdca' | 'finance' | 'automation' | 'users';
 
 interface Props {
   activeTab: AdminTab;
@@ -14,13 +15,15 @@ interface Props {
   onMobileClose: () => void;
 }
 
-const NAV: { id: AdminTab; label: string; icon: typeof LayoutDashboard; badge?: string }[] = [
-  { id: 'overview', label: 'Agency Overview', icon: LayoutDashboard },
-  { id: 'clients',  label: 'Clients & 360°',  icon: UserCheck },
-  { id: 'crm',      label: 'Agency CRM',       icon: Trello },
-  { id: 'pdca',     label: 'PDCA Matrix',      icon: GitBranch },
-  { id: 'users',    label: 'Users',            icon: Users },
-  { id: 'settings', label: 'Settings',         icon: Settings },
+const NAV: { id: AdminTab; label: string; icon: typeof LayoutDashboard; group?: string }[] = [
+  { id: 'overview',    label: 'Agency Overview', icon: LayoutDashboard },
+  { id: 'clients',     label: 'Clients & 360°',  icon: UserCheck },
+  { id: 'pdca',        label: 'PDCA Matrix',      icon: GitBranch },
+  { id: 'automation',  label: 'Automation Ops',   icon: Bot },
+  { id: 'crm',         label: 'Agency CRM',       icon: Trello },
+  { id: 'lg-pipeline', label: 'LG Pipeline',      icon: TrendingUp },
+  { id: 'finance',     label: 'Finance',          icon: DollarSign },
+  { id: 'users',       label: 'Users',            icon: Users },
 ];
 
 function getInitials(name: string) {
@@ -49,16 +52,15 @@ function SidebarContent({ activeTab, onTabChange, onClose }: {
         )}
       </div>
 
-      <nav className="flex-1 p-3 space-y-0.5">
+      <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         {NAV.map(item => {
-          const Icon = item.icon;
+          const Icon   = item.icon;
           const active = activeTab === item.id;
           return (
             <button key={item.id} onClick={() => handleNav(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active ? 'bg-primary/10 text-primary border border-primary/20' : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'}`}>
               <Icon className="w-4 h-4 shrink-0" />
               <span className="text-sm flex-1">{item.label}</span>
-              {item.badge && <span className="text-xs bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">{item.badge}</span>}
             </button>
           );
         })}

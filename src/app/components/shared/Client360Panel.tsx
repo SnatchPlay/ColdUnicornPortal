@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 import { X, Globe, Building2, Calendar, FileText, Users, BarChart3,
   CheckCircle2, AlertCircle, ChevronDown, Pencil, Save, XCircle,
-  Send, TrendingUp, Plus, ToggleLeft, ToggleRight, Percent, Mail } from 'lucide-react';
+  Send, TrendingUp, Plus, ToggleLeft, ToggleRight, Percent, Mail,
+  AlertTriangle, Clock, Bot } from 'lucide-react';
 import type { Client, ClientSetup, Domain, Campaign, Lead, LeadQualification,
-  ClientHealthAssessment, HealthStatus, CrmPlatform } from '../../data/schema';
+  ClientHealthAssessment, HealthStatus, CrmPlatform, ClientIssue, IssueSeverity, IssueStatus } from '../../data/schema';
 import {
   mockClientSetup, mockDomains, mockCampaigns, mockLeads,
   mockClientDailySnapshots, mockHealthAssessments, mockInvoices,
-  mockUsers, mockPdca, mockCampaignDailyStats
+  mockUsers, mockPdca, mockCampaignDailyStats, mockClientIssues, mockAuditEvents,
 } from '../../data/mock';
 import type { PdcaStatus, ClientPdca } from '../../data/mock';
 import { HealthBadge, HealthDot, getOverallHealth } from './HealthBadge';
@@ -16,7 +17,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid
 } from 'recharts';
 
-type Tab = 'overview' | 'campaigns' | 'domains' | 'leads' | 'invoices' | 'pdca';
+type Tab = 'overview' | 'campaigns' | 'domains' | 'leads' | 'invoices' | 'pdca' | 'issues' | 'activity';
 
 const TABS: { id: Tab; label: string; icon: typeof Globe }[] = [
   { id: 'overview',  label: 'Overview',  icon: BarChart3 },
@@ -25,7 +26,22 @@ const TABS: { id: Tab; label: string; icon: typeof Globe }[] = [
   { id: 'leads',     label: 'Leads',     icon: Users },
   { id: 'invoices',  label: 'Invoices',  icon: FileText },
   { id: 'pdca',      label: 'PDCA',      icon: CheckCircle2 },
+  { id: 'issues',    label: 'Issues',    icon: AlertTriangle },
+  { id: 'activity',  label: 'Activity',  icon: Clock },
 ];
+
+const SEV_CFG: Record<IssueSeverity, { label: string; color: string; bg: string }> = {
+  low:      { label: 'Low',      color: 'text-gray-400',   bg: 'bg-gray-500/10 border-gray-500/20' },
+  medium:   { label: 'Medium',   color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20' },
+  high:     { label: 'High',     color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/20' },
+  critical: { label: 'Critical', color: 'text-red-400',    bg: 'bg-red-500/10 border-red-500/20' },
+};
+const ISS_STATUS_CFG: Record<IssueStatus, { label: string; color: string }> = {
+  open:        { label: 'Open',        color: 'text-red-400' },
+  in_progress: { label: 'In Progress', color: 'text-blue-400' },
+  resolved:    { label: 'Resolved',    color: 'text-green-400' },
+  closed:      { label: 'Closed',      color: 'text-muted-foreground' },
+};
 
 const HEALTH_LABELS: Record<string, string> = {
   ip_health: 'IP', domains_health: 'Domains', warmup_health: 'Warmup',
@@ -301,6 +317,11 @@ export function Client360Panel({ client, onClose }: Props) {
   const [lLeads,       setLLeads]       = useState(() => mockLeads.filter(l => l.client_id === client.id).map(l => ({ ...l })));
   const [lAssessments, setLAssessments] = useState(() => mockHealthAssessments.filter(h => h.client_id === client.id).sort((a, b) => b.assessed_at.localeCompare(a.assessed_at)).map(a => ({ ...a })));
   const [lInvoices,    setLInvoices]    = useState(() => mockInvoices.filter(i => i.client_id === client.id).sort((a, b) => b.issue_date.localeCompare(a.issue_date)).map(i => ({ ...i })));
+  const [lIssues,      setLIssues]      = useState<ClientIssue[]>(() => mockClientIssues.filter(i => i.client_id === client.id).map(i => ({ ...i })));
+  const [showNewIssue, setShowNewIssue] = useState(false);
+  const [issueForm,    setIssueForm]    = useState({ title: '', description: '', severity: 'medium' as IssueSeverity });
+
+  const clientEvents = mockAuditEvents.filter(e => e.client_id === client.id).sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   // ── Edit modes ────────────────────────────────────────────
   const [editClient,  setEditClient]  = useState(false);
@@ -369,6 +390,28 @@ export function Client360Panel({ client, onClose }: Props) {
 
   const updateInvoice = (id: string, status: string) =>
     setLInvoices(prev => prev.map(i => i.id === id ? { ...i, status: status as any } : i));
+
+  const submitIssue = () => {
+    if (!issueForm.title.trim()) return;
+    const now = new Date().toISOString();
+    setLIssues(prev => [...prev, {
+      id: `issue-${Date.now()}`,
+      client_id: client.id,
+      created_by: 'user-1',
+      title: issueForm.title.trim(),
+      description: issueForm.description.trim() || null,
+      severity: issueForm.severity,
+      status: 'open',
+      resolved_at: null,
+      created_at: now,
+      updated_at: now,
+    }]);
+    setIssueForm({ title: '', description: '', severity: 'medium' });
+    setShowNewIssue(false);
+  };
+
+  const updateIssueStatus = (id: string, status: IssueStatus) =>
+    setLIssues(prev => prev.map(i => i.id === id ? { ...i, status, resolved_at: status === 'resolved' ? new Date().toISOString() : null } : i));
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -741,6 +784,122 @@ export function Client360Panel({ client, onClose }: Props) {
                         <p className="text-xs text-yellow-400">{cell.note}</p>
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {/* ══ ISSUES ════════════════════════════════════════ */}
+          {tab === 'issues' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">{lIssues.filter(i => ['open','in_progress'].includes(i.status)).length} open</p>
+                <button onClick={() => setShowNewIssue(!showNewIssue)}
+                  className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors">
+                  <Plus className="w-3.5 h-3.5" />New Issue
+                </button>
+              </div>
+              {showNewIssue && (
+                <div className="bg-white/3 border border-primary/20 rounded-xl p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Severity">
+                      <select value={issueForm.severity} onChange={e => setIssueForm(p => ({ ...p, severity: e.target.value as IssueSeverity }))}
+                        className="w-full px-2.5 py-1.5 bg-secondary/30 border border-border rounded-lg text-xs focus:outline-none cursor-pointer">
+                        {(['low','medium','high','critical'] as IssueSeverity[]).map(s => (
+                          <option key={s} value={s}>{SEV_CFG[s].label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Title">
+                      <Input value={issueForm.title} onChange={v => setIssueForm(p => ({ ...p, title: v }))} placeholder="Issue title..." />
+                    </Field>
+                  </div>
+                  <Field label="Description">
+                    <textarea value={issueForm.description} onChange={e => setIssueForm(p => ({ ...p, description: e.target.value }))}
+                      rows={2} placeholder="Optional details..."
+                      className="w-full px-2.5 py-2 bg-secondary/30 border border-border rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/40" />
+                  </Field>
+                  <div className="flex gap-2">
+                    <button onClick={submitIssue}
+                      className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs hover:bg-primary/90 flex items-center gap-1">
+                      <Save className="w-3 h-3" />Submit
+                    </button>
+                    <button onClick={() => setShowNewIssue(false)} className="px-3 py-1.5 border border-border rounded-lg text-xs text-muted-foreground hover:text-foreground">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {lIssues.length === 0 && !showNewIssue && (
+                <div className="text-center text-muted-foreground text-sm py-8">No issues logged</div>
+              )}
+              {lIssues.sort((a, b) => {
+                const o: Record<IssueSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+                return o[a.severity] - o[b.severity];
+              }).map(issue => {
+                const sevCfg  = SEV_CFG[issue.severity];
+                const statCfg = ISS_STATUS_CFG[issue.status];
+                const creator = mockUsers.find(u => u.id === issue.created_by);
+                return (
+                  <div key={issue.id} className={`bg-card border rounded-xl p-4 ${issue.severity === 'critical' ? 'border-red-500/30' : issue.severity === 'high' ? 'border-orange-500/20' : 'border-border'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                          <span className={`text-xs px-2 py-0.5 rounded-lg border ${sevCfg.bg} ${sevCfg.color}`}>{sevCfg.label}</span>
+                          <span className={`text-xs ${statCfg.color}`}>{statCfg.label}</span>
+                        </div>
+                        <p className="text-sm">{issue.title}</p>
+                        {issue.description && <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{issue.description}</p>}
+                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
+                          <span>{new Date(issue.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                          {creator && <span>by {creator.full_name}</span>}
+                          {issue.resolved_at && <span className="text-green-400">Resolved</span>}
+                        </div>
+                      </div>
+                      <select value={issue.status} onChange={e => updateIssueStatus(issue.id, e.target.value as IssueStatus)}
+                        className={`text-xs px-2 py-1 bg-secondary/30 border border-border rounded-lg focus:outline-none cursor-pointer shrink-0 ${statCfg.color}`}>
+                        {(['open','in_progress','resolved','closed'] as IssueStatus[]).map(s => (
+                          <option key={s} value={s}>{ISS_STATUS_CFG[s].label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ══ ACTIVITY ══════════════════════════════════════ */}
+          {tab === 'activity' && (
+            <div className="space-y-2">
+              {clientEvents.length === 0 && (
+                <div className="text-center text-muted-foreground text-sm py-8">No activity logged</div>
+              )}
+              {clientEvents.map(evt => {
+                const isAuto = evt.triggered_by === 'automation';
+                const actor  = mockUsers.find(u => u.id === evt.triggered_by);
+                return (
+                  <div key={evt.id} className="flex items-start gap-3 p-3 bg-card border border-border rounded-xl">
+                    <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${isAuto ? 'bg-purple-500/10 text-purple-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                      {isAuto ? <Bot className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs">{evt.description}</p>
+                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
+                        <span className={`px-1.5 py-0.5 rounded ${isAuto ? 'bg-purple-500/10 text-purple-400' : 'bg-blue-500/10 text-blue-400'}`}>
+                          {isAuto ? '🤖 Auto' : `👤 ${actor?.full_name ?? evt.triggered_by}`}
+                        </span>
+                        <span className="capitalize">{evt.event_type.replace(/_/g, ' ')}</span>
+                      </div>
+                      {evt.metadata && (
+                        <p className="text-xs text-muted-foreground/50 mt-1 font-mono truncate">
+                          {JSON.stringify(evt.metadata).slice(0, 80)}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground shrink-0">
+                      {new Date(evt.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                    </p>
                   </div>
                 );
               })}

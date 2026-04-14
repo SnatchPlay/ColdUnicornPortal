@@ -1,0 +1,2093 @@
+# 1. Executive Summary
+This migration is not just “moving reports out of Google Sheets.” It is replacing a multi-sheet operating system used for client reporting, lead handoff, customer success management, health monitoring, finance tracking, reply automation, OOO routing, blacklist handling, and internal sales operations.
+
+The target product is really four connected surfaces:
+- Client portal
+- CS manager operational workspace
+- Admin portal
+- Super admin management/settings area
+
+The real source of truth is not the formal markdown spec alone. The workbooks and Make blueprints reveal materially broader requirements:
+- The client report workbook defines the real client-facing reporting contract: qualified leads, campaign context, statistics, and dashboard widgets.
+- The PDCA workbook defines the internal agency operating model: DoD/WoW/MoM tracking, health assessments, setup/configuration, finance, CRM, domains, exclusions, and lost-client management.
+- The automation blueprints define hidden product requirements: AI reply classification, tag-driven lead logging, OOO extraction and rerouting, blacklist state, CRM and forwarding side effects, and export-to-Look4Lead workflows.
+
+Main findings:
+- The future product needs more pages and more state surfaces than the current formal spec and current prototype show.
+- The current live Supabase schema is not sufficient for required UI coverage.
+- The current live Supabase schema is also not permission-safe yet: RLS is enabled on tables, but there are no actual policies returned from `pg_policies`.
+- The current prototype is useful for layout direction, but it is not reliable as product truth. It hardcodes role context, does not scope client data correctly, and omits several required operational modules.
+- The biggest modeling problem is the lead model. Current materials require a separation between internal qualification and client-managed pipeline progression, but the live schema currently mixes stages and omits critical metadata.
+
+Main risks:
+- Building from the current live schema without changes will force frontend workarounds and break key flows.
+- If role visibility is implemented from the current prototype instead of the real workbook/automation logic, clients will either see too much or miss required data.
+- If reply classification and OOO handling remain “background-only,” operations will lack auditability and recovery paths.
+- If the team copies the formal spec’s simplified status model, operational parity with the existing sheets system will be lost.
+
+Major missing pieces:
+- Client access mapping and invitation model
+- Client daily snapshot time-series
+- Health assessment history
+- Structured issues tracking
+- Reply classification/audit surface
+- OOO review/routing surface
+- Import center with validation and history
+- Automation/audit logs
+- Proper separation of qualification vs client pipeline stage
+- Several operational fields now stored only in spreadsheet columns
+
+# 2. Source Materials Reviewed
+## `PROJECT_SPEC.md`
+- What it contains: Intended product architecture, role model, candidate database schema, planned routes, user stories, and phased rollout.
+- What it reveals: Clear intent for a React + Supabase client/admin portal; recognition that Sheets do not scale; early attempt to normalize PDCA into tables and views.
+- Reliability / authority: Medium for future intent; low for current operational truth. It conflicts with real statuses, reply taxonomies, and some actual workflows.
+- Role in future system: Good architectural baseline, not enough for implementation without reconciliation.
+
+## `GHEADS _ Antal _ Report.xlsx`
+- What it contains: Client-facing workbook with `Leads`, `Campaigns`, `Statistics`, and `GHEADS | Dashboard`.
+- What it reveals: The actual client-facing data contract. `Leads` includes enrichment, qualification, pipeline booleans, response text, message step, blacklist IDs, and LinkedIn URL. `Statistics` is daily campaign performance. Dashboard formulas show the expected client-facing widgets and aggregations.
+- Reliability / authority: High for client portal behavior and field requirements.
+- Role in future system: Primary source for client portal data structure and reporting logic.
+
+## `GHEADS _ PDCA (1).xlsx`
+- What it contains: 20-sheet operational workbook including `CS PDCA`, `CRM`, `CF`, `AUTH`, `🤖Daily stats`, `🤖Emails Exclude List`, `Client CRM Details`, `ABM LOSTS`, `LG PDCA`, `DomainsPerformance`, `Weekly`, `Monthly`, `Dashboards`, and `RR & BR generator`.
+- What it reveals: The internal portal is not a simple admin panel; it is a dense operations cockpit. `CS PDCA` alone proves the need for client setup management, trend matrices, health tracking, finance, ecosystem config, and KPI comparison.
+- Reliability / authority: Highest authority for internal operating reality.
+- Role in future system: Primary source for internal modules, metrics, field definitions, and workflow priorities.
+
+## `Automated Replies Management.xlsx`
+- What it contains: `ARM`, `OOO Leads`, and `Classification Test`.
+- What it reveals: OOO routing is gender-based and workspace-specific; OOO leads have a dedicated queue; classification audit exists conceptually; 4,560 OOO rows are currently tracked and none are marked as processed.
+- Reliability / authority: High for automation-adjacent UI needs.
+- Role in future system: Source for OOO routing UI, OOO queue requirements, and AI review/audit expectations.
+
+## `Bison Replies Classification.blueprint.json`
+- What it contains: Webhook-driven reply classification flow using OpenAI, Bison tags, sheet lookups, and optional forwarding logic.
+- What it reveals: Classification metadata needed in UI includes category, confidence, short reason, language, automated-reply flag, tag attachment outcome, and forwarding status.
+- Reliability / authority: High for reply classification behavior.
+- Role in future system: Source for internal reply review/audit requirements.
+
+## `Log Bison Replies in Spreadsheets( MQL, PRE-MQL).blueprint (1).json`
+- What it contains: Tag-attached/tag-removed automation that writes to client `Leads`, `OOO Leads`, `Daily stats`, and blacklist flows; also uses Snov, Lusha, SMS, forwarding, and CRM subscenario.
+- What it reveals: Lead logging is not passive. It includes enrichment, response-time calculation, blacklist state, OOO date extraction, and side effects that operations need to inspect.
+- Reliability / authority: Highest for lead ingestion and side-effect logic.
+- Role in future system: Source for lead processing UI, blacklist traceability, and automation logs.
+
+## `Add OOO leads into Campaigns.blueprint.json`
+- What it contains: Scheduled scan of `OOO Leads`, grouping by workspace and gender, then campaign attach via API.
+- What it reveals: OOO is a first-class operational flow, not a note field. The current automation lacks processed writeback and duplicate protection.
+- Reliability / authority: High for OOO handling logic.
+- Role in future system: Source for OOO queue, routing management, retry/review states.
+
+## `Import leads to look4leads connect.blueprint (1).json`
+- What it contains: Scheduled export from client `Leads` sheet into Look4Lead AutoConnect.
+- What it reveals: There is an export workflow that depends on LinkedIn URL, active client state, and a client-level token stored in `CS PDCA`.
+- Reliability / authority: High for hidden downstream integration requirements.
+- Role in future system: Source for export history, integration config, and audit requirements.
+
+## Current prototype code in `PdcaFigmaTest`
+- What it contains: React prototype with client, manager, and admin shells; mock schema; mock data; role switcher; role-specific pages.
+- What it reveals: Current intended UX direction includes dashboards, leads workspace, analytics, client 360, PDCA, CRM, users, and settings. It also exposes mismatches: no real client scoping, no `super_admin` surface, missing campaigns in client nav, duplicate admin settings.
+- Reliability / authority: Medium for current IA and visual direction; low for business logic.
+- Role in future system: Useful reference for navigation, density, and role separation, but not source of truth.
+
+## Current demo portal `https://fluent-eagle-62420935.figma.site`
+- What it contains: JS-rendered wrapper around the same code-component style demo.
+- What it reveals: Confirms an existing demo surface exists, but does not add more business truth than the local prototype.
+- Reliability / authority: Low for requirements; useful only as a visual reference.
+- Role in future system: Demo reference only.
+
+## Current live Supabase schema
+- What it contains: Existing `public` tables with zero rows and no migrations recorded.
+- What it reveals: Current implementation started but is materially incomplete. Roles, statuses, and entities do not align with the real product needs. `pg_policies` returned no policies despite RLS-enabled tables.
+- Reliability / authority: Highest authority for current implementation constraints.
+- Role in future system: Must be treated as insufficient and incomplete for frontend implementation planning.
+
+# 3. Current-State System Decomposition
+The current system decomposes into these product capabilities.
+
+## 3.1 Client Reporting Layer
+Current capability:
+- Show delivered leads
+- Show campaign-level stats
+- Show dashboard summaries and trends
+- Let someone update downstream pipeline booleans
+
+Implemented today via:
+- Client report workbook `Leads`
+- Client report workbook `Statistics`
+- Client report workbook `Campaigns`
+- Dashboard formulas using weekly/monthly/date-range aggregations
+
+Operational meaning:
+- The client portal is fundamentally a qualified-lead delivery and performance-reporting tool.
+- The dashboard is derived, not manually authored.
+- The lead list is the most operational client screen.
+
+## 3.2 Internal Client Operations Layer
+Current capability:
+- Track every active client in one grid
+- Monitor send schedule vs actuals
+- Compare current week/month vs prior periods
+- Track health states and insights
+- Manage client setup and ecosystem integrations
+- Track commercial/contract context
+
+Implemented today via:
+- `CS PDCA`
+- `🤖Daily stats`
+- `Client CRM Details`
+- manual sheet columns and formulas
+
+Operational meaning:
+- The internal portal must support dense table-based analysis, not just card dashboards.
+
+## 3.3 Lead Intake and Qualification Layer
+Current capability:
+- Receive Bison reply events
+- Classify reply intent
+- Attach tags
+- Create/update actionable lead rows
+- Calculate response time
+- Enrich contact data
+- Trigger downstream actions
+
+Implemented today via:
+- `Bison Replies Classification` blueprint
+- `Log Bison Replies...` blueprint
+- client `Leads` sheet
+- `Classification Test`
+
+Operational meaning:
+- Internal users need a lead-processing workspace plus audit/recovery visibility for automation decisions.
+
+## 3.4 OOO Management Layer
+Current capability:
+- Extract expected return date
+- Store OOO leads separately
+- Route by workspace and gender
+- Reattach leads into follow-up campaigns
+
+Implemented today via:
+- `OOO Leads`
+- `ARM`
+- `Add OOO leads into Campaigns` blueprint
+
+Operational meaning:
+- OOO is a managed queue with routing logic, not a passive tag.
+
+## 3.5 Blacklist and Compliance Layer
+Current capability:
+- Add/remove email or domain blacklists in Bison
+- Maintain global exclude-domain list
+- Persist returned blacklist IDs in lead rows
+
+Implemented today via:
+- `🤖Emails Exclude List`
+- lead columns `Blacklist ID` and `Domain Blacklist ID`
+- automation branches
+
+Operational meaning:
+- UI needs both global blacklist management and per-lead blacklist state visibility.
+
+## 3.6 Internal Sales and Pipeline Layer
+Current capability:
+- Track GHEADS’ own sales CRM
+- Track LG pipeline
+- Track won/lost lessons
+
+Implemented today via:
+- `CRM`
+- `LG PDCA`
+
+Operational meaning:
+- Internal sales is a separate product domain from client delivery and must remain access-isolated.
+
+## 3.7 Finance and Commercial Tracking Layer
+Current capability:
+- Maintain monthly cash-flow plan
+- Track client invoice state
+- Track partnership payment state
+- Track account-based selling scoring
+
+Implemented today via:
+- `CF`
+- invoice/partnership/ABS columns in `CS PDCA`
+
+Operational meaning:
+- Finance is partially structured, partially embedded in client rows. The product should unbundle it into focused screens.
+
+## 3.8 Access and Integration Layer
+Current capability:
+- Map client reports by spreadsheet ID
+- Store workspace IDs and API keys
+- Store CRM credentials
+- Support Look4Lead export token
+
+Implemented today via:
+- `AUTH`
+- `CS PDCA`
+- `Client CRM Details`
+
+Operational meaning:
+- Configuration management is already a product area, even if it currently lives in columns.
+
+# 4. Target Product Model
+The target system should be treated as one product with four user surfaces and one shared data platform.
+
+## 4.1 Core product domains
+- Identity and access
+- Client account and setup
+- Leads and reply processing
+- Campaign reporting and analytics
+- PDCA operations
+- Domains and health
+- Issues and support tracking
+- Finance and commercial tracking
+- Agency CRM and LG pipeline
+- Imports, exports, and automation observability
+- Integration configuration
+
+## 4.2 Product surfaces
+### Client portal
+Purpose:
+- Transparent lead delivery and performance visibility
+- Lightweight collaboration around lead progression
+- Low cognitive load, mobile-friendly
+
+Core modules:
+- Dashboard
+- Leads
+- Campaigns
+- Analytics
+- Settings
+
+### CS manager workspace
+Purpose:
+- Daily operational control over assigned clients
+- Fast triage, qualification, issue spotting, and health review
+- Dense tables and bulk actions
+
+Core modules:
+- Portfolio dashboard
+- Assigned clients
+- Leads processing
+- PDCA
+- Health/issues/OOO review
+
+### Admin portal
+Purpose:
+- Full cross-client oversight
+- Finance, internal sales, reporting, imports, and user management
+- Complete operational coverage
+
+Core modules:
+- Executive overview
+- Client 360
+- PDCA
+- Automation ops
+- Finance
+- Agency CRM
+- LG pipeline
+- Reports
+- Settings and access
+
+### Super admin management area
+Purpose:
+- High-risk configuration and system governance
+
+Core modules:
+- Users and roles
+- Client access assignment
+- Global integrations and secrets
+- Import templates and migration controls
+- Audit logs
+- Impersonation and support tools
+
+## 4.3 Shared product decisions
+Recommended final decisions:
+- Treat workbook structures and automations as operational truth.
+- Separate internal lead qualification from client sales pipeline stage.
+- Preserve current operational client statuses from the workbook unless stakeholders explicitly choose a new taxonomy.
+- Expose `preMQL` and `MQL` to clients for parity, but never expose OOO, NRR, spam, or blacklist/internal automation noise.
+- Make automation side effects visible in UI whenever they affect lead state, blacklists, OOO routing, exports, or client alerts.
+
+## 4.4 Product surface map
+Main product areas:
+- Auth and access
+- Client reporting
+- Client setup and ecosystem
+- Lead processing
+- Campaign reporting
+- PDCA matrices
+- Health timeline
+- Domains
+- Issues
+- Invoicing
+- Partnerships
+- ABS scoring
+- Agency CRM
+- LG pipeline
+- Cash flow
+- Reports
+- Exclude list
+- Imports
+- Automation logs
+- OOO routing
+- User and client assignment
+
+Key shared drawers/modals:
+- Lead detail drawer
+- Client create/edit modal
+- Health assessment modal
+- Import wizard modal
+- Export modal
+- Invite user modal
+- Assign client access modal
+- OOO routing editor modal
+- Integration test modal
+- Impersonation confirmation modal
+- Audit/event detail drawer
+
+# 5. Roles and Permission Matrix
+## 5.1 Role definitions
+| Role | Product meaning | Scope |
+|---|---|---|
+| `super_admin` | System owner and high-risk operator | Entire platform, all clients, all settings |
+| `admin` | Internal operations admin | Entire platform except super-admin-only governance actions |
+| `cs_manager` | Assigned-client operator | Only assigned clients and their operational modules |
+| `client` | External client user | Only own client-facing data and limited updates |
+
+## 5.2 Domain visibility
+| Domain | super_admin | admin | cs_manager | client |
+|---|---|---|---|---|
+| Own user profile/settings | Yes | Yes | Yes | Yes |
+| Client dashboard/analytics | All clients via impersonation or admin views | All clients | Assigned clients | Own client only |
+| Qualified leads (`preMQL`, `MQL`, client pipeline) | All | All | Assigned clients | Own client only |
+| Raw reply review / AI classification | All | All | Assigned clients | No |
+| OOO queue and routing | All | All | Assigned clients | No |
+| Campaigns and campaign stats | All | All | Assigned clients | Own client only |
+| Client daily snapshots / PDCA metrics | All | All | Assigned clients | No direct table access |
+| Client health assessments | All | All | Assigned clients | No |
+| Client setup / ecosystem config | All | All | Assigned clients, but secret values masked where needed | No |
+| Domains | All | All | Assigned clients | No |
+| Issues | All | All | Assigned clients | Optional future limited view only; not current parity |
+| Invoices / finance | All | All | View assigned clients; limited update rights | No |
+| Agency CRM | All | All | No | No |
+| LG pipeline | All | All | No | No |
+| Cash flow | All | All | No | No |
+| Email exclude list | All | All | View-only if needed | No |
+| Lost clients archive | All | All | No | No |
+| Users and client assignment | All | All | No | No |
+| Global integrations and secrets | All | Limited | No | No |
+| Audit logs / automation events | All | All | Assigned clients | No |
+
+## 5.3 Page/action matrix
+Legend:
+- `V` view
+- `E` edit
+- `T` trigger operational action
+- `X` no access
+
+| Area / page | super_admin | admin | cs_manager | client |
+|---|---|---|---|---|
+| Client dashboard | V/E/T | V/E/T | V/E/T assigned | V own |
+| Client leads list | V/E/T | V/E/T | V/E/T assigned | V own; limited stage updates only |
+| Lead detail drawer | V/E/T | V/E/T | V/E/T assigned | V own; limited stage/comments only |
+| Client campaigns | V/E/T | V/E/T | V/E/T assigned | V own |
+| Client analytics | V | V | V assigned | V own |
+| Client settings | V/E | V/E | V/E assigned if impersonating or helping | V/E own profile/prefs only |
+| Admin clients index | V/E/T | V/E/T | V assigned only | X |
+| Client setup / ecosystem | V/E/T | V/E/T | V/E assigned; secrets masked | X |
+| Client leads processing | V/E/T | V/E/T | V/E/T assigned | X |
+| Client health | V/E/T | V/E/T | V/E/T assigned | X |
+| Client domains | V/E/T | V/E/T | V/E assigned | X |
+| Client issues | V/E/T | V/E/T | V/E/T assigned | X |
+| Client invoicing | V/E/T | V/E/T | V assigned; very limited status/note edits | X |
+| PDCA DoD/WoW/MoM | V | V | V assigned | X |
+| Reply review queue | V/E/T | V/E/T | V/E/T assigned | X |
+| OOO queue | V/E/T | V/E/T | V/E/T assigned | X |
+| Agency CRM | V/E/T | V/E/T | X | X |
+| LG pipeline | V/E/T | V/E/T | X | X |
+| Finance cash flow | V/E/T | V/E/T | X | X |
+| Reports | V/T | V/T | V/T assigned exports only | filtered CSV export only |
+| User management | V/E/T | V/E/T | X | X |
+| Exclude list | V/E/T | V/E/T | V optional | X |
+| Integrations/secrets | V/E/T | V/E/T limited | X | X |
+| Audit logs | V | V | V assigned | X |
+| Impersonation | T | Optional if allowed | X | X |
+
+## 5.4 Permission nuances that must be explicit in implementation
+- Client users can update downstream pipeline state, not internal qualification.
+- Client users cannot see OOO, NRR, spam, blacklist IDs, AI confidence, or raw automation decisions.
+- `cs_manager` should not see raw API keys or secret tokens by default; they need connection status and masked values.
+- `cs_manager` can create health assessments, update domains, manage issues, and process leads for assigned clients.
+- `cs_manager` should not create/delete users, manage global integrations, or edit agency-only sales/finance.
+- `admin` can manage nearly all operational data but should not rotate root-level secrets or assign/remove `super_admin` without super-admin rights.
+- `super_admin` is the only role that should have impersonation, secret rotation, and high-risk system controls.
+- Export permissions differ: client exports filtered own-client leads only; `cs_manager` exports assigned-client operational data; `admin` and `super_admin` export global reports.
+
+# 6. Entity and Data Model Review for UI Coverage
+## 6.1 Coverage summary
+| Entity | Workbook / automation source | Live schema coverage | UI coverage status | Main gaps |
+|---|---|---|---|---|
+| `organizations` | Spec only | Present | Covered | Low priority |
+| `users` | `AUTH`, prototype | Present but role mismatch | Partial | No notification prefs; uses `manager` not `cs_manager`; split name fields |
+| `client_users` | `AUTH`, spec | Missing | Missing | Needed for client access, invitation assignment, client RLS |
+| `clients` | `CS PDCA` | Present but thin | Partial | Missing many links, notes, contact emails, lifecycle fields |
+| `client_setup` | `CS PDCA` | Present but very thin | Partial | Missing most setup/ecosystem fields |
+| `client_crm_integrations` or equivalent | `Client CRM Details` | Missing | Missing | Needed for CRM settings UI |
+| `campaigns` | client `Campaigns`, automations | Present but thin | Partial | Missing start date, database size, positive responses, sequencer |
+| `leads` | client `Leads`, automations | Present but too thin | Partial-to-missing | Missing most workbook fields; mixed qualification model |
+| `lead_replies` / `replies` | automations | Present as `replies`, too thin | Partial-to-missing | Missing AI fields, external ids, language, extracted date, direction, auditability |
+| `client_ooo_routing` | `ARM` | Present | Partial | Missing `general` gender support; no audit/status linkage |
+| `campaign_daily_stats` | client `Statistics` | Present but incomplete | Partial | Missing positive/negative/OOO/human reply counts |
+| `client_daily_snapshots` | `🤖Daily stats` | Missing | Missing | Required for PDCA and internal dashboards |
+| `client_health_assessments` | `CS PDCA` 2Wo2W | Missing | Missing | Required for health timeline and risk views |
+| `domains` | `DomainsPerformance` | Present but thin | Partial | Missing verification dates and campaign status details |
+| `client_issues` | `CS PDCA` issue column, spec | Missing | Missing | Needed for structured issue UI |
+| `invoices` | `CS PDCA` invoice columns | Present but incomplete | Partial | Missing vindication, chance amount, notes, contact fields |
+| `partnerships` | `CS PDCA` | Missing | Missing | Required if partnerships page stays in scope |
+| `account_based_selling` | `CS PDCA` ABS columns | Missing | Missing | Required if ABS page stays in scope |
+| `agency_crm_deals` | `CRM` | Present | Partial | Missing notes/follow-up scheduling/activity detail |
+| `lg_pipeline` | `LG PDCA` | Missing | Missing | Required for internal LG workspace |
+| `cash_flow_projections` | `CF` | Present | Partial | Missing notes/order/scenario metadata for spreadsheet-like UI |
+| `email_exclude_list` | `🤖Emails Exclude List` | Present | Partial | Good for global domain list, but no per-lead blacklist event history |
+| `abm_lost_clients` | `ABM LOSTS` | Present but too thin | Partial | Missing snapshot name, owner, docs links, notes |
+| Import job / audit event entities | imports + automations | Missing | Missing | Required for import center and automation observability |
+
+## 6.2 Critical schema mismatches affecting frontend behavior
+### Lead model mismatch
+Current sources require:
+- Internal qualification: `preMQL`, `MQL`
+- Client-managed closing funnel: meeting scheduled, meeting held, offer sent, won, rejected
+- Raw reply classification and AI metadata
+- OOO and blacklist state
+
+Live schema currently:
+- Mixes qualification and pipeline into one enum
+- Lacks most lead detail fields from workbook
+- Has no AI classification fields on replies
+
+Result:
+- Current schema cannot cleanly support the permission model or page behavior.
+
+Recommended UI-facing model:
+- Lead record
+- Reply/event history
+- Separate client pipeline stage
+- Separate rejection reason
+- Separate raw classification metadata
+
+### Client metrics mismatch
+Current sources require:
+- Daily client-level snapshots
+- Weekly and monthly rollups
+- Negative/OOO/human reply rates
+- Schedule vs actual send comparisons
+
+Live schema currently:
+- Has `campaign_daily_stats`
+- Does not have `client_daily_snapshots`
+- Does not have health history
+- Does not have the required derived views
+
+Result:
+- Internal PDCA pages are not feasible from the live schema alone.
+
+### Access-control mismatch
+Current sources require:
+- Multiple client users per client
+- Assignment of managers to subsets of clients
+- Strict client-only row visibility
+
+Live schema currently:
+- Has no `client_users`
+- Uses role `manager` instead of `cs_manager`
+- Has no returned RLS policies
+
+Result:
+- Client-facing UI cannot be launched safely on current schema.
+
+# 7. Final Information Architecture
+## 7.1 Client portal navigation
+Primary nav:
+- Dashboard `/client/dashboard`
+- Leads `/client/leads`
+- Campaigns `/client/campaigns`
+- Analytics `/client/analytics`
+- Settings `/client/settings`
+
+Cross-navigation:
+- Dashboard KPI card click opens filtered leads
+- Dashboard campaign list opens campaign detail
+- Campaign detail links to filtered lead list
+- Lead row opens lead drawer
+- Lead drawer opens LinkedIn and company site
+- Analytics charts deep-link to filtered leads/campaigns
+
+Shared overlays:
+- Lead detail drawer
+- Export filtered leads modal
+- Notification settings panel inside settings
+
+## 7.2 Admin portal navigation
+Primary nav:
+- Overview `/admin/dashboard`
+- Clients `/admin/clients`
+- PDCA `/admin/pdca/*`
+- Automation Ops `/admin/automation/*`
+- Sales `/admin/crm` and `/admin/lg-pipeline`
+- Finance `/admin/finance/*`
+- Reports `/admin/reports/*`
+- Settings `/admin/settings/*`
+
+Client 360 subnav:
+- Overview
+- Setup
+- Leads
+- Campaigns
+- Health
+- Domains
+- Issues
+- Invoicing
+- Partnerships
+- ABS
+- CRM Integration
+- Activity / audit
+
+Shared overlays:
+- Client create/edit modal
+- Health assessment modal
+- Invite user modal
+- Import wizard
+- Event log drawer
+- Impersonation confirmation
+
+## 7.3 CS manager daily workflow navigation
+Primary nav:
+- My Dashboard `/manager/dashboard`
+- Assigned Clients `/manager/clients`
+- Leads Queue `/manager/leads`
+- PDCA `/manager/pdca`
+- Health & Issues `/manager/health`
+- Automation Inbox `/manager/automation`
+
+Daily workflow:
+- Start on Dashboard for alerts and portfolio status
+- Jump into DoD/PDCA anomalies
+- Process new/low-confidence replies and OOO queue
+- Update leads and client health
+- Move into client 360 for setup/domains/issues
+- End with weekly/monthly review views
+
+## 7.4 Super admin settings / management area
+Primary nav:
+- Users & Roles
+- Client Access Assignment
+- Integrations & Secrets
+- Imports & Migration
+- Audit Logs
+- Support / Impersonation
+- System Configuration
+
+## 7.5 Recommended cross-navigation
+- Any client row in admin/manager views should open client 360.
+- Any lead row should link back to parent client and campaign.
+- Any campaign should link to leads and analytics filtered to that campaign.
+- Any OOO record should link to lead, reply, routing rule, and attach history.
+- Any import job or automation event should link to affected client and records.
+
+# 8. Client Portal Functional Specification
+## Client Sign In
+**Status: Missing but required**
+- Route: `/login` or `/client/login`
+- Primary roles: `client`
+- Primary purpose: Authenticate client users and direct them into their own portal.
+- Business value: Replaces spreadsheet sharing with controlled access.
+- Key datasets: `users`, `client_users`, auth session, optional invitation token.
+- Required fields: email; magic-link or passwordless token state; assigned client list if a user belongs to multiple clients.
+- Main UI sections: sign-in form; invitation acceptance state; support/help link; branded reassurance about visible data scope.
+- Filters/search/sort: none.
+- Row actions: none.
+- Bulk actions: none.
+- Edit capabilities: email entry only; password reset if password auth is used.
+- Validation rules: valid email format; expired/invalid invitation states must be handled; inactive users blocked with clear message.
+- Empty states: first-time user invited but not activated yet.
+- Loading states: submitting link request; verifying token.
+- Error states: invalid token; inactive account; no assigned client access.
+- Permission nuances: client users only; internal roles should use internal sign-in.
+- Entry points: invite email; direct URL; support links.
+- Exit paths / linked destinations: dashboard after auth; support contact on failure.
+- Mobile/responsive considerations: fully mobile-friendly; one-column layout.
+- Audit/history needs: sign-in audit event.
+- Export/reporting needs: none.
+- Notes / open questions: Current live schema lacks `client_users`, so multi-user client access cannot be implemented correctly yet.
+
+## Client Dashboard
+- Route: `/client/dashboard`
+- Primary roles: `client`
+- Primary purpose: Give the client a clear performance overview of delivered leads and campaign activity.
+- Business value: Replaces the workbook dashboard and reduces the need to ask the CS team for updates.
+- Key datasets: aggregated `campaign_daily_stats`; qualified `leads`; campaign summary; optionally `client_daily_snapshots` for prospect base and KPI trend cards.
+- Required fields: daily sent/reply/bounce/open counts; lead counts by week and month; active campaign list with status and database size; current-period MQL/preMQL count; meetings; won; prospect base; period-over-period deltas.
+- Main UI sections: KPI cards; daily activity chart; lead volume by week; lead volume by month; campaign summary table; quick links to leads and campaigns.
+- Filters/search/sort: date range preset; custom date range; campaign filter; qualification scope toggle if needed.
+- Row actions: open campaign detail from campaign summary.
+- Bulk actions: none.
+- Edit capabilities: none on dashboard itself.
+- Validation rules: date range required; future dates disallowed; if period exceeds allowed window, prompt to use analytics page.
+- Empty states: no data imported yet; active account but zero delivered leads; no active campaigns.
+- Loading states: KPI skeletons; chart skeletons; preserve filter bar.
+- Error states: partial data load; stats unavailable; leads unavailable; permission denied if client assignment is broken.
+- Permission nuances: client sees only own client aggregates and only client-visible lead counts.
+- Entry points: post-login default; from client nav.
+- Exit paths / linked destinations: leads page with current date filter; campaigns page; analytics page.
+- Mobile/responsive considerations: cards stack vertically; charts collapse to swipeable panels; campaign table becomes cards.
+- Audit/history needs: filter changes do not need audit; export from dashboard should be logged if added.
+- Export/reporting needs: optional PDF snapshot later; not MVP-critical.
+- Notes / open questions: Spreadsheet formulas prove this page is required. Current live schema is only partial because it lacks `client_daily_snapshots` and campaign metadata needed for all widgets.
+
+## Client Leads Workspace
+- Route: `/client/leads`
+- Primary roles: `client`
+- Primary purpose: Let the client review delivered leads and update the downstream sales funnel.
+- Business value: This is the core collaboration page between agency and client.
+- Key datasets: client-visible `leads`; campaign names; reply snippets; pipeline stage data; reply history preview.
+- Required fields: lead id; full name; job title; email; phone; company; industry; headcount; lead received date; campaign name; message title; message step / replied-at-step; qualification badge; pipeline stage; response time; latest reply timestamp; LinkedIn URL; website; comments; rejection reason if rejected.
+- Main UI sections: filter/search bar; table or mobile cards; status badges; export action; lead detail drawer trigger.
+- Filters/search/sort: search by name/company/email; date range; campaign multi-select; qualification; pipeline stage; message step; has LinkedIn; response-time bucket.
+- Row actions: open lead drawer; mark meeting scheduled; mark meeting held; mark offer sent; mark won; reject with reason.
+- Bulk actions: export current filtered set; optional future bulk status update for client admins.
+- Edit capabilities: client can update only client-owned pipeline fields and comments; cannot change internal qualification.
+- Validation rules: forward stage progression by default; rejection requires reason; won should imply prior stages or prompt confirmation.
+- Empty states: no leads yet; no leads matching filters.
+- Loading states: virtualized table skeleton; drawer skeleton.
+- Error states: save conflict; stale record; failed optimistic update rollback.
+- Permission nuances: `preMQL` and `MQL` should be visible; OOO, NRR, and automation-only rows should never appear.
+- Entry points: dashboard cards; nav; campaign detail leads tab.
+- Exit paths / linked destinations: lead drawer; campaign detail; external LinkedIn/company links.
+- Mobile/responsive considerations: card layout instead of dense table; sticky filter button; bottom-sheet drawer.
+- Audit/history needs: pipeline changes, comments, and rejections must be logged with actor and timestamp.
+- Export/reporting needs: CSV export must respect current filters and sort order.
+- Notes / open questions: Current prototype incorrectly allows client-level qualification changes. Final product should not.
+
+## Lead Detail Drawer
+- Route: contextual drawer from `/client/leads`
+- Primary roles: `client`
+- Primary purpose: Show full communication context and allow precise funnel updates.
+- Business value: Prevents context loss and lets the client qualify follow-up actions without leaving the list.
+- Key datasets: `leads`; `lead_replies` or equivalent reply history; campaign info.
+- Required fields: full contact profile; conversation thread; response text; message step; response-time label; LinkedIn URL; website; internal qualification badge as read-only; client stage controls; comments; rejection reason capture.
+- Main UI sections: contact summary; lead metadata; conversation timeline; funnel controls; notes; external links.
+- Filters/search/sort: not applicable inside drawer.
+- Row actions: stage updates; add/edit comment; copy email; open LinkedIn.
+- Bulk actions: none.
+- Edit capabilities: stage updates and client comments only.
+- Validation rules: rejection reason required; impossible transitions should confirm.
+- Empty states: missing reply history.
+- Loading states: drawer skeleton.
+- Error states: history unavailable; save failed.
+- Permission nuances: AI confidence/reasoning should not be shown to clients unless explicitly approved; current workbook does not require it.
+- Entry points: leads row click.
+- Exit paths / linked destinations: closes back to list; opens campaign detail.
+- Mobile/responsive considerations: full-screen sheet on mobile.
+- Audit/history needs: stage changes and comment edits logged.
+- Export/reporting needs: none.
+- Notes / open questions: Reply history requires a richer `lead_replies` model than the current live `replies` table provides.
+
+## Client Campaigns
+**Status: Missing but required**
+- Route: `/client/campaigns`
+- Primary roles: `client`
+- Primary purpose: Show campaign-level performance and context for delivered leads.
+- Business value: Clients can understand which campaigns and themes are generating results.
+- Key datasets: `campaigns`; aggregated `campaign_daily_stats`; related lead counts.
+- Required fields: campaign id; name; status; start date; database size; sequencer; positive replies; sent/reply/bounce/open totals; current week start; delivered lead count.
+- Main UI sections: campaign table; summary cards; status badges; performance mini-metrics.
+- Filters/search/sort: search by name; status; sequencer; active/paused/completed; date range for performance columns.
+- Row actions: open campaign detail.
+- Bulk actions: export filtered campaign list.
+- Edit capabilities: none for client.
+- Validation rules: status filters must map to canonical campaign statuses.
+- Empty states: no campaigns imported.
+- Loading states: table skeleton.
+- Error states: stats unavailable for some campaigns.
+- Permission nuances: client sees only campaigns belonging to own client and never sees internal OOO campaigns unless explicitly intended.
+- Entry points: client nav; dashboard campaign table.
+- Exit paths / linked destinations: campaign detail; filtered leads.
+- Mobile/responsive considerations: card layout with condensed metrics.
+- Audit/history needs: none beyond page access analytics.
+- Export/reporting needs: CSV export useful; PDF optional later.
+- Notes / open questions: This page exists in the formal spec and workbook logic but is missing from the current role-based prototype.
+
+## Campaign Detail
+**Status: Missing but required**
+- Route: `/client/campaigns/:id`
+- Primary roles: `client`
+- Primary purpose: Show one campaign’s daily performance and the leads attributed to it.
+- Business value: Helps clients link outreach execution to delivered opportunities.
+- Key datasets: `campaigns`; `campaign_daily_stats`; related `leads`.
+- Required fields: campaign metadata; daily sent/reply/bounce/open counts; positive replies; related lead rows; reply rate and bounce rate derived metrics.
+- Main UI sections: campaign summary; performance chart; leads tab; metadata panel.
+- Filters/search/sort: date range; qualification; stage; lead search within campaign.
+- Row actions: open lead drawer from related leads table.
+- Bulk actions: export campaign leads.
+- Edit capabilities: none for client.
+- Validation rules: date range must not exceed available stats window.
+- Empty states: campaign exists but has no stats yet; campaign has no delivered leads.
+- Loading states: chart and table skeletons.
+- Error states: missing campaign; stats import incomplete.
+- Permission nuances: client cannot see internal routing or OOO campaign details.
+- Entry points: campaigns list; dashboard links.
+- Exit paths / linked destinations: back to campaigns; lead drawer; analytics filtered to campaign.
+- Mobile/responsive considerations: stacked layout; chart tabs instead of multi-column panels.
+- Audit/history needs: none.
+- Export/reporting needs: campaign-specific CSV export.
+- Notes / open questions: Current live schema lacks several campaign fields needed for this page.
+
+## Client Analytics
+- Route: `/client/analytics`
+- Primary roles: `client`
+- Primary purpose: Provide deeper trend analysis than the dashboard.
+- Business value: Supports more analytical clients without cluttering the main dashboard.
+- Key datasets: aggregated `campaign_daily_stats`; qualified `leads`; optionally `client_daily_snapshots`.
+- Required fields: sent/reply/bounce/open time series; lead delivery time series; campaign comparisons; conversion rates from delivered leads to downstream stages; prospect base trend if kept.
+- Main UI sections: date controls; aggregate KPI cards; time-series charts; funnel chart; campaign comparison table.
+- Filters/search/sort: date range; campaign; qualification; stage; compare period.
+- Row actions: drill into campaign; open filtered leads.
+- Bulk actions: export chart data.
+- Edit capabilities: none.
+- Validation rules: comparison period requires complete prior period; filters combine with AND logic.
+- Empty states: no stats for selected period.
+- Loading states: chart skeletons.
+- Error states: partial metric availability.
+- Permission nuances: analytics must only count client-visible qualified leads, not raw reply volume from hidden automation states.
+- Entry points: client nav; dashboard “view all analytics”.
+- Exit paths / linked destinations: campaigns; leads; dashboard.
+- Mobile/responsive considerations: chart tabs and horizontal swipes; avoid multi-chart walls on mobile.
+- Audit/history needs: none.
+- Export/reporting needs: CSV export of filtered series; PDF optional later.
+- Notes / open questions: Client workbook formulas are the real reference, but some current formulas use campaign database size as a proxy for prospect trend; `client_daily_snapshots` is the cleaner future source.
+
+## Client Settings
+- Route: `/client/settings`
+- Primary roles: `client`
+- Primary purpose: Let client users manage their own profile and notification preferences.
+- Business value: Reduces support burden and supports team-based portal use.
+- Key datasets: `users`; `client_users`; notification preference storage; optional active session metadata.
+- Required fields: name; email; phone; avatar optional; timezone; language; theme; notification preferences for new leads/digest/alerts; security settings.
+- Main UI sections: profile; notifications; security; preferences.
+- Filters/search/sort: none.
+- Row actions: save changes; revoke session; resend magic link if needed.
+- Bulk actions: none.
+- Edit capabilities: own profile and preferences only.
+- Validation rules: email format; password rules if password auth exists; notification cadence must be one of allowed values.
+- Empty states: no optional profile fields yet.
+- Loading states: save pending banners; section skeletons.
+- Error states: save failed; session revoke failed.
+- Permission nuances: client cannot manage other users here unless a future client-admin concept is introduced.
+- Entry points: nav; avatar menu.
+- Exit paths / linked destinations: back to previous page.
+- Mobile/responsive considerations: section tabs collapse into accordions.
+- Audit/history needs: security changes and session revocations logged.
+- Export/reporting needs: none.
+- Notes / open questions: Live schema currently lacks notification preference fields.
+
+# 9. Admin Portal Functional Specification
+## Internal Sign In
+**Status: Missing but required**
+- Route: `/admin/login`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Authenticate internal users into the operational portal.
+- Business value: Separates internal access from client access and allows role-aware routing.
+- Key datasets: `users`; auth session; role.
+- Required fields: email; auth state; role resolution.
+- Main UI sections: sign-in form; SSO/magic-link if used; role-aware redirect.
+- Filters/search/sort: none.
+- Row actions: none.
+- Bulk actions: none.
+- Edit capabilities: credential entry only.
+- Validation rules: valid email; inactive users blocked.
+- Empty states: invited but not activated.
+- Loading states: auth pending.
+- Error states: invalid link; inactive user; no role assigned.
+- Permission nuances: route destination depends on role.
+- Entry points: direct URL; invite email.
+- Exit paths / linked destinations: admin dashboard or manager dashboard.
+- Mobile/responsive considerations: simple responsive form.
+- Audit/history needs: sign-in audit event.
+- Export/reporting needs: none.
+- Notes / open questions: Role naming must be standardized before implementation.
+
+## Executive Dashboard
+- Route: `/admin/dashboard`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Give leadership a cross-client operational and commercial overview.
+- Business value: Centralizes risk, output, and revenue health in one screen.
+- Key datasets: `clients`; `campaigns`; qualified `leads`; `client_daily_snapshots`; `client_health_assessments`; `invoices`; open issues; automation events.
+- Required fields: active client count; status distribution; current-month MQL/meetings/won; active campaigns; overdue invoices; clients at risk; health distribution; top anomalies; latest automation failures.
+- Main UI sections: KPI cards; risk widgets; trend charts; portfolio table; alert list.
+- Filters/search/sort: date range; manager; client status; sequencer.
+- Row actions: open client 360; open invoice page; open risk client detail.
+- Bulk actions: export portfolio summary.
+- Edit capabilities: none directly; navigation hub.
+- Validation rules: date range required for trend sections.
+- Empty states: no imported clients yet.
+- Loading states: card/chart/table skeletons.
+- Error states: partial source availability; stale aggregates.
+- Permission nuances: `cs_manager` gets a different dashboard; client never sees this surface.
+- Entry points: internal default landing page for admins.
+- Exit paths / linked destinations: client list; PDCA; finance; issues; automation logs.
+- Mobile/responsive considerations: desktop-first; mobile limited to cards and alert list.
+- Audit/history needs: none for read-only dashboard use.
+- Export/reporting needs: summary export to CSV/PDF helpful.
+- Notes / open questions: Churn-risk widget requires health history plus KPI comparison logic not supported by current live schema.
+
+## Clients List
+- Route: `/admin/clients`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Find, filter, and open any client workspace within allowed scope.
+- Business value: Main index into client operations.
+- Key datasets: `clients`; manager mapping; health summary; current-period performance summary; open issues; invoice flags.
+- Required fields: client name; manager; status; sequencer; KPI targets; current MQL/ME/WON; active campaigns; last health state; overdue invoice flag; contract due date; issue count.
+- Main UI sections: search and filters; client table; quick summary cards; create client button for admin roles.
+- Filters/search/sort: search by name; manager; status; sequencer; risk state; contract due soon; missing setup; missing integration.
+- Row actions: open client 360; edit; archive/offboard; impersonate for `super_admin`.
+- Bulk actions: assign manager; export selected clients; pause/archive if allowed.
+- Edit capabilities: admin/super_admin can create/edit/archive; `cs_manager` can only open assigned clients.
+- Validation rules: cannot archive client with unresolved critical issue without confirmation; offboarding should require status reason.
+- Empty states: no clients yet; no assigned clients for manager.
+- Loading states: table skeleton.
+- Error states: failed client list load.
+- Permission nuances: `cs_manager` sees assigned subset only; `client` no access.
+- Entry points: admin nav; manager nav.
+- Exit paths / linked destinations: client overview; setup; leads; health.
+- Mobile/responsive considerations: desktop primary; mobile card fallback.
+- Audit/history needs: create/archive/manager reassignment logged.
+- Export/reporting needs: client roster export.
+- Notes / open questions: Live schema client status enum currently matches workbook better than the formal spec; keep workbook statuses unless changed intentionally.
+
+## Client Overview
+- Route: `/admin/clients/:id/overview`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Summarize one client’s account, delivery, risk, and next actions.
+- Business value: Fast “client 360” landing tab.
+- Key datasets: `clients`; `client_setup`; `campaigns`; `leads`; `client_daily_snapshots`; `client_health_assessments`; `invoices`; `client_issues`; recent automation events.
+- Required fields: client metadata; links; manager; KPIs; current month performance vs target; latest health assessment; open issues; overdue invoices; last import/sync; campaign count; domain count.
+- Main UI sections: account summary; KPI vs target; recent activity; quick links; risk panel.
+- Filters/search/sort: period filter for KPI panels.
+- Row actions: jump to leads, health, domains, issues, invoicing, CRM config.
+- Bulk actions: none.
+- Edit capabilities: light edit of basic metadata via inline form or modal.
+- Validation rules: links must be valid URLs; status changes require confirmation.
+- Empty states: client created but no imported data yet.
+- Loading states: panel skeletons.
+- Error states: missing client; partial tab data failed.
+- Permission nuances: `cs_manager` can edit assigned client operational fields; secret values masked.
+- Entry points: clients list; dashboard risk widgets.
+- Exit paths / linked destinations: all client subpages.
+- Mobile/responsive considerations: stacked summary cards; reduce dense subpanels.
+- Audit/history needs: edits and status changes logged.
+- Export/reporting needs: snapshot PDF optional later.
+- Notes / open questions: This page is only partially represented in the current prototype.
+
+## Client Setup & Ecosystem
+- Route: `/admin/clients/:id/setup`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Manage setup completion, IDs, links, KPI baselines, and ecosystem toggles.
+- Business value: Centralizes client operational configuration now scattered across `CS PDCA`.
+- Key datasets: `clients`; `client_setup`; CRM config; OOO routing; integration status.
+- Required fields: report link; folder link; spreadsheet/external IDs; workspace IDs; sequencer; bi-setup status; ABA exchange status; inboxes count; prospects signed; prospects added; min sent; SMS phone number; contact email; CRM enabled/platform; Auto OOO enabled; Auto-LI token status; cold LinkedIn; cold Ads; workshops S/O; harmonogramy; invoice contact email; sales notification email; notes.
+- Main UI sections: account identifiers; setup checklist; ecosystem integrations; notification endpoints; OOO routing editor; secret status cards.
+- Filters/search/sort: none.
+- Row actions: save; test integration; add/edit OOO routing rule; rotate secret if allowed.
+- Bulk actions: none.
+- Edit capabilities: admin/super_admin full; `cs_manager` operational fields yes, secrets masked and possibly non-editable.
+- Validation rules: required IDs for active clients; min sent must be numeric; secret values cannot be blanked accidentally; URLs validated.
+- Empty states: newly created client with no setup complete.
+- Loading states: form skeletons.
+- Error states: save failed; integration test failed.
+- Permission nuances: raw API keys/tokens should be visible only to admin/super_admin; manager sees masked values and status.
+- Entry points: client overview; client create flow.
+- Exit paths / linked destinations: campaigns; OOO queue; CRM integration tab.
+- Mobile/responsive considerations: desktop-first form sections; collapsible cards on small screens.
+- Audit/history needs: field-level change log for setup and routing rules.
+- Export/reporting needs: setup summary export useful for onboarding.
+- Notes / open questions: Current live schema is far too thin for this page; this is one of the biggest schema gaps.
+
+## Client Leads Processing
+- Route: `/admin/clients/:id/leads`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Internal lead processing, qualification review, and downstream support for one client.
+- Business value: Core operating page for CS work.
+- Key datasets: `leads`; `lead_replies`; blacklist state; campaign context; CRM sync state; automation events.
+- Required fields: all client lead fields plus AI classification; confidence; reasoning; automated-reply flag; extracted return date; raw reply text; total replies; response-time bucket; blacklist IDs; client stage; rejection reason; CRM push status.
+- Main UI sections: filter/search bar; dense data table; bulk-action toolbar; lead drawer; audit chips.
+- Filters/search/sort: search by name/company/email; date range; qualification; client stage; campaign; message step; AI classification; confidence threshold; OOO; blacklist state; CRM sync status.
+- Row actions: reclassify; change qualification; update client stage; mark rejected; edit return date; open reply drawer; add/remove blacklist; trigger CRM sync retry.
+- Bulk actions: mark rejected; change qualification; export selected; add blacklist; assign stage.
+- Edit capabilities: full internal lead operations within scope.
+- Validation rules: stage edits and qualification edits must follow permission rules; rejection reason mandatory; OOO return date required if marked OOO.
+- Empty states: no leads for client; no results after filters.
+- Loading states: virtualized table skeleton.
+- Error states: partial reply history load; optimistic update rollback; failed blacklist action.
+- Permission nuances: `cs_manager` only for assigned clients; client never sees this full view.
+- Entry points: client overview; reply review queue; campaign detail.
+- Exit paths / linked destinations: reply review; OOO queue; campaign detail; CRM status.
+- Mobile/responsive considerations: not mobile-first; limited mobile support acceptable for internal users.
+- Audit/history needs: every status change, manual override, and trigger action logged.
+- Export/reporting needs: CSV export of filtered or selected leads.
+- Notes / open questions: The current live schema is not sufficient; it lacks most lead fields and reply audit fields required here.
+
+## Client Campaigns
+- Route: `/admin/clients/:id/campaigns`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Manage all campaigns for one client, including standard and OOO campaigns.
+- Business value: Campaign context is necessary for performance analysis and OOO routing.
+- Key datasets: `campaigns`; `campaign_daily_stats`; OOO routing mappings; related leads.
+- Required fields: campaign id; external id; name; type; status; start date; week start; database size; sequencer; positive reply count; performance rates; active flag for OOO routing.
+- Main UI sections: campaign table; create/edit form; performance summary; routing indicators.
+- Filters/search/sort: search; status; type; sequencer; active/archived.
+- Row actions: create; edit; archive; open detail; flag as OOO campaign candidate.
+- Bulk actions: archive selected; export selected.
+- Edit capabilities: admin and assigned manager can edit operational campaign data.
+- Validation rules: OOO routing targets must reference campaign type `ooo`; external ids unique.
+- Empty states: no campaigns yet.
+- Loading states: table skeleton.
+- Error states: save failed; duplicate external id.
+- Permission nuances: secret API actions remain outside this page.
+- Entry points: client overview; OOO routing editor.
+- Exit paths / linked destinations: campaign detail; leads filtered by campaign.
+- Mobile/responsive considerations: table becomes stacked cards.
+- Audit/history needs: campaign create/edit/archive logged.
+- Export/reporting needs: campaign roster export.
+- Notes / open questions: Formal spec includes this page; current role-based prototype does not.
+
+## Client Health Timeline & Assessment
+- Route: `/admin/clients/:id/health`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Record and review 2Wo2W health states and qualitative insights.
+- Business value: Central risk-management tool for client retention and delivery quality.
+- Key datasets: `client_health_assessments`; optional supporting domain and delivery metrics.
+- Required fields: assessed_at; assessed_by; IP health; domains health; warmup health; copy health; funnel health; server health if retained; insights; blocked account counts if tracked.
+- Main UI sections: latest health snapshot; assessment timeline; create new assessment form; risk summary.
+- Filters/search/sort: date range; status severity; assessor.
+- Row actions: add assessment; edit latest if allowed; open historical entry.
+- Bulk actions: none.
+- Edit capabilities: admin and assigned manager.
+- Validation rules: all health dimensions required; red/yellow states should require insight note.
+- Empty states: no assessments yet.
+- Loading states: timeline skeleton.
+- Error states: save failed; history unavailable.
+- Permission nuances: internal-only.
+- Entry points: client overview; PDCA health matrix.
+- Exit paths / linked destinations: domains; issues; client overview.
+- Mobile/responsive considerations: timeline cards stack vertically.
+- Audit/history needs: immutable or versioned assessment history preferred.
+- Export/reporting needs: health history export for retention reviews.
+- Notes / open questions: Entirely blocked by missing `client_health_assessments` in live schema.
+
+## Client Domains
+- Route: `/admin/clients/:id/domains`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Manage sending-domain status and warmup progression for one client.
+- Business value: Domain health directly affects performance and risk.
+- Key datasets: `domains`; optional health assessments.
+- Required fields: domain name; setup email; purchase date; exchange date; campaign verification date; campaign status; warmup reputation; warmup verification date; active flag; blacklisted flag.
+- Main UI sections: domain table; health badges; quick edit controls.
+- Filters/search/sort: search domain; active/inactive; blacklisted; low reputation.
+- Row actions: edit domain; activate/deactivate; flag blacklist state.
+- Bulk actions: export selected; activate/deactivate selected.
+- Edit capabilities: admin and assigned manager.
+- Validation rules: reputation 0-100; dates valid and ordered logically.
+- Empty states: no domains imported.
+- Loading states: table skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only.
+- Entry points: client overview; health page.
+- Exit paths / linked destinations: global domains page; health page.
+- Mobile/responsive considerations: horizontal scroll on mobile; not primary mobile workflow.
+- Audit/history needs: domain status and blacklist changes logged.
+- Export/reporting needs: domain health export.
+- Notes / open questions: Live schema partially supports this page but misses verification fields shown in the workbook.
+
+## Client Issues
+**Status: Missing but required**
+- Route: `/admin/clients/:id/issues`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Track operational issues instead of relying on free-text PDCA notes.
+- Business value: Converts fragile spreadsheet comments into an actionable issue workflow.
+- Key datasets: `client_issues`; optional related client and user data.
+- Required fields: issue id; type; description; priority; status; reported_by; created_at; first response time; resolved_at; owner; notes.
+- Main UI sections: issue list; create issue form; status board or grouped table.
+- Filters/search/sort: status; priority; owner; age; unresolved only.
+- Row actions: create; assign; change status; add note; resolve; close.
+- Bulk actions: assign selected; close selected low-priority issues.
+- Edit capabilities: internal staff within scope.
+- Validation rules: description required; resolution note required when closing critical issues.
+- Empty states: no issues.
+- Loading states: list skeleton.
+- Error states: save failed; assignment failed.
+- Permission nuances: internal-only; client-facing support surface is not part of current parity.
+- Entry points: client overview; dashboard risk widget.
+- Exit paths / linked destinations: client overview; audit history.
+- Mobile/responsive considerations: issue cards on smaller screens.
+- Audit/history needs: state transitions and comments logged.
+- Export/reporting needs: open issue export.
+- Notes / open questions: Workbook only has a weak “issues” note area; a structured issue entity is required for a real portal.
+
+## Client Invoicing
+- Route: `/admin/clients/:id/invoicing`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Track invoice state and client-specific billing context.
+- Business value: Keeps CS and admin aligned on renewals, payment risk, and follow-up.
+- Key datasets: `invoices`; billing fields from `clients` or client setup.
+- Required fields: issue/invoice month; amount; status; chance amount if used; issue time; invoice contact email; sales notification email; vindication state; notes.
+- Main UI sections: invoice list; billing summary; overdue alerts.
+- Filters/search/sort: status; month; overdue only.
+- Row actions: create invoice; update status; add note; open client contact info.
+- Bulk actions: export invoices; mark sent/paid in bulk if allowed.
+- Edit capabilities: admin full; `cs_manager` view plus limited note/status update only if business approves.
+- Validation rules: amount numeric; paid date/status consistency; vindication fields only for overdue states.
+- Empty states: no invoices yet.
+- Loading states: table skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only; contract amount edits should remain admin-only.
+- Entry points: client overview; finance pages.
+- Exit paths / linked destinations: global invoices; client overview.
+- Mobile/responsive considerations: compact invoice cards on small screens.
+- Audit/history needs: status changes and note edits logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Current live schema is partial and misses several workbook billing fields.
+
+## Client Partnerships
+**Status: Missing but required**
+- Route: `/admin/clients/:id/partnerships`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Track partner-side invoice/payment state linked to the client.
+- Business value: Maintains parity with current PDCA partnership tracking.
+- Key datasets: `partnerships`.
+- Required fields: partner name; reported month; invoice received; paid; amount; notes if kept.
+- Main UI sections: partnership table; month summary.
+- Filters/search/sort: paid/unpaid; month; partner.
+- Row actions: add; edit; mark invoice received; mark paid.
+- Bulk actions: export.
+- Edit capabilities: admin roles.
+- Validation rules: amount numeric; month required.
+- Empty states: no partnerships for client.
+- Loading states: table skeleton.
+- Error states: save failed.
+- Permission nuances: likely admin-only, not CS-manager default.
+- Entry points: client finance subnav.
+- Exit paths / linked destinations: invoicing; client overview.
+- Mobile/responsive considerations: simple stacked rows.
+- Audit/history needs: payment status changes logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Not present in live schema; only build if this workbook section is still operationally used.
+
+## Client ABS
+**Status: Missing but required**
+- Route: `/admin/clients/:id/abs`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Track account-based selling score and strategy for the client.
+- Business value: Preserves current PDCA commercial scoring fields if they remain active.
+- Key datasets: `account_based_selling`.
+- Required fields: customer lifetime value; market size; score; strategy/state; updated date.
+- Main UI sections: score summary; editable strategy fields.
+- Filters/search/sort: not significant.
+- Row actions: edit ABS data.
+- Bulk actions: none.
+- Edit capabilities: admin roles.
+- Validation rules: score numeric; date valid.
+- Empty states: no ABS record yet.
+- Loading states: panel skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only.
+- Entry points: client finance/commercial subnav.
+- Exit paths / linked destinations: client overview.
+- Mobile/responsive considerations: simple form.
+- Audit/history needs: score changes logged.
+- Export/reporting needs: optional.
+- Notes / open questions: This area appears in `CS PDCA` but not in the current prototype.
+
+## Client CRM Integration
+- Route: `/admin/clients/:id/crm`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Configure and monitor client CRM connection details.
+- Business value: Supports qualified-lead push and operational troubleshooting.
+- Key datasets: `client_crm_integrations` or equivalent; connection test results; sync event history.
+- Required fields: platform; API key/token; API secret if needed; subdomain; workspace id if needed; enabled flag; last test result; last sync status.
+- Main UI sections: integration form; platform-specific credentials; test connection; sync log summary.
+- Filters/search/sort: none.
+- Row actions: connect; disconnect; test; rotate secret; retry sync.
+- Bulk actions: none.
+- Edit capabilities: admin/super_admin only.
+- Validation rules: platform-specific required fields; masked secrets cannot be overwritten unintentionally.
+- Empty states: no CRM configured.
+- Loading states: connection test spinner; form skeleton.
+- Error states: invalid credentials; test failure.
+- Permission nuances: `cs_manager` should see status only, not raw credentials.
+- Entry points: client setup; client overview; sync failure log.
+- Exit paths / linked destinations: lead processing; automation log.
+- Mobile/responsive considerations: form remains usable but desktop preferred.
+- Audit/history needs: credential changes and test runs logged.
+- Export/reporting needs: none.
+- Notes / open questions: Client CRM data currently lives only in a workbook; live schema has no proper equivalent.
+
+## PDCA DoD
+- Route: `/admin/pdca/dod`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Show day-over-day send schedule vs actuals and recent lead inflow.
+- Business value: Daily operational triage screen.
+- Key datasets: `client_daily_snapshots`; `clients`; `client_setup`; optional issue note summary.
+- Required fields: client; manager; status; schedule today/+1/+2; actual sent today and prior 4 days; 3DoD total leads; 3DoD SQL/MQL leads; min sent threshold; anomaly flags.
+- Main UI sections: dense matrix table; heatmap cells; summary counts; quick anomaly filters.
+- Filters/search/sort: manager; status; anomaly only; sequencer; missing setup.
+- Row actions: open client 360; create issue; open lead queue.
+- Bulk actions: export filtered matrix.
+- Edit capabilities: read-only matrix; issue creation shortcuts.
+- Validation rules: heatmap thresholds must use defined business rule and be consistent.
+- Empty states: no snapshots available.
+- Loading states: frozen-column table skeleton.
+- Error states: snapshot data unavailable.
+- Permission nuances: `cs_manager` limited to assigned clients.
+- Entry points: manager dashboard; admin nav.
+- Exit paths / linked destinations: client overview; issues; leads.
+- Mobile/responsive considerations: desktop-primary only.
+- Audit/history needs: none for viewing.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Entirely blocked by missing `client_daily_snapshots`.
+
+## PDCA WoW
+- Route: `/admin/pdca/wow`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Compare weekly quality and response metrics across clients.
+- Business value: Shows deterioration in bounce, response, OOO, and negative trends.
+- Key datasets: weekly view derived from `client_daily_snapshots`.
+- Required fields: bounce rate; total response rate; human response rate; OOO rate; negative response rate; total leads; SQL leads for current week and previous 3 weeks.
+- Main UI sections: dense matrix; trend arrows; anomaly highlights.
+- Filters/search/sort: manager; status; highest bounce; lowest response; assigned only.
+- Row actions: open client health; open campaigns; open reply review filtered to client.
+- Bulk actions: export filtered matrix.
+- Edit capabilities: none.
+- Validation rules: week boundaries must be consistent across all metrics.
+- Empty states: no weekly data.
+- Loading states: matrix skeleton.
+- Error states: partial metric calculation failure.
+- Permission nuances: internal-only.
+- Entry points: PDCA nav.
+- Exit paths / linked destinations: health; campaigns; reply review.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: none.
+- Export/reporting needs: weekly report export.
+- Notes / open questions: Requires a derived weekly aggregate view for practical performance.
+
+## PDCA 2Wo2W Health
+- Route: `/admin/pdca/2wo2w`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Manage health assessments across clients in one place.
+- Business value: Operationalizes the red/yellow/green health review process.
+- Key datasets: `client_health_assessments`; `clients`.
+- Required fields: latest assessment values per client; next assessment due; assessor; insights.
+- Main UI sections: assessment queue; latest-state matrix; create assessment modal; historical timeline shortcuts.
+- Filters/search/sort: due soon; red-only; manager; status.
+- Row actions: add assessment; open history.
+- Bulk actions: export current health board.
+- Edit capabilities: internal staff within scope.
+- Validation rules: same as client health page.
+- Empty states: no assessments yet.
+- Loading states: matrix skeleton.
+- Error states: assessment save/load errors.
+- Permission nuances: `cs_manager` limited to assigned clients.
+- Entry points: PDCA nav; manager dashboard.
+- Exit paths / linked destinations: client health detail; client overview.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: assessment history preserved.
+- Export/reporting needs: health board export.
+- Notes / open questions: Missing from live schema.
+
+## PDCA MoM
+- Route: `/admin/pdca/mom`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Track month-over-month client output and KPI attainment.
+- Business value: Monthly management and retention review screen.
+- Key datasets: monthly aggregate view over `client_daily_snapshots`; client KPI targets.
+- Required fields: total leads; SQL leads vs KPI; meetings rate vs KPI; won rate vs KPI; optional additional LinkedIn MQL/meetings if retained; current + prior months.
+- Main UI sections: monthly matrix; KPI attainment indicators; trend arrows.
+- Filters/search/sort: manager; below KPI only; client status.
+- Row actions: open client overview; open invoicing; open health.
+- Bulk actions: export monthly matrix.
+- Edit capabilities: none.
+- Validation rules: monthly comparisons use closed periods or clearly mark partial current month.
+- Empty states: no monthly data.
+- Loading states: matrix skeleton.
+- Error states: aggregate unavailable.
+- Permission nuances: internal-only.
+- Entry points: PDCA nav; monthly report page.
+- Exit paths / linked destinations: overview; finance; health.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: none.
+- Export/reporting needs: monthly report export.
+- Notes / open questions: Formal label “SQL” is inconsistent across sources; recommend using a canonical label and mapping old terms.
+
+## Reply Review Queue
+**Status: Missing but required**
+- Route: `/admin/automation/replies`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Review, override, and audit incoming reply classifications and processing outcomes.
+- Business value: Makes AI and webhook-driven operations supportable.
+- Key datasets: `lead_replies` or equivalent; linked `leads`; automation events; workspace/client config.
+- Required fields: reply id; client; workspace; lead id; received_at; automated_reply flag; raw message text; AI category; confidence; short reason; language; extracted date; current tag state; forward status; CRM sync status; blacklist status.
+- Main UI sections: filter/search bar; reply table; detail drawer with full message/thread; action bar.
+- Filters/search/sort: client; category; confidence threshold; automated reply; unreviewed only; failed processing only; date range.
+- Row actions: approve; reclassify; create/update lead; mark ignore; add/remove blacklist; retry downstream action.
+- Bulk actions: approve selected; reclassify selected; export selected.
+- Edit capabilities: internal operational override.
+- Validation rules: manual override must require a final category; if OOO, return date required or explicitly set unknown.
+- Empty states: no pending replies.
+- Loading states: table and drawer skeleton.
+- Error states: retry failed; downstream mismatch.
+- Permission nuances: `cs_manager` only for assigned clients.
+- Entry points: alerts; client leads page; automation logs.
+- Exit paths / linked destinations: client lead; OOO queue; client 360.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: every manual override and retry logged.
+- Export/reporting needs: export of reviewed/unreviewed replies.
+- Notes / open questions: This is strongly implied by the blueprints and classification workbook even though not fully specified in `PROJECT_SPEC.md`.
+
+## OOO Queue & Routing
+**Status: Missing but required**
+- Route: `/admin/automation/ooo`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Review OOO records, routing rules, due dates, and campaign attach outcomes.
+- Business value: Replaces the separate `OOO Leads` and `ARM` workbook logic with a traceable interface.
+- Key datasets: OOO records; `client_ooo_routing`; linked `leads`; linked `lead_replies`; attach event logs.
+- Required fields: lead id; reply id; client/workspace; contact name/email; gender; expected return date; extracted date confidence/source; route campaign; attached flag; attach attempts; last error.
+- Main UI sections: OOO list; routing rules manager; due-soon filter; attach history.
+- Filters/search/sort: due today; overdue; unattached only; missing route; gender; client.
+- Row actions: edit return date; edit gender; override route; attach now; mark ignored.
+- Bulk actions: attach selected; export queue.
+- Edit capabilities: internal operational edits.
+- Validation rules: every active client with Auto OOO enabled needs a valid route for all supported genders; return date required.
+- Empty states: no OOO leads pending.
+- Loading states: queue skeleton.
+- Error states: attach failure; missing route; duplicate attach attempt.
+- Permission nuances: internal-only.
+- Entry points: reply review; client setup; alerts.
+- Exit paths / linked destinations: client leads; campaign detail; client setup.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: routing changes and attach attempts logged.
+- Export/reporting needs: queue export.
+- Notes / open questions: Current automation never marks “Added to OOO Campaign?” true, so this needs both UI and persistence changes.
+
+## Import Center
+**Status: Missing but required**
+- Route: `/admin/imports`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Handle workbook/CSV imports with validation, preview, and job history.
+- Business value: Essential for migration and for Phase 1 manual data operations.
+- Key datasets: import job entities; target tables; column-mapping templates.
+- Required fields: import type; client; file metadata; source columns; target fields; validation errors; duplicate count; imported/skipped/error counts; job status; job timestamps.
+- Main UI sections: import type selector; upload; mapping step; preview step; confirmation; job history.
+- Filters/search/sort: import type; client; status; date.
+- Row actions: upload; resume failed mapping; retry; download error file.
+- Bulk actions: none.
+- Edit capabilities: mapping configuration and confirmation only.
+- Validation rules: required fields present; data types correct; duplicates flagged; client scope required where applicable.
+- Empty states: no imports run yet.
+- Loading states: parsing/uploading/validating progress states.
+- Error states: invalid file; parse failure; job failure.
+- Permission nuances: high-impact action; not for `cs_manager` or clients.
+- Entry points: admin settings; client onboarding flow.
+- Exit paths / linked destinations: affected client pages; import job detail.
+- Mobile/responsive considerations: desktop-first.
+- Audit/history needs: complete import job history required.
+- Export/reporting needs: downloadable error rows and summary logs.
+- Notes / open questions: This page is specified in intent but absent from the current prototype and live schema.
+
+## Agency CRM
+- Route: `/admin/crm/pipeline`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Manage GHEADS’ own sales pipeline.
+- Business value: Keeps agency sales separate from client delivery operations.
+- Key datasets: `agency_crm_deals`.
+- Required fields: company name; contact; email; phone; source; salesperson; stage; stage updated; estimated value; win chance; lesson learned; next action if added.
+- Main UI sections: kanban; table view; deal detail drawer.
+- Filters/search/sort: salesperson; stage; source; value; stale deals.
+- Row actions: create; edit; move stage; archive lost/won.
+- Bulk actions: reassign owner; export selected.
+- Edit capabilities: admin roles.
+- Validation rules: company name required; stage required; win chance 0-100.
+- Empty states: no agency deals.
+- Loading states: board skeleton.
+- Error states: save failed; move failed.
+- Permission nuances: internal-only.
+- Entry points: admin nav.
+- Exit paths / linked destinations: deal detail; reports if later needed.
+- Mobile/responsive considerations: table fallback on smaller screens.
+- Audit/history needs: stage transitions logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Current live schema is closer to the target than the older `crm_prospects` proposal; keep one model, not both.
+
+## LG Pipeline
+**Status: Missing but required**
+- Route: `/admin/lg-pipeline`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Track internal lead-generation opportunities separate from agency CRM.
+- Business value: Preserves a currently active operational sheet.
+- Key datasets: `lg_pipeline`.
+- Required fields: company; received date; owner; source; estimated value; win chance narrative; meeting; offer; follow-ups; contract; lead magnet; won; lesson/improvement note.
+- Main UI sections: table; owner filter; progress badges.
+- Filters/search/sort: owner; source; won/lost; contract stage.
+- Row actions: edit; mark meeting; mark offer; mark won/lost.
+- Bulk actions: export selected.
+- Edit capabilities: admin roles.
+- Validation rules: company required; received date valid.
+- Empty states: no LG opportunities.
+- Loading states: table skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only.
+- Entry points: admin nav.
+- Exit paths / linked destinations: none essential.
+- Mobile/responsive considerations: table/card fallback.
+- Audit/history needs: stage changes logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Entirely absent from live schema.
+
+## Global Domains
+- Route: `/admin/domains`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Provide cross-client domain oversight.
+- Business value: Allows ops to spot systemic domain risks quickly.
+- Key datasets: `domains`; `clients`.
+- Required fields: all domain fields plus client name and manager.
+- Main UI sections: global domain table; reputation/risk summary.
+- Filters/search/sort: client; manager; reputation threshold; blacklisted; inactive.
+- Row actions: open client domains; edit if allowed.
+- Bulk actions: export selected.
+- Edit capabilities: admin full.
+- Validation rules: same as client domains.
+- Empty states: no domain data.
+- Loading states: table skeleton.
+- Error states: load failed.
+- Permission nuances: `cs_manager` can have an assigned-client subset view if useful; not default spec requirement.
+- Entry points: admin nav; health alerts.
+- Exit paths / linked destinations: client domains.
+- Mobile/responsive considerations: desktop-first.
+- Audit/history needs: same as client domains.
+- Export/reporting needs: domain export.
+- Notes / open questions: Current workbook shows this is valuable for admin operations.
+
+## Finance Invoices
+- Route: `/admin/finance/invoices`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Cross-client invoice management.
+- Business value: Central finance operations screen.
+- Key datasets: `invoices`; `clients`.
+- Required fields: invoice identifiers; client; amount; issue date/month; status; overdue/vindication info; notes.
+- Main UI sections: cross-client invoice table; summary cards.
+- Filters/search/sort: client; status; overdue; month.
+- Row actions: open client invoicing; edit status; add note.
+- Bulk actions: export; mark sent/paid if allowed.
+- Edit capabilities: admin roles.
+- Validation rules: same as client invoicing.
+- Empty states: no invoices.
+- Loading states: table skeleton.
+- Error states: load/save failed.
+- Permission nuances: not for managers by default except possibly read-only subset.
+- Entry points: finance nav; dashboard overdue widget.
+- Exit paths / linked destinations: client invoicing.
+- Mobile/responsive considerations: desktop-first.
+- Audit/history needs: invoice status history desirable.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Live schema is partial.
+
+## Finance Cash Flow
+- Route: `/admin/finance/cash-flow`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Editable monthly finance planning grid.
+- Business value: Direct replacement for the `CF` sheet.
+- Key datasets: `cash_flow_projections`.
+- Required fields: month; category; is_revenue; amount; notes; display order if supported.
+- Main UI sections: spreadsheet-like grid; totals for income, costs, profit.
+- Filters/search/sort: month range; revenue/cost toggle.
+- Row actions: add category row; edit cell; copy month forward.
+- Bulk actions: export month range.
+- Edit capabilities: admin roles.
+- Validation rules: numeric amount; unique month+category; save on blur with optimistic UI.
+- Empty states: no cash-flow rows yet.
+- Loading states: grid skeleton.
+- Error states: cell save failed.
+- Permission nuances: finance/admin only.
+- Entry points: finance nav.
+- Exit paths / linked destinations: none.
+- Mobile/responsive considerations: desktop-primary only.
+- Audit/history needs: cell edit history desirable.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Live schema is usable but needs notes and ordering support for parity.
+
+## Weekly Report
+- Route: `/admin/reports/weekly`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Weekly client comparison report.
+- Business value: Replaces the hidden weekly workbook tab with a shareable internal report.
+- Key datasets: weekly aggregate view; clients; manager mapping.
+- Required fields: client; manager; client id; status; weekly MQL; weekly meetings; response rate; bounce rate for current and prior 3 weeks.
+- Main UI sections: report table; export controls; period header.
+- Filters/search/sort: manager; status; client.
+- Row actions: open client detail.
+- Bulk actions: export report.
+- Edit capabilities: none.
+- Validation rules: week windows locked to defined boundaries.
+- Empty states: no weekly data.
+- Loading states: table skeleton.
+- Error states: aggregate unavailable.
+- Permission nuances: `cs_manager` only assigned-client subset.
+- Entry points: reports nav; PDCA.
+- Exit paths / linked destinations: client overview.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: export logged.
+- Export/reporting needs: CSV/PDF.
+- Notes / open questions: Existing workbook implementation depends on `E5M CS`; future product should compute from normalized snapshots instead.
+
+## Monthly Report
+- Route: `/admin/reports/monthly`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Monthly trend report across clients.
+- Business value: Replaces the hidden monthly workbook report.
+- Key datasets: monthly aggregate view; clients.
+- Required fields: client; manager; monthly total leads; monthly won; prior month comparisons.
+- Main UI sections: report table; export controls.
+- Filters/search/sort: manager; status; month.
+- Row actions: open client detail.
+- Bulk actions: export report.
+- Edit capabilities: none.
+- Validation rules: month labels and closed-period handling consistent.
+- Empty states: no monthly data.
+- Loading states: table skeleton.
+- Error states: aggregate unavailable.
+- Permission nuances: `cs_manager` subset only.
+- Entry points: reports nav.
+- Exit paths / linked destinations: client overview.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: export logged.
+- Export/reporting needs: CSV/PDF.
+- Notes / open questions: Same dependency issue as weekly report.
+
+## RR/BR Generator
+**Status: Missing but required**
+- Route: `/admin/reports/rr-br`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Weekly team-member response-rate and bounce-rate reporting.
+- Business value: Current workbook proves this is an active management tool.
+- Key datasets: manual or imported team-level sequencer performance data.
+- Required fields: team member; day 1-5 sent/replied/bounced; totals; calculated RR/BR; source platform.
+- Main UI sections: person columns or normalized table; instructions/help panel if manual entry remains.
+- Filters/search/sort: team member; week.
+- Row actions: edit values; export.
+- Bulk actions: export full report.
+- Edit capabilities: admin roles.
+- Validation rules: numeric values only; rates auto-derived.
+- Empty states: no weekly entries.
+- Loading states: grid skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only.
+- Entry points: reports nav.
+- Exit paths / linked destinations: none.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: edit history useful if manual.
+- Export/reporting needs: CSV/PDF.
+- Notes / open questions: This can stay manual initially, but it still needs a UI if the workbook is to be retired.
+
+## User Management
+- Route: `/admin/settings/users`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Invite users, assign roles, and map users to clients.
+- Business value: Replaces spreadsheet-based access with enforceable role assignment.
+- Key datasets: `users`; `client_users`; invite state.
+- Required fields: name; email; role; active/inactive; last login; assigned clients; invite status; notification prefs if tracked.
+- Main UI sections: user table; invite modal; role filters; client assignment panel.
+- Filters/search/sort: role; active state; assigned client; invited/not accepted.
+- Row actions: invite; deactivate; reactivate; change role; assign clients; reset invite.
+- Bulk actions: assign clients; deactivate selected.
+- Edit capabilities: admin roles; only super_admin can grant/remove `super_admin`.
+- Validation rules: email unique; at least one client assignment for client users.
+- Empty states: no users yet.
+- Loading states: table skeleton.
+- Error states: invite failed; assignment failed.
+- Permission nuances: super-admin-only role escalation and destructive access changes.
+- Entry points: settings nav.
+- Exit paths / linked destinations: client list; audit log.
+- Mobile/responsive considerations: desktop preferred.
+- Audit/history needs: role and assignment changes logged.
+- Export/reporting needs: user roster export.
+- Notes / open questions: Blocked by missing `client_users` entity.
+
+## Email Exclude List
+- Route: `/admin/settings/blacklist`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Manage the global excluded-domain list used by outreach automations.
+- Business value: Central compliance and outreach control.
+- Key datasets: `email_exclude_list`; optional linked lead matches.
+- Required fields: domain; added_by; created_at; notes/source if added.
+- Main UI sections: domain table; add domain form; import/export controls.
+- Filters/search/sort: domain search; recently added.
+- Row actions: add; remove; edit note if supported.
+- Bulk actions: CSV import; export.
+- Edit capabilities: admin roles.
+- Validation rules: valid domain format; duplicate domains blocked.
+- Empty states: no excluded domains.
+- Loading states: table skeleton.
+- Error states: add/remove failed.
+- Permission nuances: `cs_manager` view-only at most.
+- Entry points: settings nav; lead processing blacklist shortcut.
+- Exit paths / linked destinations: lead processing filtered to blacklisted leads.
+- Mobile/responsive considerations: simple responsive list.
+- Audit/history needs: add/remove events logged.
+- Export/reporting needs: CSV import/export.
+- Notes / open questions: Current live table covers only the global domain list; per-lead blacklist event history is still missing.
+
+## Integrations & Secrets
+**Status: Missing but required**
+- Route: `/admin/settings/integrations`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Manage global and client-linked integration credentials and connection status.
+- Business value: Central control plane for Bison, Smartlead, CRM, Look4Lead, SMS, and AI-dependent operations.
+- Key datasets: integration configs; secret metadata; connection test results; last syncs.
+- Required fields: provider; scope; masked token/key; status; last tested; last sync; owner client if scoped.
+- Main UI sections: provider cards; connection tables; test controls; secret rotation UI.
+- Filters/search/sort: provider; failing only; client.
+- Row actions: test; rotate; disable; enable.
+- Bulk actions: export integration status.
+- Edit capabilities: admin full; super_admin for highest-risk operations.
+- Validation rules: secret fields masked by default; destructive rotation requires confirmation.
+- Empty states: no integrations configured.
+- Loading states: test/save spinners.
+- Error states: invalid credentials; provider unavailable.
+- Permission nuances: only super_admin should perform high-risk secret rotation.
+- Entry points: settings nav; failure alerts.
+- Exit paths / linked destinations: client setup; automation logs.
+- Mobile/responsive considerations: desktop-first.
+- Audit/history needs: every credential change and test result logged.
+- Export/reporting needs: status export only, never secret export.
+- Notes / open questions: Current workbook fields prove this page is needed even though the prototype does not include it.
+
+## Lost Clients Archive
+- Route: `/admin/clients/lost`
+- Primary roles: `super_admin`, `admin`
+- Primary purpose: Preserve churn history and recovery opportunities.
+- Business value: Replaces `ABM LOSTS` and supports win-back strategy.
+- Key datasets: `abm_lost_clients`; linked prior client if retained.
+- Required fields: client name snapshot; owner/CS snapshot; reason; return possibility/probability; document links; drive links; notes; churn date.
+- Main UI sections: archive table/cards; link panel.
+- Filters/search/sort: owner; return likelihood; recent churn.
+- Row actions: edit notes; open docs.
+- Bulk actions: export archive.
+- Edit capabilities: admin roles.
+- Validation rules: reason required when moving to lost/churned.
+- Empty states: no lost clients recorded.
+- Loading states: table skeleton.
+- Error states: save failed.
+- Permission nuances: internal-only.
+- Entry points: settings or clients nav.
+- Exit paths / linked destinations: none critical.
+- Mobile/responsive considerations: cards acceptable.
+- Audit/history needs: archive entry creation/edit logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Live schema is too thin to reproduce the current sheet.
+
+## Audit & Automation Log
+**Status: Missing but required**
+- Route: `/admin/audit`
+- Primary roles: `super_admin`, `admin`, `cs_manager`
+- Primary purpose: Provide traceability for imports, reply automation, OOO processing, blacklist events, and downstream syncs.
+- Business value: Necessary support tool if Sheets are removed.
+- Key datasets: generic event log / automation run entities; import job history.
+- Required fields: event id; event type; client; source system; record id; status; summary; actor/automation; created_at; retryable flag.
+- Main UI sections: event table; filters; detail drawer with payload summary.
+- Filters/search/sort: event type; client; status; actor; date range.
+- Row actions: open affected record; retry if allowed.
+- Bulk actions: export filtered event list.
+- Edit capabilities: limited retry actions only.
+- Validation rules: retry only on eligible events.
+- Empty states: no events yet.
+- Loading states: table skeleton.
+- Error states: event detail unavailable.
+- Permission nuances: `cs_manager` assigned-client subset only.
+- Entry points: failure alerts; imports; automation pages.
+- Exit paths / linked destinations: affected client/lead/import record.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: this page is the audit surface.
+- Export/reporting needs: CSV export.
+- Notes / open questions: No equivalent exists in the live schema, but the automation-heavy operating model requires it.
+
+# 10. CS Manager Operational Workspace
+## CS Manager Dashboard
+- Route: `/manager/dashboard`
+- Primary roles: `cs_manager`
+- Primary purpose: Show assigned-client health, anomalies, and immediate action queues.
+- Business value: Morning triage page for CS.
+- Key datasets: assigned `clients`; `client_daily_snapshots`; latest `client_health_assessments`; open issues; pending reply/OOO events.
+- Required fields: assigned client count; today’s anomalies; MQL/meeting/won counts; overdue health reviews; open issues; OOO due count; low-confidence reply count.
+- Main UI sections: KPI cards; action queue; risk client list; recent trend widgets.
+- Filters/search/sort: manager scope implicit; anomaly type; due today.
+- Row actions: open client 360; open reply queue; open OOO queue.
+- Bulk actions: none.
+- Edit capabilities: none directly; navigation hub.
+- Validation rules: only assigned clients included.
+- Empty states: no assigned clients.
+- Loading states: panel skeletons.
+- Error states: partial alert feed failure.
+- Permission nuances: manager-only assigned scope.
+- Entry points: post-login default for managers.
+- Exit paths / linked destinations: clients; leads; PDCA; health.
+- Mobile/responsive considerations: tablet and desktop priority; mobile summary only.
+- Audit/history needs: none.
+- Export/reporting needs: none.
+- Notes / open questions: Current prototype approximates this but lacks real alert data.
+
+## Assigned Clients Workspace
+- Route: `/manager/clients`
+- Primary roles: `cs_manager`
+- Primary purpose: List assigned clients with quick access into 360 views.
+- Business value: Manager-owned client management.
+- Key datasets: assigned `clients`; summary metrics; latest health.
+- Required fields: same subset as admin clients list, scoped to assigned clients.
+- Main UI sections: search/filter bar; client cards/table; quick risk badges.
+- Filters/search/sort: status; risk; contract due soon; missing setup.
+- Row actions: open client 360; create issue; schedule health review.
+- Bulk actions: export assigned roster.
+- Edit capabilities: limited metadata edits if allowed.
+- Validation rules: assigned-only scope.
+- Empty states: no assigned clients.
+- Loading states: list skeleton.
+- Error states: load failed.
+- Permission nuances: no access outside assigned clients.
+- Entry points: manager nav; dashboard.
+- Exit paths / linked destinations: client setup; leads; health; domains.
+- Mobile/responsive considerations: card-first.
+- Audit/history needs: edits logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: This is present in the current prototype but still mock-only.
+
+## Leads Review Queue
+- Route: `/manager/leads`
+- Primary roles: `cs_manager`
+- Primary purpose: Process and review actionable leads and related reply events across assigned clients.
+- Business value: Main CS working screen.
+- Key datasets: assigned-client `leads`; linked reply metadata; OOO flags; confidence flags.
+- Required fields: lead basics; client; campaign; qualification; client stage; reply count; latest reply; message step; AI classification; confidence; OOO state.
+- Main UI sections: dense table; bulk action bar; quick filters; detail drawer.
+- Filters/search/sort: client; qualification; AI confidence; OOO; newest first; message step.
+- Row actions: update qualification; move to rejected; open detail; edit OOO return date.
+- Bulk actions: mark rejected; change qualification; export filtered leads.
+- Edit capabilities: manager can fully operate within assigned clients.
+- Validation rules: manual overrides logged; rejection reason required.
+- Empty states: no pending leads.
+- Loading states: table skeleton.
+- Error states: save failed; stale data.
+- Permission nuances: assigned scope only.
+- Entry points: dashboard alerts; client overview.
+- Exit paths / linked destinations: client 360; OOO queue; reply review.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: full audit trail required.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Manager view should merge lead processing and automation review enough for daily work, even if admin has broader log pages.
+
+## CS Manager PDCA Workspace
+- Route: `/manager/pdca`
+- Primary roles: `cs_manager`
+- Primary purpose: Manager-scoped DoD/WoW/MoM and health views.
+- Business value: Replaces manual filtering in the workbook.
+- Key datasets: same PDCA aggregates as admin pages, scoped.
+- Required fields: same as PDCA pages, limited to assigned clients.
+- Main UI sections: tabbed DoD/WoW/MoM/Health matrix; anomaly filters.
+- Filters/search/sort: assigned only; anomaly severity.
+- Row actions: open client; create issue; add health review.
+- Bulk actions: export current tab.
+- Edit capabilities: health review creation.
+- Validation rules: assigned-only scope.
+- Empty states: no snapshot data.
+- Loading states: matrix skeleton.
+- Error states: aggregate unavailable.
+- Permission nuances: no cross-client visibility beyond assignments.
+- Entry points: manager nav; dashboard.
+- Exit paths / linked destinations: client health; overview; issues.
+- Mobile/responsive considerations: desktop-primary.
+- Audit/history needs: health edits logged.
+- Export/reporting needs: CSV export.
+- Notes / open questions: Current prototype has a simplified PDCA surface but not the real metric breadth.
+
+## Health & Issues Review
+**Status: Missing but required**
+- Route: `/manager/health`
+- Primary roles: `cs_manager`
+- Primary purpose: Consolidate due health reviews, red-status clients, and open issues for assigned accounts.
+- Business value: Prevents health and issue work from being buried across client pages.
+- Key datasets: assigned `client_health_assessments`; `client_issues`; clients.
+- Required fields: client; latest health; due review flag; open issue count; highest issue priority.
+- Main UI sections: due-review queue; open-issues table; quick-create assessment.
+- Filters/search/sort: due now; red only; unresolved only.
+- Row actions: add health review; open issue list; resolve issue.
+- Bulk actions: export due-review list.
+- Edit capabilities: manager can create assessments and update issues in scope.
+- Validation rules: same as health and issues modules.
+- Empty states: nothing due today.
+- Loading states: queue skeleton.
+- Error states: load/save failed.
+- Permission nuances: assigned scope only.
+- Entry points: dashboard alerts; PDCA.
+- Exit paths / linked destinations: client health; client issues.
+- Mobile/responsive considerations: tablet/desktop priority.
+- Audit/history needs: same as health/issues pages.
+- Export/reporting needs: queue export.
+- Notes / open questions: Not present as a distinct surface today, but strongly recommended for operational usability.
+
+# 11. Automation-Driven UI Requirements
+## 11.1 Reply classification
+Must be visible:
+- raw incoming reply
+- `automated_reply` flag
+- AI category
+- confidence
+- short reason / reasoning
+- detected language
+- attached Bison tag
+- whether lead row was created, updated, or ignored
+
+Must be editable/reviewable:
+- manual reclassification
+- approval of low-confidence results
+- re-run processing
+- “ignore” or “not actionable” resolution
+
+Must be traceable:
+- timestamp
+- client/workspace
+- source webhook event id if available
+- downstream side effects
+
+## 11.2 OOO handling
+Must be visible:
+- expected return date
+- source reply
+- gender used for routing
+- workspace and resolved route campaign
+- attach-to-campaign outcome
+- processed/unprocessed state
+
+Must be editable:
+- expected return date override
+- gender override
+- route override
+- attach retry
+
+Must be traceable:
+- every attach attempt
+- failure reason
+- whether processed flag changed
+
+## 11.3 Blacklist management
+Must be visible:
+- whether a lead/email/domain was blacklisted
+- blacklist IDs written by automation
+- source lead/reply that triggered blacklisting
+- removal events
+
+Must be editable:
+- add/remove blacklist manually from internal pages
+- add/remove domain in global exclude list
+
+Must be traceable:
+- actor or automation
+- timestamp
+- target type: email vs domain
+- external provider response
+
+## 11.4 Lead enrichment and forwarding
+Must be visible:
+- whether Snov/Lusha enrichment succeeded
+- phone source
+- whether SMS was sent
+- whether reply was forwarded and to whom
+
+Must be traceable:
+- provider used
+- provider result
+- fallback path used
+
+## 11.5 CRM push and external exports
+Must be visible:
+- CRM sync status per lead
+- Look4Lead export status per lead
+- last attempt and error message
+- destination integration used
+
+Must be triggerable:
+- retry CRM push
+- retry Look4Lead export
+- disable client-level integration
+
+## 11.6 Import and scheduled-job visibility
+Must be visible:
+- import job history
+- automation run history
+- success/failure status
+- affected record counts
+- downloadable error summary
+
+## 11.7 Alerts and notifications
+Internal alert surfaces should include:
+- min-sent breach
+- bounce-rate breach
+- red health or repeated red health
+- overdue invoice
+- due OOO return
+- low AI confidence
+- failed CRM push
+- failed export/import
+
+# 12. Missing Interfaces and Product Gaps
+## 12.1 Four-layer comparison
+| Area | Sheets reality | Automation reality | Formal spec | Future product need | Classification | Recommended decision |
+|---|---|---|---|---|---|---|
+| Client campaigns page | Present | Campaign IDs and context used | Present | Required | Partially covered | Build it; missing in current prototype |
+| Client pipeline editing | Separate booleans after qualification | Lead tags and side effects depend on state | Partially covered | Required | Contradictory | Separate qualification from client stage |
+| Client visibility of `preMQL` | Present in workbook | Logged as actionable lead | Contradicted by one alt spec | Required for parity | Contradictory | Show `preMQL` and `MQL`; hide OOO/NRR |
+| Reply review / AI audit | Classification test sheet exists | Core operational dependency | Under-specified | Required | Missing | Add internal reply review queue |
+| OOO queue and routing | Separate workbook tabs | Core automation | Only partially described | Required | Missing | Add OOO queue + routing UI |
+| Import center | Manual import reality | Needed for Phase 1 | Mentioned | Required | Missing in prototype | Build import center early |
+| Structured issues tracker | Weak free-text notes only | Not automated | Present as page in spec | Required | Partially covered | Add `client_issues` and UI |
+| Health history | Color cells in PDCA | Drives risk logic | Present | Required | Partially covered | Add proper history/timeline |
+| Client CRM integration settings | Separate sheet | CRM sync side effects | Present | Required | Missing in live DB | Add CRM config entity and page |
+| Automation/audit log | Not in workbook except test sheets | Essential for support | Not explicit enough | Required | Missing | Add event log surface |
+| Look4Lead export status | Token in CS PDCA | Scheduled export exists | Not described in detail | Required if integration stays | Missing | Add export status and config visibility |
+| Weekly/Monthly reports | Hidden workbook tabs | Derived from daily stats | Present | Required | Covered conceptually | Compute from normalized views |
+| E5M CS / Prospect Base | Present in workbook | Used by hidden reports | Explicitly ignored | Probably not core GHEADS portal | Over-scoped / ambiguous | Confirm with stakeholders before building |
+| Super admin governance | Not in sheets | Not in automations | Barely separated | Required | Missing | Add dedicated super-admin-only settings area |
+
+## 12.2 Current prototype gaps
+- No true client scoping; client pages read portfolio-wide mock data.
+- No `super_admin` role surface.
+- Client portal lacks top-level campaigns despite workbook and spec requiring them.
+- Admin settings route currently duplicates users instead of a real settings area.
+- No import center.
+- No reply review queue.
+- No OOO queue.
+- No audit/event log.
+- No finance cash-flow page.
+- No dedicated client issues page.
+- No partnerships or ABS screens.
+- No proper secret-handling UX.
+- No real permission-safe client/team access model.
+
+## 12.3 Gaps in the formal markdown spec
+- Does not fully capture automation observability needs.
+- Under-specifies OOO handling UI.
+- Under-specifies import history and recovery.
+- Under-specifies blacklist traceability.
+- Inconsistently defines who sees `preMQL`.
+- Provides conflicting lead-state models.
+
+# 13. Database Schema Gaps Relative to UI Needs
+Only the minimum truly required changes are listed here.
+
+## 13.1 Must-add entities
+| Gap | Why UI needs it | Minimal addition |
+|---|---|---|
+| Client access mapping | Client users must map to one or more clients; permissions depend on it | Add `client_users` |
+| Daily client time-series | PDCA and several dashboard widgets depend on it | Add `client_daily_snapshots` |
+| Health history | Health pages and churn-risk logic require it | Add `client_health_assessments` |
+| Structured issues | Issues page cannot be built from one free-text field | Add `client_issues` |
+| CRM config | Client CRM settings UI and sync status need it | Add `client_crm_integrations` or equivalent 1:1 config table |
+| LG pipeline | Existing internal sheet has no live equivalent | Add `lg_pipeline` |
+| Partnerships | Required only if this module stays in scope | Add `partnerships` |
+| ABS scoring | Required only if this module stays in scope | Add `account_based_selling` |
+| Import jobs | Import center needs history and errors | Add `import_jobs` and minimal error details |
+| Automation/audit events | Reply/OOO/sync/export observability needs persistence | Add a generic `automation_events` / audit log table |
+
+## 13.2 Must-fix current entities
+| Entity | Gap | Minimal change |
+|---|---|---|
+| `users` | role mismatch; no notification prefs | Standardize role naming; add notification preference storage |
+| `clients` | missing links, notes, contact emails, some lifecycle/config fields | Add workbook-backed operational fields or move them into `client_setup` |
+| `client_setup` | too thin for setup/ecosystem UI | Add fields for bi-setup, ABA, prospects signed/added, SMS/email contacts, Auto OOO, Auto-LI, cold LinkedIn/Ads, workshops, harmonogramy |
+| `campaigns` | missing start date, database size, sequencer, positive responses | Add those fields |
+| `leads` | missing many workbook fields and cannot separate qualification from pipeline | Add workbook fields and a separate client pipeline stage model |
+| `replies` | too thin for automation audit | Add external id, direction, sequence step, AI classification/reason/confidence, extracted date, language, created-at consistency; preferably treat as `lead_replies` |
+| `client_ooo_routing` | missing `general` gender support in live enum | Extend enum/mapping support to `general` |
+| `campaign_daily_stats` | missing positive/negative/OOO/human reply counts | Add reply-breakdown columns |
+| `domains` | missing verification/status fields from sheet | Add campaign verification date/status and warmup verification date |
+| `invoices` | missing vindication and workbook billing fields | Add vindication status/stage and notes at minimum |
+| `abm_lost_clients` | too thin for current archive UI | Add client name snapshot, owner snapshot, docs links, notes, return likelihood text |
+
+## 13.3 Required data-model decisions
+- Separate internal qualification from client pipeline stage.
+- Preserve raw reply events separately from client-visible lead rows.
+- Decide one canonical client status taxonomy.
+- Decide one canonical reply classification taxonomy.
+- Implement actual RLS policies before frontend client access.
+
+## 13.4 Recommended derived views for UI performance
+- `v_client_weekly_stats`
+- `v_client_monthly_stats`
+- `v_client_current_metrics`
+- `v_pdca_dod`
+- `v_reply_review_queue`
+- `v_client_risk_summary`
+
+These are not backend over-design; they are practical query surfaces for dense operational UIs.
+
+## 13.5 Current live schema verdict
+The current live schema is not sufficient for the required interface.
+
+Reasons:
+- missing client access model
+- missing time-series snapshot table
+- missing health history
+- missing issues
+- missing CRM config
+- missing internal pipeline tables
+- too-thin leads and replies
+- incomplete campaigns, domains, invoices
+- no RLS policies currently returned
+
+# 14. MVP Scope Recommendation
+## 14.1 Fastest useful MVP
+Build this first if the goal is the fastest credible move away from client spreadsheets:
+- Internal auth and role routing
+- Client access mapping
+- Client portal: Dashboard, Leads, Campaigns, Analytics, Settings
+- Admin: Clients list, Client Overview, Client Setup, Client Leads, Client Campaigns
+- Import Center for client report workbooks and PDCA core data
+- `client_daily_snapshots`
+- `campaign_daily_stats`
+- Qualified lead model with separate client pipeline stage
+- Basic user management and invitations
+- Real RLS policies
+- Export filtered leads CSV
+
+## 14.2 Must-have for operational parity before retiring Sheets
+- PDCA DoD/WoW/MoM
+- Health assessments and history
+- Domains page
+- Invoicing page
+- Global exclude list
+- Lost clients archive
+- Agency CRM
+- LG pipeline
+- OOO queue and routing management
+- Reply review / low-confidence audit
+- Import history and automation event logging
+
+## 14.3 What not to cut if you want a usable migration
+Do not cut:
+- `client_daily_snapshots`
+- `client_users`
+- separate pipeline stage model
+- import validation and history
+- basic automation auditability
+- health assessment history
+
+# 15. Post-MVP / Phase 2 Recommendation
+## Should-have
+- Scheduled report builder
+- Client impersonation
+- CRM push retry center
+- Look4Lead export history and retry controls
+- Finance cash-flow spreadsheet UI
+- RR/BR generator UI
+- Partner/ABS modules if still used
+- Client-side PDF export
+- Connection health and last-sync widgets
+
+## Nice-to-have
+- Client-admin self-service team invitations
+- Per-client visibility rules for `preMQL`
+- Saved filters and shared report presets
+- Real-time notifications center
+- Automated churn-risk scoring widget
+- Mobile-optimized manager triage app behavior
+- Comment mentions and task assignments
+- Historical change diff views for configuration and health
+
+# 16. Risks, Ambiguities, and Product Decisions Needed
+1. Lead visibility
+Explicit: workbook shows both `preMQL` and `MQL`.
+Inferred: clients currently rely on both.
+Ambiguous: alternate spec text says only `MQL` should be visible.
+Recommended decision: expose both `preMQL` and `MQL` to clients for parity.
+
+2. Lead-state model
+Explicit: workbook has `QUALIFICATION` plus separate meeting/offer/won fields.
+Explicit: current live DB mixes stages into one enum.
+Recommended decision: split internal qualification from client pipeline stage.
+
+3. Client status taxonomy
+Explicit: workbook uses `Active`, `Abo`, `On hold`, `Offboarding`, `Inactive`, `Sales`.
+Explicit: formal spec proposes different statuses.
+Recommended decision: use workbook statuses in MVP and optionally map them to grouped display labels.
+
+4. Reply taxonomy
+Explicit: automations use `OOO`, `Interested`, `NRR`, `Spam_Inbound`, `Left_Company`, `other`.
+Explicit: formal spec uses a different set.
+Recommended decision: maintain an internal automation classification enum distinct from lead qualification.
+
+5. OOO timing rule
+Explicit: one blueprint attaches on `now - 2 days`; spec text implies `<= current_date`.
+Recommended decision: use a processed flag plus `expected_return_date <= current_date` to avoid silent misses.
+
+6. `SQL` terminology
+Explicit: PDCA workbook uses “SQL leads received”.
+Inferred: in practice this does not map cleanly to a separate final status.
+Recommended decision: retire ambiguous `SQL` labels from UI unless stakeholders define them precisely.
+
+7. CRM configuration shape
+Explicit: workbook stores platform + keys + secret + subdomain.
+Ambiguous: whether multiple CRM connections per client are needed.
+Recommended decision: build one active CRM integration per client in MVP, but do not block a future 1:N model.
+
+8. Finance scope for CS managers
+Explicit: formal matrix gives managers finance visibility for assigned clients.
+Ambiguous: whether they can edit invoice state or only view it.
+Recommended decision: managers may view invoice status and add operational notes only; admin retains financial control.
+
+9. E5M-related sheets
+Explicit: `E5M CS`, `Prospect Base`, `Weekly`, `Monthly` depend on those structures.
+Ambiguous: whether these belong in the GHEADS product scope.
+Recommended decision: confirm with stakeholders; treat as non-MVP unless clearly still in active GHEADS ops.
+
+10. Current schema access safety
+Explicit: RLS enabled; `pg_policies` returned no policies.
+Recommended decision: treat this as a launch blocker for any client-facing release.
+
+# 17. Final Build Checklist
+- [ ] Confirm canonical role names and permissions.
+- [ ] Confirm canonical client statuses.
+- [ ] Confirm final client-visible lead statuses.
+- [ ] Separate qualification from client pipeline stage in the data model.
+- [ ] Add `client_users`.
+- [ ] Add `client_daily_snapshots`.
+- [ ] Add `client_health_assessments`.
+- [ ] Add `client_issues`.
+- [ ] Expand leads and replies to match workbook and automation needs.
+- [ ] Expand campaigns, domains, invoices, and lost-client entities.
+- [ ] Add CRM integration config storage.
+- [ ] Add import-job history.
+- [ ] Add automation/audit event logging.
+- [ ] Implement real RLS policies.
+- [ ] Build client portal pages: Dashboard, Leads, Campaigns, Analytics, Settings.
+- [ ] Build admin pages: Clients, Client 360 tabs, PDCA, Imports, Users, Integrations.
+- [ ] Build manager workspace: Dashboard, Leads Queue, PDCA, Health/Issues.
+- [ ] Build reply review queue.
+- [ ] Build OOO queue and routing UI.
+- [ ] Build global exclude-list UI.
+- [ ] Build onboarding flow: create client, setup, assign manager, invite users, import history.
+- [ ] Define all loading, empty, and error states before UI design starts.
+- [ ] Define audit requirements for every mutation page.
+- [ ] Define export requirements page by page.
+- [ ] Decide what stays out of MVP but must stay in parity scope.
+- [ ] Reconcile nomenclature before component/API work begins.
+- [ ] Validate final field list against workbook columns before implementation tickets are written.

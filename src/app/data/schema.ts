@@ -9,12 +9,21 @@ export type ReplyIntent = 'positive' | 'negative' | 'ooo' | 'info_requested' | '
 export type LeadGender = 'male' | 'female' | 'general';
 export type HealthStatus = 'green' | 'yellow' | 'red' | 'unknown';
 export type CrmPipelineStage = 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
+export type LgPipelineStage = 'new' | 'contacted' | 'demo' | 'proposal' | 'closed_won' | 'closed_lost';
 export type LeadQualification =
   | 'unprocessed' | 'unqualified' | 'preMQL' | 'MQL'
   | 'meeting_scheduled' | 'meeting_held' | 'offer_sent' | 'won' | 'rejected';
 export type CampaignType = 'outreach' | 'ooo' | 'nurture';
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
 export type CrmPlatform = 'livespace' | 'pipedrive' | 'zoho' | 'salesforce' | 'none';
+export type IssueSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type PartnershipStatus = 'active' | 'paused' | 'ended';
+export type AbsStatus = 'prospect' | 'contacted' | 'engaged' | 'won' | 'lost';
+export type AuditEventType =
+  | 'classification' | 'ooo_routed' | 'blacklist_added' | 'blacklist_removed'
+  | 'lead_updated' | 'export' | 'import' | 'health_assessed' | 'campaign_changed'
+  | 'invoice_updated' | 'user_invited';
 
 // --- Tables ---
 
@@ -34,6 +43,15 @@ export interface User {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ClientUser {
+  id: string;
+  client_id: string;
+  user_id: string;
+  invited_by: string | null;
+  invited_at: string;
+  accepted_at: string | null;
 }
 
 export interface Client {
@@ -61,6 +79,7 @@ export interface ClientSetup {
   crm_credentials: Record<string, string> | null;
   inboxes_count: number;
   prospects_in_base: number;
+  look4lead_token: string | null;
   updated_at: string;
 }
 
@@ -83,7 +102,7 @@ export interface Campaign {
   external_id: string | null;
   type: CampaignType;
   name: string;
-  status: string | null; // TEXT in DB (active, paused, completed, draft)
+  status: string | null; // active, paused, completed, draft
   database_size: number;
   created_at: string;
 }
@@ -107,11 +126,14 @@ export interface Lead {
   linkedin_url: string | null;
   gender: LeadGender;
   qualification: LeadQualification;
+  client_pipeline_stage: string | null; // client-managed: meeting_scheduled, offer_sent, won, rejected
   is_ooo: boolean;
   expected_return_date: string | null;
   latest_reply_at: string | null;
   replied_at_step: number | null;
   total_replies_count: number;
+  blacklist_id: string | null;
+  domain_blacklist_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -127,8 +149,22 @@ export interface LeadReply {
   received_at: string;
   ai_classification: ReplyIntent;
   ai_reasoning: string | null;
-  ai_confidence: number | null; // 0.00–1.00 (numeric 3,2)
+  ai_confidence: number | null; // 0.00–1.00
+  ai_language: string | null;
   extracted_date: string | null;
+  is_reviewed: boolean;
+  created_at: string;
+}
+
+export interface OooLead {
+  id: string;
+  lead_id: string;
+  client_id: string;
+  campaign_id: string | null;
+  expected_return_date: string | null;
+  routed_campaign_id: string | null;
+  is_processed: boolean;
+  processed_at: string | null;
   created_at: string;
 }
 
@@ -140,6 +176,10 @@ export interface CampaignDailyStat {
   reply_count: number;
   bounce_count: number;
   unique_open_count: number;
+  positive_count: number;
+  negative_count: number;
+  ooo_count: number;
+  human_reply_count: number;
 }
 
 export interface ClientDailySnapshot {
@@ -150,9 +190,9 @@ export interface ClientDailySnapshot {
   prospects_count: number;
   emails_sent_total: number; // cumulative
   bounce_count: number;
-  mql_diff: number;   // delta for this day
-  me_diff: number;    // meetings scheduled delta
-  won_diff: number;   // won delta
+  mql_diff: number;
+  me_diff: number;
+  won_diff: number;
   ooo_accumulated: number;
   negative_total: number;
   human_replies_total: number;
@@ -172,6 +212,19 @@ export interface ClientHealthAssessment {
   insights: string | null;
 }
 
+export interface ClientIssue {
+  id: string;
+  client_id: string;
+  created_by: string | null;
+  title: string;
+  description: string | null;
+  severity: IssueSeverity;
+  status: IssueStatus;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgencyCrmDeal {
   id: string;
   company_name: string;
@@ -185,6 +238,56 @@ export interface AgencyCrmDeal {
   estimated_value: number | null;
   win_chance: number | null;
   lesson_learned: string | null;
+  notes: string | null;
+  next_follow_up: string | null;
+  created_at: string;
+}
+
+export interface LgPipelineDeal {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  email: string | null;
+  source: string | null;
+  stage: LgPipelineStage;
+  estimated_value: number | null;
+  win_chance: number | null;
+  notes: string | null;
+  next_follow_up: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Partnership {
+  id: string;
+  partner_name: string;
+  contact_name: string | null;
+  email: string | null;
+  monthly_fee: number | null;
+  status: PartnershipStatus;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface AccountBasedSelling {
+  id: string;
+  client_id: string | null;
+  company_name: string;
+  score: number; // 0–100
+  decision_maker: string | null;
+  status: AbsStatus;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface CashFlowProjection {
+  id: string;
+  month: string; // 'YYYY-MM'
+  expected_revenue: number;
+  actual_revenue: number | null;
+  expected_costs: number;
+  actual_costs: number | null;
+  notes: string | null;
   created_at: string;
 }
 
@@ -195,12 +298,24 @@ export interface Invoice {
   amount: number;
   status: InvoiceStatus;
   vindication_stage: string | null;
+  notes: string | null;
   created_at: string;
 }
 
 export interface EmailExcludeItem {
   domain: string;
   added_by: string | null;
+  created_at: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  client_id: string | null;
+  lead_id: string | null;
+  event_type: AuditEventType;
+  description: string;
+  metadata: Record<string, unknown> | null;
+  triggered_by: string; // 'automation' | user_id
   created_at: string;
 }
 
@@ -212,4 +327,19 @@ export interface AbmLostClient {
   reason_for_loss: string | null;
   return_probability: string | null;
   created_at: string;
+}
+
+export interface ImportJob {
+  id: string;
+  client_id: string | null;
+  imported_by: string;
+  entity_type: string; // 'leads' | 'domains' | 'campaigns' | 'prospects'
+  file_name: string;
+  total_rows: number;
+  imported_rows: number;
+  failed_rows: number;
+  status: 'pending' | 'processing' | 'done' | 'failed';
+  error_log: string | null;
+  created_at: string;
+  finished_at: string | null;
 }

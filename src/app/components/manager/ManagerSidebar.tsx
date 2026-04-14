@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
-import { LayoutDashboard, Users, GitBranch, UserCheck, LogOut, X } from 'lucide-react';
+import { LayoutDashboard, Users, GitBranch, UserCheck, LogOut, X, HeartPulse, Bot } from 'lucide-react';
 import { Logo } from '../Logo';
-import { mockUsers, mockClients } from '../../data/mock';
+import { mockUsers, mockClients, mockClientIssues } from '../../data/mock';
 
 const MANAGER_USER = mockUsers.find(u => u.role === 'cs_manager' && u.id === 'user-2')!;
 
-export type ManagerTab = 'dashboard' | 'clients' | 'leads' | 'pdca';
+export type ManagerTab = 'dashboard' | 'clients' | 'leads' | 'pdca' | 'health' | 'automation';
 
 interface Props {
   activeTab: ManagerTab;
@@ -15,10 +15,12 @@ interface Props {
 }
 
 const NAV: { id: ManagerTab; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'dashboard', label: 'My Dashboard',    icon: LayoutDashboard },
-  { id: 'clients',   label: 'Client 360°',     icon: UserCheck },
-  { id: 'leads',     label: 'Leads Workspace', icon: Users },
-  { id: 'pdca',      label: 'PDCA',            icon: GitBranch },
+  { id: 'dashboard',  label: 'My Dashboard',    icon: LayoutDashboard },
+  { id: 'clients',    label: 'Client 360°',     icon: UserCheck },
+  { id: 'leads',      label: 'Leads Workspace', icon: Users },
+  { id: 'pdca',       label: 'PDCA',            icon: GitBranch },
+  { id: 'health',     label: 'Health & Issues', icon: HeartPulse },
+  { id: 'automation', label: 'Automation Inbox',icon: Bot },
 ];
 
 function getInitials(name: string) {
@@ -28,8 +30,10 @@ function getInitials(name: string) {
 function SidebarContent({ activeTab, onTabChange, onClose }: {
   activeTab: ManagerTab; onTabChange: (tab: ManagerTab) => void; onClose?: () => void;
 }) {
-  const myClients = mockClients.filter(c => c.cs_manager_id === MANAGER_USER.id);
-  const handleNav = (tab: ManagerTab) => { onTabChange(tab); onClose?.(); };
+  const myClients    = mockClients.filter(c => c.cs_manager_id === MANAGER_USER.id);
+  const myClientIds  = myClients.map(c => c.id);
+  const openIssues   = mockClientIssues.filter(i => myClientIds.includes(i.client_id) && ['open','in_progress'].includes(i.status)).length;
+  const handleNav    = (tab: ManagerTab) => { onTabChange(tab); onClose?.(); };
 
   return (
     <div className="bg-[#0d0d0d] border-r border-border h-full flex flex-col" style={{ width: 240 }}>
@@ -50,13 +54,17 @@ function SidebarContent({ activeTab, onTabChange, onClose }: {
 
       <nav className="flex-1 p-3 space-y-0.5">
         {NAV.map(item => {
-          const Icon = item.icon;
+          const Icon   = item.icon;
           const active = activeTab === item.id;
+          const badge  = item.id === 'health' ? openIssues : 0;
           return (
             <button key={item.id} onClick={() => handleNav(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${active ? 'bg-primary/10 text-primary border border-primary/20' : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'}`}>
               <Icon className="w-4 h-4 shrink-0" />
-              <span className="text-sm">{item.label}</span>
+              <span className="text-sm flex-1">{item.label}</span>
+              {badge > 0 && (
+                <span className="text-xs bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">{badge}</span>
+              )}
             </button>
           );
         })}
