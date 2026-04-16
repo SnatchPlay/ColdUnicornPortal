@@ -64,8 +64,12 @@ function InternalCampaignsPage() {
         <EmptyState title="No campaigns in scope" description="Role-based campaign scoping is active. Client users only see outreach campaigns." />
       ) : (
         <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-          <Surface title="Campaign portfolio" subtitle={`${scopedCampaigns.length} campaigns visible`}>
-            <div className="space-y-3">
+          <Surface
+            title="Campaign portfolio"
+            subtitle={`${scopedCampaigns.length} campaigns visible`}
+            className="flex h-[34rem] max-h-[68vh] min-h-0 flex-col"
+          >
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               {scopedCampaigns.map((campaign) => (
                 <button
                   key={campaign.id}

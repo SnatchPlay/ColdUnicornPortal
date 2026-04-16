@@ -22,6 +22,7 @@ import {
 import { useCoreData } from "../providers/core-data";
 import { useAuth } from "../providers/auth";
 import { ClientDashboardPage } from "./client-dashboard-page";
+import { ManagerDashboardPage } from "./manager-dashboard-page";
 
 const TT = {
   contentStyle: {
@@ -35,6 +36,7 @@ const TT = {
 export function DashboardPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientDashboardPage />;
+  if (identity?.role === "manager") return <ManagerDashboardPage />;
   return <InternalDashboardPage />;
 }
 

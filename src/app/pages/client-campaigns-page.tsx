@@ -73,8 +73,12 @@ export function ClientCampaignsPage() {
         <EmptyPortalState title="No campaigns in scope" description="Client users only see outreach campaigns from live Supabase data." />
       ) : (
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.4fr]">
-          <PortalSurface title="Campaign portfolio" subtitle={`${scopedCampaigns.length} outreach campaigns`}>
-            <div className="space-y-3">
+          <PortalSurface
+            title="Campaign portfolio"
+            subtitle={`${scopedCampaigns.length} outreach campaigns`}
+            className="flex h-[34rem] max-h-[68vh] min-h-0 flex-col"
+          >
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               {scopedCampaigns.map((campaign) => {
                 const stats = performance.find((item) => item.id === campaign.id);
                 const active = selectedCampaign?.id === campaign.id;
