@@ -1,61 +1,35 @@
-**Add your own guidelines here**
-<!--
+# Project Guidelines
 
-System Guidelines
+## Architecture
 
-Use this file to provide the AI with rules and guidelines you want it to follow.
-This template outlines a few examples of things you can add. You can add your own sections and format it to suit your needs
+- Treat the live Supabase schema as the runtime source of truth.
+- Never wire runtime code to local fixture datasets.
+- Shared feature logic belongs in reusable modules; role differences should be expressed through routing, scoping, and permissions.
+- Keep route shells stable:
+  `/client/*`, `/manager/*`, `/admin/*`.
+- Prefer explicit blocker states over silent fallbacks when backend dependencies are missing.
+- Test fixtures, if ever needed, belong outside `src/app` in a dedicated test-only directory.
 
-TIP: More context isn't always better. It can confuse the LLM. Try and add the most important rules you need
+## Data And Mutations
 
-# General guidelines
+- Client-facing routes must not expose internal-only entities or campaign types.
+- Mutations are limited to fields confirmed in the live schema.
+- Read-only analytics tables stay read-only in the UI unless backend contracts explicitly change.
+- Any new Supabase integration must use publishable keys on the frontend and never expose privileged credentials.
 
-Any general rules you want the AI to follow.
-For example:
+## UI
 
-* Only use absolute positioning when necessary. Opt for responsive and well structured layouts that use flexbox and grid by default
-* Refactor code as you go to keep code clean
-* Keep file sizes small and put helper functions and components in their own files.
+- Desktop-first internal workspaces should still remain usable on mobile, but dense operations can degrade to cards and drawers.
+- Every data-heavy page must define loading, empty, and blocker states.
+- Detail panes should sit next to lists instead of hiding key operational context behind modal-only flows.
+- Keep visual language consistent:
+  rounded containers,
+  dark atmospheric background,
+  compact KPI cards,
+  clear section framing.
 
---------------
+## Documentation
 
-# Design system guidelines
-Rules for how the AI should make generations look like your company's design system
-
-Additionally, if you select a design system to use in the prompt box, you can reference
-your design system's components, tokens, variables and components.
-For example:
-
-* Use a base font-size of 14px
-* Date formats should always be in the format “Jun 10”
-* The bottom toolbar should only ever have a maximum of 4 items
-* Never use the floating action button with the bottom toolbar
-* Chips should always come in sets of 3 or more
-* Don't use a dropdown if there are 2 or fewer options
-
-You can also create sub sections and add more specific details
-For example:
-
-
-## Button
-The Button component is a fundamental interactive element in our design system, designed to trigger actions or navigate
-users through the application. It provides visual feedback and clear affordances to enhance user experience.
-
-### Usage
-Buttons should be used for important actions that users need to take, such as form submissions, confirming choices,
-or initiating processes. They communicate interactivity and should have clear, action-oriented labels.
-
-### Variants
-* Primary Button
-  * Purpose : Used for the main action in a section or page
-  * Visual Style : Bold, filled with the primary brand color
-  * Usage : One primary button per section to guide users toward the most important action
-* Secondary Button
-  * Purpose : Used for alternative or supporting actions
-  * Visual Style : Outlined with the primary color, transparent background
-  * Usage : Can appear alongside a primary button for less important actions
-* Tertiary Button
-  * Purpose : Used for the least important actions
-  * Visual Style : Text-only with no border, using primary color
-  * Usage : For actions that should be available but not emphasized
--->
+- Any architectural decision that affects routing, visibility, data ownership, or schema coupling must be captured in ADRs.
+- Public module behavior belongs in `docs/reference/*`.
+- Update docs when runtime contracts change; do not let docs trail implementation.
