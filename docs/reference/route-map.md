@@ -1,0 +1,20 @@
+# Route Map
+
+- `/login`: auth entry and magic-link sign-in.
+- `/client/dashboard`: scoped client dashboard.
+- `/client/leads`: client-safe lead workspace.
+- `/client/campaigns`: outreach-only campaigns.
+- `/client/statistics`: client analytics.
+- `/client/settings`: client identity/runtime settings.
+- `/manager/dashboard`: assigned-client overview.
+- `/manager/clients`: internal client configuration.
+- `/manager/leads`: assigned-client lead operations.
+- `/manager/campaigns`: assigned-client campaign operations.
+- `/manager/statistics`: assigned-client analytics.
+- `/manager/settings`: manager runtime settings.
+- `/admin/dashboard`: global operational overview.
+- `/admin/clients`: client configuration.
+- `/admin/leads`: global lead operations.
+- `/admin/campaigns`: global campaign operations.
+- `/admin/statistics`: global analytics.
+- `/admin/settings`: admin runtime settings.
