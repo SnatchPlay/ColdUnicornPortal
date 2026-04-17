@@ -16,6 +16,8 @@ import {
   DateRangeButton,
   EmptyPortalState,
   KpiTile,
+  PortalErrorState,
+  PortalLoadingState,
   PortalPageHeader,
   PortalSurface,
   ResponsiveChart,
@@ -174,8 +176,24 @@ function monthLabelFromKey(monthKey: string) {
 
 export function ClientDashboardPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, campaignDailyStats, dailyStats } = useCoreData();
+  const { clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
+
+  if (loading) {
+    return <PortalLoadingState title="Loading dashboard" description="Preparing KPI, funnel, and campaign trends." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Dashboard data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(

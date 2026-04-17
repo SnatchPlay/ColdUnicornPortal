@@ -13,6 +13,8 @@ import {
   ChartTooltip,
   DateRangeButton,
   EmptyPortalState,
+  PortalErrorState,
+  PortalLoadingState,
   PortalPageHeader,
   PortalSurface,
   ResponsiveChart,
@@ -26,9 +28,25 @@ import { useCoreData } from "../providers/core-data";
 
 export function ClientCampaignsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, campaignDailyStats } = useCoreData();
+  const { clients, campaigns, campaignDailyStats, loading, error, refresh } = useCoreData();
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
+
+  if (loading) {
+    return <PortalLoadingState title="Loading campaigns" description="Syncing outreach campaign performance." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Campaign data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
 
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),

@@ -4,7 +4,9 @@ import type {
   CampaignRecord,
   ClientRecord,
   DailyStatRecord,
+  DomainRecord,
   Identity,
+  InvoiceRecord,
   LeadQualification,
   LeadRecord,
   ReplyRecord,
@@ -53,6 +55,16 @@ export function scopeCampaignStats(
 export function scopeDailyStats(identity: Identity, clients: ClientRecord[], stats: DailyStatRecord[]) {
   const clientIds = new Set(scopeClients(identity, clients).map((item) => item.id));
   return stats.filter((item) => clientIds.has(item.client_id));
+}
+
+export function scopeDomains(identity: Identity, clients: ClientRecord[], domains: DomainRecord[]) {
+  const clientIds = new Set(scopeClients(identity, clients).map((item) => item.id));
+  return domains.filter((item) => clientIds.has(item.client_id));
+}
+
+export function scopeInvoices(identity: Identity, clients: ClientRecord[], invoices: InvoiceRecord[]) {
+  const clientIds = new Set(scopeClients(identity, clients).map((item) => item.id));
+  return invoices.filter((item) => clientIds.has(item.client_id));
 }
 
 export function getLeadStage(lead: LeadRecord): LeadQualification | "unqualified" {

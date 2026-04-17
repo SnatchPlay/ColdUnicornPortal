@@ -20,6 +20,7 @@ export type ReplyClassification =
   | "Left_Company"
   | "Spam_Inbound"
   | "other";
+export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
 
 export interface UserRecord {
   id: string;
@@ -57,6 +58,13 @@ export interface ClientRecord {
   bi_setup_done: boolean;
   lost_reason: string | null;
   notes: string | null;
+}
+
+export interface ClientUserRecord {
+  id: string;
+  created_at: string;
+  client_id: string;
+  user_id: string;
 }
 
 export interface CampaignRecord {
@@ -168,6 +176,37 @@ export interface DailyStatRecord {
   created_at: string;
 }
 
+export interface DomainRecord {
+  id: string;
+  created_at: string;
+  client_id: string;
+  domain_name: string;
+  setup_email: string;
+  purchase_date: string;
+  exchange_date: string;
+  updated_at: string;
+  status: DomainStatus | null;
+  reputation: string | null;
+  exchange_cost: number | null;
+  campaign_verified_at: string | null;
+  warmup_verified_at: string | null;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  created_at: string;
+  client_id: string;
+  issue_date: string;
+  amount: number;
+  status: string | null;
+  updated_at: string | null;
+}
+
+export interface EmailExcludeRecord {
+  domain: string;
+  created_at: string;
+}
+
 export interface Identity {
   id: string;
   fullName: string;
@@ -179,9 +218,13 @@ export interface Identity {
 export interface CoreSnapshot {
   users: UserRecord[];
   clients: ClientRecord[];
+  clientUsers: ClientUserRecord[];
   campaigns: CampaignRecord[];
   leads: LeadRecord[];
   replies: ReplyRecord[];
   campaignDailyStats: CampaignDailyStatRecord[];
   dailyStats: DailyStatRecord[];
+  domains: DomainRecord[];
+  invoices: InvoiceRecord[];
+  emailExcludeList: EmailExcludeRecord[];
 }

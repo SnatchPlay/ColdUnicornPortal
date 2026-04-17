@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Banner, EmptyState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber, getFullName } from "../lib/format";
 import {
   getLeadStage,
@@ -15,7 +15,7 @@ import { useCoreData } from "../providers/core-data";
 
 export function ManagerDashboardPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, replies, campaignDailyStats, error } = useCoreData();
+  const { clients, campaigns, leads, replies, campaignDailyStats, loading, error, refresh } = useCoreData();
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
@@ -176,14 +176,35 @@ export function ManagerDashboardPage() {
     [leadsInProgress, recentReplyCount, scopedCampaigns, scopedClients.length, unclassifiedReplies],
   );
 
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Manager Dashboard"
+          subtitle="Assigned-client operations hub: portfolio status, lead queue, campaign watchlist, and reply triage."
+        />
+        <Banner tone="warning">{error}</Banner>
+        <InlineLinkButton
+          onClick={() => {
+            void refresh();
+          }}
+        >
+          Retry data sync
+        </InlineLinkButton>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Manager Dashboard"
         subtitle="Assigned-client operations hub: portfolio status, lead queue, campaign watchlist, and reply triage."
       />
-
-      {error && <Banner tone="warning">{error}</Banner>}
 
       <Banner tone="info">
         Work queue: prioritize reply triage and lead updates, then review campaign watchlist. Quick links: {" "}

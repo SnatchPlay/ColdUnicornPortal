@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MessageSquare, Search } from "lucide-react";
-import { EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, getFullName } from "../lib/format";
 import { getLeadStage, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -18,6 +18,54 @@ const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
   "rejected",
 ];
 
+const PAGE_SIZE = 50;
+
+interface LeadDraft {
+  qualification: LeadQualification | "";
+  comments: string;
+  meetingBooked: boolean;
+  meetingHeld: boolean;
+  offerSent: boolean;
+  won: boolean;
+}
+
+function toLeadDraft(lead: LeadRecord): LeadDraft {
+  return {
+    qualification: lead.qualification ?? "",
+    comments: lead.comments ?? "",
+    meetingBooked: lead.meeting_booked,
+    meetingHeld: lead.meeting_held,
+    offerSent: lead.offer_sent,
+    won: lead.won,
+  };
+}
+
+function buildLeadPatch(lead: LeadRecord, draft: LeadDraft): Partial<LeadRecord> {
+  const patch: Partial<LeadRecord> = {};
+
+  const nextQualification = draft.qualification || null;
+  if ((lead.qualification ?? null) !== nextQualification) {
+    patch.qualification = nextQualification;
+  }
+  if ((lead.comments ?? "") !== draft.comments) {
+    patch.comments = draft.comments;
+  }
+  if (lead.meeting_booked !== draft.meetingBooked) {
+    patch.meeting_booked = draft.meetingBooked;
+  }
+  if (lead.meeting_held !== draft.meetingHeld) {
+    patch.meeting_held = draft.meetingHeld;
+  }
+  if (lead.offer_sent !== draft.offerSent) {
+    patch.offer_sent = draft.offerSent;
+  }
+  if (lead.won !== draft.won) {
+    patch.won = draft.won;
+  }
+
+  return patch;
+}
+
 export function LeadsPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientLeadsPage />;
@@ -26,9 +74,12 @@ export function LeadsPage() {
 
 function InternalLeadsPage() {
   const { identity } = useAuth();
-  const { clients, leads, replies, campaigns, updateLead } = useCoreData();
+  const { clients, leads, replies, campaigns, updateLead, loading, error, refresh } = useCoreData();
   const [query, setQuery] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
+  const [draft, setDraft] = useState<LeadDraft | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
@@ -49,13 +100,75 @@ function InternalLeadsPage() {
     });
   }, [query, scopedLeads]);
 
-  const selectedLead = filteredLeads.find((item) => item.id === selectedLeadId) ?? filteredLeads[0] ?? null;
+  const visibleLeads = useMemo(() => filteredLeads.slice(0, visibleRowsCount), [filteredLeads, visibleRowsCount]);
+  const hasMoreLeads = visibleRowsCount < filteredLeads.length;
+
+  const selectedLead = visibleLeads.find((item) => item.id === selectedLeadId) ?? visibleLeads[0] ?? null;
   const selectedReplies = scopedReplies
     .filter((item) => item.lead_id === selectedLead?.id)
     .sort((a, b) => b.received_at.localeCompare(a.received_at));
 
   async function patchLead(lead: LeadRecord, patch: Partial<LeadRecord>) {
     await updateLead(lead.id, patch);
+  }
+
+  useEffect(() => {
+    if (!selectedLead) {
+      setDraft(null);
+      return;
+    }
+
+    setDraft(toLeadDraft(selectedLead));
+  }, [selectedLead?.id]);
+
+  useEffect(() => {
+    setVisibleRowsCount(PAGE_SIZE);
+    setSelectedLeadId(null);
+  }, [query, scopedLeads.length]);
+
+  const draftPatch = useMemo(() => {
+    if (!selectedLead || !draft) return {};
+    return buildLeadPatch(selectedLead, draft);
+  }, [draft, selectedLead]);
+
+  const isDraftDirty = Object.keys(draftPatch).length > 0;
+
+  async function saveDraft() {
+    if (!selectedLead || !isDraftDirty) return;
+    setIsSavingDraft(true);
+    try {
+      await patchLead(selectedLead, draftPatch);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }
+
+  function cancelDraft() {
+    if (!selectedLead) return;
+    setDraft(toLeadDraft(selectedLead));
+  }
+
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Leads"
+          subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
+        />
+        <Banner tone="warning">{error}</Banner>
+        <InlineLinkButton
+          onClick={() => {
+            void refresh();
+          }}
+        >
+          Retry data sync
+        </InlineLinkButton>
+      </div>
+    );
   }
 
   return (
@@ -81,7 +194,7 @@ function InternalLeadsPage() {
         <EmptyState title="No leads match the current filters" description="Leads are scoped by role and searchable across core enrichment fields." />
       ) : (
         <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-          <Surface title="Lead list" subtitle={`${filteredLeads.length} leads in current scope`}>
+          <Surface title="Lead list" subtitle={`${visibleLeads.length} of ${filteredLeads.length} leads in current scope`}>
             <div className="overflow-hidden rounded-2xl border border-border">
               <div className="hidden grid-cols-[1.3fr_1fr_0.9fr_0.8fr] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid">
                 <span>Lead</span>
@@ -90,7 +203,7 @@ function InternalLeadsPage() {
                 <span>Updated</span>
               </div>
               <div className="divide-y divide-border">
-                {filteredLeads.map((lead) => {
+                {visibleLeads.map((lead) => {
                   const active = selectedLead?.id === lead.id;
                   const campaign = campaigns.find((item) => item.id === lead.campaign_id);
                   return (
@@ -120,6 +233,17 @@ function InternalLeadsPage() {
                 })}
               </div>
             </div>
+
+            {hasMoreLeads && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  onClick={() => setVisibleRowsCount((current) => current + PAGE_SIZE)}
+                  className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30"
+                >
+                  Load more leads
+                </button>
+              </div>
+            )}
           </Surface>
 
           <Surface title="Lead detail" subtitle="Context drawer replacement built into the page layout.">
@@ -127,6 +251,25 @@ function InternalLeadsPage() {
               <EmptyState title="Select a lead" description="Lead detail becomes available when you choose a row from the list." />
             ) : (
               <div className="space-y-5">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => cancelDraft()}
+                    disabled={!isDraftDirty || isSavingDraft}
+                    className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel changes
+                  </button>
+                  <button
+                    onClick={() => {
+                      void saveDraft();
+                    }}
+                    disabled={!isDraftDirty || isSavingDraft}
+                    className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSavingDraft ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+
                 <div className="space-y-2">
                   <p className="text-xl">{getFullName(selectedLead.first_name, selectedLead.last_name)}</p>
                   <p className="text-sm text-muted-foreground">
@@ -143,13 +286,21 @@ function InternalLeadsPage() {
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Qualification</span>
                     <select
-                      value={selectedLead.qualification ?? ""}
+                      value={draft?.qualification ?? ""}
                       onChange={(event) =>
-                        patchLead(selectedLead, { qualification: event.target.value as LeadQualification })
+                        setDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                qualification: event.target.value as LeadQualification | "",
+                              }
+                            : current,
+                        )
                       }
                       disabled={identity?.role === "client"}
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     >
+                      <option value="">unqualified</option>
                       {EDITABLE_QUALIFICATIONS.map((qualification) => (
                         <option key={qualification} value={qualification}>
                           {qualification}
@@ -161,8 +312,10 @@ function InternalLeadsPage() {
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Comments</span>
                     <textarea
-                      value={selectedLead.comments ?? ""}
-                      onChange={(event) => void patchLead(selectedLead, { comments: event.target.value })}
+                      value={draft?.comments ?? ""}
+                      onChange={(event) =>
+                        setDraft((current) => (current ? { ...current, comments: event.target.value } : current))
+                      }
                       disabled={identity?.role === "client"}
                       rows={4}
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
@@ -172,10 +325,10 @@ function InternalLeadsPage() {
 
                 <div className="grid gap-3 md:grid-cols-4">
                   {[
-                    { label: "Meeting booked", key: "meeting_booked" as const, value: selectedLead.meeting_booked },
-                    { label: "Meeting held", key: "meeting_held" as const, value: selectedLead.meeting_held },
-                    { label: "Offer sent", key: "offer_sent" as const, value: selectedLead.offer_sent },
-                    { label: "Won", key: "won" as const, value: selectedLead.won },
+                    { label: "Meeting booked", key: "meeting_booked" as const, value: draft?.meetingBooked ?? false },
+                    { label: "Meeting held", key: "meeting_held" as const, value: draft?.meetingHeld ?? false },
+                    { label: "Offer sent", key: "offer_sent" as const, value: draft?.offerSent ?? false },
+                    { label: "Won", key: "won" as const, value: draft?.won ?? false },
                   ].map((item) => (
                     <label key={item.label} className="rounded-2xl border border-white/10 bg-black/10 p-4">
                       <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</span>
@@ -186,7 +339,19 @@ function InternalLeadsPage() {
                           checked={item.value}
                           disabled={identity?.role === "client"}
                           onChange={(event) =>
-                            void patchLead(selectedLead, { [item.key]: event.target.checked } as Partial<LeadRecord>)
+                            setDraft((current) => {
+                              if (!current) return current;
+                              if (item.key === "meeting_booked") {
+                                return { ...current, meetingBooked: event.target.checked };
+                              }
+                              if (item.key === "meeting_held") {
+                                return { ...current, meetingHeld: event.target.checked };
+                              }
+                              if (item.key === "offer_sent") {
+                                return { ...current, offerSent: event.target.checked };
+                              }
+                              return { ...current, won: event.target.checked };
+                            })
                           }
                         />
                       </div>

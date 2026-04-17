@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { formatDate } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads } from "../lib/selectors";
 import { useCoreData } from "../providers/core-data";
@@ -28,7 +28,7 @@ export function StatisticsPage() {
 
 function InternalStatisticsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, campaignDailyStats } = useCoreData();
+  const { clients, campaigns, leads, campaignDailyStats, loading, error, refresh } = useCoreData();
 
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
@@ -73,6 +73,29 @@ function InternalStatisticsPage() {
       })),
     [scopedCampaigns],
   );
+
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Statistics"
+          subtitle="Shared analytics layer built on top of campaign_daily_stats and role-scoped campaign metadata."
+        />
+        <Banner tone="warning">{error}</Banner>
+        <InlineLinkButton
+          onClick={() => {
+            void refresh();
+          }}
+        >
+          Retry data sync
+        </InlineLinkButton>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

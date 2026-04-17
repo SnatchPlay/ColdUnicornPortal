@@ -24,23 +24,37 @@ Example:
 ```env
 VITE_SUPABASE_URL=https://bnetnuzxynmdftiadwef.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_6jbWFa2hOX-5U6TWS_KtrQ_5JXYCRG2
+VITE_APP_BASE_URL=http://localhost:5175
+VITE_APP_ENV=development
+VITE_AUTH_ALLOW_SELF_SIGNUP=false
+VITE_AUTH_ALLOW_MAGIC_LINK=true
 ```
 
 ## Development
 
 ```bash
-npm install
-npm run dev
+corepack pnpm install
+corepack pnpm dev
 ```
 
 ## Build
 
 ```bash
-npm run build
+corepack pnpm build
+```
+
+## Verification
+
+```bash
+corepack pnpm test:run
+corepack pnpm build
+corepack pnpm test:smoke
 ```
 
 ## Notes
 
-- Backend tenant mapping and RLS are still blockers for a safe client-facing release.
+- Self-service signup is intentionally disabled for production readiness. Provision accounts through staff/admin workflow.
+- Password reset redirects require `VITE_APP_BASE_URL` to match the deployed frontend origin.
+- Production deployment requires SPA rewrites to `index.html`, HTTPS, publishable-key-only frontend config, and verified Supabase RLS policies.
 - The repository intentionally has no alternate local-data runtime path.
 - Runtime docs live in `docs/adr` and `docs/reference`.

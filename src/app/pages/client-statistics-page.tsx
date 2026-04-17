@@ -16,6 +16,8 @@ import {
   DateRangeButton,
   EmptyPortalState,
   KpiTile,
+  PortalErrorState,
+  PortalLoadingState,
   PortalPageHeader,
   PortalSurface,
   ResponsiveChart,
@@ -36,8 +38,24 @@ import { useCoreData } from "../providers/core-data";
 
 export function ClientStatisticsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, campaignDailyStats } = useCoreData();
+  const { clients, campaigns, leads, campaignDailyStats, loading, error, refresh } = useCoreData();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
+
+  if (loading) {
+    return <PortalLoadingState title="Loading analytics" description="Building conversion and performance views." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Analytics data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(

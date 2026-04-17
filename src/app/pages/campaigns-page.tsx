@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -8,13 +8,48 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { CampaignRecord } from "../types/core";
 import { ClientCampaignsPage } from "./client-campaigns-page";
+
+interface CampaignDraft {
+  name: string;
+  status: CampaignRecord["status"];
+  databaseSize: number;
+  positiveResponses: number;
+}
+
+function toCampaignDraft(campaign: CampaignRecord): CampaignDraft {
+  return {
+    name: campaign.name,
+    status: campaign.status,
+    databaseSize: campaign.database_size ?? 0,
+    positiveResponses: campaign.positive_responses,
+  };
+}
+
+function buildCampaignPatch(campaign: CampaignRecord, draft: CampaignDraft): Partial<CampaignRecord> {
+  const patch: Partial<CampaignRecord> = {};
+
+  if (campaign.name !== draft.name) {
+    patch.name = draft.name;
+  }
+  if (campaign.status !== draft.status) {
+    patch.status = draft.status;
+  }
+  if ((campaign.database_size ?? 0) !== draft.databaseSize) {
+    patch.database_size = draft.databaseSize;
+  }
+  if (campaign.positive_responses !== draft.positiveResponses) {
+    patch.positive_responses = draft.positiveResponses;
+  }
+
+  return patch;
+}
 
 export function CampaignsPage() {
   const { identity } = useAuth();
@@ -24,8 +59,10 @@ export function CampaignsPage() {
 
 function InternalCampaignsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, campaignDailyStats, updateCampaign } = useCoreData();
+  const { clients, campaigns, campaignDailyStats, updateCampaign, loading, error, refresh } = useCoreData();
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<CampaignDraft | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
@@ -39,6 +76,22 @@ function InternalCampaignsPage() {
   const selectedCampaign =
     scopedCampaigns.find((item) => item.id === selectedCampaignId) ?? scopedCampaigns[0] ?? null;
 
+  useEffect(() => {
+    if (!selectedCampaign) {
+      setDraft(null);
+      return;
+    }
+
+    setDraft(toCampaignDraft(selectedCampaign));
+  }, [selectedCampaign?.id]);
+
+  const draftPatch = useMemo(() => {
+    if (!selectedCampaign || !draft) return {};
+    return buildCampaignPatch(selectedCampaign, draft);
+  }, [draft, selectedCampaign]);
+
+  const isDraftDirty = Object.keys(draftPatch).length > 0;
+
   const selectedCampaignStats = scopedStats
     .filter((item) => item.campaign_id === selectedCampaign?.id)
     .sort((a, b) => a.report_date.localeCompare(b.report_date))
@@ -51,6 +104,44 @@ function InternalCampaignsPage() {
 
   async function patchCampaign(campaign: CampaignRecord, patch: Partial<CampaignRecord>) {
     await updateCampaign(campaign.id, patch);
+  }
+
+  async function saveDraft() {
+    if (!selectedCampaign || !isDraftDirty) return;
+    setIsSavingDraft(true);
+    try {
+      await patchCampaign(selectedCampaign, draftPatch);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }
+
+  function cancelDraft() {
+    if (!selectedCampaign) return;
+    setDraft(toCampaignDraft(selectedCampaign));
+  }
+
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Campaigns"
+          subtitle="Shared campaign workspace with client-safe visibility and internal edit controls."
+        />
+        <Banner tone="warning">{error}</Banner>
+        <InlineLinkButton
+          onClick={() => {
+            void refresh();
+          }}
+        >
+          Retry data sync
+        </InlineLinkButton>
+      </div>
+    );
   }
 
   return (
@@ -102,23 +193,51 @@ function InternalCampaignsPage() {
               <EmptyState title="Select a campaign" description="Campaign details appear once a row is selected." />
             ) : (
               <div className="space-y-5">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => cancelDraft()}
+                    disabled={!isDraftDirty || isSavingDraft}
+                    className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel changes
+                  </button>
+                  <button
+                    onClick={() => {
+                      void saveDraft();
+                    }}
+                    disabled={!isDraftDirty || isSavingDraft}
+                    className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSavingDraft ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name</span>
                     <input
-                      value={selectedCampaign.name}
+                      value={draft?.name ?? ""}
                       disabled={identity?.role === "client"}
-                      onChange={(event) => void patchCampaign(selectedCampaign, { name: event.target.value })}
+                      onChange={(event) =>
+                        setDraft((current) => (current ? { ...current, name: event.target.value } : current))
+                      }
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     />
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
                     <select
-                      value={selectedCampaign.status}
+                      value={draft?.status ?? "draft"}
                       disabled={identity?.role === "client"}
                       onChange={(event) =>
-                        void patchCampaign(selectedCampaign, { status: event.target.value as CampaignRecord["status"] })
+                        setDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                status: event.target.value as CampaignRecord["status"],
+                              }
+                            : current,
+                        )
                       }
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     >
@@ -133,10 +252,17 @@ function InternalCampaignsPage() {
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Database size</span>
                     <input
                       type="number"
-                      value={selectedCampaign.database_size ?? 0}
+                      value={draft?.databaseSize ?? 0}
                       disabled={identity?.role === "client"}
                       onChange={(event) =>
-                        void patchCampaign(selectedCampaign, { database_size: Number(event.target.value) })
+                        setDraft((current) => {
+                          if (!current) return current;
+                          const value = Number(event.target.value);
+                          return {
+                            ...current,
+                            databaseSize: Number.isFinite(value) ? Math.max(0, value) : 0,
+                          };
+                        })
                       }
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     />
@@ -145,10 +271,17 @@ function InternalCampaignsPage() {
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Positive responses</span>
                     <input
                       type="number"
-                      value={selectedCampaign.positive_responses}
+                      value={draft?.positiveResponses ?? 0}
                       disabled={identity?.role === "client"}
                       onChange={(event) =>
-                        void patchCampaign(selectedCampaign, { positive_responses: Number(event.target.value) })
+                        setDraft((current) => {
+                          if (!current) return current;
+                          const value = Number(event.target.value);
+                          return {
+                            ...current,
+                            positiveResponses: Number.isFinite(value) ? Math.max(0, value) : 0,
+                          };
+                        })
                       }
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     />

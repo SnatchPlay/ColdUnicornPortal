@@ -1,4 +1,5 @@
 import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { runtimeConfig } from "../lib/env";
 import { formatDate } from "../lib/format";
 import { getRoleLabel } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -61,18 +62,20 @@ export function SettingsPage() {
 
         <Surface
           title="Implementation notes"
-          subtitle="Operational reminders embedded into the frontend until backend blockers are removed."
+          subtitle="Release posture and delivery guardrails for the current production-ready runtime."
         >
           <div className="space-y-4 text-sm text-muted-foreground">
             <p>
-              This runtime already assumes route-based role shells, live-schema contracts, and scoped
-              query surfaces. Backend work still needed: auth identity mapping, tenant access mapping,
-              and real RLS policies.
+              This runtime assumes route-based role shells, live-schema contracts, invite/account-created
+              access, and publishable-key-only frontend auth.
             </p>
             <p>
-              Super admin impersonation changes the effective portal role and visible scope in the UI,
-              while the underlying authenticated session remains the super admin account.
+              Password reset redirects are resolved against <code>VITE_APP_BASE_URL</code>, while missing
+              profile linkage, client mapping, permission denials, and invalid sessions stay visible as
+              explicit blocker states.
             </p>
+            <p>Magic link access: {runtimeConfig.authAllowMagicLink ? "enabled for provisioned users" : "disabled"}.</p>
+            <p>Internal impersonation tooling: {runtimeConfig.allowInternalImpersonation ? "enabled" : "disabled in production"}.</p>
             <p>Last review timestamp: {formatDate(new Date().toISOString())}</p>
           </div>
         </Surface>

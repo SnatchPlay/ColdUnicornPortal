@@ -4,13 +4,17 @@ import {
   BarChart3,
   Building2,
   Eye,
+  Globe2,
   LayoutDashboard,
   LogOut,
+  ReceiptText,
   Rocket,
   Settings,
+  ShieldBan,
   Users,
 } from "lucide-react";
 import { cn } from "./ui/utils";
+import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { AppRole } from "../types/core";
@@ -28,6 +32,9 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/leads", label: "Leads", icon: Users },
   { to: "/admin/campaigns", label: "Campaigns", icon: Rocket },
   { to: "/admin/statistics", label: "Analytics", icon: BarChart3 },
+  { to: "/admin/domains", label: "Domains", icon: Globe2 },
+  { to: "/admin/invoices", label: "Invoices", icon: ReceiptText },
+  { to: "/admin/blacklist", label: "Blacklist", icon: ShieldBan },
   { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -45,6 +52,9 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { to: "/manager/leads", label: "Leads", icon: Users },
     { to: "/manager/campaigns", label: "Campaigns", icon: Rocket },
     { to: "/manager/statistics", label: "Analytics", icon: BarChart3 },
+    { to: "/manager/domains", label: "Domains", icon: Globe2 },
+    { to: "/manager/invoices", label: "Invoices", icon: ReceiptText },
+    { to: "/manager/blacklist", label: "Blacklist", icon: ShieldBan },
     { to: "/manager/settings", label: "Settings", icon: Settings },
   ],
   admin: ADMIN_NAV,
@@ -186,7 +196,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
 
           <div className="mt-4 border-t border-[#1f1f1f] px-4 py-4">
-            {actorIdentity?.role === "super_admin" && (
+            {runtimeConfig.allowInternalImpersonation && actorIdentity?.role === "super_admin" && (
               <div className="mb-4 space-y-3 rounded-xl border border-[#1f1f1f] bg-[#080808] p-3">
                 <div className="flex items-center gap-2">
                   <Eye className="h-4 w-4 text-emerald-400" />

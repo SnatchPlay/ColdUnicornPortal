@@ -11,10 +11,16 @@
 - `/manager/leads`: assigned-client lead operations.
 - `/manager/campaigns`: assigned-client campaign operations.
 - `/manager/statistics`: assigned-client analytics.
+- `/manager/domains`: assigned-client domain operations.
+- `/manager/invoices`: assigned-client invoicing operations.
+- `/manager/blacklist`: global blacklist read view.
 - `/manager/settings`: manager runtime settings.
 - `/admin/dashboard`: global operational overview.
 - `/admin/clients`: client configuration.
 - `/admin/leads`: global lead operations.
 - `/admin/campaigns`: global campaign operations.
 - `/admin/statistics`: global analytics.
+- `/admin/domains`: global domain operations.
+- `/admin/invoices`: global invoicing operations.
+- `/admin/blacklist`: global blacklist management.
 - `/admin/settings`: admin runtime settings.

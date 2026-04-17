@@ -12,13 +12,24 @@ import { runtimeConfig } from "../lib/env";
 import { supabase } from "../lib/supabase";
 import type { Identity, UserRecord } from "../types/core";
 
+export type AuthErrorCode =
+  | "runtime_config"
+  | "session_invalid"
+  | "profile_missing"
+  | "client_mapping_missing"
+  | "permission"
+  | "network"
+  | "unknown";
+
 interface AuthContextValue {
   loading: boolean;
   actorIdentity: Identity | null;
   identity: Identity | null;
   session: Session | null;
   error: string | null;
+  errorCode: AuthErrorCode | null;
   isImpersonating: boolean;
+  refreshIdentity: () => Promise<void>;
   signUpWithPassword: (
     email: string,
     password: string,
@@ -37,10 +48,11 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function buildBrowserRedirect(path: string) {
-  if (typeof window === "undefined") {
+  const baseUrl = runtimeConfig.appBaseUrl;
+  if (!baseUrl) {
     return path;
   }
-  return new URL(path, window.location.origin).toString();
+  return new URL(path, `${baseUrl}/`).toString();
 }
 
 function mapUserToIdentity(user: UserRecord, clientId?: string): Identity {
@@ -53,11 +65,52 @@ function mapUserToIdentity(user: UserRecord, clientId?: string): Identity {
   };
 }
 
+function toSafeAuthMessage(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("invalid login credentials")) {
+    return "Invalid email or password.";
+  }
+  if (
+    normalized.includes("permission") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("denied") ||
+    normalized.includes("policy")
+  ) {
+    return "Your account does not have permission to continue this action.";
+  }
+  return message;
+}
+
+function classifyAuthErrorCode(message: string): AuthErrorCode {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("permission") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("denied") ||
+    normalized.includes("policy") ||
+    normalized.includes("42501")
+  ) {
+    return "permission";
+  }
+  if (
+    normalized.includes("network") ||
+    normalized.includes("fetch") ||
+    normalized.includes("timeout") ||
+    normalized.includes("503") ||
+    normalized.includes("502") ||
+    normalized.includes("504")
+  ) {
+    return "network";
+  }
+  return "unknown";
+}
+
 async function loadIdentity(session: Session | null) {
   if (!supabase) {
     return {
       identity: null,
       error: runtimeConfig.error,
+      errorCode: "runtime_config" as const,
     };
   }
 
@@ -65,6 +118,7 @@ async function loadIdentity(session: Session | null) {
     return {
       identity: null,
       error: null,
+      errorCode: null,
     };
   }
 
@@ -77,34 +131,57 @@ async function loadIdentity(session: Session | null) {
   if (error) {
     return {
       identity: null,
-      error: `Signed-in session could not read public.users: ${error.message}`,
+      error:
+        classifyAuthErrorCode(error.message) === "permission"
+          ? "Your authenticated session does not have permission to load the workspace profile."
+          : "Your account profile could not be loaded right now. Please try again.",
+      errorCode: classifyAuthErrorCode(error.message),
     };
   }
 
   if (!publicUser) {
     return {
       identity: null,
-      error: "Supabase session exists, but public.users is not linked to auth.users yet.",
+      error: "Your account is authenticated, but the portal profile is not provisioned yet.",
+      errorCode: "profile_missing" as const,
     };
   }
 
   let clientId: string | undefined;
   if (publicUser.role === "client") {
-    const { data: clientMapping } = await supabase
+    const { data: clientMapping, error: clientMappingError } = await supabase
       .from("client_users")
       .select("client_id")
       .eq("user_id", session.user.id)
       .limit(1)
       .maybeSingle();
 
+    if (clientMappingError) {
+      return {
+        identity: mapUserToIdentity(publicUser as UserRecord),
+        error:
+          classifyAuthErrorCode(clientMappingError.message) === "permission"
+            ? "Your authenticated session could not resolve client access mapping because the request was denied."
+            : "Your client access mapping could not be loaded right now. Please retry.",
+        errorCode: classifyAuthErrorCode(clientMappingError.message),
+      };
+    }
+
     if (clientMapping?.client_id) {
       clientId = clientMapping.client_id;
+    } else {
+      return {
+        identity: mapUserToIdentity(publicUser as UserRecord),
+        error: "Your client account is authenticated, but no client access mapping is assigned yet.",
+        errorCode: "client_mapping_missing" as const,
+      };
     }
   }
 
   return {
     identity: mapUserToIdentity(publicUser as UserRecord, clientId),
     error: null,
+    errorCode: null,
   };
 }
 
@@ -114,10 +191,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [impersonatedIdentity, setImpersonatedIdentity] = useState<Identity | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<AuthErrorCode | null>(null);
 
   const identity =
-    actorIdentity?.role === "super_admin" && impersonatedIdentity ? impersonatedIdentity : actorIdentity;
-  const isImpersonating = actorIdentity?.role === "super_admin" && Boolean(impersonatedIdentity);
+    actorIdentity?.role === "super_admin" && runtimeConfig.allowInternalImpersonation && impersonatedIdentity
+      ? impersonatedIdentity
+      : actorIdentity;
+  const isImpersonating =
+    runtimeConfig.allowInternalImpersonation && actorIdentity?.role === "super_admin" && Boolean(impersonatedIdentity);
 
   useEffect(() => {
     let active = true;
@@ -132,11 +213,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setActorIdentity(next.identity);
       setImpersonatedIdentity((current) => (next.identity?.role === "super_admin" ? current : null));
       setError(next.error);
+      setErrorCode(next.errorCode);
       setLoading(false);
     };
 
     if (!supabase) {
       setError(runtimeConfig.error);
+      setErrorCode("runtime_config");
       setLoading(false);
       return () => {
         active = false;
@@ -148,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (authError) {
         setError(authError.message);
+        setErrorCode("session_invalid");
         setLoading(false);
         return;
       }
@@ -167,15 +251,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const refreshIdentity = useCallback(async () => {
+    if (!supabase) {
+      setError(runtimeConfig.error ?? "Supabase is not configured.");
+      setErrorCode("runtime_config");
+      return;
+    }
+
+    setLoading(true);
+    const { data, error: authError } = await supabase.auth.getSession();
+    if (authError) {
+      setError("Could not validate your current session. Please sign in again.");
+      setErrorCode("session_invalid");
+      setLoading(false);
+      return;
+    }
+
+    setSession(data.session);
+    const next = await loadIdentity(data.session);
+    setActorIdentity(next.identity);
+    setImpersonatedIdentity((current) => (next.identity?.role === "super_admin" ? current : null));
+    setError(next.error);
+    setErrorCode(next.errorCode);
+    setLoading(false);
+  }, []);
+
   const signInWithOtp = useCallback(async (email: string) => {
     if (!supabase) {
       return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
+    }
+    if (!runtimeConfig.authAllowMagicLink) {
+      return { ok: false, message: "Magic link sign-in is not enabled for this environment." };
     }
     const { error: signInError } = await supabase.auth.signInWithOtp({
       email,
       options: { shouldCreateUser: false },
     });
-    if (signInError) return { ok: false, message: signInError.message };
+    if (signInError) return { ok: false, message: toSafeAuthMessage(signInError.message) };
     return { ok: true, message: "Magic link sent. Check your inbox." };
   }, []);
 
@@ -183,6 +295,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string, firstName: string, lastName: string) => {
       if (!supabase) {
         return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
+      }
+      if (!runtimeConfig.authAllowSelfSignup) {
+        return {
+          ok: false,
+          message: "Self-service registration is disabled. Contact your account administrator to provision access.",
+        };
       }
 
       const normalizedFirstName = firstName.trim();
@@ -201,7 +319,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
 
-      if (signUpError) return { ok: false, message: signUpError.message };
+      if (signUpError) return { ok: false, message: toSafeAuthMessage(signUpError.message) };
 
       if (data.session) {
         return { ok: true, message: "Account created and signed in successfully." };
@@ -223,7 +341,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
     });
-    if (signInError) return { ok: false, message: signInError.message };
+    if (signInError) return { ok: false, message: toSafeAuthMessage(signInError.message) };
     return { ok: true, message: "Signed in successfully." };
   }, []);
 
@@ -234,7 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: buildBrowserRedirect("/reset-password"),
     });
-    if (resetError) return { ok: false, message: resetError.message };
+    if (resetError) return { ok: false, message: toSafeAuthMessage(resetError.message) };
     return {
       ok: true,
       message: "Password reset email sent. Open the recovery link to set a new password.",
@@ -246,11 +364,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
     }
     const { error: updateError } = await supabase.auth.updateUser({ password });
-    if (updateError) return { ok: false, message: updateError.message };
+    if (updateError) return { ok: false, message: toSafeAuthMessage(updateError.message) };
     return { ok: true, message: "Password updated successfully." };
   }, []);
 
   const impersonate = useCallback((nextIdentity: Identity) => {
+    if (!runtimeConfig.allowInternalImpersonation) return;
     setImpersonatedIdentity(nextIdentity);
   }, []);
 
@@ -265,6 +384,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setImpersonatedIdentity(null);
     setSession(null);
     setError(null);
+    setErrorCode(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -274,7 +394,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       identity,
       session,
       error,
+      errorCode,
       isImpersonating,
+      refreshIdentity,
       signUpWithPassword,
       signInWithPassword,
       signInWithOtp,
@@ -287,10 +409,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       actorIdentity,
       error,
+      errorCode,
       identity,
       impersonate,
       isImpersonating,
       loading,
+      refreshIdentity,
       requestPasswordReset,
       session,
       signInWithOtp,

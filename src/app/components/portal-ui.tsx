@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { Calendar, MessageSquare, Search, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, Calendar, MessageSquare, RefreshCcw, Search, X } from "lucide-react";
 import { ResponsiveContainer, Tooltip } from "recharts";
 import { cn } from "./ui/utils";
 import { formatDate, formatNumber } from "../lib/format";
@@ -300,6 +300,53 @@ export function EmptyPortalState({ title, description }: { title: string; descri
   );
 }
 
+export function PortalLoadingState({
+  title = "Loading workspace data",
+  description = "We are syncing your client data from Supabase.",
+}: {
+  title?: string;
+  description?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#242424] bg-[#080808] px-6 py-10 text-center">
+      <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#2f2f2f]">
+        <RefreshCcw className="h-4 w-4 animate-spin text-neutral-300" />
+      </div>
+      <p className="text-base text-white">{title}</p>
+      <p className="mt-2 text-sm text-neutral-500">{description}</p>
+    </div>
+  );
+}
+
+export function PortalErrorState({
+  title,
+  description,
+  onRetry,
+}: {
+  title: string;
+  description: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-red-500/25 bg-red-500/[0.06] px-6 py-8 text-center">
+      <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10">
+        <AlertCircle className="h-4 w-4 text-red-300" />
+      </div>
+      <p className="text-base text-red-100">{title}</p>
+      <p className="mt-2 text-sm text-red-100/70">{description}</p>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-300/30 px-4 py-2 text-sm text-red-100 transition hover:bg-red-500/10"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function LeadDrawer({
   open,
   onClose,
@@ -338,6 +385,63 @@ export function LeadDrawer({
     }>;
   };
 }) {
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open || !lead) return;
+
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusCloseButton = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const container = drawerRef.current;
+      if (!container) return;
+
+      const focusable = Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey) {
+        if (active === first || !active || !container.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+
+      if (active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusCloseButton);
+      window.removeEventListener("keydown", handleKeyDown);
+      returnFocusRef.current?.focus();
+    };
+  }, [lead, onClose, open]);
+
   if (!open || !lead) return null;
 
   const detailItems = [
@@ -355,15 +459,25 @@ export function LeadDrawer({
   const inlineReply = lead.lead.reply_text?.trim();
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/45">
-      <aside className="flex h-full w-full max-w-[620px] flex-col border-l border-[#242424] bg-[#070707] text-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
+      <aside
+        ref={drawerRef}
+        id="lead-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-drawer-title"
+        className="flex h-full w-full max-w-[620px] flex-col border-l border-[#242424] bg-[#070707] text-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-start justify-between border-b border-[#1f1f1f] p-6">
           <div className="flex gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-fuchsia-500 text-lg font-medium">
               {lead.initials}
             </div>
             <div>
-              <h2 className="text-xl font-semibold">{lead.name}</h2>
+              <h2 id="lead-drawer-title" className="text-xl font-semibold">
+                {lead.name}
+              </h2>
               <p className="text-sm text-neutral-400">
                 {lead.title} · {lead.company}
               </p>
@@ -372,7 +486,12 @@ export function LeadDrawer({
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-xl p-2 text-neutral-400 transition hover:bg-white/5 hover:text-white">
+          <button
+            ref={closeButtonRef}
+            onClick={onClose}
+            aria-label="Close lead details"
+            className="rounded-xl p-2 text-neutral-400 transition hover:bg-white/5 hover:text-white"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -382,9 +501,18 @@ export function LeadDrawer({
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">Contact</p>
             <div className="space-y-3">
               <div className="rounded-2xl bg-[#111] px-4 py-4 text-base">{lead.email}</div>
-              <div className="rounded-2xl bg-[#111] px-4 py-4 text-base text-blue-400">
-                {lead.lead.linkedin_url ?? "LinkedIn unavailable"}
-              </div>
+              {lead.lead.linkedin_url ? (
+                <a
+                  href={lead.lead.linkedin_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-2xl bg-[#111] px-4 py-4 text-base text-blue-400 underline-offset-2 hover:underline"
+                >
+                  {lead.lead.linkedin_url}
+                </a>
+              ) : (
+                <div className="rounded-2xl bg-[#111] px-4 py-4 text-base text-neutral-400">LinkedIn unavailable</div>
+              )}
             </div>
           </section>
 

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Navigate } from "react-router-dom";
 import { Banner, LoadingState } from "../components/app-ui";
+import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 
 type AuthMode = "signin" | "signup" | "reset" | "magic";
@@ -109,6 +110,24 @@ function submitTone(ok: boolean): FormMessage["tone"] {
   return ok ? "info" : "danger";
 }
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getRecoveryHint(mode: AuthMode, text?: string) {
+  const normalized = text?.toLowerCase() ?? "";
+  if (normalized.includes("invalid email or password")) {
+    return "Check your credentials or use password reset to regain access.";
+  }
+  if (mode === "reset") {
+    return "Use the latest recovery email. Older links may expire after issuing a newer one.";
+  }
+  if (mode === "magic") {
+    return "Magic links are single-use and can expire quickly. Request a fresh one if needed.";
+  }
+  return null;
+}
+
 function validateAuthForm({
   mode,
   email,
@@ -123,6 +142,7 @@ function validateAuthForm({
   lastName: string;
 }) {
   if (!email) return "Email is required.";
+  if (!isValidEmail(email)) return "Enter a valid email address.";
 
   if (mode === "signin" && !password) {
     return "Password is required.";
@@ -143,6 +163,7 @@ export function LoginPage() {
     signUpWithPassword,
     requestPasswordReset,
     identity,
+    session,
     loading,
     error,
   } = useAuth();
@@ -154,6 +175,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [lastSuccessMode, setLastSuccessMode] = useState<AuthMode | null>(null);
 
   const activeCopy = modeCopy[mode];
   const ActiveIcon = activeCopy.icon;
@@ -166,9 +188,23 @@ export function LoginPage() {
     );
   }
 
-  if (identity) return <Navigate to="/" replace />;
+  if (session || identity) return <Navigate to="/" replace />;
 
   function switchMode(nextMode: AuthMode) {
+    if (nextMode === "signup" && !runtimeConfig.authAllowSelfSignup) {
+      setMessage({
+        tone: "warning",
+        text: "Self-service registration is disabled. Contact your account administrator to provision access.",
+      });
+      return;
+    }
+    if (nextMode === "magic" && !runtimeConfig.authAllowMagicLink) {
+      setMessage({
+        tone: "warning",
+        text: "Magic link sign-in is not enabled for this environment.",
+      });
+      return;
+    }
     setMode(nextMode);
     setMessage(null);
     setPassword("");
@@ -205,6 +241,7 @@ export function LoginPage() {
             : await signInWithOtp(trimmedEmail);
 
     setMessage({ tone: submitTone(result.ok), text: result.message });
+    setLastSuccessMode(result.ok ? mode : null);
     setBusy(false);
 
     if (result.ok && mode === "signup") {
@@ -214,6 +251,8 @@ export function LoginPage() {
       setLastName("");
     }
   }
+
+  const recoveryHint = getRecoveryHint(mode, message?.text ?? error ?? undefined);
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#050505] text-white">
@@ -247,6 +286,16 @@ export function LoginPage() {
             <div className="mt-6 space-y-3">
               {error && <Banner tone="warning">{error}</Banner>}
               {message && <Banner tone={message.tone}>{message.text}</Banner>}
+              {recoveryHint && <p className="text-sm text-neutral-400">{recoveryHint}</p>}
+              {lastSuccessMode === "reset" && mode === "reset" && (
+                <button
+                  type="button"
+                  onClick={() => switchMode("signin")}
+                  className="text-sm font-medium text-emerald-300 transition hover:text-emerald-200"
+                >
+                  Back to sign in
+                </button>
+              )}
             </div>
 
             <form className="mt-7 space-y-5" onSubmit={handleSubmit}>
@@ -307,8 +356,13 @@ export function LoginPage() {
                 </p>
               ) : (
                 <p className="text-sm text-neutral-500">
-                  No account yet?{" "}
-                  <SwitchButton onClick={() => switchMode("signup")}>Register</SwitchButton>
+                  {runtimeConfig.authAllowSelfSignup ? (
+                    <>
+                      No account yet? <SwitchButton onClick={() => switchMode("signup")}>Register</SwitchButton>
+                    </>
+                  ) : (
+                    "Access is provisioned by your account administrator."
+                  )}
                 </p>
               )}
 
@@ -316,7 +370,7 @@ export function LoginPage() {
                 {mode !== "reset" && (
                   <SwitchButton onClick={() => switchMode("reset")}>Forgot password</SwitchButton>
                 )}
-                {mode !== "magic" && (
+                {runtimeConfig.authAllowMagicLink && mode !== "magic" && (
                   <SwitchButton onClick={() => switchMode("magic")}>Magic link</SwitchButton>
                 )}
               </div>
