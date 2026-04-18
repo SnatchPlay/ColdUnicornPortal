@@ -41,22 +41,6 @@ export function ClientStatisticsPage() {
   const { clients, campaigns, leads, campaignDailyStats, loading, error, refresh } = useCoreData();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  if (loading) {
-    return <PortalLoadingState title="Loading analytics" description="Building conversion and performance views." />;
-  }
-
-  if (error) {
-    return (
-      <PortalErrorState
-        title="Analytics data is unavailable"
-        description={error}
-        onRetry={() => {
-          void refresh();
-        }}
-      />
-    );
-  }
-
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
@@ -84,6 +68,22 @@ export function ClientStatisticsPage() {
   const performance = useMemo(() => getCampaignPerformance(scopedCampaigns, timeframeStats), [scopedCampaigns, timeframeStats]);
   const conversion = useMemo(() => getConversionRates(timeframeLeads, kpis.prospects), [kpis.prospects, timeframeLeads]);
   const timeframeLabel = getTimeframeLabel(timeframe);
+
+  if (loading) {
+    return <PortalLoadingState title="Loading analytics" description="Building conversion and performance views." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Analytics data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -119,9 +119,9 @@ export function ClientStatisticsPage() {
       </ChartPanel>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Daily sent" subtitle={`campaign_daily_stats.sent_count for the selected scope (${timeframeLabel})`}>
+        <ChartPanel title="Daily sent" subtitle={`Email activity for the selected period (${timeframeLabel})`}>
           {dailySent.length === 0 ? (
-            <EmptyPortalState title="No send volume" description="No campaign_daily_stats rows exist for this client." />
+            <EmptyPortalState title="No send volume" description="No email activity is available for this period." />
           ) : (
             <ResponsiveChart>
               <AreaChart data={dailySent}>
@@ -137,7 +137,7 @@ export function ClientStatisticsPage() {
 
         <ChartPanel title="Campaign reply rates" subtitle={`Reply rate ranking by campaign (${timeframeLabel})`}>
           {performance.length === 0 ? (
-            <EmptyPortalState title="No campaign stats" description="Campaign performance needs campaign_daily_stats rows." />
+            <EmptyPortalState title="No campaign stats" description="Not enough campaign activity to calculate performance." />
           ) : (
             <ResponsiveChart>
               <BarChart data={performance.slice(0, 8)}>
@@ -152,7 +152,7 @@ export function ClientStatisticsPage() {
         </ChartPanel>
       </div>
 
-      <PortalSurface title="Conversion Funnel" subtitle="Live-schema funnel: prospects → MQL → meeting → won">
+      <PortalSurface title="Conversion Funnel" subtitle="Prospects -> MQL -> meeting -> won">
         <div className="space-y-5">
           {conversion.map((item) => (
             <div key={item.label}>

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Building2,
@@ -44,7 +44,6 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { to: "/client/leads", label: "My Pipeline", icon: Users },
     { to: "/client/campaigns", label: "Campaigns", icon: Rocket },
     { to: "/client/statistics", label: "Analytics", icon: BarChart3 },
-    { to: "/client/settings", label: "Settings", icon: Settings },
   ],
   manager: [
     { to: "/manager/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -69,7 +68,6 @@ function roleHomePath(role: AppRole) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { users, clients } = useCoreData();
   const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
   const [managerTargetId, setManagerTargetId] = useState("");
@@ -282,7 +280,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <LogOut className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-3 truncate text-xs text-neutral-600">{location.pathname}</p>
           </div>
         </aside>
 

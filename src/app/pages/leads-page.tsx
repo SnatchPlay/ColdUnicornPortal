@@ -365,7 +365,7 @@ function InternalLeadsPage() {
                     <p className="text-sm">Replies</p>
                   </div>
                   {selectedReplies.length === 0 ? (
-                    <EmptyState title="No reply history" description="The live schema already supports replies, but the current dataset may still be sparse." />
+                    <EmptyState title="No reply history" description="No reply history is available for this lead yet." />
                   ) : (
                     <div className="space-y-3">
                       {selectedReplies.map((reply) => (

@@ -140,7 +140,6 @@ export function HomeRedirect() {
   if (loading) return <LoadingState />;
   if (!session) return <Navigate to="/login" replace />;
   if (!identity) return <SessionAccessBlocker />;
-  if (identity.role === "client" && !identity.clientId) return <Navigate to="/client/settings" replace />;
   return <Navigate to={roleHomePath(identity.role)} replace />;
 }
 
@@ -174,7 +173,6 @@ function ProtectedApp() {
                   <Route path="leads" element={identity.clientId ? <LeadsPage /> : <ClientAccessBlocker />} />
                   <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
                   <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
-                  <Route path="settings" element={<SettingsPage />} />
                 </Route>
               </Route>
 
