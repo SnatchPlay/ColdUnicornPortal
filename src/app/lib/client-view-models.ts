@@ -172,7 +172,6 @@ export function getClientLeadRows(
       campaignName: campaign?.name ?? "No campaign linked",
       step: lead.message_number ?? latestReply?.sequence_step ?? null,
       replyCount: leadReplies.length || (hasInlineReply ? 1 : 0),
-      replyLabel: hasInlineReply || leadReplies.length ? "Positive" : "No reply",
       lastReplyDate: latestReply?.received_at ?? (hasInlineReply ? lead.updated_at : null),
       addedDate: lead.created_at,
       campaign,

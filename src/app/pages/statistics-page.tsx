@@ -83,7 +83,7 @@ function InternalStatisticsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Statistics"
-          subtitle="Shared analytics layer built on top of campaign_daily_stats and role-scoped campaign metadata."
+          subtitle="Performance overview for campaigns in your current scope."
         />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
@@ -101,13 +101,13 @@ function InternalStatisticsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Statistics"
-        subtitle="Shared analytics layer built on top of campaign_daily_stats and role-scoped campaign metadata."
+        subtitle="Performance overview for campaigns in your current scope."
       />
 
       <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <Surface title="Trend lines" subtitle="Sent, replies, opens, and bounces over time.">
           {trendSeries.length === 0 ? (
-            <EmptyState title="No trend data yet" description="The statistics page needs campaign_daily_stats rows for the current scope." />
+            <EmptyState title="No trend data yet" description="No activity data is available for the current scope yet." />
           ) : (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">

@@ -303,11 +303,6 @@ export function ClientLeadsPage() {
                   <div className="flex items-center gap-2 text-sm text-white">
                     <MessageSquare className="h-4 w-4 text-neutral-400" />
                     {row.replyCount}
-                    {row.replyCount > 0 && (
-                      <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-400">
-                        {row.replyLabel}
-                      </span>
-                    )}
                   </div>
                   <p className="text-sm text-neutral-300">
                     {row.lastReplyDate ? formatDate(row.lastReplyDate, { day: "numeric", month: "short", year: "2-digit" }) : "—"}

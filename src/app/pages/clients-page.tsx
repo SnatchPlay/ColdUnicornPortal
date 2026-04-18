@@ -226,7 +226,7 @@ export function ClientsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Clients"
-          subtitle="Operational client control surface. Core settings are edited directly against the live clients table contract."
+          subtitle="Operational client control surface for managing core client settings."
         />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
@@ -244,7 +244,7 @@ export function ClientsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Clients"
-        subtitle="Operational client control surface. Core settings are edited directly against the live clients table contract."
+        subtitle="Operational client control surface for managing core client settings."
       />
 
       {scopedClients.length === 0 ? (
@@ -280,7 +280,7 @@ export function ClientsPage() {
             </div>
           </Surface>
 
-          <Surface title="Client detail" subtitle="Editable fields currently live on public.clients.">
+          <Surface title="Client detail" subtitle="Manage core client details and settings.">
             {!selectedClient ? (
               <EmptyState title="Select a client" description="Client detail appears here once a client is selected." />
             ) : (

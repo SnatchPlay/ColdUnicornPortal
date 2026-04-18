@@ -179,22 +179,6 @@ export function ClientDashboardPage() {
   const { clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  if (loading) {
-    return <PortalLoadingState title="Loading dashboard" description="Preparing KPI, funnel, and campaign trends." />;
-  }
-
-  if (error) {
-    return (
-      <PortalErrorState
-        title="Dashboard data is unavailable"
-        description={error}
-        onRetry={() => {
-          void refresh();
-        }}
-      />
-    );
-  }
-
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
@@ -455,6 +439,22 @@ export function ClientDashboardPage() {
 
   const timeframeLabel = getTimeframeLabel(timeframe);
 
+  if (loading) {
+    return <PortalLoadingState title="Loading dashboard" description="Preparing KPI, funnel, and campaign trends." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Dashboard data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-8">
       <PortalPageHeader
@@ -507,9 +507,9 @@ export function ClientDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Daily sent (last 30 days)" subtitle={`campaign_daily_stats.sent_count aggregated by report_date (${timeframeLabel})`}>
+        <ChartPanel title="Daily sent (last 30 days)" subtitle={`Email activity over time (${timeframeLabel})`}>
           {dailySent.length === 0 ? (
-            <EmptyPortalState title="No sent data" description="No campaign_daily_stats rows exist for this client scope." />
+            <EmptyPortalState title="No sent data" description="No email activity is available for this period." />
           ) : (
             <ResponsiveChart>
               <BarChart data={dailySent}>
@@ -523,7 +523,7 @@ export function ClientDashboardPage() {
           )}
         </ChartPanel>
 
-        <ChartPanel title="Leads Count per week" subtitle="client_daily_snapshots.mql_diff grouped by ISO week">
+        <ChartPanel title="Leads Count per week" subtitle="Qualified leads grouped by week">
           {weeklyLeadsSeries.length === 0 ? (
             <EmptyPortalState title="No weekly lead data" description="No MQL activity for selected range." />
           ) : (
@@ -541,7 +541,7 @@ export function ClientDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Leads Count per month" subtitle="client_daily_snapshots.mql_diff Σ per calendar month">
+        <ChartPanel title="Leads Count per month" subtitle="Qualified leads grouped by month">
           {monthlyLeadsSeries.length === 0 ? (
             <EmptyPortalState title="No monthly lead data" description="Historical client snapshots are empty." />
           ) : (
@@ -557,7 +557,7 @@ export function ClientDashboardPage() {
           )}
         </ChartPanel>
 
-        <ChartPanel title="Prospects added" subtitle="Δ client_daily_snapshots.prospects_count by date">
+        <ChartPanel title="Prospects added" subtitle="New prospects added over time">
           {prospectsAddedDailySeries.length === 0 ? (
             <EmptyPortalState title="No prospects delta" description="Not enough daily snapshot data to calculate deltas." />
           ) : (
@@ -575,7 +575,7 @@ export function ClientDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Sent count for last three months" subtitle="campaign_daily_stats.sent_count Σ per month">
+        <ChartPanel title="Sent count for last three months" subtitle="Email volume by month">
           {sentLastThreeMonthsSeries.length === 0 ? (
             <EmptyPortalState title="No monthly sent data" description="No campaign stats in this client scope." />
           ) : (
@@ -591,7 +591,7 @@ export function ClientDashboardPage() {
           )}
         </ChartPanel>
 
-        <ChartPanel title="Prospects added by Month" subtitle="monthly Δ of client_daily_snapshots.prospects_count">
+        <ChartPanel title="Prospects added by Month" subtitle="New prospects added by month">
           {prospectsAddedByMonthSeries.length === 0 ? (
             <EmptyPortalState title="No monthly prospect deltas" description="Daily snapshots are required for this view." />
           ) : (

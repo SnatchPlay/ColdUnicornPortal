@@ -32,22 +32,6 @@ export function ClientCampaignsPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  if (loading) {
-    return <PortalLoadingState title="Loading campaigns" description="Syncing outreach campaign performance." />;
-  }
-
-  if (error) {
-    return (
-      <PortalErrorState
-        title="Campaign data is unavailable"
-        description={error}
-        onRetry={() => {
-          void refresh();
-        }}
-      />
-    );
-  }
-
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],
@@ -78,6 +62,22 @@ export function ClientCampaignsPage() {
     [timeframeStats, selectedCampaign?.id],
   );
   const timeframeLabel = getTimeframeLabel(timeframe);
+
+  if (loading) {
+    return <PortalLoadingState title="Loading campaigns" description="Syncing outreach campaign performance." />;
+  }
+
+  if (error) {
+    return (
+      <PortalErrorState
+        title="Campaign data is unavailable"
+        description={error}
+        onRetry={() => {
+          void refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -141,7 +141,7 @@ export function ClientCampaignsPage() {
           </PortalSurface>
 
           <div className="space-y-6">
-            <PortalSurface title={selectedCampaign?.name ?? "Campaign detail"} subtitle="Read-only campaign metadata from live schema">
+            <PortalSurface title={selectedCampaign?.name ?? "Campaign detail"} subtitle="Read-only campaign details">
               {selectedCampaign && (
                 <div className="grid gap-4 md:grid-cols-4">
                   {[
@@ -165,7 +165,7 @@ export function ClientCampaignsPage() {
 
             <ChartPanel title="Daily campaign volume" subtitle={`Sent, replies, bounces, and opens for selected campaign (${timeframeLabel})`}>
             {selectedStats.length === 0 ? (
-              <EmptyPortalState title="No daily metrics yet" description="campaign_daily_stats has no rows for this campaign." />
+              <EmptyPortalState title="No daily metrics yet" description="No daily metrics are available for this campaign yet." />
             ) : (
               <ResponsiveChart>
                 <LineChart data={selectedStats}>
@@ -185,7 +185,7 @@ export function ClientCampaignsPage() {
         </div>
       )}
 
-      <ChartPanel title="Campaign sent count" subtitle={`campaign_daily_stats.sent_count grouped by outreach campaign (${timeframeLabel})`}>
+      <ChartPanel title="Campaign sent count" subtitle={`Emails sent by campaign (${timeframeLabel})`}>
         {performance.length === 0 ? (
           <EmptyPortalState title="No campaign ranking" description="Campaigns need daily stats for this chart." />
         ) : (

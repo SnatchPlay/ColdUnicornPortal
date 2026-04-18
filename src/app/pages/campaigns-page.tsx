@@ -188,7 +188,7 @@ function InternalCampaignsPage() {
             </div>
           </Surface>
 
-          <Surface title="Campaign detail" subtitle="Editable internal fields backed by the live schema.">
+          <Surface title="Campaign detail" subtitle="Editable campaign settings and performance context.">
             {!selectedCampaign ? (
               <EmptyState title="Select a campaign" description="Campaign details appear once a row is selected." />
             ) : (
@@ -308,7 +308,7 @@ function InternalCampaignsPage() {
                 </div>
 
                 {selectedCampaignStats.length === 0 ? (
-                  <EmptyState title="No daily metrics yet" description="Once campaign_daily_stats exists for this campaign, the chart appears here." />
+                  <EmptyState title="No daily metrics yet" description="This chart will appear when campaign activity data becomes available." />
                 ) : (
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">

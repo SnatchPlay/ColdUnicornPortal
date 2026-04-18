@@ -66,8 +66,8 @@ export function SettingsPage() {
         >
           <div className="space-y-4 text-sm text-muted-foreground">
             <p>
-              This runtime assumes route-based role shells, live-schema contracts, invite/account-created
-              access, and publishable-key-only frontend auth.
+              This application uses role-based access, account provisioning,
+              and secure publishable-key frontend authentication.
             </p>
             <p>
               Password reset redirects are resolved against <code>VITE_APP_BASE_URL</code>, while missing

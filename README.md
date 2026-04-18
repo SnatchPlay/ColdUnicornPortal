@@ -46,6 +46,7 @@ corepack pnpm build
 ## Verification
 
 ```bash
+corepack pnpm lint
 corepack pnpm test:run
 corepack pnpm build
 corepack pnpm test:smoke

@@ -364,7 +364,6 @@ export function LeadDrawer({
     campaignName: string;
     step: number | null;
     replyCount: number;
-    replyLabel: string;
     lastReplyDate: string | null;
     addedDate: string;
     lead: {
@@ -543,7 +542,6 @@ export function LeadDrawer({
                         <MessageSquare className="h-4 w-4 text-emerald-400" />
                         Inbound
                       </span>
-                      <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-400">Positive</span>
                     </div>
                     <p className="text-sm leading-6 text-white">{inlineReply}</p>
                   </div>

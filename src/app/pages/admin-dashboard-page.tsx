@@ -196,7 +196,7 @@ export function AdminDashboardPage() {
       <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <Surface title="Campaign momentum" subtitle="21-day sent, replies, and positive trend.">
           {campaignSeries.length === 0 ? (
-            <EmptyState title="No campaign trend data" description="No campaign_daily_stats records are available for admin scope." />
+            <EmptyState title="No campaign trend data" description="No campaign trend data is available for the current scope." />
           ) : (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
