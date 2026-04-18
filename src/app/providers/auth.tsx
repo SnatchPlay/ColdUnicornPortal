@@ -30,12 +30,6 @@ interface AuthContextValue {
   errorCode: AuthErrorCode | null;
   isImpersonating: boolean;
   refreshIdentity: () => Promise<void>;
-  signUpWithPassword: (
-    email: string,
-    password: string,
-    firstName: string,
-    lastName: string,
-  ) => Promise<{ ok: boolean; message: string }>;
   signInWithPassword: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
   signInWithOtp: (email: string) => Promise<{ ok: boolean; message: string }>;
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; message: string }>;
@@ -291,48 +285,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true, message: "Magic link sent. Check your inbox." };
   }, []);
 
-  const signUpWithPassword = useCallback(
-    async (email: string, password: string, firstName: string, lastName: string) => {
-      if (!supabase) {
-        return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
-      }
-      if (!runtimeConfig.authAllowSelfSignup) {
-        return {
-          ok: false,
-          message: "Self-service registration is disabled. Contact your account administrator to provision access.",
-        };
-      }
-
-      const normalizedFirstName = firstName.trim();
-      const normalizedLastName = lastName.trim();
-      const fullName = [normalizedFirstName, normalizedLastName].filter(Boolean).join(" ").trim();
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            first_name: normalizedFirstName,
-            last_name: normalizedLastName,
-            full_name: fullName,
-          },
-        },
-      });
-
-      if (signUpError) return { ok: false, message: toSafeAuthMessage(signUpError.message) };
-
-      if (data.session) {
-        return { ok: true, message: "Account created and signed in successfully." };
-      }
-
-      return {
-        ok: true,
-        message: "Account created. Check your email to confirm registration before signing in.",
-      };
-    },
-    [],
-  );
-
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     if (!supabase) {
       return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
@@ -397,7 +349,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       errorCode,
       isImpersonating,
       refreshIdentity,
-      signUpWithPassword,
       signInWithPassword,
       signInWithOtp,
       requestPasswordReset,
@@ -420,7 +371,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithOtp,
       signInWithPassword,
       signOut,
-      signUpWithPassword,
       stopImpersonation,
       updatePassword,
     ],

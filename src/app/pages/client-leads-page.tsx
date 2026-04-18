@@ -11,6 +11,7 @@ import {
   PortalPageHeader,
   PortalSearch,
 } from "../components/portal-ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { getClientLeadRows, PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { formatDate, formatNumber } from "../lib/format";
@@ -178,29 +179,47 @@ export function ClientLeadsPage() {
 
       <div className="grid gap-4 xl:grid-cols-[1fr_250px_220px]">
         <PortalSearch value={query} onChange={setQuery} placeholder="Search by name, company or email..." />
-        <select
-          value={campaignFilter}
-          onChange={(event) => setCampaignFilter(event.target.value)}
-          aria-label="Filter leads by campaign"
-          className="h-[52px] rounded-2xl border border-[#242424] bg-[#050505] px-5 text-base text-neutral-300 outline-none"
-        >
-          <option value="all">All Campaigns</option>
-          {scopedCampaigns.map((campaign) => (
-            <option key={campaign.id} value={campaign.id}>
-              {campaign.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={replyScope}
-          onChange={(event) => setReplyScope(event.target.value as ReplyScope)}
-          aria-label="Filter leads by reply type"
-          className="h-[52px] rounded-2xl border border-[#242424] bg-[#050505] px-5 text-base text-neutral-300 outline-none"
-        >
-          <option value="all">All (OOO + Active)</option>
-          <option value="active">Active only</option>
-          <option value="ooo">OOO only</option>
-        </select>
+        <Select value={campaignFilter} onValueChange={setCampaignFilter}>
+          <SelectTrigger
+            aria-label="Filter leads by campaign"
+            className="h-[52px] rounded-2xl border-[#242424] bg-[#050505] px-5 text-base text-neutral-300"
+          >
+            <SelectValue placeholder="All Campaigns" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+            <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+              All Campaigns
+            </SelectItem>
+            {scopedCampaigns.map((campaign) => (
+              <SelectItem
+                key={campaign.id}
+                value={campaign.id}
+                className="text-white focus:bg-[#1a1a1a] focus:text-white"
+              >
+                {campaign.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={replyScope} onValueChange={(value) => setReplyScope(value as ReplyScope)}>
+          <SelectTrigger
+            aria-label="Filter leads by reply type"
+            className="h-[52px] rounded-2xl border-[#242424] bg-[#050505] px-5 text-base text-neutral-300"
+          >
+            <SelectValue placeholder="All (OOO + Active)" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+            <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+              All (OOO + Active)
+            </SelectItem>
+            <SelectItem value="active" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+              Active only
+            </SelectItem>
+            <SelectItem value="ooo" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+              OOO only
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {filteredRows.length === 0 ? (

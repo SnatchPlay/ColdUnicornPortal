@@ -99,6 +99,12 @@ function makeCoreData(overrides?: Record<string, unknown>) {
   };
 }
 
+async function chooseOptionByLabel(label: string, option: string | RegExp) {
+  const trigger = screen.getByLabelText(label);
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("Sprint B module operations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -115,7 +121,7 @@ describe("Sprint B module operations", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "blocked" } });
+    await chooseOptionByLabel("Status", "blocked");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {

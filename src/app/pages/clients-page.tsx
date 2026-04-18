@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Checkbox } from "../components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { scopeClients } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
-import type { ClientRecord } from "../types/core";
+import type { ClientRecord, InviteRole } from "../types/core";
 
 const CLIENT_STATUSES: ClientRecord["status"][] = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"];
+const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 
 interface ClientDraft {
   name: string;
@@ -29,6 +32,10 @@ function parseCsv(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function toClientDraft(client: ClientRecord): ClientDraft {
@@ -94,6 +101,7 @@ export function ClientsPage() {
     users,
     clientUsers,
     updateClient,
+    sendInvite,
     upsertClientUserMapping,
     deleteClientUserMapping,
     loading,
@@ -105,11 +113,17 @@ export function ClientsPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [mappingUserId, setMappingUserId] = useState("");
   const [isSavingMapping, setIsSavingMapping] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InviteRole>("client");
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const selectedClient =
     scopedClients.find((item) => item.id === selectedClientId) ?? scopedClients[0] ?? null;
   const canEditAssignments = identity?.role === "admin" || identity?.role === "super_admin";
+  const canInviteUsers = identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
+  const canInviteInternalRoles = identity?.role === "admin" || identity?.role === "super_admin";
 
   const managerUsers = useMemo(
     () => users.filter((item) => item.role === "manager"),
@@ -163,6 +177,12 @@ export function ClientsPage() {
     setMappingUserId("");
   }, [selectedClient?.id]);
 
+  useEffect(() => {
+    if (!canInviteInternalRoles) {
+      setInviteRole("client");
+    }
+  }, [canInviteInternalRoles]);
+
   const draftPatch = useMemo(() => {
     if (!selectedClient || !draft) return {};
     return buildClientPatch(selectedClient, draft, canEditAssignments);
@@ -208,6 +228,41 @@ export function ClientsPage() {
     }
   }
 
+  async function inviteUser() {
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      setInviteMessage({ tone: "warning", text: "Enter a valid email before sending an invitation." });
+      return;
+    }
+
+    const roleToInvite = canInviteInternalRoles ? inviteRole : "client";
+    if (!canInviteInternalRoles && roleToInvite !== "client") {
+      setInviteMessage({ tone: "danger", text: "Manager accounts can invite client users only." });
+      return;
+    }
+
+    if (roleToInvite === "client" && !selectedClient) {
+      setInviteMessage({ tone: "warning", text: "Select a client before inviting a client user." });
+      return;
+    }
+
+    setIsSendingInvite(true);
+    setInviteMessage(null);
+    try {
+      await sendInvite({
+        email: normalizedEmail,
+        role: roleToInvite,
+        ...(roleToInvite === "client" && selectedClient ? { clientId: selectedClient.id } : {}),
+      });
+      setInviteEmail("");
+      setInviteMessage({ tone: "info", text: `Invitation sent to ${normalizedEmail}.` });
+    } catch {
+      setInviteMessage({ tone: "danger", text: "Invitation request failed. Check permissions and try again." });
+    } finally {
+      setIsSendingInvite(false);
+    }
+  }
+
   if (!identity || identity.role === "client") {
     return (
       <EmptyState
@@ -246,6 +301,77 @@ export function ClientsPage() {
         title="Clients"
         subtitle="Operational client control surface for managing core client settings."
       />
+
+      {canInviteUsers && (
+        <Surface
+          title="Invite users"
+          subtitle={
+            canInviteInternalRoles
+              ? "Admins can invite client, manager, and admin users."
+              : "Managers can invite client users for assigned clients only."
+          }
+        >
+          <div className="space-y-4">
+            {inviteMessage && <Banner tone={inviteMessage.tone}>{inviteMessage.text}</Banner>}
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email</span>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  placeholder="name@company.com"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Role</span>
+                <Select
+                  value={canInviteInternalRoles ? inviteRole : "client"}
+                  disabled={!canInviteInternalRoles}
+                  onValueChange={(value) => setInviteRole(value as InviteRole)}
+                >
+                  <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-70">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    <SelectItem value="client" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      client
+                    </SelectItem>
+                    {canInviteInternalRoles && (
+                      <SelectItem value="manager" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                        manager
+                      </SelectItem>
+                    )}
+                    {canInviteInternalRoles && (
+                      <SelectItem value="admin" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                        admin
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {inviteRole === "client"
+                  ? `Client invite target: ${selectedClient?.name ?? "select a client"}`
+                  : "Internal role invite is organization-wide."}
+              </p>
+              <button
+                onClick={() => {
+                  void inviteUser();
+                }}
+                disabled={isSendingInvite || !inviteEmail.trim()}
+                className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSendingInvite ? "Sending..." : "Send invitation"}
+              </button>
+            </div>
+          </div>
+        </Surface>
+      )}
 
       {scopedClients.length === 0 ? (
         <EmptyState title="No clients assigned" description="The current identity does not have any visible clients." />
@@ -319,26 +445,34 @@ export function ClientsPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                    <select
+                    <Select
                       value={draft?.status ?? CLIENT_STATUSES[0]}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setDraft((current) =>
                           current
                             ? {
                                 ...current,
-                                status: event.target.value as ClientRecord["status"],
+                                status: value as ClientRecord["status"],
                               }
                             : current,
                         )
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     >
-                      {CLIENT_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                        {CLIENT_STATUSES.map((status) => (
+                          <SelectItem
+                            key={status}
+                            value={status}
+                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                          >
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Min daily sent</span>
@@ -405,21 +539,27 @@ export function ClientsPage() {
                   {canEditAssignments && (
                     <label className="space-y-2">
                       <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager assignment</span>
-                      <select
-                        value={draft?.managerId ?? ""}
-                        onChange={(event) =>
-                          setDraft((current) =>
-                            current ? { ...current, managerId: event.target.value } : current,
-                          )
+                      <Select
+                        value={draft?.managerId || undefined}
+                        onValueChange={(value) =>
+                          setDraft((current) => (current ? { ...current, managerId: value } : current))
                         }
-                        className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                       >
-                        {managerUsers.map((manager) => (
-                          <option key={manager.id} value={manager.id}>
-                            {`${manager.first_name} ${manager.last_name}`.trim()}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                          <SelectValue placeholder="Select manager" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                          {managerUsers.map((manager) => (
+                            <SelectItem
+                              key={manager.id}
+                              value={manager.id}
+                              className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                            >
+                              {`${manager.first_name} ${manager.last_name}`.trim()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </label>
                   )}
                 </div>
@@ -441,14 +581,14 @@ export function ClientsPage() {
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto OOO</span>
                     <div className="mt-3 flex items-center justify-between">
                       <span className="text-sm">{draft?.autoOooEnabled ? "Enabled" : "Disabled"}</span>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={draft?.autoOooEnabled ?? false}
-                        onChange={(event) =>
+                        onCheckedChange={(checked) =>
                           setDraft((current) =>
-                            current ? { ...current, autoOooEnabled: event.target.checked } : current,
+                            current ? { ...current, autoOooEnabled: checked === true } : current,
                           )
                         }
+                        className="h-4 w-4"
                       />
                     </div>
                   </label>
@@ -478,23 +618,36 @@ export function ClientsPage() {
                     <div className="flex flex-wrap items-end gap-3">
                       <label className="min-w-[16rem] flex-1 space-y-2">
                         <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client user</span>
-                        <select
-                          value={mappingUserId}
-                          onChange={(event) => setMappingUserId(event.target.value)}
-                          className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                        <Select
+                          value={mappingUserId || CLIENT_USER_PLACEHOLDER}
+                          onValueChange={(value) => setMappingUserId(value === CLIENT_USER_PLACEHOLDER ? "" : value)}
                         >
-                          <option value="">Select a client user</option>
-                          {clientRoleUsers.map((user) => {
-                            const mapping = mappingByUserId.get(user.id);
-                            const mappedClientName = mapping ? clientById.get(mapping.client_id) ?? "Unknown client" : null;
-                            return (
-                              <option key={user.id} value={user.id}>
-                                {`${user.first_name} ${user.last_name}`.trim()} · {user.email}
-                                {mappedClientName ? ` (mapped: ${mappedClientName})` : ""}
-                              </option>
-                            );
-                          })}
-                        </select>
+                          <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                            <SelectValue placeholder="Select a client user" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                            <SelectItem
+                              value={CLIENT_USER_PLACEHOLDER}
+                              className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                            >
+                              Select a client user
+                            </SelectItem>
+                            {clientRoleUsers.map((user) => {
+                              const mapping = mappingByUserId.get(user.id);
+                              const mappedClientName = mapping ? clientById.get(mapping.client_id) ?? "Unknown client" : null;
+                              return (
+                                <SelectItem
+                                  key={user.id}
+                                  value={user.id}
+                                  className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                                >
+                                  {`${user.first_name} ${user.last_name}`.trim()} · {user.email}
+                                  {mappedClientName ? ` (mapped: ${mappedClientName})` : ""}
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
                       </label>
                       <button
                         onClick={() => {

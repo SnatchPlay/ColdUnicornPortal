@@ -9,6 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -226,27 +227,35 @@ function InternalCampaignsPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                    <select
+                    <Select
                       value={draft?.status ?? "draft"}
                       disabled={identity?.role === "client"}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setDraft((current) =>
                           current
                             ? {
                                 ...current,
-                                status: event.target.value as CampaignRecord["status"],
+                                status: value as CampaignRecord["status"],
                               }
                             : current,
                         )
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     >
-                      {["draft", "launching", "active", "stopped", "completed"].map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                        {["draft", "launching", "active", "stopped", "completed"].map((status) => (
+                          <SelectItem
+                            key={status}
+                            value={status}
+                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                          >
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Database size</span>

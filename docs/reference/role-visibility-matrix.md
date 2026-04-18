@@ -11,6 +11,7 @@
 | domains | No | Assigned clients | All |
 | invoices | No | Assigned clients | All |
 | email_exclude_list | No | Read-only | All |
+| Invitations lifecycle | No | No | All |
 | Client config edits | No | Yes, assigned only | Yes |
 | Lead operational edits | No | Yes, assigned only | Yes |
 | Campaign edits | No | Yes, assigned only | Yes |

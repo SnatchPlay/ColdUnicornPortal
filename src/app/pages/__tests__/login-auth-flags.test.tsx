@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type RuntimeConfigMock = {
-  authAllowSelfSignup: boolean;
+  authInviteOnly: boolean;
   authAllowMagicLink: boolean;
 };
 
@@ -14,7 +14,6 @@ type AuthMock = {
   error: string | null;
   signInWithOtp: ReturnType<typeof vi.fn>;
   signInWithPassword: ReturnType<typeof vi.fn>;
-  signUpWithPassword: ReturnType<typeof vi.fn>;
   requestPasswordReset: ReturnType<typeof vi.fn>;
 };
 
@@ -23,7 +22,7 @@ async function renderLoginPage(config: RuntimeConfigMock, authOverrides?: Partia
 
   vi.doMock("../../lib/env", () => ({
     runtimeConfig: {
-      authAllowSelfSignup: config.authAllowSelfSignup,
+      authInviteOnly: config.authInviteOnly,
       authAllowMagicLink: config.authAllowMagicLink,
     },
   }));
@@ -37,7 +36,6 @@ async function renderLoginPage(config: RuntimeConfigMock, authOverrides?: Partia
         error: null,
         signInWithOtp: vi.fn(async () => ({ ok: true, message: "ok" })),
         signInWithPassword: vi.fn(async () => ({ ok: true, message: "ok" })),
-        signUpWithPassword: vi.fn(async () => ({ ok: true, message: "ok" })),
         requestPasswordReset: vi.fn(async () => ({ ok: true, message: "ok" })),
         ...authOverrides,
       }) satisfies AuthMock,
@@ -61,7 +59,7 @@ describe("login production auth flags", () => {
 
   it("hides self-signup copy when registration is disabled", async () => {
     await renderLoginPage({
-      authAllowSelfSignup: false,
+      authInviteOnly: true,
       authAllowMagicLink: true,
     });
 
@@ -72,7 +70,7 @@ describe("login production auth flags", () => {
 
   it("hides magic link entry when passwordless auth is disabled", async () => {
     await renderLoginPage({
-      authAllowSelfSignup: false,
+      authInviteOnly: true,
       authAllowMagicLink: false,
     });
 

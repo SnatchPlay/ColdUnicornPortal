@@ -18,6 +18,8 @@ import type {
   CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
+  InviteRecord,
+  InviteRequest,
   InvoiceRecord,
   LeadRecord,
 } from "../types/core";
@@ -31,6 +33,10 @@ interface CoreDataContextValue extends CoreSnapshot {
   updateLead: (leadId: string, patch: Partial<LeadRecord>) => Promise<void>;
   updateDomain: (domainId: string, patch: Partial<DomainRecord>) => Promise<void>;
   updateInvoice: (invoiceId: string, patch: Partial<InvoiceRecord>) => Promise<void>;
+  sendInvite: (payload: InviteRequest) => Promise<void>;
+  listInvites: () => Promise<InviteRecord[]>;
+  resendInvite: (inviteId: string) => Promise<InviteRecord>;
+  revokeInvite: (inviteId: string) => Promise<void>;
   upsertClientUserMapping: (userId: string, clientId: string) => Promise<void>;
   deleteClientUserMapping: (mappingId: string) => Promise<void>;
   upsertEmailExcludeDomain: (domain: string) => Promise<void>;
@@ -56,6 +62,9 @@ const CoreDataContext = createContext<CoreDataContextValue | null>(null);
 function mapCoreDataError(reason: unknown) {
   if (reason instanceof RepositoryError) {
     if (reason.kind === "permission") {
+      if (reason.table === "invites") {
+        return reason.message;
+      }
       return `Access to ${reason.table} is blocked by your current permissions.`;
     }
     if (reason.kind === "network") {
@@ -268,6 +277,56 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
     }
   }, [snapshot.invoices]);
 
+  const sendInvite = useCallback(async (payload: InviteRequest) => {
+    try {
+      await repository.sendInvite(payload);
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const listInvites = useCallback(async () => {
+    try {
+      const invites = await repository.listInvites();
+      setError(null);
+      return invites;
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const resendInvite = useCallback(async (inviteId: string) => {
+    try {
+      const invite = await repository.resendInvite(inviteId);
+      setError(null);
+      return invite;
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const revokeInvite = useCallback(async (inviteId: string) => {
+    try {
+      await repository.revokeInvite(inviteId);
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
   const upsertClientUserMapping = useCallback(async (userId: string, clientId: string) => {
     const previous = snapshot.clientUsers;
     const existing = previous.find((item) => item.user_id === userId);
@@ -405,6 +464,10 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       updateLead,
       updateDomain,
       updateInvoice,
+      sendInvite,
+      listInvites,
+      resendInvite,
+      revokeInvite,
       upsertClientUserMapping,
       deleteClientUserMapping,
       upsertEmailExcludeDomain,
@@ -414,8 +477,12 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       deleteEmailExcludeDomain,
       deleteClientUserMapping,
       error,
+      listInvites,
       loading,
       refresh,
+      resendInvite,
+      revokeInvite,
+      sendInvite,
       snapshot,
       updateCampaign,
       updateClient,

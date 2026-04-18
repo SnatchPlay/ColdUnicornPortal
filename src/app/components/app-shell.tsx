@@ -11,14 +11,23 @@ import {
   Rocket,
   Settings,
   ShieldBan,
+  UserCog,
   Users,
 } from "lucide-react";
 import { cn } from "./ui/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { AppRole } from "../types/core";
 import { getRoleLabel } from "../lib/selectors";
+import coldUnicornLogo from "../../imports/logo white with name.png";
 
 interface NavItem {
   to: string;
@@ -28,6 +37,7 @@ interface NavItem {
 
 const ADMIN_NAV: NavItem[] = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/admin/users", label: "User management", icon: UserCog },
   { to: "/admin/clients", label: "Clients", icon: Building2 },
   { to: "/admin/leads", label: "Leads", icon: Users },
   { to: "/admin/campaigns", label: "Campaigns", icon: Rocket },
@@ -133,17 +143,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-[#030303] text-white">
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col overflow-y-auto border-r border-[#1f1f1f] bg-[#050505] lg:flex">
-          <Link to={homePath} className="flex gap-3 border-b border-[#1f1f1f] px-6 py-6">
-            <div className="mt-0.5 h-5 w-5 rounded-sm bg-emerald-500" />
+          <Link to={homePath} className="border-b border-[#1f1f1f] px-6 py-6">
             <div>
-              <p className="text-lg font-medium leading-none">Cold Unicorn</p>
-              <p className="mt-2 text-sm leading-5 text-neutral-500">
-                GHEADS
-                <br />
-                PDCA
-                <br />
-                Platform
-              </p>
+              <img src={coldUnicornLogo} alt="ColdUnicorn" className="h-10 w-auto object-contain" />
+              <p className="mt-3 text-sm leading-5 text-neutral-500">ColdUnicorn PDCA Platform</p>
             </div>
           </Link>
 
@@ -206,18 +209,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   Open admin view
                 </button>
-                <select
-                  value={managerTargetId}
-                  onChange={(event) => setManagerTargetId(event.target.value)}
-                  className="w-full rounded-lg border border-[#242424] bg-[#050505] px-3 py-2 text-sm outline-none"
-                >
-                  <option value="">Select manager</option>
-                  {managerOptions.map((manager) => (
-                    <option key={manager.id} value={manager.id}>
-                      {`${manager.first_name} ${manager.last_name}`.trim()}
-                    </option>
-                  ))}
-                </select>
+                <Select value={managerTargetId} onValueChange={setManagerTargetId}>
+                  <SelectTrigger className="h-auto rounded-lg border-[#242424] bg-[#050505] px-3 py-2 text-left text-sm text-white hover:bg-[#111] focus-visible:ring-[#2b2b2b]">
+                    <SelectValue placeholder="Select manager" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-lg border-[#242424] bg-[#050505] text-white">
+                    {managerOptions.map((manager) => (
+                      <SelectItem
+                        key={manager.id}
+                        value={manager.id}
+                        className="rounded-md text-sm text-white focus:bg-[#1a1a1a] focus:text-white"
+                      >
+                        {`${manager.first_name} ${manager.last_name}`.trim()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <button
                   onClick={handleImpersonateManager}
                   disabled={!managerTargetId}
@@ -225,18 +232,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   Open manager view
                 </button>
-                <select
-                  value={clientTargetId}
-                  onChange={(event) => setClientTargetId(event.target.value)}
-                  className="w-full rounded-lg border border-[#242424] bg-[#050505] px-3 py-2 text-sm outline-none"
-                >
-                  <option value="">Select client</option>
-                  {clientOptions.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
+                <Select value={clientTargetId} onValueChange={setClientTargetId}>
+                  <SelectTrigger className="h-auto rounded-lg border-[#242424] bg-[#050505] px-3 py-2 text-left text-sm text-white hover:bg-[#111] focus-visible:ring-[#2b2b2b]">
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-lg border-[#242424] bg-[#050505] text-white">
+                    {clientOptions.map((client) => (
+                      <SelectItem
+                        key={client.id}
+                        value={client.id}
+                        className="rounded-md text-sm text-white focus:bg-[#1a1a1a] focus:text-white"
+                      >
+                        {client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <button
                   onClick={handleImpersonateClient}
                   disabled={!clientTargetId}

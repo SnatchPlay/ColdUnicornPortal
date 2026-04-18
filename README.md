@@ -1,6 +1,6 @@
 # PdcaFigmaTest
 
-Production-oriented frontend foundation for the GHEADS PDCA portal.
+Production-oriented frontend foundation for the ColdUnicorn PDCA portal.
 
 ## What This Repo Now Contains
 

@@ -24,6 +24,9 @@ const DomainsPage = lazy(() => import("./pages/domains-page").then((module) => (
 const InvoicesPage = lazy(() => import("./pages/invoices-page").then((module) => ({ default: module.InvoicesPage })));
 const BlacklistPage = lazy(() => import("./pages/blacklist-page").then((module) => ({ default: module.BlacklistPage })));
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
+const AdminUserManagementPage = lazy(() =>
+  import("./pages/admin-user-management-page").then((module) => ({ default: module.AdminUserManagementPage })),
+);
 const ResetPasswordPage = lazy(() =>
   import("./pages/reset-password-page").then((module) => ({ default: module.ResetPasswordPage })),
 );
@@ -190,6 +193,7 @@ function ProtectedApp() {
 
               <Route path="admin" element={<RequireRole allowed={["admin", "super_admin"]} />}>
                 <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="users" element={<AdminUserManagementPage />} />
                 <Route path="clients" element={<ClientsPage />} />
                 <Route path="leads" element={<LeadsPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />

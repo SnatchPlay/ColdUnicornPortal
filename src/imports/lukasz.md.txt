@@ -44,13 +44,13 @@ Major missing pieces:
 - Reliability / authority: Medium for future intent; low for current operational truth. It conflicts with real statuses, reply taxonomies, and some actual workflows.
 - Role in future system: Good architectural baseline, not enough for implementation without reconciliation.
 
-## `GHEADS _ Antal _ Report.xlsx`
-- What it contains: Client-facing workbook with `Leads`, `Campaigns`, `Statistics`, and `GHEADS | Dashboard`.
+## `ColdUnicorn _ Antal _ Report.xlsx`
+- What it contains: Client-facing workbook with `Leads`, `Campaigns`, `Statistics`, and `ColdUnicorn | Dashboard`.
 - What it reveals: The actual client-facing data contract. `Leads` includes enrichment, qualification, pipeline booleans, response text, message step, blacklist IDs, and LinkedIn URL. `Statistics` is daily campaign performance. Dashboard formulas show the expected client-facing widgets and aggregations.
 - Reliability / authority: High for client portal behavior and field requirements.
 - Role in future system: Primary source for client portal data structure and reporting logic.
 
-## `GHEADS _ PDCA (1).xlsx`
+## `ColdUnicorn _ PDCA (1).xlsx`
 - What it contains: 20-sheet operational workbook including `CS PDCA`, `CRM`, `CF`, `AUTH`, `🤖Daily stats`, `🤖Emails Exclude List`, `Client CRM Details`, `ABM LOSTS`, `LG PDCA`, `DomainsPerformance`, `Weekly`, `Monthly`, `Dashboards`, and `RR & BR generator`.
 - What it reveals: The internal portal is not a simple admin panel; it is a dense operations cockpit. `CS PDCA` alone proves the need for client setup management, trend matrices, health tracking, finance, ecosystem config, and KPI comparison.
 - Reliability / authority: Highest authority for internal operating reality.
@@ -193,7 +193,7 @@ Operational meaning:
 
 ## 3.6 Internal Sales and Pipeline Layer
 Current capability:
-- Track GHEADS’ own sales CRM
+- Track ColdUnicorn’s own sales CRM
 - Track LG pipeline
 - Track won/lost lessons
 
@@ -1310,7 +1310,7 @@ Primary nav:
 ## Agency CRM
 - Route: `/admin/crm/pipeline`
 - Primary roles: `super_admin`, `admin`
-- Primary purpose: Manage GHEADS’ own sales pipeline.
+- Primary purpose: Manage ColdUnicorn’s own sales pipeline.
 - Business value: Keeps agency sales separate from client delivery operations.
 - Key datasets: `agency_crm_deals`.
 - Required fields: company name; contact; email; phone; source; salesperson; stage; stage updated; estimated value; win chance; lesson learned; next action if added.
@@ -1865,7 +1865,7 @@ Internal alert surfaces should include:
 | Automation/audit log | Not in workbook except test sheets | Essential for support | Not explicit enough | Required | Missing | Add event log surface |
 | Look4Lead export status | Token in CS PDCA | Scheduled export exists | Not described in detail | Required if integration stays | Missing | Add export status and config visibility |
 | Weekly/Monthly reports | Hidden workbook tabs | Derived from daily stats | Present | Required | Covered conceptually | Compute from normalized views |
-| E5M CS / Prospect Base | Present in workbook | Used by hidden reports | Explicitly ignored | Probably not core GHEADS portal | Over-scoped / ambiguous | Confirm with stakeholders before building |
+| E5M CS / Prospect Base | Present in workbook | Used by hidden reports | Explicitly ignored | Probably not core ColdUnicorn portal | Over-scoped / ambiguous | Confirm with stakeholders before building |
 | Super admin governance | Not in sheets | Not in automations | Barely separated | Required | Missing | Add dedicated super-admin-only settings area |
 
 ## 12.2 Current prototype gaps
@@ -2056,8 +2056,8 @@ Recommended decision: managers may view invoice status and add operational notes
 
 9. E5M-related sheets
 Explicit: `E5M CS`, `Prospect Base`, `Weekly`, `Monthly` depend on those structures.
-Ambiguous: whether these belong in the GHEADS product scope.
-Recommended decision: confirm with stakeholders; treat as non-MVP unless clearly still in active GHEADS ops.
+Ambiguous: whether these belong in the ColdUnicorn product scope.
+Recommended decision: confirm with stakeholders; treat as non-MVP unless clearly still in active ColdUnicorn ops.
 
 10. Current schema access safety
 Explicit: RLS enabled; `pg_policies` returned no policies.

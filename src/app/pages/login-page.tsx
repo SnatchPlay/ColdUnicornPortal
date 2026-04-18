@@ -1,18 +1,11 @@
 import { type FormEvent, useState } from "react";
-import {
-  ArrowRight,
-  KeyRound,
-  LockKeyhole,
-  Mail,
-  ShieldCheck,
-  UserPlus,
-} from "lucide-react";
+import { ArrowRight, KeyRound, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { Navigate } from "react-router-dom";
 import { Banner, LoadingState } from "../components/app-ui";
 import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 
-type AuthMode = "signin" | "signup" | "reset" | "magic";
+type AuthMode = "signin" | "reset" | "magic";
 
 type FormMessage = {
   tone: "info" | "warning" | "danger";
@@ -37,14 +30,6 @@ const modeCopy: Record<
     cta: "Sign in",
     busy: "Signing in...",
     icon: LockKeyhole,
-  },
-  signup: {
-    eyebrow: "Account setup",
-    title: "Create your account",
-    subtitle: "Use your real contact details to register your workspace access.",
-    cta: "Create account",
-    busy: "Creating account...",
-    icon: UserPlus,
   },
   reset: {
     eyebrow: "Password recovery",
@@ -132,25 +117,16 @@ function validateAuthForm({
   mode,
   email,
   password,
-  firstName,
-  lastName,
 }: {
   mode: AuthMode;
   email: string;
   password: string;
-  firstName: string;
-  lastName: string;
 }) {
   if (!email) return "Email is required.";
   if (!isValidEmail(email)) return "Enter a valid email address.";
 
   if (mode === "signin" && !password) {
     return "Password is required.";
-  }
-
-  if (mode === "signup") {
-    if (!firstName || !lastName) return "First name and last name are required.";
-    if (password.length < 8) return "Password must contain at least 8 characters.";
   }
 
   return null;
@@ -160,7 +136,6 @@ export function LoginPage() {
   const {
     signInWithOtp,
     signInWithPassword,
-    signUpWithPassword,
     requestPasswordReset,
     identity,
     session,
@@ -173,8 +148,6 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
   const [lastSuccessMode, setLastSuccessMode] = useState<AuthMode | null>(null);
 
   const activeCopy = modeCopy[mode];
@@ -191,13 +164,6 @@ export function LoginPage() {
   if (session || identity) return <Navigate to="/" replace />;
 
   function switchMode(nextMode: AuthMode) {
-    if (nextMode === "signup" && !runtimeConfig.authAllowSelfSignup) {
-      setMessage({
-        tone: "warning",
-        text: "Self-service registration is disabled. Contact your account administrator to provision access.",
-      });
-      return;
-    }
     if (nextMode === "magic" && !runtimeConfig.authAllowMagicLink) {
       setMessage({
         tone: "warning",
@@ -214,14 +180,10 @@ export function LoginPage() {
     event.preventDefault();
 
     const trimmedEmail = email.trim();
-    const normalizedFirstName = firstName.trim();
-    const normalizedLastName = lastName.trim();
     const validationError = validateAuthForm({
       mode,
       email: trimmedEmail,
       password,
-      firstName: normalizedFirstName,
-      lastName: normalizedLastName,
     });
 
     if (validationError) {
@@ -234,22 +196,13 @@ export function LoginPage() {
     const result =
       mode === "signin"
         ? await signInWithPassword(trimmedEmail, password)
-        : mode === "signup"
-          ? await signUpWithPassword(trimmedEmail, password, normalizedFirstName, normalizedLastName)
-          : mode === "reset"
-            ? await requestPasswordReset(trimmedEmail)
-            : await signInWithOtp(trimmedEmail);
+        : mode === "reset"
+          ? await requestPasswordReset(trimmedEmail)
+          : await signInWithOtp(trimmedEmail);
 
     setMessage({ tone: submitTone(result.ok), text: result.message });
     setLastSuccessMode(result.ok ? mode : null);
     setBusy(false);
-
-    if (result.ok && mode === "signup") {
-      setMode("signin");
-      setPassword("");
-      setFirstName("");
-      setLastName("");
-    }
   }
 
   const recoveryHint = getRecoveryHint(mode, message?.text ?? error ?? undefined);
@@ -263,7 +216,7 @@ export function LoginPage() {
           <div className="rounded-[2rem] border border-[#242424] bg-[#080808]/95 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.5)] backdrop-blur md:p-7">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">
               <ShieldCheck className="h-3.5 w-3.5" />
-              GHEADS Secure Access
+              ColdUnicorn Secure Access
             </div>
 
             <div className="mt-7 flex items-start gap-4">
@@ -282,6 +235,11 @@ export function LoginPage() {
             <p className="mt-5 text-sm text-neutral-500">
               Access is available only for authorized users.
             </p>
+            {runtimeConfig.authInviteOnly && (
+              <p className="mt-2 text-sm text-neutral-500">
+                New access is invitation-only. Contact an administrator or your account manager to be invited.
+              </p>
+            )}
 
             <div className="mt-6 space-y-3">
               {error && <Banner tone="warning">{error}</Banner>}
@@ -299,25 +257,6 @@ export function LoginPage() {
             </div>
 
             <form className="mt-7 space-y-5" onSubmit={handleSubmit}>
-              {mode === "signup" && (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <AuthInput
-                    label="First name"
-                    value={firstName}
-                    onChange={setFirstName}
-                    placeholder="Anna"
-                    autoComplete="given-name"
-                  />
-                  <AuthInput
-                    label="Last name"
-                    value={lastName}
-                    onChange={setLastName}
-                    placeholder="Popovych"
-                    autoComplete="family-name"
-                  />
-                </div>
-              )}
-
               <AuthInput
                 label="Work email"
                 value={email}
@@ -327,14 +266,14 @@ export function LoginPage() {
                 autoComplete="email"
               />
 
-              {(mode === "signin" || mode === "signup") && (
+              {mode === "signin" && (
                 <AuthInput
                   label="Password"
                   value={password}
                   onChange={setPassword}
                   type="password"
-                  placeholder={mode === "signup" ? "Create a secure password" : "Enter your password"}
-                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
                 />
               )}
 
@@ -355,15 +294,7 @@ export function LoginPage() {
                   <SwitchButton onClick={() => switchMode("signin")}>Sign in</SwitchButton>
                 </p>
               ) : (
-                <p className="text-sm text-neutral-500">
-                  {runtimeConfig.authAllowSelfSignup ? (
-                    <>
-                      No account yet? <SwitchButton onClick={() => switchMode("signup")}>Register</SwitchButton>
-                    </>
-                  ) : (
-                    "Access is provisioned by your account administrator."
-                  )}
-                </p>
+                <p className="text-sm text-neutral-500">Access is provisioned by your account administrator.</p>
               )}
 
               <div className="flex gap-4">

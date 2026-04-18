@@ -16,13 +16,13 @@ vi.mock("../../providers/core-data", () => ({
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedUseCoreData = vi.mocked(useCoreData);
 
-function makeAuth() {
+function makeAuth(role: "admin" | "manager" = "admin") {
   return {
     identity: {
-      id: "admin-1",
-      fullName: "Admin User",
-      email: "admin@test.local",
-      role: "admin",
+      id: role === "admin" ? "admin-1" : "manager-1",
+      fullName: role === "admin" ? "Admin User" : "Manager User",
+      email: role === "admin" ? "admin@test.local" : "manager@test.local",
+      role,
     },
   };
 }
@@ -78,6 +78,7 @@ function makeCoreData(overrides?: Record<string, unknown>) {
     error: null,
     refresh: vi.fn(async () => {}),
     updateClient: vi.fn(async () => {}),
+    sendInvite: vi.fn(async () => ({ inviteId: "invite-1" })),
     updateCampaign: vi.fn(async () => {}),
     updateLead: vi.fn(async () => {}),
     upsertClientUserMapping: vi.fn(async () => {}),
@@ -96,6 +97,12 @@ function renderPage() {
       <ClientsPage />
     </MemoryRouter>,
   );
+}
+
+async function chooseOptionByLabel(label: string, option: string | RegExp) {
+  const trigger = screen.getByLabelText(label);
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
 }
 
 describe("clients operational tooling", () => {
@@ -134,7 +141,7 @@ describe("clients operational tooling", () => {
 
     renderPage();
 
-    fireEvent.change(screen.getByLabelText("Client user"), { target: { value: "client-user-1" } });
+    await chooseOptionByLabel("Client user", /Chris Client.*client@test.local/i);
     fireEvent.click(screen.getByRole("button", { name: "Assign user" }));
 
     await waitFor(() => {
@@ -148,5 +155,43 @@ describe("clients operational tooling", () => {
       expect(core.deleteClientUserMapping).toHaveBeenCalledTimes(1);
     });
     expect(core.deleteClientUserMapping).toHaveBeenCalledWith("mapping-1");
+  });
+
+  it("allows admin to invite manager users", async () => {
+    const core = makeCoreData();
+    mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
+    mockedUseCoreData.mockReturnValue(core as never);
+
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "manager.new@test.local" } });
+    await chooseOptionByLabel("Role", "manager");
+    fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
+
+    await waitFor(() => {
+      expect(core.sendInvite).toHaveBeenCalledTimes(1);
+    });
+    expect(core.sendInvite).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "manager.new@test.local", role: "manager" }),
+    );
+  });
+
+  it("forces manager invites to client role with selected client scope", async () => {
+    const core = makeCoreData();
+    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+    mockedUseCoreData.mockReturnValue(core as never);
+
+    renderPage();
+
+    expect(screen.getByLabelText("Role")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "client.new@test.local" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
+
+    await waitFor(() => {
+      expect(core.sendInvite).toHaveBeenCalledTimes(1);
+    });
+    expect(core.sendInvite).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "client.new@test.local", role: "client", clientId: "client-1" }),
+    );
   });
 });

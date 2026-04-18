@@ -182,7 +182,8 @@ export function AdminDashboardPage() {
       />
 
       <Banner tone="info">
-        Admin quick actions: <Link to="/admin/clients" className="underline underline-offset-2">clients</Link> ·{" "}
+        Admin quick actions: <Link to="/admin/users" className="underline underline-offset-2">users</Link> ·{" "}
+        <Link to="/admin/clients" className="underline underline-offset-2">clients</Link> ·{" "}
         <Link to="/admin/campaigns" className="underline underline-offset-2">campaigns</Link> ·{" "}
         <Link to="/admin/leads" className="underline underline-offset-2">leads</Link>
       </Banner>

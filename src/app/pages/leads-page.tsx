@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { MessageSquare, Search } from "lucide-react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Checkbox } from "../components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, getFullName } from "../lib/format";
 import { getLeadStage, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -17,6 +19,7 @@ const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
   "won",
   "rejected",
 ];
+const LEAD_QUALIFICATION_UNSET = "__lead_unqualified__";
 
 const PAGE_SIZE = 50;
 
@@ -285,28 +288,38 @@ function InternalLeadsPage() {
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Qualification</span>
-                    <select
-                      value={draft?.qualification ?? ""}
-                      onChange={(event) =>
+                    <Select
+                      value={(draft?.qualification ?? "") === "" ? LEAD_QUALIFICATION_UNSET : (draft?.qualification ?? "")}
+                      disabled={identity?.role === "client"}
+                      onValueChange={(value) =>
                         setDraft((current) =>
                           current
                             ? {
                                 ...current,
-                                qualification: event.target.value as LeadQualification | "",
+                                qualification: value === LEAD_QUALIFICATION_UNSET ? "" : (value as LeadQualification),
                               }
                             : current,
                         )
                       }
-                      disabled={identity?.role === "client"}
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:opacity-60"
                     >
-                      <option value="">unqualified</option>
-                      {EDITABLE_QUALIFICATIONS.map((qualification) => (
-                        <option key={qualification} value={qualification}>
-                          {qualification}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60">
+                        <SelectValue placeholder="unqualified" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                        <SelectItem value={LEAD_QUALIFICATION_UNSET} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          unqualified
+                        </SelectItem>
+                        {EDITABLE_QUALIFICATIONS.map((qualification) => (
+                          <SelectItem
+                            key={qualification}
+                            value={qualification}
+                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                          >
+                            {qualification}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
 
                   <label className="space-y-2">
@@ -334,23 +347,23 @@ function InternalLeadsPage() {
                       <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</span>
                       <div className="mt-3 flex items-center justify-between">
                         <span className="text-sm">{item.value ? "Yes" : "No"}</span>
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={item.value}
                           disabled={identity?.role === "client"}
-                          onChange={(event) =>
+                          onCheckedChange={(checked) =>
                             setDraft((current) => {
                               if (!current) return current;
+                              const nextChecked = checked === true;
                               if (item.key === "meeting_booked") {
-                                return { ...current, meetingBooked: event.target.checked };
+                                return { ...current, meetingBooked: nextChecked };
                               }
                               if (item.key === "meeting_held") {
-                                return { ...current, meetingHeld: event.target.checked };
+                                return { ...current, meetingHeld: nextChecked };
                               }
                               if (item.key === "offer_sent") {
-                                return { ...current, offerSent: event.target.checked };
+                                return { ...current, offerSent: nextChecked };
                               }
-                              return { ...current, won: event.target.checked };
+                              return { ...current, won: nextChecked };
                             })
                           }
                         />

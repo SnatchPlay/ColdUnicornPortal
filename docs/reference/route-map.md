@@ -16,6 +16,7 @@
 - `/manager/blacklist`: global blacklist read view.
 - `/manager/settings`: manager runtime settings.
 - `/admin/dashboard`: global operational overview.
+- `/admin/users`: invite-only user management (create/list/resend/revoke).
 - `/admin/clients`: client configuration.
 - `/admin/leads`: global lead operations.
 - `/admin/campaigns`: global campaign operations.

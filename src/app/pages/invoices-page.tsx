@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { scopeClients, scopeInvoices } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -7,6 +8,7 @@ import { useCoreData } from "../providers/core-data";
 import type { InvoiceRecord } from "../types/core";
 
 const INVOICE_STATUSES = ["pending", "issued", "sent", "paid", "overdue", "vindication"] as const;
+const INVOICE_UNSET_VALUE = "__unset_invoice_status__";
 
 interface InvoiceDraft {
   issueDate: string;
@@ -179,20 +181,30 @@ export function InvoicesPage() {
                 placeholder="Search by client, status, or invoice id"
                 className="min-w-[16rem] flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
               />
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                aria-label="Filter invoices by status"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
+              <Select
+                value={statusFilter === "" ? INVOICE_UNSET_VALUE : statusFilter}
+                onValueChange={(value) => setStatusFilter(value === INVOICE_UNSET_VALUE ? "" : value)}
               >
-                <option value="all">All statuses</option>
-                {INVOICE_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-                <option value="">unset</option>
-              </select>
+                <SelectTrigger
+                  aria-label="Filter invoices by status"
+                  className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white"
+                >
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    All statuses
+                  </SelectItem>
+                  {INVOICE_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {status}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={INVOICE_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    unset
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border">
@@ -299,20 +311,32 @@ export function InvoicesPage() {
 
                   <label className="space-y-2 md:col-span-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                    <select
-                      value={draft.status}
-                      onChange={(event) =>
-                        setDraft((current) => (current ? { ...current, status: event.target.value } : current))
+                    <Select
+                      value={draft.status === "" ? INVOICE_UNSET_VALUE : draft.status}
+                      onValueChange={(value) =>
+                        setDraft((current) =>
+                          current ? { ...current, status: value === INVOICE_UNSET_VALUE ? "" : value } : current,
+                        )
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     >
-                      <option value="">unset</option>
-                      {INVOICE_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                        <SelectItem value={INVOICE_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          unset
+                        </SelectItem>
+                        {INVOICE_STATUSES.map((status) => (
+                          <SelectItem
+                            key={status}
+                            value={status}
+                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                          >
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                 </div>
               </div>

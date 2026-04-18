@@ -2,13 +2,13 @@
 > It is not the source of truth for the current frontend runtime.
 > It may reference mock-only modules, old table names, and deprecated architecture.
 
-# GHEADS PDCA Platform - Project Specification
+# ColdUnicorn PDCA Platform - Project Specification
 
 ## 1. System Overview
 
 ### 1.1 About
 
-GHEADS is a B2B cold email lead generation agency. They run email campaigns for clients through platforms like Smartlead and Bison. The current system is built entirely on Google Sheets: each client gets a separate spreadsheet with their leads, campaigns, statistics, and a dashboard. The internal team operates from a 20-sheet master workbook (PDCA) with a 127-column "CS PDCA" sheet tracking day-over-day, week-over-week, and month-over-month metrics.
+ColdUnicorn is a B2B cold email lead generation agency. They run email campaigns for clients through platforms like Smartlead and Bison. The current system is built entirely on Google Sheets: each client gets a separate spreadsheet with their leads, campaigns, statistics, and a dashboard. The internal team operates from a 20-sheet master workbook (PDCA) with a 127-column "CS PDCA" sheet tracking day-over-day, week-over-week, and month-over-month metrics.
 
 ### 1.2 Problem
 
@@ -77,8 +77,8 @@ A custom platform built with **React** (frontend) + **Supabase** (backend, datab
 
 | Role | Scope | Description |
 |------|-------|-------------|
-| `super_admin` | Full system | GHEADS founder, full access to everything |
-| `admin` | Full system | GHEADS admin team, nearly full access |
+| `super_admin` | Full system | ColdUnicorn founder, full access to everything |
+| `admin` | Full system | ColdUnicorn admin team, nearly full access |
 | `cs_manager` | Assigned clients | Customer Success / Growth Head - manages assigned clients |
 | `client` | Own data only | External client user - sees only their own leads, campaigns, stats |
 
@@ -412,7 +412,7 @@ CREATE INDEX idx_domains_name ON domains(domain_name);
 
 ### 3.10 Internal CRM
 
-Replaces the "CRM" sheet (GHEADS own sales pipeline, 109 rows).
+Replaces the "CRM" sheet (ColdUnicorn own sales pipeline, 109 rows).
 
 ```sql
 CREATE TABLE crm_prospects (
@@ -447,7 +447,7 @@ CREATE TABLE crm_prospects (
 
 ### 3.11 LG Pipeline
 
-Replaces the "LG PDCA" sheet (lead generation pipeline for GHEADS itself).
+Replaces the "LG PDCA" sheet (lead generation pipeline for ColdUnicorn itself).
 
 ```sql
 CREATE TABLE lg_pipeline (
@@ -716,8 +716,8 @@ CREATE POLICY "admin_only_lg" ON lg_pipeline FOR ALL USING (
 | `/admin/pdca/wow` | Week-over-Week | All clients: bounce rate, response rate, human RR, OOO rate, negative rate, total leads, SQL leads (current + 3 prev weeks) |
 | `/admin/pdca/2wo2w` | Biweekly Health | Health assessment form + history for all clients |
 | `/admin/pdca/mom` | Month-over-Month | All clients: total leads, SQL leads, meetings rate, WON rate vs KPI targets (current + 3 prev months) |
-| **GHEADS Sales** | | |
-| `/admin/crm/pipeline` | Sales CRM | Pipeline view (kanban or table) of GHEADS own prospects |
+| **ColdUnicorn Sales** | | |
+| `/admin/crm/pipeline` | Sales CRM | Pipeline view (kanban or table) of ColdUnicorn own prospects |
 | `/admin/crm/prospects/:id` | Prospect Detail | Full prospect detail with pipeline stages |
 | `/admin/lg-pipeline` | LG Pipeline | Lead generation deals, win chance, contract stages |
 | **Domains** | | |
@@ -761,7 +761,7 @@ CREATE POLICY "admin_only_lg" ON lg_pipeline FOR ALL USING (
 | US-M3 | As a CS manager, I want to perform biweekly health assessments per client | Form with 6 traffic-light selectors (IP, domains, warmup, copy, funnel, server), insights text area |
 | US-M4 | As a CS manager, I want MoM views of total leads, SQL leads, meeting rate, WON rate vs KPI targets | Table with 4 month columns, KPI comparison, percentage of target achieved |
 | US-M5 | As a CS manager, I want to see ecosystem integration status for each client at a glance | Dashboard widget with checkmarks: SMS, CRM, OOO, LinkedIn, workshops, ads |
-| US-M6 | As a CS manager, I want to track issues and GHEADS response times per client | Issue list with priority, status, response time metric, resolution tracking |
+| US-M6 | As a CS manager, I want to track issues and ColdUnicorn response times per client | Issue list with priority, status, response time metric, resolution tracking |
 | US-M7 | As a CS manager, I want to manage domains per client | Domain table: domain name, setup email, purchase date, verification status, warmup reputation |
 
 ### 6.3 Admin Stories
@@ -769,7 +769,7 @@ CREATE POLICY "admin_only_lg" ON lg_pipeline FOR ALL USING (
 | ID | Story | Acceptance Criteria |
 |----|-------|-------------------|
 | US-A1 | As an admin, I want a global dashboard: total clients, leads, MQL, revenue, clients at risk | Summary cards + trend charts + at-risk client list (red health or high lost probability) |
-| US-A2 | As an admin, I want to manage GHEADS sales CRM: prospects, pipeline stages, follow-ups | Kanban board or table with drag-and-drop stages, prospect CRUD |
+| US-A2 | As an admin, I want to manage ColdUnicorn sales CRM: prospects, pipeline stages, follow-ups | Kanban board or table with drag-and-drop stages, prospect CRUD |
 | US-A3 | As an admin, I want to manage LG pipeline: deals, win chance, contracts | Deal table with win chance badges, source tracking, won/lost recording |
 | US-A4 | As an admin, I want to view/edit cash flow projections by month | Spreadsheet-like grid: months as columns, cost categories as rows, editable cells |
 | US-A5 | As an admin, I want to manage users: invite clients with magic links, assign roles and clients | User list, invite form (email + role + client assignment), deactivate users |
@@ -884,7 +884,7 @@ Endpoints needed:
 Webhook (incoming):
   POST /webhooks/smartlead/lead      -- New lead notification
 
-Auth: API key per Smartlead account (4 accounts: RevGen, ConvertAI, E5M, GHEADS)
+Auth: API key per Smartlead account (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
 ```
 
 ### 8.2 Bison Integration

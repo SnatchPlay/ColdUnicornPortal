@@ -6,6 +6,17 @@ import { useAuth } from "../providers/auth";
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const { loading, session, updatePassword, requestPasswordReset, error } = useAuth();
+  const isInviteFlow = useMemo(() => {
+    if (typeof window === "undefined") return false;
+
+    const searchType = new URLSearchParams(window.location.search).get("type");
+    const hashParams = window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const hashType = new URLSearchParams(hashParams).get("type");
+
+    return searchType === "invite" || hashType === "invite";
+  }, []);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,6 +77,11 @@ export function ResetPasswordPage() {
           className="w-full"
         >
           <div className="space-y-4">
+            {isInviteFlow && (
+              <Banner tone="info">
+                You are opening an invitation link. Set a password to activate your account before entering the workspace.
+              </Banner>
+            )}
             {error && <Banner tone="warning">{error}</Banner>}
             {message && <Banner tone={message.tone}>{message.text}</Banner>}
 

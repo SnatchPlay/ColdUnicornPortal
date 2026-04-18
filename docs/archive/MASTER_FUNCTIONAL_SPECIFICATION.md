@@ -2,7 +2,7 @@
 > It is not the source of truth for the current frontend runtime.
 > It may reference mock-only modules, old table names, and deprecated architecture.
 
-# GHEADS PDCA Platform - Master Functional Specification
+# ColdUnicorn PDCA Platform - Master Functional Specification
 
 **Version:** 1.0
 **Date:** 2026-04-04
@@ -14,10 +14,10 @@
 
 ## What the Product Is
 
-The GHEADS PDCA Platform is a custom B2B SaaS portal replacing a sprawling Google Sheets-based operating system for a cold email lead generation agency (~35 active clients). It consists of two interlinked portals:
+The ColdUnicorn PDCA Platform is a custom B2B SaaS portal replacing a sprawling Google Sheets-based operating system for a cold email lead generation agency (~35 active clients). It consists of two interlinked portals:
 
 - **Client Portal** -- External-facing. Clients view their leads, campaigns, email statistics, pipeline progress, and dashboards.
-- **Admin Portal** -- Internal-facing. GHEADS admins, CS managers, and the founder manage the entire agency operation: client health, PDCA metrics, CRM pipeline, finances, domains, automations, and reporting.
+- **Admin Portal** -- Internal-facing. ColdUnicorn admins, CS managers, and the founder manage the entire agency operation: client health, PDCA metrics, CRM pipeline, finances, domains, automations, and reporting.
 
 ## What the Migration Is Really Doing
 
@@ -78,7 +78,7 @@ This is not a simple "move data from sheets to a database" project. It is a **bu
 - **Reliability:** High for architecture decisions. Medium for schema completeness (missing tables discovered). Low for UI detail (route list without interaction specs).
 - **Role in future system:** Blueprint for database and backend. Must be updated with schema gaps found in this analysis.
 
-## 2.2 GHEADS _ Antal _ Report.xlsx (Client Report Workbook)
+## 2.2 ColdUnicorn _ Antal _ Report.xlsx (Client Report Workbook)
 
 - **Contains:** 4 sheets -- Leads (1010 rows, 29 columns), Campaigns (214 rows, 8 columns), Dashboard (computed, 51 columns), Statistics (278 rows, 8 columns).
 - **Reveals:** The exact data structure clients currently see. Leads have columns A-AC including Full Name, Job Title, Email, Phone, Phone Source, Company, Industry, Headcount, Lead Received date, Campaign Name, Message Title, Message #, Website, Qualification, Lead Response Time, Meetings (bool), Meetings Held (bool), Offer Sent (bool), Won (bool), Comments, Date, Mail from lead (response text), TIP, Month, Campaign ID, external IDs (Z), LinkedIn URL (AB), Country (AC). The Dashboard sheet is formula-driven with data series for charts (daily sent/reply/bounce, weekly/monthly leads, prospects, campaign stats). Statistics tracks daily per-campaign metrics (report-date, campaign-id, sent, reply, bounce, unique-open, positive-replies).
@@ -95,7 +95,7 @@ This is not a simple "move data from sheets to a database" project. It is a **bu
 | U (Date - seems like created date) | Yes | `created_at` | Covered |
 | X (Month) | Computed | Can derive from dates | N/A |
 
-## 2.3 GHEADS _ PDCA (1).xlsx (PDCA Master Workbook)
+## 2.3 ColdUnicorn _ PDCA (1).xlsx (PDCA Master Workbook)
 
 - **Contains:** 20 sheets including the critical 127-column CS PDCA (962 rows), CRM (116 rows), CF/Cash Flow (40 rows), GH cost (13 rows), AUTH (75 rows), Daily stats (4,294 rows, 27 columns), Emails Exclude List (162 rows), Client CRM Details (1,002 rows), ABM LOSTS (1,000 rows), E5M CS (50 rows, 57 columns), LG PDCA (100 rows), Prospect Base (23 rows), Monthly (46 rows), DomainsPerformance (1,001 rows), Weekly (47 rows), Smartlead Accounts (5 rows), Dashboards (chart-only), RR & BR generator (25 rows).
 - **Reveals:** The complete internal operating system of the agency. CS PDCA has sections: Customer info (A-G), Basic setup (H-Q), Issues (R), DoD schedule & daily sent (S-Z with 5-day windows), 3DoD leads (AA-AJ), WoW metrics (AK-BL with 4-week windows), 2Wo2W health (BM-BR), MoM totals (BS-CS with 4-month windows), Ecosystem integration (CT-DF), MoM invoices (DG-DN), MoM partnerships (DO-DR), Account Based Selling (DS-DW).
@@ -184,7 +184,7 @@ A single master workbook shared internally with 20 sheets:
 | Sheet | Purpose | Key Metric |
 |-------|---------|-----------|
 | CS PDCA | Central command -- 127 columns tracking every client dimension | THE operating view |
-| CRM | GHEADS' own sales pipeline | 116 prospects |
+| CRM | ColdUnicorn's own sales pipeline | 116 prospects |
 | CF | Cash flow projections | Monthly net/gross |
 | GH cost | Agency cost breakdown | PLN totals |
 | Daily stats | Time-series client snapshots | 4,294 rows |
@@ -215,7 +215,7 @@ Four automations running in production:
 
 | Platform | Role | Integration Type |
 |----------|------|-----------------|
-| Bison (go.gheads.com) | Email outreach execution | API + webhooks |
+| Bison (go.coldunicorn.com) | Email outreach execution | API + webhooks |
 | Smartlead | Email outreach execution (legacy/parallel) | API keys |
 | Snov.io | Lead enrichment (company, position, LinkedIn) | API |
 | Lusha | Phone number discovery | API |
@@ -290,8 +290,8 @@ Frontend (React + TanStack Query)
 
 | Role | Identity | Scope | Count |
 |------|----------|-------|-------|
-| `super_admin` | GHEADS founder (Lukasz) | Everything. Cannot be deleted. | 1 |
-| `admin` | GHEADS admin team | Nearly everything except user role escalation to super_admin | 2-5 |
+| `super_admin` | ColdUnicorn founder (Lukasz) | Everything. Cannot be deleted. | 1 |
+| `admin` | ColdUnicorn admin team | Nearly everything except user role escalation to super_admin | 2-5 |
 | `cs_manager` | Customer Success / Growth Head (Ania, Natalia, Kacper, etc.) | Assigned clients only + shared read-only tools | 3-6 |
 | `client` | External client user | Own client data only, client-visible tables only | ~35-70 |
 
@@ -1159,7 +1159,7 @@ Two-step wizard:
 
 - **Route:** `/admin/crm/pipeline`
 - **Primary roles:** super_admin, admin
-- **Primary purpose:** GHEADS' own sales pipeline management.
+- **Primary purpose:** ColdUnicorn's own sales pipeline management.
 - **Business value:** Track agency's own business development.
 - **Key datasets:** `crm_prospects` (AgencyCrmDeal), `users`
 - **Main UI sections:**
@@ -1174,7 +1174,7 @@ Two-step wizard:
 
 - **Route:** `/admin/crm/lg-pipeline`
 - **Primary roles:** super_admin, admin
-- **Primary purpose:** Lead generation pipeline for GHEADS' own leads (separate from CRM).
+- **Primary purpose:** Lead generation pipeline for ColdUnicorn's own leads (separate from CRM).
 - **Business value:** Track inbound/referred leads separately from outbound CRM.
 - **Key datasets:** `lg_pipeline`, `users`
 - **Required fields:** company_name, received_date, owner_id, source, estimated_value, win_chance, meeting_done (bool), offer_sent (bool), follow_ups_done (bool), contract_signed (bool), lead_magnet (bool), won (bool), lesson_learned
@@ -1326,7 +1326,7 @@ Two-step wizard:
 - **Primary purpose:** API keys, Smartlead accounts, Bison workspace management, global config.
 - **Key datasets:** Smartlead Accounts data, client configs
 - **Main UI sections:**
-  1. Smartlead Accounts: account name + API key (4 accounts: RevGen, ConvertAI, E5M, GHEADS)
+  1. Smartlead Accounts: account name + API key (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
   2. Global Bison webhook URL configuration
   3. OpenAI API key for classification
   4. Snov.io credentials
@@ -1723,7 +1723,7 @@ CREATE POLICY "internal_pdca" ON client_pdca_phases FOR ALL USING (
 
 ## 14.1 MVP Goal
 
-**Fastest useful migration** that allows GHEADS to stop using Google Sheets for daily operations without losing critical functionality.
+**Fastest useful migration** that allows ColdUnicorn to stop using Google Sheets for daily operations without losing critical functionality.
 
 ## 14.2 MVP Inclusions
 
@@ -1765,7 +1765,7 @@ CREATE POLICY "internal_pdca" ON client_pdca_phases FOR ALL USING (
 
 | Item | Why Excluded |
 |------|-------------|
-| Agency CRM | GHEADS can continue using CRM sheet temporarily |
+| Agency CRM | ColdUnicorn can continue using CRM sheet temporarily |
 | LG Pipeline | Can continue in sheets |
 | Finance (invoices, cash flow, costs) | Can continue in sheets |
 | Global Domains page | Per-client domains in 360 panel is sufficient for now |

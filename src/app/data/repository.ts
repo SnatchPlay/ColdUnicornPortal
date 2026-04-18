@@ -9,6 +9,8 @@ import type {
   DailyStatRecord,
   DomainRecord,
   EmailExcludeRecord,
+  InviteRecord,
+  InviteRequest,
   InvoiceRecord,
   LeadRecord,
   ReplyRecord,
@@ -51,6 +53,16 @@ function sleep(ms: number) {
 }
 
 function getReasonMessage(reason: unknown) {
+  const maybeHttpStatus =
+    typeof reason === "object" && reason !== null && "context" in reason
+      ? ((reason as { context?: { status?: number; statusText?: string } }).context ?? null)
+      : null;
+
+  if (maybeHttpStatus?.status) {
+    const statusText = maybeHttpStatus.statusText ? ` ${maybeHttpStatus.statusText}` : "";
+    return `Edge Function request failed with HTTP ${maybeHttpStatus.status}${statusText}.`;
+  }
+
   if (typeof reason === "string") return reason;
   if (reason instanceof Error) return reason.message;
   return "Unknown repository failure.";
@@ -111,6 +123,107 @@ function ensureSupabase() {
   return supabase;
 }
 
+async function getSessionAccessToken() {
+  const client = ensureSupabase();
+  const { data, error } = await client.auth.getSession();
+
+  if (error) {
+    throw new RepositoryError({
+      table: "auth",
+      operation: "select",
+      kind: "permission",
+      message: "Could not validate your authenticated session. Please sign in again.",
+    });
+  }
+
+  let session = data.session;
+
+  if (session?.expires_at && session.expires_at * 1000 <= Date.now() + 60_000) {
+    const refresh = await client.auth.refreshSession();
+    if (refresh.error) {
+      throw new RepositoryError({
+        table: "auth",
+        operation: "select",
+        kind: "permission",
+        message: "Your session expired and could not be refreshed. Please sign in again.",
+      });
+    }
+    session = refresh.data.session;
+  }
+
+  const accessToken = session?.access_token;
+  if (!accessToken) {
+    throw new RepositoryError({
+      table: "auth",
+      operation: "select",
+      kind: "permission",
+      message: "Your session is missing an access token. Please sign in again.",
+    });
+  }
+
+  return accessToken;
+}
+
+async function performInviteFunctionRequest(
+  functionName: "send-invite" | "manage-invites",
+  accessToken: string,
+  body: Record<string, unknown>,
+) {
+  const endpoint = `${runtimeConfig.supabaseUrl}/functions/v1/${functionName}`;
+
+  return fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: runtimeConfig.supabasePublishableKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function invokeInviteEdgeFunction<TResponse>(
+  functionName: "send-invite" | "manage-invites",
+  body: Record<string, unknown>,
+): Promise<TResponse> {
+  const client = ensureSupabase();
+  const firstToken = await getSessionAccessToken();
+  let response = await performInviteFunctionRequest(functionName, firstToken, body);
+
+  if (response.status === 401) {
+    const refresh = await client.auth.refreshSession();
+    if (!refresh.error && refresh.data.session?.access_token) {
+      response = await performInviteFunctionRequest(functionName, refresh.data.session.access_token, body);
+    }
+  }
+
+  const text = await response.text();
+  let payload: Record<string, unknown> = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      payload = { error: text };
+    }
+  }
+
+  if (!response.ok) {
+    const backendMessage =
+      typeof payload.error === "string"
+        ? payload.error
+        : `Edge Function request failed with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`;
+
+    throw new RepositoryError({
+      table: "invites",
+      operation: "select",
+      kind: classifyErrorKind(backendMessage),
+      message: backendMessage,
+    });
+  }
+
+  return payload as TResponse;
+}
+
 export interface Repository {
   loadSnapshot(options?: {
     includeDailyStats?: boolean;
@@ -121,6 +234,10 @@ export interface Repository {
   updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
+  sendInvite(payload: InviteRequest): Promise<{ inviteId: string | null }>;
+  listInvites(): Promise<InviteRecord[]>;
+  resendInvite(inviteId: string): Promise<InviteRecord>;
+  revokeInvite(inviteId: string): Promise<void>;
   upsertClientUserMapping(userId: string, clientId: string): Promise<ClientUserRecord>;
   deleteClientUserMapping(mappingId: string): Promise<void>;
   upsertEmailExcludeDomain(domain: string): Promise<EmailExcludeRecord>;
@@ -228,6 +345,52 @@ export const repository: Repository = {
     const { data, error } = await client.from("invoices").update(patch).eq("id", invoiceId).select("*").single();
     if (error) throw mapRepositoryError(error, "invoices", "update");
     return data as InvoiceRecord;
+  },
+  async sendInvite(payload) {
+    ensureSupabase();
+    const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; inviteId?: string; error?: string }>(
+      "send-invite",
+      payload as Record<string, unknown>,
+    );
+    if (!typedData.ok) {
+      throw mapRepositoryError(typedData.error ?? "Invitation request failed.", "invites", "upsert");
+    }
+
+    return { inviteId: typedData.inviteId ?? null };
+  },
+  async listInvites() {
+    ensureSupabase();
+    const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; invites?: InviteRecord[]; error?: string }>(
+      "manage-invites",
+      { action: "list" },
+    );
+    if (!typedData.ok) {
+      throw mapRepositoryError(typedData.error ?? "Could not load invitations.", "invites", "select");
+    }
+
+    return typedData.invites ?? [];
+  },
+  async resendInvite(inviteId) {
+    ensureSupabase();
+    const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; invite?: InviteRecord; error?: string }>(
+      "manage-invites",
+      { action: "resend", inviteId },
+    );
+    if (!typedData.ok || !typedData.invite) {
+      throw mapRepositoryError(typedData.error ?? "Could not resend invitation.", "invites", "upsert");
+    }
+
+    return typedData.invite;
+  },
+  async revokeInvite(inviteId) {
+    ensureSupabase();
+    const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; error?: string }>("manage-invites", {
+      action: "revoke",
+      inviteId,
+    });
+    if (!typedData.ok) {
+      throw mapRepositoryError(typedData.error ?? "Could not revoke invitation.", "invites", "delete");
+    }
   },
   async upsertClientUserMapping(userId, clientId) {
     const client = ensureSupabase();

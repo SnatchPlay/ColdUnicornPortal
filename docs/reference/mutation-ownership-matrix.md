@@ -9,6 +9,7 @@
 | domains | No | Assigned records only | All |
 | invoices | No | Assigned records only | All |
 | email_exclude_list | No | No | All |
+| invitations (edge functions) | No | No | All |
 | replies | No | No | No |
 | campaign_daily_stats | No | No | No |
 | daily_stats | No | No | No |

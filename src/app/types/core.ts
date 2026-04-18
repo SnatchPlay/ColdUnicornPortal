@@ -1,4 +1,6 @@
 export type AppRole = "super_admin" | "admin" | "manager" | "client";
+export type InviteRole = "admin" | "manager" | "client";
+export type InviteStatus = "pending" | "accepted" | "expired";
 export type ClientStatus = "Active" | "Abo" | "On hold" | "Offboarding" | "Inactive" | "Sales";
 export type CampaignType = "outreach" | "ooo" | "nurture" | "ooo_followup";
 export type CampaignStatus = "draft" | "launching" | "active" | "stopped" | "completed";
@@ -213,6 +215,28 @@ export interface Identity {
   email: string;
   role: AppRole;
   clientId?: string;
+}
+
+export interface InviteRequest {
+  email: string;
+  role: InviteRole;
+  clientId?: string;
+}
+
+export interface InviteRecord {
+  id: string;
+  email: string;
+  role: InviteRole;
+  status: InviteStatus;
+  invitedAt: string | null;
+  acceptedAt: string | null;
+  expiresAt: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  invitedById: string | null;
+  invitedByName: string | null;
+  canResend: boolean;
+  canRevoke: boolean;
 }
 
 export interface CoreSnapshot {

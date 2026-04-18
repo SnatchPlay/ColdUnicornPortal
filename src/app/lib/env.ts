@@ -20,7 +20,8 @@ const isProduction = appEnv === "production";
 const appBaseUrl =
   configuredBaseUrl || (!isProduction && typeof window !== "undefined" ? trimTrailingSlash(window.location.origin) : "");
 
-const authAllowSelfSignup = parseBooleanFlag(import.meta.env.VITE_AUTH_ALLOW_SELF_SIGNUP, !isProduction);
+const authInviteOnly = parseBooleanFlag(import.meta.env.VITE_AUTH_INVITE_ONLY, true);
+const authAllowSelfSignup = parseBooleanFlag(import.meta.env.VITE_AUTH_ALLOW_SELF_SIGNUP, false) && !authInviteOnly;
 const authAllowMagicLink = parseBooleanFlag(import.meta.env.VITE_AUTH_ALLOW_MAGIC_LINK, true);
 const allowInternalImpersonation = !isProduction;
 
@@ -36,6 +37,7 @@ export const runtimeConfig = {
   appBaseUrl,
   appEnv,
   isProduction,
+  authInviteOnly,
   authAllowSelfSignup,
   authAllowMagicLink,
   allowInternalImpersonation,

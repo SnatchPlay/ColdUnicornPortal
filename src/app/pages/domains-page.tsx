@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney } from "../lib/format";
 import { scopeClients, scopeDomains } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
@@ -7,6 +8,7 @@ import { useCoreData } from "../providers/core-data";
 import type { DomainRecord, DomainStatus } from "../types/core";
 
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
+const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
 
 interface DomainDraft {
   status: DomainStatus | "";
@@ -172,20 +174,30 @@ export function DomainsPage() {
                 placeholder="Search domain or setup email"
                 className="min-w-[16rem] flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
               />
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                aria-label="Filter domains by status"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
+              <Select
+                value={statusFilter === "" ? DOMAIN_UNSET_VALUE : statusFilter}
+                onValueChange={(value) => setStatusFilter(value === DOMAIN_UNSET_VALUE ? "" : value)}
               >
-                <option value="all">All statuses</option>
-                {DOMAIN_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-                <option value="">unset</option>
-              </select>
+                <SelectTrigger
+                  aria-label="Filter domains by status"
+                  className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white"
+                >
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    All statuses
+                  </SelectItem>
+                  {DOMAIN_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {status}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    unset
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border">
@@ -267,27 +279,37 @@ export function DomainsPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                    <select
-                      value={draft.status}
-                      onChange={(event) =>
+                    <Select
+                      value={draft.status === "" ? DOMAIN_UNSET_VALUE : draft.status}
+                      onValueChange={(value) =>
                         setDraft((current) =>
                           current
                             ? {
                                 ...current,
-                                status: event.target.value as DomainStatus | "",
+                                status: value === DOMAIN_UNSET_VALUE ? "" : (value as DomainStatus),
                               }
                             : current,
                         )
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     >
-                      <option value="">unset</option>
-                      {DOMAIN_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                        <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          unset
+                        </SelectItem>
+                        {DOMAIN_STATUSES.map((status) => (
+                          <SelectItem
+                            key={status}
+                            value={status}
+                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                          >
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
 
                   <label className="space-y-2">
