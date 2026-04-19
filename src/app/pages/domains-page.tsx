@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney } from "../lib/format";
 import { scopeClients, scopeDomains } from "../lib/selectors";
+import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { DomainRecord, DomainStatus } from "../types/core";
@@ -10,12 +11,27 @@ import type { DomainRecord, DomainStatus } from "../types/core";
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
 const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
 
+type SortDirection = "asc" | "desc";
+type DomainSortKey = "domain" | "client" | "status" | "reputation";
+
 interface DomainDraft {
   status: DomainStatus | "";
   reputation: string;
   exchangeCost: number | null;
   campaignVerifiedAt: string;
   warmupVerifiedAt: string;
+}
+
+function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
+  const safeLeft = (left ?? "").toLowerCase();
+  const safeRight = (right ?? "").toLowerCase();
+  const result = safeLeft.localeCompare(safeRight);
+  return direction === "asc" ? result : -result;
+}
+
+function sortIndicator(active: boolean, direction: SortDirection) {
+  if (!active) return "sort";
+  return direction === "asc" ? "asc" : "desc";
 }
 
 function toDomainDraft(domain: DomainRecord): DomainDraft {
@@ -63,6 +79,22 @@ export function DomainsPage() {
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DomainDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [domainSort, setDomainSort] = useState<{ key: DomainSortKey; direction: SortDirection }>({
+    key: "domain",
+    direction: "asc",
+  });
+  const domainColumns = useResizableColumns({
+    storageKey: "table:domains:columns",
+    defaultWidths: [420, 320, 220, 220],
+    minWidths: [240, 200, 150, 150],
+  });
+  const domainTableStyle = useMemo(
+    () =>
+      ({
+        "--domains-table-columns": domainColumns.template,
+      }) as CSSProperties,
+    [domainColumns.template],
+  );
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
@@ -79,8 +111,25 @@ export function DomainsPage() {
     });
   }, [query, scopedDomains, statusFilter]);
 
+  const sortedDomains = useMemo(() => {
+    return filteredDomains.slice().sort((left, right) => {
+      if (domainSort.key === "domain") {
+        return compareText(left.domain_name, right.domain_name, domainSort.direction);
+      }
+      if (domainSort.key === "client") {
+        const leftClient = scopedClients.find((item) => item.id === left.client_id)?.name ?? "";
+        const rightClient = scopedClients.find((item) => item.id === right.client_id)?.name ?? "";
+        return compareText(leftClient, rightClient, domainSort.direction);
+      }
+      if (domainSort.key === "status") {
+        return compareText(left.status, right.status, domainSort.direction);
+      }
+      return compareText(left.reputation, right.reputation, domainSort.direction);
+    });
+  }, [domainSort.direction, domainSort.key, filteredDomains, scopedClients]);
+
   const selectedDomain =
-    filteredDomains.find((item) => item.id === selectedDomainId) ?? filteredDomains[0] ?? null;
+    sortedDomains.find((item) => item.id === selectedDomainId) ?? sortedDomains[0] ?? null;
 
   const selectedClientName = useMemo(() => {
     if (!selectedDomain) return "Unknown client";
@@ -159,14 +208,14 @@ export function DomainsPage() {
         subtitle="Domain inventory with warmup and campaign verification controls for scoped clients."
       />
 
-      {filteredDomains.length === 0 ? (
+      {sortedDomains.length === 0 ? (
         <EmptyState
           title="No domains in current scope"
           description="When domains are synced, they will appear here with health and verification details."
         />
       ) : (
         <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-          <Surface title="Domain list" subtitle={`${filteredDomains.length} domains in current scope`}>
+          <Surface title="Domain list" subtitle={`${sortedDomains.length} domains in current scope`}>
             <div className="mb-4 flex flex-wrap gap-3">
               <input
                 value={query}
@@ -201,31 +250,53 @@ export function DomainsPage() {
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border">
-              <div className="hidden grid-cols-[1.4fr_1.1fr_0.9fr_0.8fr] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid">
-                <span>Domain</span>
-                <span>Client</span>
-                <span>Status</span>
-                <span>Reputation</span>
-              </div>
-              <div className="divide-y divide-border">
-                {filteredDomains.map((domain) => {
-                  const active = selectedDomain?.id === domain.id;
-                  const clientName = scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
-                  return (
-                    <button
-                      key={domain.id}
-                      onClick={() => setSelectedDomainId(domain.id)}
-                      className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:grid-cols-[1.4fr_1.1fr_0.9fr_0.8fr] md:items-center md:gap-3 ${
-                        active ? "bg-white/5" : "hover:bg-white/3"
-                      }`}
-                    >
-                      <span className="truncate text-sm text-white">{domain.domain_name}</span>
-                      <span className="truncate text-sm text-neutral-300">{clientName}</span>
-                      <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
-                      <span className="truncate text-sm text-neutral-300">{domain.reputation ?? "—"}</span>
-                    </button>
-                  );
-                })}
+              <div className="overflow-x-auto" style={domainTableStyle}>
+                <div className="hidden min-w-[1200px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--domains-table-columns)]">
+                  {[
+                    { key: "domain" as const, label: "Domain" },
+                    { key: "client" as const, label: "Client" },
+                    { key: "status" as const, label: "Status" },
+                    { key: "reputation" as const, label: "Reputation" },
+                  ].map((column, index, collection) => (
+                    <div key={column.key} className="relative min-w-0">
+                      <button
+                        onClick={() =>
+                          setDomainSort((current) =>
+                            current.key === column.key
+                              ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
+                              : { key: column.key, direction: "asc" },
+                          )
+                        }
+                        className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
+                      >
+                        {column.label} ({sortIndicator(domainSort.key === column.key, domainSort.direction)})
+                      </button>
+                      {index < collection.length - 1 && (
+                        <div onMouseDown={domainColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="divide-y divide-border">
+                  {sortedDomains.map((domain) => {
+                    const active = selectedDomain?.id === domain.id;
+                    const clientName = scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
+                    return (
+                      <button
+                        key={domain.id}
+                        onClick={() => setSelectedDomainId(domain.id)}
+                        className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:min-w-[1200px] md:[grid-template-columns:var(--domains-table-columns)] md:items-center md:gap-3 ${
+                          active ? "bg-white/5" : "hover:bg-white/3"
+                        }`}
+                      >
+                        <span className="truncate text-sm text-white">{domain.domain_name}</span>
+                        <span className="truncate text-sm text-neutral-300">{clientName}</span>
+                        <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
+                        <span className="truncate text-sm text-neutral-300">{domain.reputation ?? "—"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </Surface>
@@ -379,3 +450,4 @@ export function DomainsPage() {
     </div>
   );
 }
+

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { scopeClients, scopeInvoices } from "../lib/selectors";
+import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { InvoiceRecord } from "../types/core";
@@ -10,10 +11,32 @@ import type { InvoiceRecord } from "../types/core";
 const INVOICE_STATUSES = ["pending", "issued", "sent", "paid", "overdue", "vindication"] as const;
 const INVOICE_UNSET_VALUE = "__unset_invoice_status__";
 
+type SortDirection = "asc" | "desc";
+type InvoiceSortKey = "client" | "issueDate" | "amount" | "status";
+
 interface InvoiceDraft {
   issueDate: string;
   amount: number;
   status: string;
+}
+
+function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
+  const safeLeft = (left ?? "").toLowerCase();
+  const safeRight = (right ?? "").toLowerCase();
+  const result = safeLeft.localeCompare(safeRight);
+  return direction === "asc" ? result : -result;
+}
+
+function compareNumber(left: number | null | undefined, right: number | null | undefined, direction: SortDirection) {
+  const safeLeft = left ?? Number.NEGATIVE_INFINITY;
+  const safeRight = right ?? Number.NEGATIVE_INFINITY;
+  const result = safeLeft - safeRight;
+  return direction === "asc" ? result : -result;
+}
+
+function sortIndicator(active: boolean, direction: SortDirection) {
+  if (!active) return "sort";
+  return direction === "asc" ? "asc" : "desc";
 }
 
 function toInvoiceDraft(invoice: InvoiceRecord): InvoiceDraft {
@@ -50,6 +73,22 @@ export function InvoicesPage() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [draft, setDraft] = useState<InvoiceDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [invoiceSort, setInvoiceSort] = useState<{ key: InvoiceSortKey; direction: SortDirection }>({
+    key: "issueDate",
+    direction: "desc",
+  });
+  const invoiceColumns = useResizableColumns({
+    storageKey: "table:invoices:columns",
+    defaultWidths: [360, 250, 220, 220],
+    minWidths: [220, 170, 140, 140],
+  });
+  const invoiceTableStyle = useMemo(
+    () =>
+      ({
+        "--invoices-table-columns": invoiceColumns.template,
+      }) as CSSProperties,
+    [invoiceColumns.template],
+  );
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedInvoices = useMemo(
@@ -71,8 +110,25 @@ export function InvoicesPage() {
     });
   }, [query, scopedClients, scopedInvoices, statusFilter]);
 
+  const sortedInvoices = useMemo(() => {
+    return filteredInvoices.slice().sort((left, right) => {
+      if (invoiceSort.key === "client") {
+        const leftClient = scopedClients.find((item) => item.id === left.client_id)?.name ?? "";
+        const rightClient = scopedClients.find((item) => item.id === right.client_id)?.name ?? "";
+        return compareText(leftClient, rightClient, invoiceSort.direction);
+      }
+      if (invoiceSort.key === "issueDate") {
+        return compareText(left.issue_date, right.issue_date, invoiceSort.direction);
+      }
+      if (invoiceSort.key === "amount") {
+        return compareNumber(left.amount, right.amount, invoiceSort.direction);
+      }
+      return compareText(left.status, right.status, invoiceSort.direction);
+    });
+  }, [filteredInvoices, invoiceSort.direction, invoiceSort.key, scopedClients]);
+
   const selectedInvoice =
-    filteredInvoices.find((item) => item.id === selectedInvoiceId) ?? filteredInvoices[0] ?? null;
+    sortedInvoices.find((item) => item.id === selectedInvoiceId) ?? sortedInvoices[0] ?? null;
 
   useEffect(() => {
     if (!selectedInvoice) {
@@ -89,9 +145,9 @@ export function InvoicesPage() {
 
   const isDraftDirty = Object.keys(draftPatch).length > 0;
 
-  const paidCount = filteredInvoices.filter((item) => item.status === "paid").length;
-  const overdueCount = filteredInvoices.filter((item) => item.status === "overdue").length;
-  const totalAmount = filteredInvoices.reduce((sum, item) => sum + item.amount, 0);
+  const paidCount = sortedInvoices.filter((item) => item.status === "paid").length;
+  const overdueCount = sortedInvoices.filter((item) => item.status === "overdue").length;
+  const totalAmount = sortedInvoices.reduce((sum, item) => sum + item.amount, 0);
 
   async function saveDraft() {
     if (!selectedInvoice || !isDraftDirty) return;
@@ -153,7 +209,7 @@ export function InvoicesPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-border bg-black/10 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Invoices</p>
-          <p className="mt-2 text-2xl">{formatNumber(filteredInvoices.length)}</p>
+          <p className="mt-2 text-2xl">{formatNumber(sortedInvoices.length)}</p>
         </div>
         <div className="rounded-2xl border border-border bg-black/10 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Paid</p>
@@ -166,14 +222,14 @@ export function InvoicesPage() {
         </div>
       </div>
 
-      {filteredInvoices.length === 0 ? (
+      {sortedInvoices.length === 0 ? (
         <EmptyState
           title="No invoices in current scope"
           description="When invoices are synced, they will appear here with amount and status details."
         />
       ) : (
         <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-          <Surface title="Invoice list" subtitle={`${filteredInvoices.length} invoices in current scope`}>
+          <Surface title="Invoice list" subtitle={`${sortedInvoices.length} invoices in current scope`}>
             <div className="mb-4 flex flex-wrap gap-3">
               <input
                 value={query}
@@ -208,31 +264,53 @@ export function InvoicesPage() {
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border">
-              <div className="hidden grid-cols-[1.3fr_0.9fr_0.8fr_0.8fr] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid">
-                <span>Client</span>
-                <span>Issue date</span>
-                <span>Amount</span>
-                <span>Status</span>
-              </div>
-              <div className="divide-y divide-border">
-                {filteredInvoices.map((invoice) => {
-                  const active = selectedInvoice?.id === invoice.id;
-                  const clientName = scopedClients.find((item) => item.id === invoice.client_id)?.name ?? "Unknown client";
-                  return (
-                    <button
-                      key={invoice.id}
-                      onClick={() => setSelectedInvoiceId(invoice.id)}
-                      className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:grid-cols-[1.3fr_0.9fr_0.8fr_0.8fr] md:items-center md:gap-3 ${
-                        active ? "bg-white/5" : "hover:bg-white/3"
-                      }`}
-                    >
-                      <span className="truncate text-sm text-white">{clientName}</span>
-                      <span className="text-sm text-neutral-300">{formatDate(invoice.issue_date)}</span>
-                      <span className="text-sm text-neutral-300">{formatMoney(invoice.amount)}</span>
-                      <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
-                    </button>
-                  );
-                })}
+              <div className="overflow-x-auto" style={invoiceTableStyle}>
+                <div className="hidden min-w-[1100px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--invoices-table-columns)]">
+                  {[
+                    { key: "client" as const, label: "Client" },
+                    { key: "issueDate" as const, label: "Issue date" },
+                    { key: "amount" as const, label: "Amount" },
+                    { key: "status" as const, label: "Status" },
+                  ].map((column, index, collection) => (
+                    <div key={column.key} className="relative min-w-0">
+                      <button
+                        onClick={() =>
+                          setInvoiceSort((current) =>
+                            current.key === column.key
+                              ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
+                              : { key: column.key, direction: column.key === "issueDate" ? "desc" : "asc" },
+                          )
+                        }
+                        className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
+                      >
+                        {column.label} ({sortIndicator(invoiceSort.key === column.key, invoiceSort.direction)})
+                      </button>
+                      {index < collection.length - 1 && (
+                        <div onMouseDown={invoiceColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="divide-y divide-border">
+                  {sortedInvoices.map((invoice) => {
+                    const active = selectedInvoice?.id === invoice.id;
+                    const clientName = scopedClients.find((item) => item.id === invoice.client_id)?.name ?? "Unknown client";
+                    return (
+                      <button
+                        key={invoice.id}
+                        onClick={() => setSelectedInvoiceId(invoice.id)}
+                        className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:min-w-[1100px] md:[grid-template-columns:var(--invoices-table-columns)] md:items-center md:gap-3 ${
+                          active ? "bg-white/5" : "hover:bg-white/3"
+                        }`}
+                      >
+                        <span className="truncate text-sm text-white">{clientName}</span>
+                        <span className="text-sm text-neutral-300">{formatDate(invoice.issue_date)}</span>
+                        <span className="text-sm text-neutral-300">{formatMoney(invoice.amount)}</span>
+                        <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </Surface>
@@ -347,3 +425,4 @@ export function InvoicesPage() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Download, MessageSquare } from "lucide-react";
 import {
   DateRangeButton,
@@ -16,12 +16,34 @@ import { getClientLeadRows, PIPELINE_STAGES, type PipelineStage } from "../lib/c
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaigns, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
+import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 
 type ReplyScope = "all" | "active" | "ooo";
+type SortDirection = "asc" | "desc";
+type ClientLeadSortKey = "lead" | "company" | "status" | "campaign" | "step" | "replies" | "lastReply" | "added";
 
 const PAGE_SIZE = 50;
+
+function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
+  const safeLeft = (left ?? "").toLowerCase();
+  const safeRight = (right ?? "").toLowerCase();
+  const result = safeLeft.localeCompare(safeRight);
+  return direction === "asc" ? result : -result;
+}
+
+function compareNumber(left: number | null | undefined, right: number | null | undefined, direction: SortDirection) {
+  const safeLeft = left ?? Number.NEGATIVE_INFINITY;
+  const safeRight = right ?? Number.NEGATIVE_INFINITY;
+  const result = safeLeft - safeRight;
+  return direction === "asc" ? result : -result;
+}
+
+function sortIndicator(active: boolean, direction: SortDirection) {
+  if (!active) return "sort";
+  return direction === "asc" ? "asc" : "desc";
+}
 
 function toCsvCell(value: string | number | null | undefined) {
   const normalized = String(value ?? "").replace(/"/g, '""');
@@ -38,6 +60,22 @@ export function ClientLeadsPage() {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
+  const [leadSort, setLeadSort] = useState<{ key: ClientLeadSortKey; direction: SortDirection }>({
+    key: "added",
+    direction: "desc",
+  });
+  const clientLeadColumns = useResizableColumns({
+    storageKey: "table:client-leads:columns",
+    defaultWidths: [340, 290, 300, 340, 150, 170, 220, 220],
+    minWidths: [220, 200, 200, 220, 120, 120, 160, 160],
+  });
+  const clientLeadTableStyle = useMemo(
+    () =>
+      ({
+        "--client-leads-table-columns": clientLeadColumns.template,
+      }) as CSSProperties,
+    [clientLeadColumns.template],
+  );
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
@@ -76,19 +114,43 @@ export function ClientLeadsPage() {
     });
   }, [campaignFilter, query, replyScope, rows, stageFilter]);
 
+  const sortedRows = useMemo(() => {
+    return filteredRows.slice().sort((left, right) => {
+      if (leadSort.key === "lead") {
+        return compareText(left.name, right.name, leadSort.direction);
+      }
+      if (leadSort.key === "company") {
+        return compareText(left.company, right.company, leadSort.direction);
+      }
+      if (leadSort.key === "status") {
+        return compareText(left.stage, right.stage, leadSort.direction);
+      }
+      if (leadSort.key === "campaign") {
+        return compareText(left.campaignName, right.campaignName, leadSort.direction);
+      }
+      if (leadSort.key === "step") {
+        return compareNumber(left.step, right.step, leadSort.direction);
+      }
+      if (leadSort.key === "replies") {
+        return compareNumber(left.replyCount, right.replyCount, leadSort.direction);
+      }
+      if (leadSort.key === "lastReply") {
+        return compareText(left.lastReplyDate, right.lastReplyDate, leadSort.direction);
+      }
+      return compareText(left.addedDate, right.addedDate, leadSort.direction);
+    });
+  }, [filteredRows, leadSort.direction, leadSort.key]);
+
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
   }, [campaignFilter, query, replyScope, stageFilter, timeframe]);
 
-  const visibleRows = useMemo(
-    () => filteredRows.slice(0, visibleRowsCount),
-    [filteredRows, visibleRowsCount],
-  );
+  const visibleRows = useMemo(() => sortedRows.slice(0, visibleRowsCount), [sortedRows, visibleRowsCount]);
 
-  const hasMoreRows = visibleRowsCount < filteredRows.length;
+  const hasMoreRows = visibleRowsCount < sortedRows.length;
 
   function handleExportCsv() {
-    if (filteredRows.length === 0) return;
+    if (sortedRows.length === 0) return;
 
     const header = [
       "Lead",
@@ -102,7 +164,7 @@ export function ClientLeadsPage() {
       "Added",
     ];
 
-    const lines = filteredRows.map((row) => [
+    const lines = sortedRows.map((row) => [
       row.name,
       row.email,
       row.company,
@@ -125,7 +187,7 @@ export function ClientLeadsPage() {
     window.URL.revokeObjectURL(url);
   }
 
-  const selectedRow = filteredRows.find((row) => row.id === selectedLeadId) ?? null;
+  const selectedRow = sortedRows.find((row) => row.id === selectedLeadId) ?? null;
   const clientName = scopedClients[0]?.name ?? "Client";
   const timeframeLabel = getTimeframeLabel(timeframe);
 
@@ -149,13 +211,13 @@ export function ClientLeadsPage() {
     <div className="space-y-7">
       <PortalPageHeader
         title="My Pipeline"
-        subtitle={`${formatNumber(filteredRows.length)} leads · ${timeframeLabel.toLowerCase()} · click a row to open details`}
+        subtitle={`${formatNumber(sortedRows.length)} leads · ${timeframeLabel.toLowerCase()} · click a row to open details`}
         actions={
           <div className="flex flex-wrap gap-3">
             <DateRangeButton value={timeframe} onChange={setTimeframe} />
             <button
               onClick={handleExportCsv}
-              disabled={filteredRows.length === 0}
+              disabled={sortedRows.length === 0}
               className="inline-flex items-center gap-2 rounded-xl border border-[#242424] px-4 py-2.5 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               <Download className="h-4 w-4" />
@@ -222,7 +284,7 @@ export function ClientLeadsPage() {
         </Select>
       </div>
 
-      {filteredRows.length === 0 ? (
+      {sortedRows.length === 0 ? (
         <EmptyPortalState title="No leads match the current filters" description={`${clientName} has no leads in this view.`} />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-[#242424] bg-[#050505]">
@@ -279,16 +341,36 @@ export function ClientLeadsPage() {
             ))}
           </div>
 
-          <div className="hidden xl:block">
-            <div className="grid grid-cols-[1.35fr_1.15fr_1.2fr_1.35fr_0.65fr_0.75fr_0.9fr_0.9fr] gap-5 border-b border-[#1f1f1f] px-5 py-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-              <span>Lead</span>
-              <span>Company</span>
-              <span>Status</span>
-              <span>Campaign</span>
-              <span>Step #</span>
-              <span>Replies</span>
-              <span>Last Reply</span>
-              <span>Added</span>
+          <div className="hidden overflow-x-auto xl:block" style={clientLeadTableStyle}>
+            <div className="min-w-[1900px] gap-5 border-b border-[#1f1f1f] px-5 py-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400 [grid-template-columns:var(--client-leads-table-columns)] xl:grid">
+              {[
+                { key: "lead" as const, label: "Lead" },
+                { key: "company" as const, label: "Company" },
+                { key: "status" as const, label: "Status" },
+                { key: "campaign" as const, label: "Campaign" },
+                { key: "step" as const, label: "Step #" },
+                { key: "replies" as const, label: "Replies" },
+                { key: "lastReply" as const, label: "Last Reply" },
+                { key: "added" as const, label: "Added" },
+              ].map((column, index, collection) => (
+                <div key={column.key} className="relative min-w-0">
+                  <button
+                    onClick={() =>
+                      setLeadSort((current) =>
+                        current.key === column.key
+                          ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
+                          : { key: column.key, direction: column.key === "added" || column.key === "lastReply" ? "desc" : "asc" },
+                      )
+                    }
+                    className="w-full pr-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400 transition hover:text-white"
+                  >
+                    {column.label} ({sortIndicator(leadSort.key === column.key, leadSort.direction)})
+                  </button>
+                  {index < collection.length - 1 && (
+                    <div onMouseDown={clientLeadColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
+                  )}
+                </div>
+              ))}
             </div>
             <div className="divide-y divide-[#151515]">
               {visibleRows.map((row) => (
@@ -299,7 +381,7 @@ export function ClientLeadsPage() {
                   aria-haspopup="dialog"
                   aria-controls="lead-drawer"
                   aria-expanded={selectedLeadId === row.id}
-                  className="grid w-full grid-cols-[1.35fr_1.15fr_1.2fr_1.35fr_0.65fr_0.75fr_0.9fr_0.9fr] gap-5 px-5 py-4 text-left transition hover:bg-[#0d0d0d]"
+                  className="grid min-w-[1900px] w-full [grid-template-columns:var(--client-leads-table-columns)] gap-5 px-5 py-4 text-left transition hover:bg-[#0d0d0d]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500 text-sm text-white">
@@ -338,7 +420,7 @@ export function ClientLeadsPage() {
                 onClick={() => setVisibleRowsCount((current) => current + PAGE_SIZE)}
                 className="inline-flex items-center gap-2 rounded-xl border border-[#2d2d2d] px-4 py-2 text-sm text-neutral-200 transition hover:border-[#3f3f3f]"
               >
-                Load more ({formatNumber(filteredRows.length - visibleRowsCount)} remaining)
+                Load more ({formatNumber(sortedRows.length - visibleRowsCount)} remaining)
               </button>
             </div>
           )}
@@ -349,3 +431,4 @@ export function ClientLeadsPage() {
     </div>
   );
 }
+
