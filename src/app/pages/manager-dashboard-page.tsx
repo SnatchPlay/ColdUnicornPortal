@@ -126,26 +126,6 @@ export function ManagerDashboardPage() {
     [campaignStatMap, scopedCampaigns],
   );
 
-  const replyTriageRows = useMemo(
-    () =>
-      scopedReplies
-        .filter((reply) => !reply.classification)
-        .slice()
-        .sort((left, right) => right.received_at.localeCompare(left.received_at))
-        .slice(0, 8)
-        .map((reply) => {
-          const lead = scopedLeads.find((item) => item.id === reply.lead_id);
-          return {
-            id: reply.id,
-            leadName: lead ? getFullName(lead.first_name, lead.last_name) : "Unknown lead",
-            clientName:
-              lead ? scopedClients.find((client) => client.id === lead.client_id)?.name ?? "Unknown client" : "Unknown client",
-            receivedAt: reply.received_at,
-          };
-        }),
-    [scopedClients, scopedLeads, scopedReplies],
-  );
-
   const metrics = useMemo(
     () => [
       {
@@ -167,7 +147,7 @@ export function ManagerDashboardPage() {
         tone: "neutral" as const,
       },
       {
-        label: "Reply triage",
+        label: "Unclassified replies",
         value: formatNumber(unclassifiedReplies),
         hint: `${formatNumber(recentReplyCount)} replies in the last 14 days`,
         tone: "warning" as const,
@@ -185,7 +165,7 @@ export function ManagerDashboardPage() {
       <div className="space-y-6">
         <PageHeader
           title="Manager Dashboard"
-          subtitle="Assigned-client operations hub: portfolio status, lead queue, campaign watchlist, and reply triage."
+          subtitle="Assigned-client operations hub: portfolio status, lead queue, and campaign watchlist."
         />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
@@ -203,19 +183,19 @@ export function ManagerDashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Manager Dashboard"
-        subtitle="Assigned-client operations hub: portfolio status, lead queue, campaign watchlist, and reply triage."
+        subtitle="Assigned-client operations hub: portfolio status, lead queue, and campaign watchlist."
       />
 
       <Banner tone="info">
-        Work queue: prioritize reply triage and lead updates, then review campaign watchlist. Quick links: {" "}
+        Work queue: prioritize lead updates, then review campaign watchlist. Quick links:{" "}
         <Link to="/manager/leads" className="underline underline-offset-2">
           Leads
         </Link>{" "}
-        · {" "}
+        ·{" "}
         <Link to="/manager/campaigns" className="underline underline-offset-2">
           Campaigns
         </Link>{" "}
-        · {" "}
+        ·{" "}
         <Link to="/manager/clients" className="underline underline-offset-2">
           Clients
         </Link>
@@ -227,7 +207,44 @@ export function ManagerDashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <Surface
+          title="Campaign watchlist"
+          subtitle="Stopped/launching campaigns or low-reply performers in your scope."
+          actions={
+            <Link to="/manager/campaigns" className="text-sm text-sky-300 hover:text-sky-200">
+              Open campaigns
+            </Link>
+          }
+          className="xl:row-span-2"
+        >
+          {campaignWatchlist.length === 0 ? (
+            <EmptyState title="No campaign alerts" description="All scoped campaigns look healthy based on current status and reply rate." />
+          ) : (
+            <div className="space-y-3">
+              {campaignWatchlist.map((campaign) => (
+                <div key={campaign.id} className="rounded-2xl border border-border bg-black/10 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm">{campaign.name}</p>
+                    <p className="text-sm text-amber-300">{campaign.replyRate.toFixed(1)}%</p>
+                  </div>
+                  <p className="mt-1 text-xs uppercase tracking-[0.16em] text-muted-foreground">{campaign.status}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Sent</p>
+                      <p>{formatNumber(campaign.sent)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Replies</p>
+                      <p>{formatNumber(campaign.replies)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Surface>
+
         <Surface
           title="Assigned client portfolio"
           subtitle="Client-level KPI snapshot for your scoped portfolio."
@@ -292,68 +309,6 @@ export function ManagerDashboardPage() {
                     {lead.clientName} · {lead.stage}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">Updated: {formatDate(lead.updatedAt)}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Surface>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <Surface
-          title="Campaign watchlist"
-          subtitle="Stopped/launching campaigns or low-reply performers in your scope."
-          actions={
-            <Link to="/manager/campaigns" className="text-sm text-sky-300 hover:text-sky-200">
-              Open campaigns
-            </Link>
-          }
-        >
-          {campaignWatchlist.length === 0 ? (
-            <EmptyState title="No campaign alerts" description="All scoped campaigns look healthy based on current status and reply rate." />
-          ) : (
-            <div className="space-y-3">
-              {campaignWatchlist.map((campaign) => (
-                <div key={campaign.id} className="rounded-2xl border border-border bg-black/10 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm">{campaign.name}</p>
-                    <p className="text-sm text-amber-300">{campaign.replyRate.toFixed(1)}%</p>
-                  </div>
-                  <p className="mt-1 text-xs uppercase tracking-[0.16em] text-muted-foreground">{campaign.status}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Sent</p>
-                      <p>{formatNumber(campaign.sent)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Replies</p>
-                      <p>{formatNumber(campaign.replies)}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Surface>
-
-        <Surface
-          title="Reply triage"
-          subtitle="Recent unclassified replies that need manager review."
-          actions={
-            <Link to="/manager/leads" className="text-sm text-sky-300 hover:text-sky-200">
-              Review in leads
-            </Link>
-          }
-        >
-          {replyTriageRows.length === 0 ? (
-            <EmptyState title="No triage items" description="All visible replies are already classified." />
-          ) : (
-            <div className="space-y-3">
-              {replyTriageRows.map((reply) => (
-                <div key={reply.id} className="rounded-2xl border border-border bg-black/10 p-4">
-                  <p className="text-sm">{reply.leadName}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{reply.clientName}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">Received: {formatDate(reply.receivedAt)}</p>
                 </div>
               ))}
             </div>

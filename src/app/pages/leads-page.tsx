@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { MessageSquare, Search, X } from "lucide-react";
+import { DateRangeButton, FilterChip } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Checkbox } from "../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { formatDate, getFullName } from "../lib/format";
-import { getLeadStage, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
+import { getLeadStage, scopeCampaigns, scopeLeads, scopeReplies } from "../lib/selectors";
+import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -21,8 +24,10 @@ const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
   "rejected",
 ];
 const LEAD_QUALIFICATION_UNSET = "__lead_unqualified__";
+const ALL_FILTER_VALUE = "__all__";
 
 const PAGE_SIZE = 50;
+type ReplyScope = "all" | "active" | "ooo";
 
 type SortDirection = "asc" | "desc";
 type LeadSortKey = "lead" | "company" | "status" | "updated";
@@ -95,6 +100,10 @@ function InternalLeadsPage() {
   const { identity } = useAuth();
   const { clients, leads, replies, campaigns, updateLead, loading, error, refresh } = useCoreData();
   const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<PipelineStage | "all">("all");
+  const [campaignFilter, setCampaignFilter] = useState(ALL_FILTER_VALUE);
+  const [replyScope, setReplyScope] = useState<ReplyScope>("all");
+  const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [draft, setDraft] = useState<LeadDraft | null>(null);
@@ -116,12 +125,19 @@ function InternalLeadsPage() {
     [leadColumns.template],
   );
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
+  const scopedCampaigns = useMemo(
+    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
+    [campaigns, clients, identity],
+  );
   const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
   const scopedReplies = useMemo(() => (identity ? scopeReplies(identity, clients, replies) : []), [clients, identity, replies]);
+  const timeframeLeads = useMemo(
+    () => filterByTimeframe(scopedLeads, (lead) => lead.created_at, timeframe),
+    [scopedLeads, timeframe],
+  );
 
-  const filteredLeads = useMemo(() => {
-    return scopedLeads.filter((lead) => {
+  const baseFilteredLeads = useMemo(() => {
+    return timeframeLeads.filter((lead) => {
       const haystack = [
         getFullName(lead.first_name, lead.last_name),
         lead.email,
@@ -131,11 +147,31 @@ function InternalLeadsPage() {
       ]
         .join(" ")
         .toLowerCase();
-      return haystack.includes(query.toLowerCase());
+      if (!haystack.includes(query.toLowerCase())) return false;
+      if (campaignFilter !== ALL_FILTER_VALUE && lead.campaign_id !== campaignFilter) return false;
+      if (replyScope === "ooo" && lead.qualification !== "OOO") return false;
+      if (replyScope === "active" && lead.qualification === "OOO") return false;
+      return true;
     });
-  }, [query, scopedLeads]);
+  }, [campaignFilter, query, replyScope, timeframeLeads]);
 
-  const campaignById = useMemo(() => new Map(campaigns.map((campaign) => [campaign.id, campaign])), [campaigns]);
+  const stageCounts = useMemo(() => {
+    const counts = new Map<PipelineStage, number>();
+    for (const lead of baseFilteredLeads) {
+      const stage = getLeadStage(lead);
+      counts.set(stage, (counts.get(stage) ?? 0) + 1);
+    }
+    return counts;
+  }, [baseFilteredLeads]);
+  const filteredLeads = useMemo(
+    () =>
+      baseFilteredLeads.filter((lead) => {
+        if (stageFilter === "all") return true;
+        return getLeadStage(lead) === stageFilter;
+      }),
+    [baseFilteredLeads, stageFilter],
+  );
+  const campaignById = useMemo(() => new Map(scopedCampaigns.map((campaign) => [campaign.id, campaign])), [scopedCampaigns]);
 
   const sortedLeads = useMemo(() => {
     return filteredLeads.slice().sort((left, right) => {
@@ -154,6 +190,7 @@ function InternalLeadsPage() {
 
   const visibleLeads = useMemo(() => sortedLeads.slice(0, visibleRowsCount), [sortedLeads, visibleRowsCount]);
   const hasMoreLeads = visibleRowsCount < sortedLeads.length;
+  const timeframeLabel = getTimeframeLabel(timeframe);
 
   const selectedLead = sortedLeads.find((item) => item.id === selectedLeadId) ?? null;
   const selectedReplies = scopedReplies
@@ -176,7 +213,7 @@ function InternalLeadsPage() {
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
     setSelectedLeadId(null);
-  }, [query, scopedLeads.length]);
+  }, [campaignFilter, query, replyScope, scopedLeads.length, stageFilter, timeframe]);
 
   useEffect(() => {
     if (selectedLeadId && !sortedLeads.some((lead) => lead.id === selectedLeadId)) {
@@ -247,17 +284,72 @@ function InternalLeadsPage() {
       <PageHeader
         title="Leads"
         subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
+        actions={<DateRangeButton value={timeframe} onChange={setTimeframe} />}
       />
 
-      <Surface>
-        <div className="relative max-w-xl">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by name, email, company, title, country"
-            className="w-full rounded-2xl border border-white/10 bg-black/20 px-11 py-3 text-sm outline-none transition focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15"
-          />
+      <Surface title="Lead filters" subtitle={`Current timeframe: ${timeframeLabel}`}>
+        <div className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[1fr_260px_220px]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search by name, email, company, title, country"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-11 py-3 text-sm outline-none transition focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15"
+              />
+            </div>
+            <Select value={campaignFilter} onValueChange={setCampaignFilter}>
+              <SelectTrigger
+                aria-label="Filter leads by campaign"
+                className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"
+              >
+                <SelectValue placeholder="All campaigns" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                <SelectItem value={ALL_FILTER_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                  All campaigns
+                </SelectItem>
+                {scopedCampaigns.map((campaign) => (
+                  <SelectItem key={campaign.id} value={campaign.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    {campaign.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={replyScope} onValueChange={(value) => setReplyScope(value as ReplyScope)}>
+              <SelectTrigger
+                aria-label="Filter leads by reply scope"
+                className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"
+              >
+                <SelectValue placeholder="All (OOO + Active)" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                  All (OOO + Active)
+                </SelectItem>
+                <SelectItem value="active" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                  Active only
+                </SelectItem>
+                <SelectItem value="ooo" className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                  OOO only
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <FilterChip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
+              All <span className="ml-1 text-neutral-500">{baseFilteredLeads.length}</span>
+            </FilterChip>
+            {PIPELINE_STAGES.map((stage) => (
+              <FilterChip key={stage.key} active={stageFilter === stage.key} onClick={() => setStageFilter(stage.key)}>
+                <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
+                {stage.label}
+                <span className="ml-1 text-neutral-500">{stageCounts.get(stage.key) ?? 0}</span>
+              </FilterChip>
+            ))}
+          </div>
         </div>
       </Surface>
 
@@ -293,7 +385,7 @@ function InternalLeadsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="divide-y divide-border">
+                <div className="min-w-[1100px] divide-y divide-border">
                   {visibleLeads.map((lead) => {
                     const active = selectedLead?.id === lead.id;
                     const campaign = campaignById.get(lead.campaign_id ?? "");

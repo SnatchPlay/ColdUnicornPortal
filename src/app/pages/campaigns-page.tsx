@@ -9,10 +9,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { DateRangeButton } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
-import { scopeCampaignStats, scopeCampaigns } from "../lib/selectors";
+import { scopeCampaignStats, scopeCampaigns, scopeClients } from "../lib/selectors";
+import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -20,6 +22,7 @@ import type { CampaignRecord } from "../types/core";
 import { ClientCampaignsPage } from "./client-campaigns-page";
 
 const PAGE_SIZE = 50;
+const ALL_FILTER_VALUE = "__all__";
 
 interface CampaignDraft {
   name: string;
@@ -89,6 +92,10 @@ function InternalCampaignsPage() {
   const { clients, campaigns, campaignDailyStats, updateCampaign, loading, error, refresh } = useCoreData();
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>(ALL_FILTER_VALUE);
+  const [clientFilterId, setClientFilterId] = useState<string>(ALL_FILTER_VALUE);
+  const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [draft, setDraft] = useState<CampaignDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [campaignSort, setCampaignSort] = useState<{ key: CampaignSortKey; direction: SortDirection }>({
@@ -108,6 +115,7 @@ function InternalCampaignsPage() {
     [campaignColumns.template],
   );
 
+  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],
@@ -116,13 +124,29 @@ function InternalCampaignsPage() {
     () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
     [campaignDailyStats, campaigns, clients, identity],
   );
+  const timeframeStats = useMemo(
+    () => filterByTimeframe(scopedStats, (item) => item.report_date, timeframe),
+    [scopedStats, timeframe],
+  );
+  const filteredCampaigns = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return scopedCampaigns.filter((campaign) => {
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        campaign.name.toLowerCase().includes(normalizedQuery) ||
+        campaign.external_id.toLowerCase().includes(normalizedQuery);
+      const matchesStatus = statusFilter === ALL_FILTER_VALUE || campaign.status === statusFilter;
+      const matchesClient = clientFilterId === ALL_FILTER_VALUE || campaign.client_id === clientFilterId;
+      return matchesQuery && matchesStatus && matchesClient;
+    });
+  }, [clientFilterId, query, scopedCampaigns, statusFilter]);
   const selectedCampaign = useMemo(
-    () => scopedCampaigns.find((item) => item.id === selectedCampaignId) ?? null,
-    [scopedCampaigns, selectedCampaignId],
+    () => filteredCampaigns.find((item) => item.id === selectedCampaignId) ?? null,
+    [filteredCampaigns, selectedCampaignId],
   );
 
   const sortedCampaigns = useMemo(() => {
-    return scopedCampaigns.slice().sort((left, right) => {
+    return filteredCampaigns.slice().sort((left, right) => {
       if (campaignSort.key === "name") {
         return compareText(left.name, right.name, campaignSort.direction);
       }
@@ -137,17 +161,21 @@ function InternalCampaignsPage() {
       }
       return compareText(left.start_date, right.start_date, campaignSort.direction);
     });
-  }, [campaignSort.direction, campaignSort.key, scopedCampaigns]);
+  }, [campaignSort.direction, campaignSort.key, filteredCampaigns]);
 
   const visibleCampaigns = useMemo(() => sortedCampaigns.slice(0, visibleRowsCount), [sortedCampaigns, visibleRowsCount]);
   const hasMoreCampaigns = visibleRowsCount < sortedCampaigns.length;
 
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
-    if (selectedCampaignId && !scopedCampaigns.some((item) => item.id === selectedCampaignId)) {
+    if (selectedCampaignId && !filteredCampaigns.some((item) => item.id === selectedCampaignId)) {
       setSelectedCampaignId(null);
     }
-  }, [scopedCampaigns, selectedCampaignId]);
+  }, [filteredCampaigns, selectedCampaignId]);
+
+  useEffect(() => {
+    setVisibleRowsCount(PAGE_SIZE);
+  }, [clientFilterId, query, statusFilter, timeframe]);
 
   useEffect(() => {
     if (!selectedCampaign) {
@@ -178,7 +206,7 @@ function InternalCampaignsPage() {
 
   const isDraftDirty = Object.keys(draftPatch).length > 0;
 
-  const selectedCampaignStats = scopedStats
+  const selectedCampaignStats = timeframeStats
     .filter((item) => item.campaign_id === selectedCampaign?.id)
     .sort((a, b) => a.report_date.localeCompare(b.report_date))
     .map((item) => ({
@@ -187,6 +215,7 @@ function InternalCampaignsPage() {
       replies: item.reply_count ?? 0,
       bounces: item.bounce_count ?? 0,
     }));
+  const timeframeLabel = getTimeframeLabel(timeframe);
 
   async function patchCampaign(campaign: CampaignRecord, patch: Partial<CampaignRecord>) {
     await updateCampaign(campaign.id, patch);
@@ -235,12 +264,75 @@ function InternalCampaignsPage() {
       <PageHeader
         title="Campaigns"
         subtitle="Shared campaign workspace with table overview and drawer-based campaign details."
+        actions={<DateRangeButton value={timeframe} onChange={setTimeframe} />}
       />
 
       {scopedCampaigns.length === 0 ? (
         <EmptyState title="No campaigns in scope" description="Role-based campaign scoping is active. Client users only see outreach campaigns." />
       ) : (
-        <Surface title="Campaign table" subtitle={`${visibleCampaigns.length} of ${sortedCampaigns.length} campaigns visible`}>
+        <Surface title="Campaign filters" subtitle={`Timeframe: ${timeframeLabel}`}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search campaign name or external id"
+              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none transition focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15 xl:col-span-2"
+            />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger
+                aria-label="Filter campaigns by status"
+                className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"
+              >
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                <SelectItem value={ALL_FILTER_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                  All statuses
+                </SelectItem>
+                {["draft", "launching", "active", "stopped", "completed"].map((status) => (
+                  <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {scopedClients.length > 1 ? (
+              <Select value={clientFilterId} onValueChange={setClientFilterId}>
+                <SelectTrigger
+                  aria-label="Filter campaigns by client"
+                  className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"
+                >
+                  <SelectValue placeholder="All clients" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value={ALL_FILTER_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    All clients
+                  </SelectItem>
+                  {scopedClients.map((client) => (
+                    <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="rounded-2xl border border-border bg-black/10 px-4 py-3 text-sm text-muted-foreground">
+                Client scope: {scopedClients[0]?.name ?? "n/a"}
+              </div>
+            )}
+          </div>
+        </Surface>
+      )}
+
+      {scopedCampaigns.length > 0 && sortedCampaigns.length === 0 ? (
+        <EmptyState
+          title="No campaigns match the current filters"
+          description="Try broadening status/client/search filters to reveal campaigns."
+        />
+      ) : null}
+
+      {sortedCampaigns.length > 0 ? (
+        <Surface title="Campaign portfolio" subtitle={`${visibleCampaigns.length} of ${sortedCampaigns.length} campaigns visible`}>
           <div className="overflow-hidden rounded-2xl border border-border">
             <div className="overflow-x-auto" style={campaignTableStyle}>
               <div className="hidden min-w-[1200px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--campaign-table-columns)]">
@@ -270,7 +362,7 @@ function InternalCampaignsPage() {
                   </div>
                 ))}
               </div>
-              <div className="divide-y divide-border">
+              <div className="min-w-[1200px] divide-y divide-border">
                 {visibleCampaigns.map((campaign) => {
                   const isActive = selectedCampaign?.id === campaign.id;
                   return (
@@ -292,9 +384,9 @@ function InternalCampaignsPage() {
                       </div>
                       <p className="text-sm text-muted-foreground">{formatNumber(campaign.positive_responses)}</p>
                       <p className="text-sm text-muted-foreground">{formatDate(campaign.start_date)}</p>
-                    </button>
-                  );
-                })}
+                  </button>
+                );
+              })}
               </div>
             </div>
           </div>
@@ -310,7 +402,7 @@ function InternalCampaignsPage() {
             </div>
           )}
         </Surface>
-      )}
+      ) : null}
 
       {selectedCampaign && draft && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/55" onClick={() => setSelectedCampaignId(null)}>
@@ -466,12 +558,15 @@ function InternalCampaignsPage() {
                       <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
                       <Tooltip
+                        cursor={false}
                         contentStyle={{
                           backgroundColor: "rgba(2,6,23,0.98)",
                           border: "1px solid rgba(148,163,184,0.2)",
                           borderRadius: "16px",
                           color: "#fff",
                         }}
+                        labelStyle={{ color: "rgba(226,232,240,0.92)" }}
+                        itemStyle={{ color: "#f8fafc" }}
                       />
                       <Bar dataKey="sent" fill="#38bdf8" radius={[6, 6, 0, 0]} />
                       <Bar dataKey="replies" fill="#22c55e" radius={[6, 6, 0, 0]} />

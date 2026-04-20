@@ -34,6 +34,7 @@ interface AuthContextValue {
   signInWithOtp: (email: string) => Promise<{ ok: boolean; message: string }>;
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; message: string }>;
   updatePassword: (password: string) => Promise<{ ok: boolean; message: string }>;
+  updateProfileName: (fullName: string) => Promise<{ ok: boolean; message: string }>;
   impersonate: (nextIdentity: Identity) => void;
   stopImpersonation: () => void;
   signOut: () => Promise<void>;
@@ -320,6 +321,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true, message: "Password updated successfully." };
   }, []);
 
+  const updateProfileName = useCallback(
+    async (fullName: string) => {
+      if (!supabase) {
+        return { ok: false, message: runtimeConfig.error ?? "Supabase is not configured." };
+      }
+
+      const trimmed = fullName.trim().replace(/\s+/g, " ");
+      if (!trimmed) {
+        return { ok: false, message: "Enter a valid full name before saving." };
+      }
+
+      const sessionUserId = session?.user.id;
+      if (!sessionUserId) {
+        return { ok: false, message: "No active authenticated session found." };
+      }
+
+      const [firstName, ...lastNameParts] = trimmed.split(" ");
+      const lastName = lastNameParts.join(" ");
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({
+          first_name: firstName,
+          last_name: lastName || "",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionUserId);
+
+      if (updateError) {
+        return { ok: false, message: toSafeAuthMessage(updateError.message) };
+      }
+
+      setActorIdentity((current) => (current ? { ...current, fullName: trimmed } : current));
+      setImpersonatedIdentity((current) =>
+        current && current.id === sessionUserId ? { ...current, fullName: trimmed } : current,
+      );
+      return { ok: true, message: "Profile name updated successfully." };
+    },
+    [session?.user.id],
+  );
+
   const impersonate = useCallback((nextIdentity: Identity) => {
     if (!runtimeConfig.allowInternalImpersonation) return;
     setImpersonatedIdentity(nextIdentity);
@@ -353,6 +394,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithOtp,
       requestPasswordReset,
       updatePassword,
+      updateProfileName,
       impersonate,
       stopImpersonation,
       signOut,
@@ -373,6 +415,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       stopImpersonation,
       updatePassword,
+      updateProfileName,
     ],
   );
 

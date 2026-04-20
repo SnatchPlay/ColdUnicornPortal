@@ -707,7 +707,7 @@ export function ClientsPage() {
                 ))}
               </div>
 
-              <div className="divide-y divide-border">
+              <div className="min-w-[1820px] divide-y divide-border">
                 {visibleOverviewRows.map((row) => {
                   const isActive = selectedClient?.id === row.client.id;
                   return (
@@ -715,7 +715,7 @@ export function ClientsPage() {
                       key={row.client.id}
                       onClick={() => setSelectedClientId(row.client.id)}
                       aria-label={`Open details for ${row.client.name}`}
-                      className={`${OVERVIEW_GRID_CLASS} w-full px-4 py-4 text-left transition ${isActive ? "bg-sky-500/10" : "hover:bg-white/5"}`}
+                      className={`${OVERVIEW_GRID_CLASS} w-max px-4 py-4 text-left transition ${isActive ? "bg-sky-500/10" : "hover:bg-white/5"}`}
                     >
                       <div>
                         <p className="text-sm">{row.client.name}</p>
@@ -878,7 +878,7 @@ export function ClientsPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="divide-y divide-border">
+                      <div className="min-w-[680px] divide-y divide-border">
                         {sortedDodRows.map((row: DodRow) => (
                           <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-dod-columns)]">
                             <span>{row.bucket}</span>
@@ -920,7 +920,7 @@ export function ClientsPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="divide-y divide-border">
+                      <div className="min-w-[680px] divide-y divide-border">
                         {sortedThreeDodRows.map((row: ThreeDodRow) => (
                           <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-three-dod-columns)]">
                             <span>{row.bucket}</span>
@@ -967,7 +967,7 @@ export function ClientsPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="divide-y divide-border">
+                      <div className="min-w-[980px] divide-y divide-border">
                         {sortedWowRows.map((row: WowRow) => (
                           <div key={row.bucket} className="grid min-w-[980px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-wow-columns)]">
                             <span>{row.bucket}</span>
@@ -1016,7 +1016,7 @@ export function ClientsPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="divide-y divide-border">
+                      <div className="min-w-[800px] divide-y divide-border">
                         {sortedMomRows.map((row: MomRow) => (
                           <div key={row.bucket} className="grid min-w-[800px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-mom-columns)]">
                             <span>{row.bucket}</span>

@@ -20,6 +20,7 @@ export const PORTAL_CHART_TOOLTIP = {
     color: "#fff",
   },
   labelStyle: { color: "#a3a3a3" },
+  itemStyle: { color: "#f5f5f5" },
 };
 
 export function DateRangeButton({
@@ -223,7 +224,7 @@ export function ResponsiveChart({ children }: { children: ReactNode }) {
 }
 
 export function ChartTooltip() {
-  return <Tooltip {...PORTAL_CHART_TOOLTIP} />;
+  return <Tooltip {...PORTAL_CHART_TOOLTIP} cursor={false} />;
 }
 
 export function PipelineBadge({ stage }: { stage: PipelineStage }) {

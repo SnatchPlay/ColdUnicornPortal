@@ -176,6 +176,7 @@ function ProtectedApp() {
                   <Route path="leads" element={identity.clientId ? <LeadsPage /> : <ClientAccessBlocker />} />
                   <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
                   <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
+                  <Route path="settings" element={<SettingsPage />} />
                 </Route>
               </Route>
 

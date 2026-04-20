@@ -291,7 +291,7 @@ export function InvoicesPage() {
                     </div>
                   ))}
                 </div>
-                <div className="divide-y divide-border">
+                <div className="min-w-[1100px] divide-y divide-border">
                   {sortedInvoices.map((invoice) => {
                     const active = selectedInvoice?.id === invoice.id;
                     const clientName = scopedClients.find((item) => item.id === invoice.client_id)?.name ?? "Unknown client";

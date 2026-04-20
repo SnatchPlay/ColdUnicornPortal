@@ -16,6 +16,13 @@ vi.mock("../../providers/core-data", () => ({
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedUseCoreData = vi.mocked(useCoreData);
 
+function getDateKey(daysOffset: number) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + daysOffset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function makeAuth() {
   return {
     identity: {
@@ -28,16 +35,46 @@ function makeAuth() {
 }
 
 function makeLeads(count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    id: `lead-${index + 1}`,
-    client_id: "client-1",
-    campaign_id: `camp-${index + 1}`,
-    lead_name: `Lead ${index + 1}`,
-    company_name: `Company ${index + 1}`,
-    status: "Open",
-    email: `lead${index + 1}@test.local`,
-    updated_at: `2026-01-${String((index % 28) + 1).padStart(2, "0")}`,
-  }));
+  return Array.from({ length: count }, (_, index) => {
+    const dateKey = getDateKey(-Math.min(index, 29));
+    return {
+      id: `lead-${index + 1}`,
+      client_id: "client-1",
+      campaign_id: "camp-1",
+      first_name: `Lead`,
+      last_name: `${index + 1}`,
+      job_title: "Owner",
+      company_name: `Company ${index + 1}`,
+      linkedin_url: null,
+      gender: null,
+      qualification: null,
+      expected_return_date: null,
+      external_id: null,
+      email: `lead${index + 1}@test.local`,
+      phone_number: null,
+      phone_source: null,
+      industry: null,
+      headcount_range: null,
+      website: null,
+      country: "PL",
+      message_title: null,
+      message_number: 1,
+      response_time_hours: null,
+      response_time_label: null,
+      meeting_booked: false,
+      meeting_held: false,
+      offer_sent: false,
+      won: false,
+      added_to_ooo_campaign: false,
+      external_blacklist_id: null,
+      external_domain_blacklist_id: null,
+      source: "test",
+      reply_text: null,
+      comments: null,
+      created_at: `${dateKey}T10:00:00.000Z`,
+      updated_at: `${dateKey}T10:00:00.000Z`,
+    };
+  });
 }
 
 function makeCoreData() {
@@ -51,11 +88,11 @@ function makeCoreData() {
       },
     ],
     campaigns: [],
-    leads: makeLeads(75),
-    replies: [],
     campaignDailyStats: [],
     dailyStats: [],
     clientUsers: [],
+    leads: makeLeads(75),
+    replies: [],
     loading: false,
     error: null,
     refresh: vi.fn(async () => {}),

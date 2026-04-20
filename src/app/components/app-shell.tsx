@@ -56,6 +56,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { to: "/client/leads", label: "My Pipeline", icon: Users },
     { to: "/client/campaigns", label: "Campaigns", icon: Rocket },
     { to: "/client/statistics", label: "Analytics", icon: BarChart3 },
+    { to: "/client/settings", label: "Settings", icon: Settings },
   ],
   manager: [
     { to: "/manager/dashboard", label: "Dashboard", icon: LayoutDashboard },

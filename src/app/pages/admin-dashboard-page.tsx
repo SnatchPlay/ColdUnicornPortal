@@ -29,6 +29,13 @@ const TOOLTIP = {
     borderRadius: "16px",
     color: "#fff",
   },
+  labelStyle: {
+    color: "rgba(226,232,240,0.92)",
+  },
+  itemStyle: {
+    color: "#f8fafc",
+  },
+  cursor: false,
 };
 
 export function AdminDashboardPage() {
@@ -144,9 +151,9 @@ export function AdminDashboardPage() {
       tone: "neutral" as const,
     },
     {
-      label: "Reply triage",
+      label: "Unclassified replies",
       value: formatNumber(unclassifiedReplies.length),
-      hint: "Unclassified replies requiring ops review",
+      hint: "Replies that still need operational classification",
       tone: "warning" as const,
     },
   ];
@@ -178,7 +185,7 @@ export function AdminDashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Admin Dashboard"
-        subtitle="Global command surface: assignment health, campaign momentum, and triage pressure."
+        subtitle="Global command surface: assignment health, campaign momentum, and portfolio risk."
       />
 
       <Banner tone="info">
@@ -195,7 +202,7 @@ export function AdminDashboardPage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
-        <Surface title="Campaign momentum" subtitle="21-day sent, replies, and positive trend.">
+        <Surface title="Campaign momentum" subtitle="21-day sent, replies, and positive trend." className="xl:row-span-2">
           {campaignSeries.length === 0 ? (
             <EmptyState title="No campaign trend data" description="No campaign trend data is available for the current scope." />
           ) : (
@@ -234,9 +241,6 @@ export function AdminDashboardPage() {
             </div>
           )}
         </Surface>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <Surface
           title="Manager capacity"
           subtitle="Visible load split across managers and assignments."
@@ -265,33 +269,6 @@ export function AdminDashboardPage() {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-        </Surface>
-
-        <Surface
-          title="Reply triage queue"
-          subtitle="Newest unclassified replies requiring operational classification."
-          actions={<Link to="/admin/leads" className="text-sm text-sky-300 hover:text-sky-200">Open leads queue</Link>}
-        >
-          {unclassifiedReplies.length === 0 ? (
-            <EmptyState title="No triage queue" description="All visible replies are already classified." />
-          ) : (
-            <div className="space-y-3">
-              {unclassifiedReplies
-                .slice()
-                .sort((left, right) => right.received_at.localeCompare(left.received_at))
-                .slice(0, 8)
-                .map((reply) => {
-                  const clientName = scopedClients.find((client) => client.id === reply.client_id)?.name ?? "Unknown client";
-                  return (
-                    <div key={reply.id} className="rounded-2xl border border-border bg-black/10 p-4">
-                      <p className="text-sm">{reply.message_subject ?? "No subject"}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{clientName}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">Received: {formatDate(reply.received_at)}</p>
-                    </div>
-                  );
-                })}
             </div>
           )}
         </Surface>

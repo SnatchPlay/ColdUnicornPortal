@@ -277,7 +277,7 @@ export function DomainsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="divide-y divide-border">
+                <div className="min-w-[1200px] divide-y divide-border">
                   {sortedDomains.map((domain) => {
                     const active = selectedDomain?.id === domain.id;
                     const clientName = scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
