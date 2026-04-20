@@ -385,7 +385,7 @@ function InternalLeadsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="min-w-[1100px] divide-y divide-border">
+                <div className="divide-y divide-border md:min-w-[1100px]">
                   {visibleLeads.map((lead) => {
                     const active = selectedLead?.id === lead.id;
                     const campaign = campaignById.get(lead.campaign_id ?? "");

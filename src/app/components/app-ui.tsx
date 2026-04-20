@@ -13,11 +13,11 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="space-y-1">
-        <h1 className="text-[30px] font-semibold leading-none tracking-[-0.03em] text-white">{title}</h1>
-        <p className="mt-3 text-base text-neutral-400">{subtitle}</p>
+      <div className="min-w-0 space-y-1">
+        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white sm:text-[30px] sm:leading-none">{title}</h1>
+        <p className="mt-2 text-sm text-neutral-400 sm:mt-3 sm:text-base">{subtitle}</p>
       </div>
-      {actions}
+      {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
     </div>
   );
 }
@@ -59,14 +59,14 @@ export function Surface({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-[#242424] bg-[#050505] p-6", className)}>
+    <section className={cn("rounded-2xl border border-[#242424] bg-[#050505] p-4 sm:p-6", className)}>
       {(title || actions) && (
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div>
-            {title && <h3 className="text-xl font-semibold tracking-[-0.02em] text-white">{title}</h3>}
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3 sm:mb-5">
+          <div className="min-w-0">
+            {title && <h3 className="text-lg font-semibold tracking-[-0.02em] text-white sm:text-xl">{title}</h3>}
             {subtitle && <p className="mt-2 text-sm text-neutral-400">{subtitle}</p>}
           </div>
-          {actions}
+          {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
         </div>
       )}
       {children}
@@ -96,7 +96,7 @@ export function MetricCard({
   return (
     <div className={cn("rounded-2xl border p-5", toneClass)}>
       <p className="text-xs uppercase tracking-[0.16em] text-neutral-500">{label}</p>
-      <p className="mt-2 text-2xl font-medium">{value}</p>
+      <p className="mt-2 text-xl font-medium sm:text-2xl">{value}</p>
       <p className="mt-2 text-sm text-neutral-400">{hint}</p>
     </div>
   );

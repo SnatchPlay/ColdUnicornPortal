@@ -235,7 +235,7 @@ export function InvoicesPage() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search by client, status, or invoice id"
-                className="min-w-[16rem] flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
+                className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:min-w-[16rem]"
               />
               <Select
                 value={statusFilter === "" ? INVOICE_UNSET_VALUE : statusFilter}
@@ -291,7 +291,7 @@ export function InvoicesPage() {
                     </div>
                   ))}
                 </div>
-                <div className="min-w-[1100px] divide-y divide-border">
+                <div className="divide-y divide-border md:min-w-[1100px]">
                   {sortedInvoices.map((invoice) => {
                     const active = selectedInvoice?.id === invoice.id;
                     const clientName = scopedClients.find((item) => item.id === invoice.client_id)?.name ?? "Unknown client";

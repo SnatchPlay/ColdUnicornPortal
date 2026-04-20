@@ -161,8 +161,8 @@ function DashboardKpiCard({
         <div className="rounded-2xl bg-current/10 p-2">{icon}</div>
         <p className={`text-2xs font-semibold tracking-[0.08em] ${deltaTone}`}>{deltaText}</p>
       </div>
-      <p className="mt-4 text-[34px] font-medium leading-none text-current">{value}</p>
-      <p className="mt-2 text-[28px] leading-none text-neutral-300">{label}</p>
+      <p className="mt-4 text-3xl font-medium leading-none text-current sm:text-[34px]">{value}</p>
+      <p className="mt-2 text-xl leading-tight text-neutral-300 sm:text-[28px] sm:leading-none">{label}</p>
       <div className="mt-4">
         <Sparkline values={spark} color={sparkColor} />
       </div>

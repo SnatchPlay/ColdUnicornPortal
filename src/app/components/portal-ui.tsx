@@ -51,13 +51,16 @@ export function DateRangeButton({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className="inline-flex items-center gap-3 rounded-xl border border-[#242424] bg-[#171717] px-4 py-2.5 text-sm text-white transition hover:border-[#3a3a3a]">
+        <button className="inline-flex max-w-full items-center gap-3 rounded-xl border border-[#242424] bg-[#171717] px-3 py-2.5 text-sm text-white transition hover:border-[#3a3a3a] sm:px-4">
           <Calendar className="h-4 w-4 text-neutral-300" />
-          <span>{getTimeframeLabel(timeframe)}</span>
+          <span className="truncate">{getTimeframeLabel(timeframe)}</span>
           <span className="text-neutral-500">⌄</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[320px] rounded-2xl border-[#242424] bg-[#080808] p-4 text-white">
+      <PopoverContent
+        align="end"
+        className="w-[min(20rem,calc(100vw-1rem))] rounded-2xl border-[#242424] bg-[#080808] p-4 text-white"
+      >
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Timeframe</p>
         <div className="grid grid-cols-2 gap-2">
           {TIMEFRAME_PRESETS.map((preset) => {
@@ -126,11 +129,11 @@ export function PortalPageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="text-[30px] font-semibold leading-none tracking-[-0.03em] text-white">{title}</h1>
-        <p className="mt-3 text-base text-neutral-400">{subtitle}</p>
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white sm:text-[30px] sm:leading-none">{title}</h1>
+        <p className="mt-2 text-sm text-neutral-400 sm:mt-3 sm:text-base">{subtitle}</p>
       </div>
-      {actions}
+      {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
     </div>
   );
 }
@@ -149,14 +152,14 @@ export function PortalSurface({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-[#242424] bg-[#050505] p-6", className)}>
+    <section className={cn("rounded-2xl border border-[#242424] bg-[#050505] p-4 sm:p-6", className)}>
       {(title || subtitle || actions) && (
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            {title && <h2 className="text-xl font-semibold tracking-[-0.02em] text-white">{title}</h2>}
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4 sm:mb-6">
+          <div className="min-w-0">
+            {title && <h2 className="text-lg font-semibold tracking-[-0.02em] text-white sm:text-xl">{title}</h2>}
             {subtitle && <p className="mt-2 text-sm text-neutral-400">{subtitle}</p>}
           </div>
-          {actions}
+          {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
         </div>
       )}
       {children}
@@ -190,7 +193,7 @@ export function KpiTile({
         <div className="rounded-xl bg-current/10 p-2 text-current">{icon}</div>
         <span className="text-xs text-emerald-400">↑ live</span>
       </div>
-      <p className="mt-5 text-3xl font-medium text-current">{value}</p>
+      <p className="mt-5 text-2xl font-medium text-current sm:text-3xl">{value}</p>
       <p className="mt-1 text-sm text-neutral-300">{label}</p>
       <p className="mt-3 text-xs text-neutral-500">{hint}</p>
     </div>
