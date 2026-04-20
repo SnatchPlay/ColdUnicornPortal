@@ -1172,7 +1172,7 @@ export function ClientsPage() {
                     </div>
                     {inviteMessage && <Banner tone={inviteMessage.tone}>{inviteMessage.text}</Banner>}
                     <div className="flex flex-wrap items-end gap-3">
-                      <label className="min-w-[16rem] flex-1 space-y-2">
+                      <label className="min-w-0 flex-1 space-y-2 sm:min-w-[16rem]">
                         <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">User email</span>
                         <input
                           type="email"
@@ -1205,7 +1205,7 @@ export function ClientsPage() {
                     </div>
 
                     <div className="flex flex-wrap items-end gap-3">
-                      <label className="min-w-[16rem] flex-1 space-y-2">
+                      <label className="min-w-0 flex-1 space-y-2 sm:min-w-[16rem]">
                         <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client user account</span>
                         <Select
                           value={mappingUserId || CLIENT_USER_PLACEHOLDER}

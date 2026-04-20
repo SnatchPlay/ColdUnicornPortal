@@ -110,11 +110,11 @@ export function BlacklistPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search excluded domain"
-            className="min-w-[16rem] flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
+            className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:min-w-[16rem]"
           />
 
           {canManageBlacklist && (
-            <div className="flex min-w-[18rem] flex-1 gap-3">
+            <div className="flex min-w-0 flex-1 gap-3 sm:min-w-[18rem]">
               <input
                 value={newDomain}
                 onChange={(event) => setNewDomain(event.target.value)}

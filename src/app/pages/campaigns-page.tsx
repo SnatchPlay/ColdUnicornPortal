@@ -362,7 +362,7 @@ function InternalCampaignsPage() {
                   </div>
                 ))}
               </div>
-              <div className="min-w-[1200px] divide-y divide-border">
+              <div className="divide-y divide-border md:min-w-[1200px]">
                 {visibleCampaigns.map((campaign) => {
                   const isActive = selectedCampaign?.id === campaign.id;
                   return (
