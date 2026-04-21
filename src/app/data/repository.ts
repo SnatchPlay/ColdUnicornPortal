@@ -18,31 +18,57 @@ import type {
 } from "../types/core";
 
 type RepositoryOperation = "select" | "update" | "upsert" | "delete";
-type RepositoryErrorKind = "permission" | "network" | "unknown";
+type RepositoryErrorKind = "permission" | "network" | "timeout" | "unknown";
 
 const SNAPSHOT_RETRY_DELAYS_MS = [250, 600] as const;
+
+// Window for heavy daily-stat tables. Shipping the full history on every
+// mount blows past the authenticated-role statement_timeout once seed
+// volumes cross ~10k rows; the dashboard only renders the last 21 days,
+// so we cap at 90 to leave headroom for drill-down views.
+const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
+const DAILY_STATS_WINDOW_DAYS = 180;
+
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
 
 export class RepositoryError extends Error {
   readonly table: string;
   readonly operation: RepositoryOperation;
   readonly kind: RepositoryErrorKind;
+  readonly code?: string;
+  readonly details?: string;
+  readonly hint?: string;
 
   constructor({
     table,
     operation,
     kind,
     message,
+    code,
+    details,
+    hint,
   }: {
     table: string;
     operation: RepositoryOperation;
     kind: RepositoryErrorKind;
     message: string;
+    code?: string;
+    details?: string;
+    hint?: string;
   }) {
     super(message);
     this.name = "RepositoryError";
     this.table = table;
     this.operation = operation;
     this.kind = kind;
+    this.code = code;
+    this.details = details;
+    this.hint = hint;
   }
 }
 
@@ -68,8 +94,17 @@ function getReasonMessage(reason: unknown) {
   return "Unknown repository failure.";
 }
 
-function classifyErrorKind(message: string): RepositoryErrorKind {
+function classifyErrorKind(message: string, code?: string): RepositoryErrorKind {
+  if (code === "57014") return "timeout";
+  if (code === "42501") return "permission";
   const lower = message.toLowerCase();
+  if (
+    lower.includes("statement timeout") ||
+    lower.includes("canceling statement") ||
+    lower.includes("57014")
+  ) {
+    return "timeout";
+  }
   if (
     lower.includes("permission") ||
     lower.includes("denied") ||
@@ -83,32 +118,54 @@ function classifyErrorKind(message: string): RepositoryErrorKind {
   if (
     lower.includes("network") ||
     lower.includes("fetch") ||
-    lower.includes("timeout") ||
     lower.includes("503") ||
     lower.includes("502") ||
-    lower.includes("504")
+    lower.includes("504") ||
+    lower.includes("timeout")
   ) {
     return "network";
   }
   return "unknown";
 }
 
+interface PostgrestLikeError {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+}
+
+function extractPostgrestFields(reason: unknown): PostgrestLikeError {
+  if (typeof reason !== "object" || reason === null) return {};
+  const r = reason as PostgrestLikeError;
+  return {
+    code: typeof r.code === "string" ? r.code : undefined,
+    message: typeof r.message === "string" ? r.message : undefined,
+    details: typeof r.details === "string" ? r.details : undefined,
+    hint: typeof r.hint === "string" ? r.hint : undefined,
+  };
+}
+
 function mapRepositoryError(reason: unknown, table: string, operation: RepositoryOperation): RepositoryError {
   if (reason instanceof RepositoryError) {
     return reason;
   }
-  const message = getReasonMessage(reason);
-  const kind = classifyErrorKind(message);
+  const pg = extractPostgrestFields(reason);
+  const message = pg.message ?? getReasonMessage(reason);
+  const kind = classifyErrorKind(message, pg.code);
   return new RepositoryError({
     table,
     operation,
     kind,
     message,
+    code: pg.code,
+    details: pg.details,
+    hint: pg.hint,
   });
 }
 
 function isRetryable(error: RepositoryError) {
-  return error.operation === "select" && error.kind === "network";
+  return error.operation === "select" && (error.kind === "network" || error.kind === "timeout");
 }
 
 function ensureSupabase() {
@@ -244,14 +301,27 @@ export interface Repository {
   deleteEmailExcludeDomain(domain: string): Promise<void>;
 }
 
-async function selectTable<T>(table: string, orderBy = "created_at", limit?: number): Promise<T[]> {
+interface SelectOptions {
+  limit?: number;
+  gteColumn?: string;
+  gteValue?: string;
+}
+
+async function selectTable<T>(
+  table: string,
+  orderBy = "created_at",
+  options: SelectOptions = {},
+): Promise<T[]> {
   const client = ensureSupabase();
 
   for (let attempt = 0; attempt <= SNAPSHOT_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
       let query = client.from(table).select("*").order(orderBy, { ascending: false });
-      if (typeof limit === "number") {
-        query = query.limit(limit);
+      if (options.gteColumn && options.gteValue) {
+        query = query.gte(options.gteColumn, options.gteValue);
+      }
+      if (typeof options.limit === "number") {
+        query = query.limit(options.limit);
       }
 
       const { data, error } = await query;
@@ -282,16 +352,27 @@ export const repository: Repository = {
     const includeDailyStats = options?.includeDailyStats ?? true;
     const leadsLimit = options?.leadsLimit;
 
+    const campaignStatsSince = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
+    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
+
     const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList] =
       await Promise.all([
         selectTable<UserRecord>("users"),
         selectTable<ClientRecord>("clients"),
         selectTable<ClientUserRecord>("client_users"),
         selectTable<CampaignRecord>("campaigns"),
-        selectTable<LeadRecord>("leads", "updated_at", leadsLimit),
+        selectTable<LeadRecord>("leads", "updated_at", { limit: leadsLimit }),
         selectTable<ReplyRecord>("replies", "received_at"),
-        selectTable<CampaignDailyStatRecord>("campaign_daily_stats", "report_date"),
-        includeDailyStats ? selectTable<DailyStatRecord>("daily_stats", "report_date") : Promise.resolve([]),
+        selectTable<CampaignDailyStatRecord>("campaign_daily_stats", "report_date", {
+          gteColumn: "report_date",
+          gteValue: campaignStatsSince,
+        }),
+        includeDailyStats
+          ? selectTable<DailyStatRecord>("daily_stats", "report_date", {
+              gteColumn: "report_date",
+              gteValue: dailyStatsSince,
+            })
+          : Promise.resolve([]),
         selectTable<DomainRecord>("domains", "updated_at"),
         selectTable<InvoiceRecord>("invoices", "issue_date"),
         selectTable<EmailExcludeRecord>("email_exclude_list", "created_at"),

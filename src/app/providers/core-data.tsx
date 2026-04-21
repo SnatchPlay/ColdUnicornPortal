@@ -61,16 +61,31 @@ const CoreDataContext = createContext<CoreDataContextValue | null>(null);
 
 function mapCoreDataError(reason: unknown) {
   if (reason instanceof RepositoryError) {
+    if (import.meta.env?.DEV) {
+      console.error("[CoreData] repository error", {
+        table: reason.table,
+        operation: reason.operation,
+        kind: reason.kind,
+        code: reason.code,
+        message: reason.message,
+        details: reason.details,
+        hint: reason.hint,
+      });
+    }
     if (reason.kind === "permission") {
       if (reason.table === "invites") {
         return reason.message;
       }
       return `Access to ${reason.table} is blocked by your current permissions.`;
     }
+    if (reason.kind === "timeout") {
+      return `Loading ${reason.table} timed out on the database (${reason.code ?? "57014"}). A row-level-security or index issue is likely — open DevTools console for details.`;
+    }
     if (reason.kind === "network") {
       return `Could not load ${reason.table} because the network connection is unstable. Try again.`;
     }
-    return `Could not ${reason.operation} ${reason.table}. Please retry.`;
+    const suffix = reason.code ? ` [${reason.code}] ${reason.message}` : ` ${reason.message}`;
+    return `Could not ${reason.operation} ${reason.table}.${suffix}`;
   }
   if (reason instanceof Error) {
     return reason.message;
