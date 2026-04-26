@@ -6,6 +6,18 @@
       "headers": {
         "Authorization": "Bearer ${env:SUPABASE_ACCESS_TOKEN}"
       }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "description": "Browser automation for visual debugging. Lets the agent open the dev/preview server, navigate as different roles, take screenshots, click around, and verify UI states without writing throwaway test files."
+    },
+    "shadcn": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@shadcn/ui@latest", "mcp"],
+      "description": "shadcn/ui registry access. Use to list, inspect, and install registered components (the project already uses shadcn primitives under src/app/components/ui/)."
     }
   }
 }

@@ -1,0 +1,114 @@
+/**
+ * Template for an ad-hoc visual debugging spec.
+ *
+ * Rename to `visual-debug.spec.ts` if you want it picked up by `pnpm test:smoke`,
+ * or run it ad-hoc:
+ *
+ *   pnpm exec playwright test e2e/visual-debug.spec.ts.example --headed
+ *
+ * Use this when you want a recorded reproduction of a visual issue across
+ * roles. For free-form one-off checks during iteration, prefer the Playwright
+ * MCP tools (no file needed).
+ *
+ * The Supabase routes are mocked the same way as e2e/smoke.spec.ts so the
+ * spec is hermetic — it does not hit the real database.
+ */
+
+import { expect, test, type Page } from "@playwright/test";
+
+const projectRef = "bnetnuzxynmdftiadwef";
+const supabaseUrl = `https://${projectRef}.supabase.co`;
+const authStorageKey = `sb-${projectRef}-auth-token`;
+
+type Role = "client" | "manager" | "admin";
+
+function buildSession(userId: string, email: string) {
+  return {
+    access_token: `access-token-${userId}`,
+    refresh_token: `refresh-token-${userId}`,
+    expires_at: Math.floor(Date.now() / 1000) + 60 * 60,
+    expires_in: 60 * 60,
+    token_type: "bearer",
+    user: {
+      id: userId,
+      email,
+      aud: "authenticated",
+      role: "authenticated",
+    },
+  };
+}
+
+async function seedSession(page: Page, role: Role) {
+  const session = buildSession(`${role}-user-1`, `${role}@test.local`);
+  await page.addInitScript(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    },
+    { key: authStorageKey, value: session },
+  );
+}
+
+async function mockSupabase(page: Page, role: Role) {
+  await page.route(`${supabaseUrl}/rest/v1/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const table = url.pathname.split("/").pop();
+
+    // Minimum stub set — extend as the page under test demands.
+    if (table === "users") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: `${role}-user-1`,
+            email: `${role}@test.local`,
+            first_name: role.charAt(0).toUpperCase() + role.slice(1),
+            last_name: "User",
+            role,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+        ]),
+      });
+      return;
+    }
+
+    if (table === "client_users" && role === "client") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ client_id: "client-1" }]),
+      });
+      return;
+    }
+
+    // TODO: add fixtures for clients, leads, campaigns, campaign_daily_stats,
+    // daily_stats — copy from the screen state you are reproducing.
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.route(`${supabaseUrl}/auth/v1/**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+}
+
+const roles: Role[] = ["client", "manager", "admin"];
+const homePathByRole: Record<Role, string> = {
+  client: "/client/dashboard",
+  manager: "/manager/dashboard",
+  admin: "/admin/dashboard",
+};
+
+for (const role of roles) {
+  test(`visual: ${role} dashboard renders`, async ({ page }) => {
+    await seedSession(page, role);
+    await mockSupabase(page, role);
+    await page.goto(homePathByRole[role]);
+
+    // Replace with a real assertion when you have a bug to reproduce.
+    await expect(page.locator("body")).toBeVisible();
+
+    // Saved next to test-results/ — useful for PR descriptions.
+    await page.screenshot({ path: `test-results/visual-${role}-dashboard.png`, fullPage: true });
+  });
+}
