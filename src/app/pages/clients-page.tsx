@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Checkbox } from "../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -58,8 +58,8 @@ interface ClientDraft {
   status: ClientRecord["status"];
   minDailySent: number;
   inboxesCount: number;
-  notificationEmails: string;
-  smsPhoneNumbers: string;
+  notificationEmails: string[];
+  smsPhoneNumbers: string[];
   autoOooEnabled: boolean;
   setupInfo: string;
   managerId: string;
@@ -122,19 +122,82 @@ function sortIndicator(active: boolean, direction: SortDirection) {
   return direction === "asc" ? "asc" : "desc";
 }
 
-function toCsv(items: string[] | null) {
-  return (items ?? []).join(", ");
-}
-
-function parseCsv(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function normalizeStringList(items: string[]) {
+  return items.map((item) => item.trim()).filter(Boolean);
 }
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+interface StringListEditorProps {
+  values: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  inputType?: "text" | "email" | "tel";
+  emptyLabel: string;
+  addLabel: string;
+  removeLabel: string;
+}
+
+function StringListEditor({
+  values,
+  onChange,
+  placeholder,
+  inputType = "text",
+  emptyLabel,
+  addLabel,
+  removeLabel,
+}: StringListEditorProps) {
+  const updateAt = (index: number, value: string) => {
+    const next = values.slice();
+    next[index] = value;
+    onChange(next);
+  };
+  const removeAt = (index: number) => {
+    onChange(values.filter((_, currentIndex) => currentIndex !== index));
+  };
+  const append = () => {
+    onChange([...values, ""]);
+  };
+  return (
+    <div className="space-y-2">
+      {values.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <ul className="space-y-2">
+          {values.map((value, index) => (
+            <li key={index} className="flex items-center gap-2">
+              <input
+                type={inputType}
+                value={value}
+                onChange={(event) => updateAt(index, event.target.value)}
+                placeholder={placeholder}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => removeAt(index)}
+                aria-label={removeLabel}
+                title={removeLabel}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/20 text-muted-foreground transition hover:border-red-400/40 hover:text-red-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={append}
+        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-muted-foreground transition hover:border-sky-400/40 hover:text-sky-100"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {addLabel}
+      </button>
+    </div>
+  );
 }
 
 function toClientDraft(client: ClientRecord): ClientDraft {
@@ -143,8 +206,8 @@ function toClientDraft(client: ClientRecord): ClientDraft {
     status: client.status,
     minDailySent: client.min_daily_sent,
     inboxesCount: client.inboxes_count,
-    notificationEmails: toCsv(client.notification_emails),
-    smsPhoneNumbers: toCsv(client.sms_phone_numbers),
+    notificationEmails: client.notification_emails ?? [],
+    smsPhoneNumbers: client.sms_phone_numbers ?? [],
     autoOooEnabled: client.auto_ooo_enabled,
     setupInfo: client.setup_info ?? "",
     managerId: client.manager_id,
@@ -167,12 +230,12 @@ function buildClientPatch(client: ClientRecord, draft: ClientDraft, canEditAssig
     patch.inboxes_count = draft.inboxesCount;
   }
 
-  const nextNotificationEmails = parseCsv(draft.notificationEmails);
+  const nextNotificationEmails = normalizeStringList(draft.notificationEmails);
   if (JSON.stringify(client.notification_emails ?? []) !== JSON.stringify(nextNotificationEmails)) {
     patch.notification_emails = nextNotificationEmails;
   }
 
-  const nextSmsPhones = parseCsv(draft.smsPhoneNumbers);
+  const nextSmsPhones = normalizeStringList(draft.smsPhoneNumbers);
   if (JSON.stringify(client.sms_phone_numbers ?? []) !== JSON.stringify(nextSmsPhones)) {
     patch.sms_phone_numbers = nextSmsPhones;
   }
@@ -1097,28 +1160,34 @@ export function ClientsPage() {
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     />
                   </label>
-                  <label className="space-y-2">
+                  <div className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Notification email recipients</span>
-                    <textarea
-                      rows={3}
-                      value={draft.notificationEmails}
-                      onChange={(event) =>
-                        setDraft((current) => (current ? { ...current, notificationEmails: event.target.value } : current))
+                    <StringListEditor
+                      values={draft.notificationEmails}
+                      onChange={(next) =>
+                        setDraft((current) => (current ? { ...current, notificationEmails: next } : current))
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                      placeholder="name@company.com"
+                      inputType="email"
+                      emptyLabel="No email recipients yet."
+                      addLabel="Add email"
+                      removeLabel="Remove email"
                     />
-                  </label>
-                  <label className="space-y-2">
+                  </div>
+                  <div className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">SMS alert phone numbers</span>
-                    <textarea
-                      rows={3}
-                      value={draft.smsPhoneNumbers}
-                      onChange={(event) =>
-                        setDraft((current) => (current ? { ...current, smsPhoneNumbers: event.target.value } : current))
+                    <StringListEditor
+                      values={draft.smsPhoneNumbers}
+                      onChange={(next) =>
+                        setDraft((current) => (current ? { ...current, smsPhoneNumbers: next } : current))
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                      placeholder="+1 555 123 4567"
+                      inputType="tel"
+                      emptyLabel="No phone numbers yet."
+                      addLabel="Add phone number"
+                      removeLabel="Remove phone number"
                     />
-                  </label>
+                  </div>
                   {canEditAssignments && (
                     <label className="space-y-2">
                       <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned manager</span>
