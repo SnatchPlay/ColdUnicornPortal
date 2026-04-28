@@ -1,4 +1,4 @@
-# 04 · Metrics Catalog
+﻿# 04 В· Metrics Catalog
 
 Every metric shown anywhere in the portal, with its formula, source columns, file:line of the computation, time window, edge-case handling, and which roles see it. When a metric is derived from `leads`, remember that the snapshot loader orders leads by `updated_at DESC` and may be limited (`loadSnapshot({ leadsLimit })`); timeframe filters are applied client-side on top of that.
 
@@ -11,13 +11,14 @@ Every metric shown anywhere in the portal, with its formula, source columns, fil
 5. [Campaign performance](#5-campaign-performance)
 6. [Client-dashboard time series](#6-client-dashboard-time-series)
 7. [Client-dashboard sparklines](#7-client-dashboard-sparklines)
-8. [DoD — Day of Day](#8-dod--day-of-day)
-9. [3-DoD — three-day observation](#9-3-dod--three-day-observation)
-10. [WoW — Week on Week](#10-wow--week-on-week)
-11. [MoM — Month on Month](#11-mom--month-on-month)
+8. [DoD вЂ” Day of Day](#8-dod--day-of-day)
+9. [3-DoD вЂ” three-day observation](#9-3-dod--three-day-observation)
+10. [WoW вЂ” Week on Week](#10-wow--week-on-week)
+11. [MoM вЂ” Month on Month](#11-mom--month-on-month)
 12. [Manager-dashboard aggregates](#12-manager-dashboard-aggregates)
 13. [Admin campaign momentum](#13-admin-campaign-momentum)
 14. [Supporting helpers](#14-supporting-helpers)
+15. [Condition-rule context metrics](#15-condition-rule-context-metrics)
 
 ---
 
@@ -62,7 +63,7 @@ export function getClientKpis(clients, campaigns, leads, stats) {
 - **Source:** `leads.qualification`.
 - **File:line:** [client-view-models.ts:37](../../../src/app/lib/client-view-models.ts#L37).
 - **Time window:** the current timeframe filter on leads. Leads list itself is pre-scoped by `scopeLeads` and then filtered by the chosen timeframe (`createDefaultTimeframe()` = last 30 days, or custom range).
-- **Edge cases:** a lead whose flags roll forward (e.g. `won=true` with `qualification='MQL'`) **still counts** as MQL here — `getClientKpis` reads `qualification` directly, it does not call `getLeadStage()`. Contrast with [§4 Lead stage lifecycle](#4-lead-stage-lifecycle).
+- **Edge cases:** a lead whose flags roll forward (e.g. `won=true` with `qualification='MQL'`) **still counts** as MQL here вЂ” `getClientKpis` reads `qualification` directly, it does not call `getLeadStage()`. Contrast with [В§4 Lead stage lifecycle](#4-lead-stage-lifecycle).
 - **Visible to:** Client, Manager (manager views the same data through `scopeLeads`), Admin.
 
 ### 2.2 Meetings Booked
@@ -98,11 +99,11 @@ export function getClientKpis(clients, campaigns, leads, stats) {
 ### 2.5 Prospects Base
 
 - **Where:** Client Dashboard KPI tile 5 (compact number), Client Statistics KPI tile 4.
-- **Formula:** `sum(campaigns.database_size) OR sum(clients.prospects_added)` — the second term is a fallback when the first is zero/falsy (short-circuit `||` on a JS number).
+- **Formula:** `sum(campaigns.database_size) OR sum(clients.prospects_added)` вЂ” the second term is a fallback when the first is zero/falsy (short-circuit `||` on a JS number).
 - **Source:** `campaigns.database_size` preferred, `clients.prospects_added` fallback.
 - **File:line:** [client-view-models.ts:34-41](../../../src/app/lib/client-view-models.ts#L34-L41).
-- **Time window:** these are "base" counters — not timeframe-filtered.
-- **Edge cases:** if both are zero, KPI reads `0` and all conversion-rate denominators using `prospects` collapse to `0%` labels (see §3).
+- **Time window:** these are "base" counters вЂ” not timeframe-filtered.
+- **Edge cases:** if both are zero, KPI reads `0` and all conversion-rate denominators using `prospects` collapse to `0%` labels (see В§3).
 - **Visible to:** Client, Manager, Admin.
 
 ---
@@ -120,9 +121,9 @@ Function `getConversionRates(leads, prospects)` at [`client-view-models.ts:109-1
 
 - **Where:** Client Dashboard "Conversion Funnel" section, Client Statistics "Conversion Funnel" section. (Rendered as HTML bar widget, not recharts.)
 - **Formula:** see table.
-- **Source:** `leads.qualification`, `leads.meeting_booked`, `leads.won`; `prospects` comes from §2.5.
+- **Source:** `leads.qualification`, `leads.meeting_booked`, `leads.won`; `prospects` comes from В§2.5.
 - **File:line:** [client-view-models.ts:109-143](../../../src/app/lib/client-view-models.ts#L109-L143).
-- **Time window:** leads timeframe-scoped; `prospects` is lifetime (see §2.5).
+- **Time window:** leads timeframe-scoped; `prospects` is lifetime (see В§2.5).
 - **Edge cases:** when any denominator is 0, `rateLabel = "0%"` (falsy guard `prospects ?`, `mqls ?`, `meetings ?`). Values themselves remain non-negative integers.
 - **Visible to:** Client; Manager/Admin see the same layout on their views that invoke this helper.
 
@@ -172,7 +173,7 @@ return PIPELINE_STAGES.map(stage => ({ ...stage, count: counts.get(stage.key) ??
 
 - **Where:** Client Dashboard pipeline visualisation, Internal Leads filter chips (with counts).
 - **Time window:** timeframe-scoped leads (filter chips show counts of the *currently filtered* dataset).
-- **Edge cases:** stages outside `PIPELINE_STAGES` (unqualified/OOO/NRR) are counted but their counts are not surfaced — they land in the `Map` but don't appear in the returned array.
+- **Edge cases:** stages outside `PIPELINE_STAGES` (unqualified/OOO/NRR) are counted but their counts are not surfaced вЂ” they land in the `Map` but don't appear in the returned array.
 - **Visible to:** all roles.
 
 ---
@@ -198,7 +199,7 @@ return campaigns.map(campaign => {
 - **Source:** `campaign_daily_stats.sent_count`, `.reply_count`.
 - **File:line:** [client-view-models.ts:96](../../../src/app/lib/client-view-models.ts#L96).
 - **Time window:** the scoped/timeframed stats the page passes in; typically current timeframe.
-- **Edge cases:** on Client Dashboard the coloring is: `>= 5%` → green `#22c55e`, otherwise yellow `#facc15` ([client-dashboard-page.tsx](../../../src/app/pages/client-dashboard-page.tsx)).
+- **Edge cases:** on Client Dashboard the coloring is: `>= 5%` в†’ green `#22c55e`, otherwise yellow `#facc15` ([client-dashboard-page.tsx](../../../src/app/pages/client-dashboard-page.tsx)).
 - **Visible to:** all roles.
 
 ### 5.2 Campaign Sent (total)
@@ -213,10 +214,10 @@ return campaigns.map(campaign => {
 
 ### 5.4 Campaign "positive responses" (editable)
 
-- **Where:** Internal Campaigns table column; Client Campaigns card metric. Feeds Admin momentum `positive` series ([§13](#13-admin-campaign-momentum)) via `campaign_daily_stats.positive_replies_count`.
+- **Where:** Internal Campaigns table column; Client Campaigns card metric. Feeds Admin momentum `positive` series ([В§13](#13-admin-campaign-momentum)) via `campaign_daily_stats.positive_replies_count`.
 - **Formula:** `campaigns.positive_responses` as the editable lifetime counter; separately, `sum(campaign_daily_stats.positive_replies_count)` for the daily momentum chart.
 - **Source:** `campaigns.positive_responses` (integer, user-editable); `campaign_daily_stats.positive_replies_count` (populated by ingestion).
-- **Edge cases:** two distinct sources for "positive" — the table column shows the manually curated number; the chart shows the daily ingestion counter. They can diverge; this is intentional.
+- **Edge cases:** two distinct sources for "positive" вЂ” the table column shows the manually curated number; the chart shows the daily ingestion counter. They can diverge; this is intentional.
 
 ---
 
@@ -236,7 +237,7 @@ return Array.from(byDate.entries())
 
 - **Where:** Client Dashboard "Daily sent (last 30 days)" bar chart; Client Statistics "Daily sent" area chart.
 - **Time window:** filter-timeframe-scoped `campaign_daily_stats`.
-- **Edge cases:** `report_date` is treated as an opaque ISO-date string — sorting is lexicographic, which matches date order for YYYY-MM-DD.
+- **Edge cases:** `report_date` is treated as an opaque ISO-date string вЂ” sorting is lexicographic, which matches date order for YYYY-MM-DD.
 
 ### 6.2 Pipeline Activity series
 
@@ -254,45 +255,45 @@ for (const lead of leads) {
 ```
 
 - **Where:** Client Statistics "Pipeline Activity" line chart (3 series: `mqls`/`meetings`/`won`).
-- **Edge cases:** `mqls` counts only leads currently at `qualification='MQL'`, not leads that have since progressed. Compare with §4.1 which uses `getLeadStage`.
+- **Edge cases:** `mqls` counts only leads currently at `qualification='MQL'`, not leads that have since progressed. Compare with В§4.1 which uses `getLeadStage`.
 - **Visible to:** Client; manager/admin see comparable data via `scopeLeads`.
 
-### 6.3 Weekly leads count (MQL) — Client Dashboard
+### 6.3 Weekly leads count (MQL) вЂ” Client Dashboard
 
 - **Where:** Client Dashboard "Leads Count per week".
 - **Formula:** group timeframe-scoped leads by ISO-week start (Monday); count `qualification === 'MQL'`.
 - **File:line:** inline in [`client-dashboard-page.tsx`](../../../src/app/pages/client-dashboard-page.tsx) (around lines 256-274 in the recent UI refactor).
-- **Edge cases:** weeks with zero MQLs do not appear as zero bars — the mapping only writes entries for weeks that had at least one lead update.
+- **Edge cases:** weeks with zero MQLs do not appear as zero bars вЂ” the mapping only writes entries for weeks that had at least one lead update.
 
-### 6.4 Monthly leads count — Client Dashboard
+### 6.4 Monthly leads count вЂ” Client Dashboard
 
 - **Where:** Client Dashboard "Leads Count per month".
 - **Formula:** `sum(daily_stats.mql_count)` aggregated by calendar month.
 - **Source:** `daily_stats.mql_count`.
-- **Note:** driven by the pre-aggregated table; **not** by the leads list. This is why the metric is available only for roles whose snapshot includes `daily_stats` (manager/admin) — clients reach this via the subset of daily stats they are RLS-visible for; if the client's snapshot intentionally excluded `daily_stats`, the chart falls back to empty state. Today the exclusion is only applied for the client role ([core-data.tsx](../../../src/app/providers/core-data.tsx)).
+- **Note:** driven by the pre-aggregated table; **not** by the leads list. This is why the metric is available only for roles whose snapshot includes `daily_stats` (manager/admin) вЂ” clients reach this via the subset of daily stats they are RLS-visible for; if the client's snapshot intentionally excluded `daily_stats`, the chart falls back to empty state. Today the exclusion is only applied for the client role ([core-data.tsx](../../../src/app/providers/core-data.tsx)).
 
-### 6.5 Prospects added daily — Client Dashboard
+### 6.5 Prospects added daily вЂ” Client Dashboard
 
 - **Where:** Client Dashboard "Prospects added" (last 10 days).
 - **Formula:** delta between consecutive `daily_stats.prospects_count` entries sorted by `report_date`.
 - **Source:** `daily_stats.prospects_count`.
-- **Edge cases:** first day has no previous → delta = 0 (skipped).
+- **Edge cases:** first day has no previous в†’ delta = 0 (skipped).
 
-### 6.6 Sent last 3 months — Client Dashboard
+### 6.6 Sent last 3 months вЂ” Client Dashboard
 
 - **Where:** "Sent count for last three months" bar.
 - **Formula:** `sum(campaign_daily_stats.sent_count)` grouped by calendar month, last 3 months.
 
-### 6.7 Prospects added by month — Client Dashboard
+### 6.7 Prospects added by month вЂ” Client Dashboard
 
 - **Where:** "Prospects added by Month" bar, last 12 months.
 - **Formula:** month-over-month delta of `sum(daily_stats.prospects_count) per month` (aggregate by month first, then delta).
 
-### 6.8 Velocity — Client Dashboard
+### 6.8 Velocity вЂ” Client Dashboard
 
 - **Where:** "Velocity Chart" ComposedChart (Bar + Line, dual-axis).
 - **Formula per week:**
-  - `emailsDelta` = `sum(sent_count this week) - sum(sent_count previous week)`; color green (`#3b82f6`) if ≥ 0, dark blue (`#1d4ed8`) if negative.
+  - `emailsDelta` = `sum(sent_count this week) - sum(sent_count previous week)`; color green (`#3b82f6`) if в‰Ґ 0, dark blue (`#1d4ed8`) if negative.
   - `mqls` = `count(leads with qualification='MQL' in that week)` (plotted as line on the right axis).
 - **Time window:** last 8 weeks from today (ISO-week boundaries).
 
@@ -310,27 +311,27 @@ Inline SVG sparklines rendered by the `Sparkline` component in [`client-dashboar
 | Emails Sent | `[sent_count per day for last 7 days]` | 7 days | blue `#38bdf8` |
 | Prospects | `[prospects_count per month for last 7 months]` | 7 months | indigo `#818cf8` |
 
-Trend arrow below the card uses `toPercentChange(current, previous)` (inline helper ~lines 73-79). Displays `↑ X%` / `↓ X%`; `null` when no previous period is available, in which case the arrow hides. `previous` is computed via `makePreviousRange(timeframe)` from [`timeframe.ts`](../../../src/app/lib/timeframe.ts).
+Trend arrow below the card uses `toPercentChange(current, previous)` (inline helper ~lines 73-79). Displays `в†‘ X%` / `в†“ X%`; `null` when no previous period is available, in which case the arrow hides. `previous` is computed via `makePreviousRange(timeframe)` from [`timeframe.ts`](../../../src/app/lib/timeframe.ts).
 
 ---
 
-## 8. DoD — Day of Day
+## 8. DoD вЂ” Day of Day
 
 Aggregations live in `createClientMetrics()` at [`client-metrics.ts:248-339`](../../../src/app/lib/client-metrics.ts#L248-L339). Input: `DailyStatRecord[]`, `LeadRecord[]`. The input is already timeframe-scoped by the caller; DoD uses absolute today-offsets instead of the timeframe window.
 
 `today` is normalised to noon (`setHours(12, 0, 0, 0)`) to dodge DST issues around midnight. All day keys are derived via `toDateKey(date)` = `YYYY-MM-DD` local.
 
-### DoD rows — [client-metrics.ts:258-266](../../../src/app/lib/client-metrics.ts#L258-L266)
+### DoD rows вЂ” [client-metrics.ts:258-266](../../../src/app/lib/client-metrics.ts#L258-L266)
 
 ```ts
 const dodRows: DodRow[] = [
   { bucket: "+2", schedule: todayDaily.scheduleDayAfter, sent: null },
   { bucket: "+1", schedule: todayDaily.scheduleTomorrow, sent: null },
   { bucket:  "0", schedule: todayDaily.scheduleToday,    sent: valueByDayOffset(..., 0, i => i.emailsSent) },
-  { bucket: "-1", schedule: null,                         sent: valueByDayOffset(..., 1, …) },
-  { bucket: "-2", schedule: null,                         sent: valueByDayOffset(..., 2, …) },
-  { bucket: "-3", schedule: null,                         sent: valueByDayOffset(..., 3, …) },
-  { bucket: "-4", schedule: null,                         sent: valueByDayOffset(..., 4, …) },
+  { bucket: "-1", schedule: null,                         sent: valueByDayOffset(..., 1, вЂ¦) },
+  { bucket: "-2", schedule: null,                         sent: valueByDayOffset(..., 2, вЂ¦) },
+  { bucket: "-3", schedule: null,                         sent: valueByDayOffset(..., 3, вЂ¦) },
+  { bucket: "-4", schedule: null,                         sent: valueByDayOffset(..., 4, вЂ¦) },
 ];
 ```
 
@@ -349,12 +350,12 @@ const dodRows: DodRow[] = [
 - **Source:** `daily_stats.emails_sent`.
 - **Helper:** `valueByDayOffset(entriesByDate, today, offset, getter)` at [client-metrics.ts:235-246](../../../src/app/lib/client-metrics.ts#L235-L246).
 - **Time window:** single-day buckets.
-- **Edge cases:** missing day → 0 (not null); bucket "0" = today, "-1" = yesterday, etc.
+- **Edge cases:** missing day в†’ 0 (not null); bucket "0" = today, "-1" = yesterday, etc.
 - **Visible to:** manager, admin. `sentToday/sentYesterday/sentTwoDaysAgo` surfaced on `ClientMetricsOverview`.
 
 ---
 
-## 9. 3-DoD — three-day observation
+## 9. 3-DoD вЂ” three-day observation
 
 Rows at [client-metrics.ts:268-272](../../../src/app/lib/client-metrics.ts#L268-L272):
 
@@ -392,7 +393,7 @@ if (lead.won)                    target.won += 1;
 
 ---
 
-## 10. WoW — Week on Week
+## 10. WoW вЂ” Week on Week
 
 Rows at [client-metrics.ts:274-296](../../../src/app/lib/client-metrics.ts#L274-L296). Week boundaries via `startOfWeek()` (Monday-start ISO week) at [client-metrics.ts:104-110](../../../src/app/lib/client-metrics.ts#L104-L110).
 
@@ -442,7 +443,7 @@ return {
 
 - **Formula:** `sum(human_replies_count) / sum(emails_sent)`.
 - **Source:** `daily_stats.human_replies_count`.
-- **Use:** excludes automated/OOO/bounce replies — the "quality" signal.
+- **Use:** excludes automated/OOO/bounce replies вЂ” the "quality" signal.
 
 ### 10.5 WoW Bounce Rate
 
@@ -460,7 +461,7 @@ Visible to manager and admin in ClientsPage "WoW" tab. The current week bucket (
 
 ---
 
-## 11. MoM — Month on Month
+## 11. MoM вЂ” Month on Month
 
 Rows at [client-metrics.ts:298-310](../../../src/app/lib/client-metrics.ts#L298-L310). Calendar-month boundaries via `shiftMonthStart` / `endOfMonth` ([lines 119-125](../../../src/app/lib/client-metrics.ts#L119-L125)).
 
@@ -489,7 +490,7 @@ const momRows = [0,1,2,3].map(offset => {
 ### 11.3 MoM Meetings
 
 - **Formula:** `count(leads WHERE meeting_booked=true, created in month)`.
-- **Note:** "created in month" — not the month the meeting was booked. For practical purposes leads whose meetings are booked shortly after they are created are counted in the creation month.
+- **Note:** "created in month" вЂ” not the month the meeting was booked. For practical purposes leads whose meetings are booked shortly after they are created are counted in the creation month.
 
 ### 11.4 MoM Won
 
@@ -511,16 +512,16 @@ Inline in [`manager-dashboard-page.tsx`](../../../src/app/pages/manager-dashboar
 
 ### 12.2 Active campaigns
 
-- **Formula:** `count(scopeCampaigns(…) WHERE status = 'active')`.
+- **Formula:** `count(scopeCampaigns(вЂ¦) WHERE status = 'active')`.
 - **Source:** `campaigns.status`.
 
 ### 12.3 Leads in progress
 
-- **Formula:** `count(scopeLeads(…) WHERE stage ∉ ('won','rejected'))` roughly; the page uses `count(scopedLeads)` over a recency filter (leads updated in last 14 days are the working set).
+- **Formula:** `count(scopeLeads(вЂ¦) WHERE stage в€‰ ('won','rejected'))` roughly; the page uses `count(scopedLeads)` over a recency filter (leads updated in last 14 days are the working set).
 
 ### 12.4 Unclassified replies <a id="125-unclassified-replies"></a>
 
-- **Formula:** `count(scopeReplies(…) WHERE classification IS NULL)`.
+- **Formula:** `count(scopeReplies(вЂ¦) WHERE classification IS NULL)`.
 - **Source:** `replies.classification`.
 - **Interpretation:** sanity check on **n8n ingestion**, not a user action queue. All replies are classified by n8n; an "unclassified" count growing means ingestion is lagging or broken. There is no triage UI ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-no-reply-triage-ui)).
 
@@ -573,7 +574,7 @@ Output: `Array<{ date, label, sent, replies, positive }>`.
 
 ### 13.3 Manager capacity
 
-- **Formula:** group scoped entities by `manager_id` → `{ clientsCount, activeCampaignsCount, leadsCount }` per manager.
+- **Formula:** group scoped entities by `manager_id` в†’ `{ clientsCount, activeCampaignsCount, leadsCount }` per manager.
 - **Source:** `users.role='manager'`, `clients.manager_id`, `campaigns`, `leads`.
 - **Where:** Admin Dashboard "Manager capacity" surface.
 
@@ -581,15 +582,15 @@ Output: `Array<{ date, label, sent, replies, positive }>`.
 
 ## 14. Supporting helpers
 
-### `sum(values)` — [client-view-models.ts:24-26](../../../src/app/lib/client-view-models.ts#L24-L26)
+### `sum(values)` вЂ” [client-view-models.ts:24-26](../../../src/app/lib/client-view-models.ts#L24-L26)
 
 Sums numbers treating `null`/`undefined` as 0.
 
-### `formatCompact(value)` — [client-view-models.ts:183-187](../../../src/app/lib/client-view-models.ts#L183-L187)
+### `formatCompact(value)` вЂ” [client-view-models.ts:183-187](../../../src/app/lib/client-view-models.ts#L183-L187)
 
-`null` / 0 → `"0"`; ≥ 10,000 → `"XK"` (no decimals); ≥ 1,000 → `"X.YK"` (one decimal); otherwise delegated to `formatNumber`.
+`null` / 0 в†’ `"0"`; в‰Ґ 10,000 в†’ `"XK"` (no decimals); в‰Ґ 1,000 в†’ `"X.YK"` (one decimal); otherwise delegated to `formatNumber`.
 
-### `formatNumber`, `formatDate`, `formatMoney`, `getFullName` — [`format.ts`](../../../src/app/lib/format.ts)
+### `formatNumber`, `formatDate`, `formatMoney`, `getFullName` вЂ” [`format.ts`](../../../src/app/lib/format.ts)
 
 `formatDate(iso, opts)` uses `Intl.DateTimeFormat`. `getFullName(first, last)` handles nulls gracefully (returns `"No name"` if both missing).
 
@@ -597,12 +598,47 @@ Sums numbers treating `null`/`undefined` as 0.
 
 All defined in [`client-metrics.ts`](../../../src/app/lib/client-metrics.ts). They share the convention of setting hours to 12:00 for stability across DST.
 
-### Scope functions — [`selectors.ts`](../../../src/app/lib/selectors.ts)
+### Scope functions вЂ” [`selectors.ts`](../../../src/app/lib/selectors.ts)
 
-- `scopeClients(identity, clients)` — role-aware client filter.
-- `scopeCampaigns(identity, clients, campaigns)` — scope to visible clients, then apply `type='outreach'` for clients.
-- `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeInvoices` — analogous.
+- `scopeClients(identity, clients)` вЂ” role-aware client filter.
+- `scopeCampaigns(identity, clients, campaigns)` вЂ” scope to visible clients, then apply `type='outreach'` for clients.
+- `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeInvoices` вЂ” analogous.
 
 These are **post-RLS** client-side filters. They guarantee UI consistency when a snapshot contains rows a role shouldn't see (e.g. during impersonation); they are not a security boundary.
+---
 
-Next: [05 · Client portal](./05-client-portal.md).
+## 15. Condition-rule context metrics
+
+Runtime mapping for dynamic condition rules is built in `buildClientConditionContext(...)` (`src/app/lib/conditions/client-condition-context.ts`) and consumed by the `ClientsPage` condition engine.
+
+### 15.1 Primary context keys
+
+| Context key | Source |
+|------------|--------|
+| `prospects_added` | `clients.prospects_added` |
+| `prospects_signed` | `clients.prospects_signed` |
+| `inboxes` | `clients.inboxes_count` |
+| `min_sent` | `clients.min_daily_sent` |
+| `sent_today`, `sent_yesterday`, `sent_two_days_ago` | `createClientMetrics().overview` |
+| `schedule_today`, `schedule_tomorrow`, `schedule_day_after` | `createClientMetrics().overview` |
+| `three_dod_total`, `three_dod_sql` | `createClientMetrics().overview` |
+| `wow_response_rate`, `wow_human_response_rate`, `wow_bounce_rate`, `wow_ooo_rate`, `wow_sql` | current WoW bucket (`0`) from `createClientMetrics()` |
+| `wow_negative_rate` | current WoW bucket (`0`) negative rate |
+| `mom_sql`, `mom_meetings`, `mom_won` | current MoM bucket (`0`) |
+| `monthly_sql_kpi` | `clients.kpi_leads` |
+| `monthly_meeting_kpi` | `clients.kpi_meetings` |
+| `monthly_won_kpi` | `null` in current build (dependent rule seeded disabled) |
+| `auto_li_api_key` | `clients.linkedin_api_key` |
+| `bi_setup` | `clients.bi_setup_done` |
+
+### 15.2 DoD dynamic bucket evaluation
+
+DoD condition checks do not hardcode per-column comparisons. Each DoD schedule/sent cell injects a runtime `value` and evaluates the shared rule key (`dod_sent_or_schedule_vs_min_sent`) with dynamic column keys (`dod:{bucket}:{schedule|sent}`).
+
+### 15.3 Legacy-rate parity keys
+
+For parity with CS PDCA sheet behavior, the WoW response/human/OOO rules preserve green branches for very low rates (`<0.10%`) and record this in seeded `notes`. See [14 · Condition rules](./14-condition-rules.md#10-known-legacy-quirks).
+
+Next: [05 В· Client portal](./05-client-portal.md).
+
+

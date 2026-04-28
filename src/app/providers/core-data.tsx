@@ -13,6 +13,7 @@ import { RepositoryError, repository } from "../data/repository";
 import { useAuth } from "./auth";
 import type {
   CampaignRecord,
+  ConditionRuleRecord,
   ClientRecord,
   ClientUserRecord,
   CoreSnapshot,
@@ -33,6 +34,14 @@ interface CoreDataContextValue extends CoreSnapshot {
   updateLead: (leadId: string, patch: Partial<LeadRecord>) => Promise<void>;
   updateDomain: (domainId: string, patch: Partial<DomainRecord>) => Promise<void>;
   updateInvoice: (invoiceId: string, patch: Partial<InvoiceRecord>) => Promise<void>;
+  createConditionRule: (
+    input: Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at" | "created_by"> & { created_by?: string | null },
+  ) => Promise<void>;
+  updateConditionRule: (
+    ruleId: string,
+    patch: Partial<Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at">>,
+  ) => Promise<void>;
+  deleteConditionRule: (ruleId: string) => Promise<void>;
   sendInvite: (payload: InviteRequest) => Promise<void>;
   listInvites: () => Promise<InviteRecord[]>;
   resendInvite: (inviteId: string) => Promise<InviteRecord>;
@@ -55,6 +64,7 @@ const EMPTY_SNAPSHOT: CoreSnapshot = {
   domains: [],
   invoices: [],
   emailExcludeList: [],
+  conditionRules: [],
 };
 
 const CoreDataContext = createContext<CoreDataContextValue | null>(null);
@@ -101,12 +111,19 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     const includeDailyStats = identity?.role !== "client";
+    const includeConditionRules = identity?.role !== "client";
 
     setLoading(true);
     try {
-      const next = await repository.loadSnapshot({ includeDailyStats });
+      const [snapshotData, conditionRules] = await Promise.all([
+        repository.loadSnapshot({ includeDailyStats }),
+        includeConditionRules ? repository.loadConditionRules() : Promise.resolve([]),
+      ]);
       startTransition(() => {
-        setSnapshot(next);
+        setSnapshot({
+          ...snapshotData,
+          conditionRules,
+        });
         setError(null);
       });
     } catch (reason) {
@@ -291,6 +308,93 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       toast.error(message);
     }
   }, [snapshot.invoices]);
+
+  const createConditionRule = useCallback(async (
+    input: Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at" | "created_by"> & { created_by?: string | null },
+  ) => {
+    try {
+      const created = await repository.createConditionRule(input);
+      setSnapshot((current) => ({
+        ...current,
+        conditionRules: current.conditionRules
+          .concat(created)
+          .slice()
+          .sort((left, right) => left.priority - right.priority),
+      }));
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const updateConditionRule = useCallback(async (
+    ruleId: string,
+    patch: Partial<Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at">>,
+  ) => {
+    const previous = snapshot.conditionRules.find((item) => item.id === ruleId);
+    if (!previous) {
+      const message = "Condition rule is no longer available.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
+    const optimistic: ConditionRuleRecord = {
+      ...previous,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+    setSnapshot((current) => ({
+      ...current,
+      conditionRules: current.conditionRules.map((item) => (item.id === ruleId ? optimistic : item)),
+    }));
+
+    try {
+      const updated = await repository.updateConditionRule(ruleId, patch);
+      setSnapshot((current) => ({
+        ...current,
+        conditionRules: current.conditionRules
+          .map((item) => (item.id === ruleId ? updated : item))
+          .slice()
+          .sort((left, right) => left.priority - right.priority),
+      }));
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setSnapshot((current) => ({
+        ...current,
+        conditionRules: current.conditionRules.map((item) => (item.id === ruleId ? previous : item)),
+      }));
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, [snapshot.conditionRules]);
+
+  const deleteConditionRule = useCallback(async (ruleId: string) => {
+    const previous = snapshot.conditionRules;
+    setSnapshot((current) => ({
+      ...current,
+      conditionRules: current.conditionRules.filter((item) => item.id !== ruleId),
+    }));
+
+    try {
+      await repository.deleteConditionRule(ruleId);
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setSnapshot((current) => ({
+        ...current,
+        conditionRules: previous,
+      }));
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, [snapshot.conditionRules]);
 
   const sendInvite = useCallback(async (payload: InviteRequest) => {
     try {
@@ -479,6 +583,9 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       updateLead,
       updateDomain,
       updateInvoice,
+      createConditionRule,
+      updateConditionRule,
+      deleteConditionRule,
       sendInvite,
       listInvites,
       resendInvite,
@@ -504,6 +611,9 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       updateDomain,
       updateInvoice,
       updateLead,
+      createConditionRule,
+      updateConditionRule,
+      deleteConditionRule,
       upsertEmailExcludeDomain,
       upsertClientUserMapping,
     ],

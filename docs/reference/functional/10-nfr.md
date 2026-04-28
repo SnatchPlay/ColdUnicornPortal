@@ -20,7 +20,7 @@ Cross-cutting concerns: data loading, auth, RLS performance, UI states, responsi
 
 ### 1.1 Bulk snapshot
 
-On `CoreDataProvider` mount and after a session change, the app fetches 11 tables in parallel via `repository.loadSnapshot()` ([09 §7](./09-mutations-rls.md#7-snapshot-reload-strategy)). Total round-trip typically 400–900 ms on warm cache.
+On `CoreDataProvider` mount and after a session change, the app loads snapshot data via `repository.loadSnapshot()` ([09 §7](./09-mutations-rls.md#7-snapshot-reload-strategy)). Repository dispatches an action to `orm-gateway`, where Drizzle executes the snapshot query set under RLS passthrough.
 
 Constants in [repository.ts](../../../src/app/data/repository.ts):
 
@@ -35,7 +35,7 @@ Rationale (comments in source): "the dashboard only renders the last 21 days, so
 
 ### 1.2 Retry policy
 
-`selectTable()` retries `select` calls with `kind ∈ {network, timeout}` up to twice (delays `250 ms` and `600 ms`). Mutations are **not** retried — see [09 §6.2](./09-mutations-rls.md#62-retry-behaviour).
+Repository retries `orm-gateway` `select` actions with `kind ∈ {network, timeout}` up to twice (delays `250 ms` and `600 ms`). Mutations are **not** retried — see [09 §6.2](./09-mutations-rls.md#62-retry-behaviour).
 
 ### 1.3 No realtime
 
@@ -70,8 +70,8 @@ Implemented in [`providers/auth.tsx`](../../../src/app/providers/auth.tsx).
 ### 2.1 Bootstrap sequence
 
 1. AuthProvider calls `supabase.auth.getSession()` on mount.
-2. If a session exists, fetch the user's row in `public.users` (RLS lets the user see their own row via `users_select_self`).
-3. If the user's role is `client`, query `client_users` to resolve `clientId`. Join to `clients` to retrieve `name` for the sidebar.
+2. If a session exists, call `repository.loadIdentity(session.user.id)`, which invokes `orm-gateway`.
+3. In `orm-gateway`, Drizzle reads `public.users` and (for `client` role) `client_users` under RLS passthrough to resolve `clientId`.
 4. Compose `Identity` and set it on context.
 
 Result state exposed by `useAuth()`:
@@ -102,7 +102,7 @@ Each code maps to a message in [`App.tsx:40-56`](../../../src/app/App.tsx#L40-L5
 - `signInWithOtp(email)` — magic link; only when `VITE_AUTH_ALLOW_MAGIC_LINK`.
 - `requestPasswordReset(email)` — uses `VITE_APP_BASE_URL + "/reset-password"` as `redirectTo`.
 - `updatePassword(password)` — post-signin change.
-- `updateProfileName(fullName)` — updates `auth.users.user_metadata` and `public.users.first_name/last_name` atomically.
+- `updateProfileName(fullName)` — updates `public.users.first_name/last_name` through `orm-gateway` (RLS-scoped to current user).
 - `signOut()` — clears the session and resets context.
 - `refreshIdentity()` — re-runs the identity load (binds to the "Retry" buttons in blockers).
 - `impersonate(identity)` / `stopImpersonation()` — super-admin only.

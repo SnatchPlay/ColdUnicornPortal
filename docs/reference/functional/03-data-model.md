@@ -1,4 +1,4 @@
-# 03 · Data Model
+﻿# 03 · Data Model
 
 Authoritative source: [`supabase/drizzle/schema.ts`](../../../supabase/drizzle/schema.ts), regenerated with `pnpm db:introspect` against the live project. RLS is applied via `pgPolicy(...)` declarations and supplemented by SQL in [`supabase/migrations/*`](../../../supabase/migrations) and [`docs/reference/supabase-production-rls.sql`](../supabase-production-rls.sql).
 
@@ -59,17 +59,18 @@ RLS:
 
 - `users_select_self` — `auth.uid() = id` (everyone reads their own row).
 - `users_select_internal` — visible to internal users (admin/manager) for dropdowns and attribution. The policy body is `to ["authenticated"]` without an explicit `using` in the Drizzle declaration; actual predicate lives in the SQL migration at `docs/reference/supabase-production-rls.sql`.
+- `users_update_self` — `auth.uid() = id` for both `using` and `with check`; supports profile-name updates through `orm-gateway`.
 
-No INSERT/UPDATE/DELETE policies — writes happen via Supabase Auth triggers / edge functions only.
+No INSERT/DELETE policies — row creation remains invite/auth-owned; updates are limited to self-service profile fields.
 
-#### `client_users` — mapping user → client(s) — [schema.ts:313-339](../../../supabase/drizzle/schema.ts#L313-L339)
+#### `client_users` — mapping user > client(s) — [schema.ts:313-339](../../../supabase/drizzle/schema.ts#L313-L339)
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid PK | |
 | `created_at` | timestamptz | |
-| `client_id` | uuid FK → `clients.id` ON DELETE CASCADE | |
-| `user_id` | uuid FK → `users.id` ON DELETE CASCADE | |
+| `client_id` | uuid FK > `clients.id` ON DELETE CASCADE | |
+| `user_id` | uuid FK > `users.id` ON DELETE CASCADE | |
 
 Indexes on both FK columns. Unique on (`client_id`, `user_id`) and on `user_id` alone — each user maps to at most one client (enforces the "client role sees exactly one workspace" invariant from ADR-0001).
 
@@ -89,7 +90,7 @@ The business entity whose outreach we run.
 | `id` | uuid PK | |
 | `created_at` | timestamptz | |
 | `name` | text not null | Displayed everywhere a client is named. |
-| `manager_id` | uuid FK → `users.id` not null | Determines manager scoping (`scopeClients`). |
+| `manager_id` | uuid FK > `users.id` not null | Determines manager scoping (`scopeClients`). |
 | `kpi_leads` | smallint | Contract target leads/month (shown in sidebar mini-card & dashboards). |
 | `kpi_meetings` | smallint | Contract target meetings/month. |
 | `contracted_amount` | numeric | For billing context; not displayed in main UI. |
@@ -117,6 +118,48 @@ RLS:
 - `clients_select_scoped` using `private.can_access_client(id)`.
 - `clients_update_scoped` — drizzle declares `for: "update" to: ["authenticated"]`; the actual predicate is in the production RLS SQL and effectively mirrors `can_manage_client(id)`. See `docs/reference/supabase-production-rls.sql`.
 
+#### `condition_rules` — [schema.ts:286-335](../../../supabase/drizzle/schema.ts#L286-L335)
+
+Dynamic condition rules used to evaluate client operational-health states across Clients surfaces.
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK | |
+| `key` | text UNIQUE not null | Stable rule identifier (seeded from CS PDCA). |
+| `name` | text not null | Human-readable label. |
+| `description` | text nullable | |
+| `target_entity` | text not null, default `client` | Current implementation focuses on client entities. |
+| `surface` | text not null | `clients_overview`, `clients_dod`, `clients_3dod`, `clients_wow`, `clients_mom`, `clients_setup`. |
+| `metric_key` | text not null | Primary context key used by the rule. |
+| `source_sheet` / `source_range` | text nullable | Traceability back to the legacy sheet. |
+| `scope_type` | text not null, default `global` | `global`, `manager`, or `client`. |
+| `client_id` | uuid FK nullable | Scoped override for one client. |
+| `manager_id` | uuid FK nullable | Scoped override for one manager. |
+| `apply_to` | text not null, default `cell` | `row`, `cell`, `badge`, `section`. |
+| `column_key` | text nullable | Column/cell target for UI rendering. |
+| `branches` | jsonb not null | Ordered branch list (first-match semantics). |
+| `base_filter` | jsonb nullable | Optional precondition before branch evaluation. |
+| `priority` | integer not null, default 100 | Lower = stronger within same severity. |
+| `enabled` | boolean not null, default true | Rule on/off switch. |
+| `notes` | text nullable | Migration/runtime caveats and legacy quirks. |
+| `created_by` | uuid FK nullable | User who authored/seeded the rule. |
+| `created_at` / `updated_at` | timestamptz | |
+
+Indexes:
+
+- `idx_condition_rules_lookup` on `(target_entity, surface, enabled, priority)`
+- `idx_condition_rules_client_scope` partial index (`scope_type='client'`)
+- `idx_condition_rules_manager_scope` partial index (`scope_type='manager'`)
+
+RLS:
+
+- `condition_rules_select_scoped`:
+  - manager can read global rules, manager-scoped rules assigned to them, and client-scoped rules for their assigned clients
+  - admin/super_admin can read all
+  - client cannot read
+- `condition_rules_admin_insert` / `condition_rules_admin_update` / `condition_rules_admin_delete`: admin + super_admin only
+
+See [14 · Condition rules](./14-condition-rules.md) for DSL and runtime evaluation behavior.
 #### `client_ooo_routing` — [schema.ts:207-229](../../../supabase/drizzle/schema.ts#L207-L229)
 
 Maps OOO replies to a follow-up campaign, optionally per gender.
@@ -124,9 +167,9 @@ Maps OOO replies to a follow-up campaign, optionally per gender.
 | Column | Type |
 |--------|------|
 | `id` | uuid PK |
-| `client_id` | uuid FK → `clients.id` not null |
+| `client_id` | uuid FK > `clients.id` not null |
 | `gender` | `lead_gender` nullable |
-| `campaign_id` | uuid FK → `campaigns.id` not null |
+| `campaign_id` | uuid FK > `campaigns.id` not null |
 | `is_active` | boolean default true |
 
 RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not currently surfaced in the portal UI; exists for ingestion logic.
@@ -298,7 +341,7 @@ Outreach sending domains.
 | `campaign_verified_at`, `warmup_verified_at` | date |
 | `updated_at` | timestamptz |
 
-RLS: all four policies (`select`, `insert`, `update`, `delete`) scoped via `private.can_access_client(client_id)` → admin + assigned manager.
+RLS: all four policies (`select`, `insert`, `update`, `delete`) scoped via `private.can_access_client(client_id)` > admin + assigned manager.
 
 #### `invoices` — [schema.ts:256-274](../../../supabase/drizzle/schema.ts#L256-L274)
 
@@ -339,7 +382,7 @@ Not surfaced in the current UI, but present in the schema. Tracks the agency's o
 |--------|------|
 | `id` | uuid PK |
 | `company_name`, `contact_name`, `email`, `phone`, `source` | text |
-| `salesperson_id` | uuid FK → `users.id` not null |
+| `salesperson_id` | uuid FK > `users.id` not null |
 | `stage` | text (free-form; `crm_pipeline_stage` enum is reserved but not typed here) |
 | `stage_updated_at` | timestamptz |
 | `estimated_value` | numeric |
@@ -391,8 +434,8 @@ All policies reference `private.*` helpers defined in `docs/reference/supabase-p
 | `private.current_app_role()` | `returns text` | `SELECT role FROM users WHERE id = auth.uid()` (or equivalent). Returns text so callers can compare to literals. |
 | `private.is_admin_user()` | `returns boolean` | `current_app_role() IN ('admin', 'super_admin')`. |
 | `private.is_internal_user()` | `returns boolean` | `current_app_role() <> 'client'` — admin, super_admin, manager. |
-| `private.can_access_client(client_id uuid)` | `returns boolean` | Admin → TRUE; manager → client is assigned (`manager_id = auth.uid()`); client → user is mapped via `client_users`. |
-| `private.can_manage_client(client_id uuid)` | `returns boolean` | Admin → TRUE; manager → client is assigned; client → FALSE. |
+| `private.can_access_client(client_id uuid)` | `returns boolean` | Admin > TRUE; manager > client is assigned (`manager_id = auth.uid()`); client > user is mapped via `client_users`. |
+| `private.can_manage_client(client_id uuid)` | `returns boolean` | Admin > TRUE; manager > client is assigned; client > FALSE. |
 | `private.can_access_reply(client_id uuid, lead_id uuid)` | `returns boolean` | Checks `can_access_client(client_id)` OR — when `client_id IS NULL` — looks up the owning client via `lead_id` and applies `can_access_client`. Admin short-circuits. |
 
 Pattern: wherever possible the new policies use **set-based subqueries** rather than per-row function calls, because Postgres would otherwise fail to hoist the check past an index. See [§5](#5-migrations-of-note).
@@ -419,12 +462,21 @@ USING (
 )
 ```
 
-Measured impact: **~10.48 s → 0.30 s** on a table of ~24k rows during seed testing.
+Measured impact: **~10.48 s > 0.30 s** on a table of ~24k rows during seed testing.
 
 ### `supabase/migrations/20260421b_admin_dashboard_view.sql`
 
 Creates the `admin_dashboard_daily` view (§3) with `security_invoker=on`.
 
+### `supabase/migrations/20260428_condition_rules_engine.sql`
+
+Adds `public.condition_rules`, indexes, RLS, and CS PDCA seed data for dynamic client-health conditions.
+
+Notable behavior encoded in seed:
+
+- Rules are normalized JSON DSL (`branches` + optional `base_filter`), no executable formulas.
+- Directly mapped rules are enabled; ambiguous or missing-field rules are seeded disabled with `notes`.
+- Legacy low-rate green behavior for WoW response/human/OOO is preserved in notes for parity.
 Earlier Drizzle migrations live in `supabase/drizzle/migrations/0000_stiff_fixer.sql` — the baseline ddl.
 
 ---
@@ -434,8 +486,14 @@ Earlier Drizzle migrations live in `supabase/drizzle/migrations/0000_stiff_fixer
 - `client_users.user_id` is **UNIQUE**, enforcing "one client per client-role user" at the database level (matches ADR-0001's single-workspace invariant for clients).
 - `campaigns_external_id_key` and `replies_external_id_key` ensure idempotent ingestion upserts.
 - `daily_stats` and `campaign_daily_stats` both have unique composite keys over (`*_id`, `report_date`) — no duplicate rows per day.
+- `condition_rules.key` is unique, allowing idempotent seed upserts without duplicate rule identities.
 - FK cascades: only `client_users.*` cascade on delete. Everywhere else (`campaigns.client_id`, `leads.client_id`, `daily_stats.client_id` RESTRICT, `domains.client_id`, …) deletes are intentionally blocked; cleanup must happen in ingestion.
 - `inboxes_active` on `campaign_daily_stats` is **not null** without a default — ingestion MUST supply it.
 - Several `varchar(length)` columns (`phone_number 50`, `message_title 500`, `country 100`) are the only places lengths are enforced at the column level; text columns are unbounded.
 
 Next: [04 · Metrics catalog](./04-metrics-catalog.md).
+
+
+
+
+

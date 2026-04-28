@@ -8,9 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { RepositoryError, repository } from "../data/repository";
 import { runtimeConfig } from "../lib/env";
 import { supabase } from "../lib/supabase";
-import type { Identity, UserRecord } from "../types/core";
+import type { Identity } from "../types/core";
 
 export type AuthErrorCode =
   | "runtime_config"
@@ -50,16 +51,6 @@ function buildBrowserRedirect(path: string) {
   return new URL(path, `${baseUrl}/`).toString();
 }
 
-function mapUserToIdentity(user: UserRecord, clientId?: string): Identity {
-  return {
-    id: user.id,
-    fullName: `${user.first_name} ${user.last_name}`.trim(),
-    email: user.email,
-    role: user.role,
-    ...(clientId ? { clientId } : {}),
-  };
-}
-
 function toSafeAuthMessage(message: string) {
   const normalized = message.toLowerCase();
   if (normalized.includes("invalid login credentials")) {
@@ -74,30 +65,6 @@ function toSafeAuthMessage(message: string) {
     return "Your account does not have permission to continue this action.";
   }
   return message;
-}
-
-function classifyAuthErrorCode(message: string): AuthErrorCode {
-  const normalized = message.toLowerCase();
-  if (
-    normalized.includes("permission") ||
-    normalized.includes("forbidden") ||
-    normalized.includes("denied") ||
-    normalized.includes("policy") ||
-    normalized.includes("42501")
-  ) {
-    return "permission";
-  }
-  if (
-    normalized.includes("network") ||
-    normalized.includes("fetch") ||
-    normalized.includes("timeout") ||
-    normalized.includes("503") ||
-    normalized.includes("502") ||
-    normalized.includes("504")
-  ) {
-    return "network";
-  }
-  return "unknown";
 }
 
 async function loadIdentity(session: Session | null) {
@@ -117,67 +84,26 @@ async function loadIdentity(session: Session | null) {
     };
   }
 
-  const { data: publicUser, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", session.user.id)
-    .maybeSingle();
-
-  if (error) {
-    return {
-      identity: null,
-      error:
-        classifyAuthErrorCode(error.message) === "permission"
-          ? "Your authenticated session does not have permission to load the workspace profile."
-          : "Your account profile could not be loaded right now. Please try again.",
-      errorCode: classifyAuthErrorCode(error.message),
-    };
-  }
-
-  if (!publicUser) {
-    return {
-      identity: null,
-      error: "Your account is authenticated, but the portal profile is not provisioned yet.",
-      errorCode: "profile_missing" as const,
-    };
-  }
-
-  let clientId: string | undefined;
-  if (publicUser.role === "client") {
-    const { data: clientMapping, error: clientMappingError } = await supabase
-      .from("client_users")
-      .select("client_id")
-      .eq("user_id", session.user.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (clientMappingError) {
+  try {
+    return await repository.loadIdentity(session.user.id);
+  } catch (reason) {
+    if (reason instanceof RepositoryError) {
       return {
-        identity: mapUserToIdentity(publicUser as UserRecord),
+        identity: null,
         error:
-          classifyAuthErrorCode(clientMappingError.message) === "permission"
-            ? "Your authenticated session could not resolve client access mapping because the request was denied."
-            : "Your client access mapping could not be loaded right now. Please retry.",
-        errorCode: classifyAuthErrorCode(clientMappingError.message),
+          reason.kind === "permission"
+            ? "Your authenticated session does not have permission to load the workspace profile."
+            : "Your account profile could not be loaded right now. Please try again.",
+        errorCode: reason.kind === "permission" ? "permission" : reason.kind === "network" ? "network" : "unknown",
       };
     }
 
-    if (clientMapping?.client_id) {
-      clientId = clientMapping.client_id;
-    } else {
-      return {
-        identity: mapUserToIdentity(publicUser as UserRecord),
-        error: "Your client account is authenticated, but no client access mapping is assigned yet.",
-        errorCode: "client_mapping_missing" as const,
-      };
-    }
+    return {
+      identity: null,
+      error: "Your account profile could not be loaded right now. Please try again.",
+      errorCode: "unknown",
+    };
   }
-
-  return {
-    identity: mapUserToIdentity(publicUser as UserRecord, clientId),
-    error: null,
-    errorCode: null,
-  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -339,22 +265,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const [firstName, ...lastNameParts] = trimmed.split(" ");
       const lastName = lastNameParts.join(" ");
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({
-          first_name: firstName,
-          last_name: lastName || "",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", sessionUserId);
 
-      if (updateError) {
-        return { ok: false, message: toSafeAuthMessage(updateError.message) };
+      try {
+        await repository.updateProfileName(sessionUserId, trimmed);
+      } catch (reason) {
+        if (reason instanceof RepositoryError) {
+          return { ok: false, message: toSafeAuthMessage(reason.message) };
+        }
+        const fallbackMessage = reason instanceof Error ? reason.message : "Profile update failed.";
+        return { ok: false, message: toSafeAuthMessage(fallbackMessage) };
       }
 
-      setActorIdentity((current) => (current ? { ...current, fullName: trimmed } : current));
+      setActorIdentity((current) =>
+        current ? { ...current, fullName: `${firstName} ${lastName}`.trim() || trimmed } : current,
+      );
       setImpersonatedIdentity((current) =>
-        current && current.id === sessionUserId ? { ...current, fullName: trimmed } : current,
+        current && current.id === sessionUserId
+          ? { ...current, fullName: `${firstName} ${lastName}`.trim() || trimmed }
+          : current,
       );
       return { ok: true, message: "Profile name updated successfully." };
     },

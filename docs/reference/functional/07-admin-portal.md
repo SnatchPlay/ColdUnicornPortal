@@ -1,4 +1,4 @@
-# 07 · Admin Portal
+﻿# 07 В· Admin Portal
 
 Pages served under `/admin/*` for `admin` and `super_admin` roles. All pages from the [manager portal](./06-manager-portal.md) are available with widened scope (everything, not only assigned clients). This file documents the **admin-specific** behaviours and the admin-only pages.
 
@@ -8,11 +8,12 @@ Pages served under `/admin/*` for `admin` and `super_admin` roles. All pages fro
 2. [User management](#2-user-management--adminusermanagementpage)
 3. [Blacklist (write mode)](#3-blacklist-write-mode)
 4. [Super-admin impersonation](#4-super-admin-impersonation)
-5. [Scope differences vs manager](#5-scope-differences-vs-manager)
+5. [Settings: condition rules builder](#5-settings-condition-rules-builder)
+6. [Scope differences vs manager](#6-scope-differences-vs-manager)
 
 ---
 
-## 1. Dashboard — `AdminDashboardPage`
+## 1. Dashboard вЂ” `AdminDashboardPage`
 
 File: [`src/app/pages/admin-dashboard-page.tsx`](../../../src/app/pages/admin-dashboard-page.tsx). Route: `/admin/dashboard`.
 
@@ -20,7 +21,7 @@ File: [`src/app/pages/admin-dashboard-page.tsx`](../../../src/app/pages/admin-da
 
 Global operational command center. Designed for a single glance: send-trend health, flag clients needing attention, and surface manager load.
 
-### 1.2 Metric cards (4) — [04-metrics §12](./04-metrics-catalog.md#12-manager-dashboard-aggregates)
+### 1.2 Metric cards (4) вЂ” [04-metrics В§12](./04-metrics-catalog.md#12-manager-dashboard-aggregates)
 
 | # | Label | Value | Hint |
 |---|-------|-------|------|
@@ -33,12 +34,12 @@ Scope functions resolve to all rows for admin/super_admin.
 
 ### 1.3 Campaign momentum surface (21-day area chart)
 
-`Surface title="Campaign momentum"` with a recharts `AreaChart` ([§13 Admin campaign momentum](./04-metrics-catalog.md#13-admin-campaign-momentum)).
+`Surface title="Campaign momentum"` with a recharts `AreaChart` ([В§13 Admin campaign momentum](./04-metrics-catalog.md#13-admin-campaign-momentum)).
 
 - **Series:**
-  - `sent` — cyan `#38bdf8`, fill opacity 0.13.
-  - `replies` — green `#22c55e`, fill opacity 0.13.
-  - `positive` — amber `#f59e0b`, fill opacity 0.13.
+  - `sent` вЂ” cyan `#38bdf8`, fill opacity 0.13.
+  - `replies` вЂ” green `#22c55e`, fill opacity 0.13.
+  - `positive` вЂ” amber `#f59e0b`, fill opacity 0.13.
 - **X axis:** `label` (date formatted `d MMM`).
 - **Grid:** `CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false}`.
 - **Tooltip:** admin `TOOLTIP` object (dark slate, `cursor: false`).
@@ -47,9 +48,9 @@ Scope functions resolve to all rows for admin/super_admin.
 
 ### 1.4 Non-active clients surface (formerly "At-risk")
 
-Surface showing clients whose `status ∈ ('On hold', 'Offboarding', 'Sales')`. Columns: Client, Status badge, Manager, KPI progress summary.
+Surface showing clients whose `status в€€ ('On hold', 'Offboarding', 'Sales')`. Columns: Client, Status badge, Manager, KPI progress summary.
 
-> **Renamed** per [BUSINESS_LOGIC decision (2026-04-25)](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-at-risk-to-non-active). Status set may be extended to include `Inactive` — tracked as **BL-6**.
+> **Renamed** per [BUSINESS_LOGIC decision (2026-04-25)](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-at-risk-to-non-active). Status set may be extended to include `Inactive` вЂ” tracked as **BL-6**.
 
 Row count and filter come straight from `scopedClients` (all clients, since admin).
 
@@ -68,11 +69,11 @@ Purpose: identify over- or under-loaded managers.
 
 ### 1.6 Controls
 
-No timeframe picker on this dashboard — the momentum chart is hard-wired to the last 21 days, the surfaces are snapshots as of "now". The manager dashboard is similar.
+No timeframe picker on this dashboard вЂ” the momentum chart is hard-wired to the last 21 days, the surfaces are snapshots as of "now". The manager dashboard is similar.
 
 ---
 
-## 2. User management — `AdminUserManagementPage`
+## 2. User management вЂ” `AdminUserManagementPage`
 
 File: [`src/app/pages/admin-user-management-page.tsx`](../../../src/app/pages/admin-user-management-page.tsx). Route: `/admin/users`.
 
@@ -96,7 +97,7 @@ On success (`ok: true` from edge function):
 - Message banner: "Invitation sent to <email>".
 - Invites list refreshed.
 
-Handler chain: `useCoreData().sendInvite(payload)` → `repository.sendInvite(payload)` → `invokeInviteEdgeFunction("send-invite", …)`. Full error handling in [09 §3](./09-mutations-rls.md#3-edge-functions).
+Handler chain: `useCoreData().sendInvite(payload)` в†’ `repository.sendInvite(payload)` в†’ `invokeInviteEdgeFunction("send-invite", вЂ¦)`. Full error handling in [09 В§3](./09-mutations-rls.md#3-edge-functions).
 
 ### 2.3 Invites list
 
@@ -110,19 +111,19 @@ Row columns:
 | Role | `invite.role` badge |
 | Status | `invite.status` badge |
 | Sent | `invite.created_at` formatted |
-| Accepted | `invite.accepted_at` or `—` |
+| Accepted | `invite.accepted_at` or `вЂ”` |
 | Actions | Resend / Revoke buttons (only for `pending` and `expired`) |
 
 Status badge palette:
 
-- Pending → sky (`border-sky-500/30 bg-sky-500/10 text-sky-200`)
-- Accepted → emerald
-- Expired → amber
+- Pending в†’ sky (`border-sky-500/30 bg-sky-500/10 text-sky-200`)
+- Accepted в†’ emerald
+- Expired в†’ amber
 
 Row actions:
 
-- **Resend** → `repository.resendInvite(id)` → new expiry; Supabase sends a new email.
-- **Revoke** → `repository.revokeInvite(id)` → marks the invite revoked; removes from pending.
+- **Resend** в†’ `repository.resendInvite(id)` в†’ new expiry; Supabase sends a new email.
+- **Revoke** в†’ `repository.revokeInvite(id)` в†’ marks the invite revoked; removes from pending.
 
 List data comes from `repository.listInvites()` on mount and after each mutation.
 
@@ -133,7 +134,7 @@ When a `client` invitation is accepted, the backend edge function creates both t
 ### 2.5 Feature availability
 
 - Admin and super_admin can invite `admin`, `manager`, `client`.
-- Invitations for `super_admin` are **not** offered — that role must be promoted directly in SQL.
+- Invitations for `super_admin` are **not** offered вЂ” that role must be promoted directly in SQL.
 
 ---
 
@@ -149,7 +150,7 @@ Banner announcing write access (in contrast to manager's read-only banner).
 
 - `domain` text input, trimmed and lower-cased on submit (client-side normalisation).
 - "Add domain" submit button.
-- Submit handler: `useCoreData().upsertEmailExcludeDomain(domain)` → `repository.upsertEmailExcludeDomain`.
+- Submit handler: `useCoreData().upsertEmailExcludeDomain(domain)` в†’ `repository.upsertEmailExcludeDomain`.
 - Validation: non-empty after trim; no duplicate prevention beyond the DB UNIQUE constraint on the primary key `domain`.
 
 ### 3.3 Entries list
@@ -166,9 +167,9 @@ No pagination; the blacklist is expected to be short (hundreds).
 
 ## 4. Super-admin impersonation
 
-See [02 §7](./02-roles-routes.md#7-impersonation). Only the super_admin role sees the impersonation panel in the sidebar; it is additionally gated by the env flag `VITE_ALLOW_INTERNAL_IMPERSONATION`.
+See [02 В§7](./02-roles-routes.md#7-impersonation). Only the super_admin role sees the impersonation panel in the sidebar; it is additionally gated by the env flag `VITE_ALLOW_INTERNAL_IMPERSONATION`.
 
-Three entry points — Admin view, Manager view (from dropdown), Client view (from dropdown). `stopImpersonation()` returns control.
+Three entry points вЂ” Admin view, Manager view (from dropdown), Client view (from dropdown). `stopImpersonation()` returns control.
 
 ### Caveat
 
@@ -188,7 +189,38 @@ The `agency_crm_deals` table and RLS exist (admin sees all; manager sees their o
 
 ---
 
-## 5. Scope differences vs manager
+## 5. Settings: condition rules builder
+
+File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.tsx). Route: `/admin/settings`.
+
+Admin and super-admin users get an additional **Condition rules** section inside Settings.
+
+### 5.1 Rule list and quick controls
+
+- Search by `key`, `name`, `metric`.
+- Filter by surface and enabled state.
+- Quick toggle: enable/disable rule.
+- Quick edit: priority value.
+
+### 5.2 Visual no-code editor
+
+- Metadata fields: `key`, `name`, `surface`, `metricKey`, `target`, `scope`, `applyTo`, `columnKey`, source metadata, notes.
+- Branch editor: severity, label, message.
+- Recursive condition-tree editor: `comparison`, `all`, `any` nodes.
+- Operand editor supports metric refs, static values, optional multiplier, optional transform.
+- Base-filter editor uses the same condition tree primitives.
+- Live JSON preview and validation errors before save.
+
+### 5.3 Permissions
+
+- Admin/super_admin: create/update/delete rules.
+- Manager/client: no builder controls.
+
+Rule runtime behavior and seeded rule set are documented in [14 · Condition rules](./14-condition-rules.md).
+
+---
+
+## 6. Scope differences vs manager
 
 For the pages shared with [the manager portal](./06-manager-portal.md), admin differences are:
 
@@ -196,7 +228,7 @@ For the pages shared with [the manager portal](./06-manager-portal.md), admin di
 |------|--------------|------------|
 | Dashboard | Assigned-client aggregates | Global aggregates + 21-day momentum + manager capacity |
 | Clients | `manager_id = identity.id` subset | All clients |
-| Leads | `client_id ∈ assigned` | All leads |
+| Leads | `client_id в€€ assigned` | All leads |
 | Campaigns | Assigned | All |
 | Statistics | Scoped | All; client+campaign filters span the whole org |
 | Domains | Assigned | All |
@@ -206,4 +238,7 @@ For the pages shared with [the manager portal](./06-manager-portal.md), admin di
 
 The actual row-level gate is enforced by Postgres via `private.can_access_client` returning true for admin. The page components are the same codepath; the broader dataset just naturally appears.
 
-Next: [08 · Charts catalog](./08-charts-catalog.md).
+Next: [08 В· Charts catalog](./08-charts-catalog.md).
+
+
+

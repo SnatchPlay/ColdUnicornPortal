@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Plus, X } from "lucide-react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Badge } from "../components/ui/badge";
 import { Checkbox } from "../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import { cn } from "../components/ui/utils";
 import {
   createClientMetrics,
   type ClientMetricsPack,
@@ -14,6 +17,11 @@ import {
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { scopeClients } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
+import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
+import { dodCellKey, evaluateClientConditions } from "../lib/conditions/client-condition-results";
+import { getCellCondition, getHighestSeverity, getSeverityClassName } from "../lib/conditions/evaluator";
+import { toConditionRule } from "../lib/conditions/mapper";
+import type { ConditionEvaluationResult, ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { ClientRecord } from "../types/core";
@@ -21,8 +29,12 @@ import type { ClientRecord } from "../types/core";
 const CLIENT_STATUSES: ClientRecord["status"][] = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"];
 const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 const PAGE_SIZE = 50;
+const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
+type HealthFilter = (typeof HEALTH_FILTERS)[number];
+const BADGE_SEVERITIES = ["good", "info", "warning", "danger", "critical_over"] as const;
+
 const OVERVIEW_GRID_CLASS =
-  "grid min-w-[1820px] gap-3 [grid-template-columns:var(--clients-overview-columns)]";
+  "grid min-w-[2300px] gap-3 [grid-template-columns:var(--clients-overview-columns)]";
 
 const DOD_BUCKET_ORDER: Record<string, number> = {
   "+2": 0,
@@ -69,6 +81,7 @@ interface ClientOverviewRow {
   client: ClientRecord;
   managerName: string;
   metrics: ClientMetricsPack["overview"];
+  highestSeverity: ConditionSeverity | null;
 }
 
 type SortDirection = "asc" | "desc";
@@ -78,6 +91,10 @@ type ClientSortKey =
   | "manager"
   | "schedule"
   | "sent"
+  | "prospectsSigned"
+  | "prospectsAdded"
+  | "minSent"
+  | "inboxes"
   | "threeDodTotal"
   | "threeDodSql"
   | "wowResponse"
@@ -269,6 +286,25 @@ function formatTriple(left: number | null | undefined, middle: number | null | u
   return `${formatMetricCell(left)} / ${formatMetricCell(middle)} / ${formatMetricCell(right)}`;
 }
 
+function severityLabel(severity: ConditionSeverity) {
+  if (severity === "critical_over") return "Critical";
+  if (severity === "danger") return "Danger";
+  if (severity === "warning") return "Warning";
+  if (severity === "info") return "Info";
+  return "Good";
+}
+
+function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity | null) {
+  if (filter === "all") return true;
+  if (filter === "healthy") {
+    return !severity || severity === "good" || severity === "info";
+  }
+  if (!severity) return false;
+  if (filter === "critical") return severity === "critical_over";
+  if (filter === "danger") return severity === "danger" || severity === "critical_over";
+  return severity === "warning" || severity === "danger" || severity === "critical_over";
+}
+
 export function ClientsPage() {
   const { identity } = useAuth();
   const {
@@ -277,6 +313,7 @@ export function ClientsPage() {
     clientUsers,
     leads,
     dailyStats,
+    conditionRules = [],
     updateClient,
     sendInvite,
     upsertClientUserMapping,
@@ -294,6 +331,12 @@ export function ClientsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
+  const [visibleBadgeSeverities, setVisibleBadgeSeverities] = useState<ConditionSeverity[]>([
+    "warning",
+    "danger",
+    "critical_over",
+  ]);
   const [clientSort, setClientSort] = useState<{ key: ClientSortKey; direction: SortDirection }>({
     key: "updated",
     direction: "desc",
@@ -316,8 +359,8 @@ export function ClientsPage() {
   });
   const overviewColumns = useResizableColumns({
     storageKey: "table:clients:overview-columns",
-    defaultWidths: [240, 160, 190, 230, 230, 170, 170, 180, 170, 170, 170, 150, 150, 150],
-    minWidths: [160, 130, 140, 170, 170, 130, 130, 130, 130, 130, 130, 120, 120, 120],
+    defaultWidths: [240, 160, 190, 150, 150, 150, 150, 230, 230, 170, 170, 180, 170, 170, 170, 150, 150, 150],
+    minWidths: [160, 130, 140, 110, 110, 110, 110, 170, 170, 130, 130, 130, 130, 130, 130, 120, 120, 120],
   });
   const dodColumns = useResizableColumns({
     storageKey: "table:clients:dod-columns",
@@ -408,18 +451,46 @@ export function ClientsPage() {
     return byClient;
   }, [dailyStats, leads, scopedClientIds, scopedClients]);
 
+  const normalizedConditionRules = useMemo(() => conditionRules.map(toConditionRule), [conditionRules]);
+
+  const conditionPackByClientId = useMemo(() => {
+    const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
+
+    for (const client of scopedClients) {
+      const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+      const manager = managerById.get(client.manager_id) ?? null;
+      const context = buildClientConditionContext({
+        client,
+        manager,
+        metricsOverview: metrics.overview,
+        dodRows: metrics.dodRows,
+        threeDodRows: metrics.threeDodRows,
+        wowRows: metrics.wowRows,
+        momRows: metrics.momRows,
+        campaigns: [],
+        leads: [],
+        dailyStats: [],
+      });
+      packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
+    }
+
+    return packs;
+  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById]);
+
   const overviewRows = useMemo<ClientOverviewRow[]>(() => {
     return scopedClients.map((client) => {
       const manager = managerById.get(client.manager_id);
       const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
       const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+      const conditionPack = conditionPackByClientId.get(client.id);
       return {
         client,
         managerName,
         metrics: metrics.overview,
+        highestSeverity: getHighestSeverity(conditionPack?.allResults ?? []),
       };
     });
-  }, [managerById, metricsByClientId, scopedClients]);
+  }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
 
   const sortedOverviewRows = useMemo(() => {
     return overviewRows.slice().sort((left, right) => {
@@ -437,6 +508,18 @@ export function ClientsPage() {
       }
       if (clientSort.key === "sent") {
         return compareNumber(left.metrics.sentToday, right.metrics.sentToday, clientSort.direction);
+      }
+      if (clientSort.key === "prospectsSigned") {
+        return compareNumber(left.client.prospects_signed, right.client.prospects_signed, clientSort.direction);
+      }
+      if (clientSort.key === "prospectsAdded") {
+        return compareNumber(left.client.prospects_added, right.client.prospects_added, clientSort.direction);
+      }
+      if (clientSort.key === "minSent") {
+        return compareNumber(left.client.min_daily_sent, right.client.min_daily_sent, clientSort.direction);
+      }
+      if (clientSort.key === "inboxes") {
+        return compareNumber(left.client.inboxes_count, right.client.inboxes_count, clientSort.direction);
       }
       if (clientSort.key === "threeDodTotal") {
         return compareNumber(left.metrics.threeDodTotal, right.metrics.threeDodTotal, clientSort.direction);
@@ -466,8 +549,15 @@ export function ClientsPage() {
     });
   }, [clientSort.direction, clientSort.key, overviewRows]);
 
-  const visibleOverviewRows = useMemo(() => sortedOverviewRows.slice(0, visibleRowsCount), [sortedOverviewRows, visibleRowsCount]);
-  const hasMoreClients = visibleRowsCount < sortedOverviewRows.length;
+  const filteredOverviewRows = useMemo(
+    () => sortedOverviewRows.filter((row) => matchesHealthFilter(healthFilter, row.highestSeverity)),
+    [healthFilter, sortedOverviewRows],
+  );
+  const visibleOverviewRows = useMemo(
+    () => filteredOverviewRows.slice(0, visibleRowsCount),
+    [filteredOverviewRows, visibleRowsCount],
+  );
+  const hasMoreClients = visibleRowsCount < filteredOverviewRows.length;
 
   const selectedClient = useMemo(
     () => scopedClients.find((item) => item.id === selectedClientId) ?? null,
@@ -477,6 +567,16 @@ export function ClientsPage() {
     () => (selectedClient ? metricsByClientId.get(selectedClient.id) ?? createClientMetrics([], []) : null),
     [metricsByClientId, selectedClient],
   );
+  const selectedClientConditionPack = useMemo(
+    () => (selectedClient ? conditionPackByClientId.get(selectedClient.id) ?? null : null),
+    [conditionPackByClientId, selectedClient],
+  );
+  const selectedAllConditions = selectedClientConditionPack?.allResults ?? [];
+  const selectedThreeDodConditions = selectedClientConditionPack?.threeDodResults ?? [];
+  const selectedWowConditions = selectedClientConditionPack?.wowResults ?? [];
+  const selectedMomConditions = selectedClientConditionPack?.momResults ?? [];
+  const selectedSetupConditions = selectedClientConditionPack?.setupResults ?? [];
+  const selectedDodConditions = selectedClientConditionPack?.dodCellResults ?? {};
 
   const selectedClientMappings = useMemo(
     () => (selectedClient ? clientUsers.filter((item) => item.client_id === selectedClient.id) : []),
@@ -505,13 +605,17 @@ export function ClientsPage() {
 
   const canEditAssignments = identity?.role === "admin" || identity?.role === "super_admin";
   const canInviteUsers = identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
+  const setupMinSentCondition = getCellCondition(selectedSetupConditions, "min_sent");
+  const setupWorkspaceCondition = getCellCondition(selectedSetupConditions, "spreadsheet_or_workspace_id");
+  const setupBiCondition = getCellCondition(selectedSetupConditions, "bi_setup");
+  const setupAutoLiCondition = getCellCondition(selectedSetupConditions, "auto_li_api_key");
 
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
     if (selectedClientId && !scopedClients.some((item) => item.id === selectedClientId)) {
       setSelectedClientId(null);
     }
-  }, [scopedClients, selectedClientId]);
+  }, [scopedClients, selectedClientId, healthFilter]);
 
   useEffect(() => {
     if (!selectedClient) {
@@ -620,6 +724,44 @@ export function ClientsPage() {
       return compareNumber(left.won, right.won, momSort.direction);
     });
   }, [momSort.direction, momSort.key, selectedClientMetrics]);
+
+  function toggleBadgeSeverity(severity: ConditionSeverity) {
+    setVisibleBadgeSeverities((current) =>
+      current.includes(severity) ? current.filter((item) => item !== severity) : current.concat(severity),
+    );
+  }
+
+  function renderConditionTooltip(result: ConditionEvaluationResult, content: ReactNode) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className={cn("rounded-lg border px-2 py-1", getSeverityClassName(result.severity))}>{content}</div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
+          <p><span className="text-neutral-400">Rule:</span> {result.ruleName}</p>
+          <p><span className="text-neutral-400">Value:</span> {String(result.value ?? "-")}</p>
+          {result.threshold !== undefined && (
+            <p><span className="text-neutral-400">Threshold:</span> {String(result.threshold)}</p>
+          )}
+          <p><span className="text-neutral-400">Message:</span> {result.message}</p>
+          <p><span className="text-neutral-400">Source:</span> {result.sourceSheet ?? "-"} {result.sourceRange ?? ""}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  function renderMetricCellWithCondition(
+    content: ReactNode,
+    columnKey: string,
+    candidates: ConditionEvaluationResult[],
+  ) {
+    const condition = getCellCondition(candidates, columnKey);
+    if (!condition) return <span className="text-muted-foreground">{content}</span>;
+    return renderConditionTooltip(
+      condition,
+      <span className="text-muted-foreground">{content}</span>,
+    );
+  }
 
   async function saveDraft() {
     if (!selectedClient || !draft || !isDraftDirty) return;
@@ -730,7 +872,43 @@ export function ClientsPage() {
       {scopedClients.length === 0 ? (
         <EmptyState title="No clients assigned" description="The current identity does not have any visible clients." />
       ) : (
-        <Surface title="Client analytics table" subtitle={`${visibleOverviewRows.length} of ${sortedOverviewRows.length} clients in current scope`}>
+        <Surface title="Client analytics table" subtitle={`${visibleOverviewRows.length} of ${filteredOverviewRows.length} clients in current health filter`}>
+          <div className="mb-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Health filter</span>
+              {HEALTH_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setHealthFilter(filter)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs capitalize transition",
+                    healthFilter === filter
+                      ? "border-sky-300/50 bg-sky-500/15 text-sky-100"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {filter === "all" ? "All clients" : filter === "healthy" ? "Healthy only" : `With ${filter}`}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Badge visibility</span>
+              {BADGE_SEVERITIES.map((severity) => (
+                <button
+                  key={severity}
+                  onClick={() => toggleBadgeSeverity(severity)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs capitalize transition",
+                    visibleBadgeSeverities.includes(severity)
+                      ? getSeverityClassName(severity)
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {severityLabel(severity)}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="overflow-hidden rounded-2xl border border-border">
             <div className="overflow-x-auto" style={overviewTableStyle}>
               <div className={`${OVERVIEW_GRID_CLASS} border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground`}>
@@ -738,6 +916,10 @@ export function ClientsPage() {
                   { key: "name" as const, label: "Client", defaultDirection: "asc" as SortDirection },
                   { key: "status" as const, label: "Status", defaultDirection: "asc" as SortDirection },
                   { key: "manager" as const, label: "Manager", defaultDirection: "asc" as SortDirection },
+                  { key: "prospectsSigned" as const, label: "Prospects signed", defaultDirection: "desc" as SortDirection },
+                  { key: "prospectsAdded" as const, label: "Prospects added", defaultDirection: "desc" as SortDirection },
+                  { key: "minSent" as const, label: "Min sent", defaultDirection: "desc" as SortDirection },
+                  { key: "inboxes" as const, label: "Inboxes", defaultDirection: "desc" as SortDirection },
                   { key: "schedule" as const, label: "DoD schedule +2/+1/0", defaultDirection: "desc" as SortDirection },
                   { key: "sent" as const, label: "DoD sent 0/-1/-2", defaultDirection: "desc" as SortDirection },
                   { key: "threeDodTotal" as const, label: "3DoD total", defaultDirection: "desc" as SortDirection },
@@ -770,42 +952,87 @@ export function ClientsPage() {
                 ))}
               </div>
 
-              <div className="min-w-[1820px] divide-y divide-border">
+              <div className="min-w-[2300px] divide-y divide-border">
                 {visibleOverviewRows.map((row) => {
                   const isActive = selectedClient?.id === row.client.id;
+                  const conditionPack = conditionPackByClientId.get(row.client.id);
+                  const allResults = conditionPack?.allResults ?? [];
+                  const overviewResults = conditionPack?.overviewResults ?? [];
+                  const visibleBadges = allResults
+                    .filter((result) => visibleBadgeSeverities.includes(result.severity))
+                    .filter((result, index, collection) => collection.findIndex((item) => item.ruleKey === result.ruleKey) === index)
+                    .slice(0, 4);
+                  const rowTint =
+                    row.highestSeverity === "critical_over"
+                      ? "bg-fuchsia-500/10"
+                      : row.highestSeverity === "danger"
+                        ? "bg-red-500/8"
+                        : row.highestSeverity === "warning"
+                          ? "bg-amber-500/8"
+                          : "";
+
+                  const renderCell = (columnKey: string, content: ReactNode) => {
+                    const condition = getCellCondition(allResults, columnKey) ?? getCellCondition(overviewResults, columnKey);
+                    if (!condition) {
+                      return <div>{content}</div>;
+                    }
+                    return renderConditionTooltip(condition, content);
+                  };
+
                   return (
                     <button
                       key={row.client.id}
                       onClick={() => setSelectedClientId(row.client.id)}
                       aria-label={`Open details for ${row.client.name}`}
-                      className={`${OVERVIEW_GRID_CLASS} w-max px-4 py-4 text-left transition ${isActive ? "bg-sky-500/10" : "hover:bg-white/5"}`}
+                      className={`${OVERVIEW_GRID_CLASS} w-max px-4 py-4 text-left transition ${isActive ? "bg-sky-500/10" : "hover:bg-white/5"} ${rowTint}`}
                     >
                       <div>
                         <p className="text-sm">{row.client.name}</p>
                         <p className="mt-1 text-xs text-muted-foreground">{formatMoney(row.client.contracted_amount)}</p>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {visibleBadges.length === 0 ? (
+                            <Badge className="border-emerald-300/45 bg-emerald-500/12 text-[10px] text-emerald-100">Healthy</Badge>
+                          ) : (
+                            visibleBadges.map((result) => (
+                              <Badge key={`${result.ruleId}-${result.severity}`} className={cn("text-[10px]", getSeverityClassName(result.severity))}>
+                                {severityLabel(result.severity)} · {result.label}
+                              </Badge>
+                            ))
+                          )}
+                        </div>
                       </div>
                       <div>
                         <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs">{row.client.status}</span>
                       </div>
                       <p className="text-sm text-muted-foreground">{row.managerName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatTriple(
-                          row.metrics.scheduleDayAfter,
-                          row.metrics.scheduleTomorrow,
-                          row.metrics.scheduleToday,
-                        )}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatTriple(row.metrics.sentToday, row.metrics.sentYesterday, row.metrics.sentTwoDaysAgo)}
-                      </p>
-                      <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodTotal)}</p>
-                      <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodSql)}</p>
-                      <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowResponseRate)}</p>
-                      <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowHumanRate)}</p>
-                      <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowBounceRate)}</p>
-                      <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowOooRate)}</p>
-                      <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.wowSql)}</p>
-                      <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.momSql)}</p>
+                      {renderCell("prospects_signed", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.prospects_signed)}</p>)}
+                      {renderCell("prospects_added", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.prospects_added)}</p>)}
+                      {renderCell("min_sent", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.min_daily_sent)}</p>)}
+                      {renderCell("inboxes", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.inboxes_count)}</p>)}
+                      {renderCell(
+                        "schedule_today",
+                        <p className="text-sm text-muted-foreground">
+                          {formatTriple(
+                            row.metrics.scheduleDayAfter,
+                            row.metrics.scheduleTomorrow,
+                            row.metrics.scheduleToday,
+                          )}
+                        </p>,
+                      )}
+                      {renderCell(
+                        "sent_today",
+                        <p className="text-sm text-muted-foreground">
+                          {formatTriple(row.metrics.sentToday, row.metrics.sentYesterday, row.metrics.sentTwoDaysAgo)}
+                        </p>,
+                      )}
+                      {renderCell("three_dod_total", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodTotal)}</p>)}
+                      {renderCell("three_dod_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodSql)}</p>)}
+                      {renderCell("wow_total_response_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowResponseRate)}</p>)}
+                      {renderCell("wow_human_response_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowHumanRate)}</p>)}
+                      {renderCell("wow_bounce_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowBounceRate)}</p>)}
+                      {renderCell("wow_ooo_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowOooRate)}</p>)}
+                      {renderCell("wow_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.wowSql)}</p>)}
+                      {renderCell("mom_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.momSql)}</p>)}
                       <p className="text-sm text-muted-foreground">{formatDate(row.client.updated_at, { day: "2-digit", month: "short" })}</p>
                     </button>
                   );
@@ -877,7 +1104,7 @@ export function ClientsPage() {
                   <p className="text-sm">Client summary</p>
                   <p className="text-xs text-muted-foreground">Quick context for ownership, contract, and automation flags.</p>
                 </div>
-                <div className="grid gap-3 md:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned manager</p>
                     <p className="mt-2 text-sm">{selectedManagerName}</p>
@@ -890,6 +1117,48 @@ export function ClientsPage() {
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract due date</p>
                     <p className="mt-2 text-sm">{formatDate(selectedClient.contract_due_date)}</p>
                   </div>
+                  {setupWorkspaceCondition
+                    ? renderConditionTooltip(
+                        setupWorkspaceCondition,
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</p>
+                          <p className="mt-2 text-sm">{selectedClient.external_workspace_id ?? "-"}</p>
+                        </div>,
+                      )
+                    : (
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</p>
+                          <p className="mt-2 text-sm">{selectedClient.external_workspace_id ?? "-"}</p>
+                        </div>
+                      )}
+                  {setupBiCondition
+                    ? renderConditionTooltip(
+                        setupBiCondition,
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup</p>
+                          <p className="mt-2 text-sm">{selectedClient.bi_setup_done ? "Complete" : "Pending"}</p>
+                        </div>,
+                      )
+                    : (
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup</p>
+                          <p className="mt-2 text-sm">{selectedClient.bi_setup_done ? "Complete" : "Pending"}</p>
+                        </div>
+                      )}
+                  {setupAutoLiCondition
+                    ? renderConditionTooltip(
+                        setupAutoLiCondition,
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto-LI API key</p>
+                          <p className="mt-2 text-sm">{selectedClient.linkedin_api_key ? "Configured" : "Missing"}</p>
+                        </div>,
+                      )
+                    : (
+                        <div className="rounded-2xl border border-border bg-black/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto-LI API key</p>
+                          <p className="mt-2 text-sm">{selectedClient.linkedin_api_key ? "Configured" : "Missing"}</p>
+                        </div>
+                      )}
                   <label className="rounded-2xl border border-border bg-black/10 p-4">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto OOO</span>
                     <div className="mt-3 flex items-center justify-between">
@@ -945,8 +1214,18 @@ export function ClientsPage() {
                         {sortedDodRows.map((row: DodRow) => (
                           <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-dod-columns)]">
                             <span>{row.bucket}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.schedule)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.sent)}</span>
+                            {(() => {
+                              const key = dodCellKey(row.bucket, "schedule");
+                              const result = getCellCondition(selectedDodConditions[key] ?? [], key);
+                              if (!result) return <span className="text-muted-foreground">{formatMetricCell(row.schedule)}</span>;
+                              return renderConditionTooltip(result, <span className="text-muted-foreground">{formatMetricCell(row.schedule)}</span>);
+                            })()}
+                            {(() => {
+                              const key = dodCellKey(row.bucket, "sent");
+                              const result = getCellCondition(selectedDodConditions[key] ?? [], key);
+                              if (!result) return <span className="text-muted-foreground">{formatMetricCell(row.sent)}</span>;
+                              return renderConditionTooltip(result, <span className="text-muted-foreground">{formatMetricCell(row.sent)}</span>);
+                            })()}
                           </div>
                         ))}
                       </div>
@@ -987,8 +1266,8 @@ export function ClientsPage() {
                         {sortedThreeDodRows.map((row: ThreeDodRow) => (
                           <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-three-dod-columns)]">
                             <span>{row.bucket}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.totalLeads)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.sqlLeads)}</span>
+                            {renderMetricCellWithCondition(formatMetricCell(row.totalLeads), "three_dod_total", selectedThreeDodConditions)}
+                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "three_dod_sql", selectedThreeDodConditions)}
                           </div>
                         ))}
                       </div>
@@ -1035,12 +1314,12 @@ export function ClientsPage() {
                           <div key={row.bucket} className="grid min-w-[980px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-wow-columns)]">
                             <span>{row.bucket}</span>
                             <span className="text-muted-foreground">{formatMetricCell(row.totalLeads)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.sqlLeads)}</span>
-                            <span className="text-muted-foreground">{formatRate(row.responseRate)}</span>
-                            <span className="text-muted-foreground">{formatRate(row.humanRate)}</span>
-                            <span className="text-muted-foreground">{formatRate(row.bounceRate)}</span>
-                            <span className="text-muted-foreground">{formatRate(row.oooRate)}</span>
-                            <span className="text-muted-foreground">{formatRate(row.negativeRate)}</span>
+                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "wow_sql", selectedWowConditions)}
+                            {renderMetricCellWithCondition(formatRate(row.responseRate), "wow_total_response_rate", selectedWowConditions)}
+                            {renderMetricCellWithCondition(formatRate(row.humanRate), "wow_human_response_rate", selectedWowConditions)}
+                            {renderMetricCellWithCondition(formatRate(row.bounceRate), "wow_bounce_rate", selectedWowConditions)}
+                            {renderMetricCellWithCondition(formatRate(row.oooRate), "wow_ooo_rate", selectedWowConditions)}
+                            {renderMetricCellWithCondition(formatRate(row.negativeRate), "wow_negative_rate", selectedWowConditions)}
                           </div>
                         ))}
                       </div>
@@ -1084,9 +1363,9 @@ export function ClientsPage() {
                           <div key={row.bucket} className="grid min-w-[800px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-mom-columns)]">
                             <span>{row.bucket}</span>
                             <span className="text-muted-foreground">{formatMetricCell(row.totalLeads)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.sqlLeads)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.meetings)}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.won)}</span>
+                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "mom_sql", selectedMomConditions)}
+                            {renderMetricCellWithCondition(formatMetricCell(row.meetings), "mom_meetings", selectedMomConditions)}
+                            {renderMetricCellWithCondition(formatMetricCell(row.won), "mom_won", selectedMomConditions)}
                           </div>
                         ))}
                       </div>
@@ -1130,7 +1409,7 @@ export function ClientsPage() {
                       </SelectContent>
                     </Select>
                   </label>
-                  <label className="space-y-2">
+                  <label className={cn("space-y-2", setupMinSentCondition ? "rounded-xl border p-3" : "", setupMinSentCondition ? getSeverityClassName(setupMinSentCondition.severity) : "")}>
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Minimum emails per day</span>
                     <input
                       type="number"
@@ -1144,6 +1423,9 @@ export function ClientsPage() {
                       }
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     />
+                    {setupMinSentCondition && (
+                      <p className="text-xs text-muted-foreground">{setupMinSentCondition.message}</p>
+                    )}
                   </label>
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active inbox count</span>
