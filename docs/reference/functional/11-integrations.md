@@ -111,7 +111,7 @@ The follow-up campaigns themselves have `campaigns.type = 'ooo_followup'` and ar
 
 Every reply that arrives is classified by n8n using LLM + heuristic rules. The classification value lands in `replies.classification` (one of `OOO | Interested | NRR | Left_Company | Spam_Inbound | other`).
 
-The portal **does not classify** and **does not provide a manual triage UI** ([decision in BUSINESS_LOGIC §10](../../BUSINESS_LOGIC.md#10-out-of-scope-legacy)). The "Unclassified replies" count on the Admin dashboard ([§12.4 in 04-metrics-catalog](./04-metrics-catalog.md#125-unclassified-replies)) is a sanity check on ingestion: if the count grows, something is wrong with n8n classification, not with the portal.
+The portal **does not classify** and **does not provide a manual triage UI** ([decision in BUSINESS_LOGIC §10](../../BUSINESS_LOGIC.md#10-out-of-scope-legacy)). If unclassified replies appear in raw data, that indicates ingestion/classification lag in n8n rather than a portal action item.
 
 ---
 

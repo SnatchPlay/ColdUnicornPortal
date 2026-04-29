@@ -23,7 +23,7 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 | `SNAPSHOT_RETRY_DELAYS_MS` | `[250, 600]` | [repository.ts:23](../../../src/app/data/repository.ts#L23) | Up to two retries of failing SELECTs (`network` / `timeout` only). |
 | Session refresh threshold | **60 s** before `expires_at` | [repository.ts:198](../../../src/app/data/repository.ts#L198) | Forces `auth.refreshSession()` if the access token is within 60 s of expiry. |
 | `PAGE_SIZE` (lazy load) | **50** | leads-page, client-leads-page, clients-page, campaigns-page | "Load more" increments by 50 rows. Resets on filter / search change. |
-| Admin dashboard "campaign momentum" window | **21 days** | [admin-dashboard-page.tsx:81-100](../../../src/app/pages/admin-dashboard-page.tsx#L81-L100) and `admin_dashboard_daily` view | Hard-coded 21 days for the area chart and the view. |
+| Admin dashboard "campaign momentum" window | **21 days** | `admin-dashboard-page.tsx` and `admin_dashboard_daily` view | Hard-coded 21 days for each momentum chart (sent/replies/positive) and the view. |
 | Manager dashboard "campaign watchlist" reply-rate threshold | **< 1 %** | [manager-dashboard-page.tsx:108-127](../../../src/app/pages/manager-dashboard-page.tsx#L108-L127) | Active campaigns below 1% reply rate land on the watchlist alongside `stopped` / `launching` campaigns. |
 | Watchlist slice | **8 campaigns** | manager-dashboard-page | Sorted by reply rate ascending, top 8 alerts shown. |
 | Manager-capacity surface slice | **8 managers** | [admin-dashboard-page.tsx:127](../../../src/app/pages/admin-dashboard-page.tsx#L127) | Top 8 by client count; rest hidden. |
@@ -42,10 +42,6 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 ### "Lead in progress"
 
 [manager-dashboard-page.tsx:50](../../../src/app/pages/manager-dashboard-page.tsx#L50) вЂ” Counts as "in progress" when both `won === false` AND `offer_sent === false`. Note: leads with `qualification = 'rejected'` or `'OOO'` still pass this test as long as those two booleans are false. This is intentional вЂ” they remain "in the funnel" until explicitly moved to a terminal state.
-
-### "Non-active clients" surface (formerly "At-risk")
-
-[admin-dashboard-page.tsx:77-79](../../../src/app/pages/admin-dashboard-page.tsx#L77-L79) вЂ” Hard-coded `status в€€ ('On hold', 'Offboarding', 'Sales')`. Per [BUSINESS_LOGIC В§12 decision (2026-04-25)](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-at-risk-to-non-active), label is being renamed and the set may be extended to also include `Inactive`. Tracked as BL-6.
 
 ### KPI progress fallback
 
@@ -132,7 +128,6 @@ These branches are preserved for parity and documented in rule `notes` pending m
 |------|--------------------|---------|
 | **"SQL Leads"** (DoD/WoW/MoM) | Sounds like a separate "Sales Qualified" stage | Same as MQL count. Historical naming. |
 | **"Reply scope filter"** (leads pages) | Sounds like it filters replies | Filters leads by `qualification = 'OOO'`. Rename pending (BL-7). |
-| **"At-risk clients"** (admin dashboard) | Implies a risk score | Just a visibility surface for `status в€€ ('On hold', 'Offboarding', 'Sales')`. Renamed to "Non-active clients" (BL-6). |
 | **`positive_responses`** (campaign drawer) vs `positive_replies_count` (daily stats) | Look like the same metric | The drawer field is a manually curated lifetime counter; the daily-stats column is ingestion-derived per day. They can diverge intentionally. |
 | **`meeting_booked`** vs **`meeting_held`** | Often used interchangeably in conversation | Two separate booleans. Some metrics use one, some the other. |
 | **`getClientKpis().mqls`** | Looks like a stage count | `count(qualification === 'MQL')` вЂ” uses the raw qualification, not `getLeadStage`. Differs from "MQL stage count" once a lead progresses past MQL. |

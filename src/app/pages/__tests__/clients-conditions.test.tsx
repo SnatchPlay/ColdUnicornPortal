@@ -280,7 +280,7 @@ describe("clients condition surfaces", () => {
     expect(highlighted).toBeTruthy();
   });
 
-  it("supports healthy filter and hides non-good badges for healthy client", () => {
+  it("supports healthy filter on segmented control", () => {
     const wowBounceRule = makeConditionRule({
       key: "wow_bounce_rate",
       name: "WoW Bounce Rate",
@@ -296,13 +296,13 @@ describe("clients condition surfaces", () => {
     );
 
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Healthy only" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Healthy \(1\)/i }));
 
     expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
   });
 
-  it("toggles danger badge visibility", () => {
+  it("filters by danger severity", () => {
     const wowBounceRule = makeConditionRule({
       key: "wow_bounce_rate",
       name: "WoW Bounce Rate",
@@ -319,7 +319,9 @@ describe("clients condition surfaces", () => {
 
     renderPage();
     expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Danger" }));
-    expect(screen.queryByText(/Bounce danger/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Healthy \(0\)/i }));
+    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Danger \(1\)/i }));
+    expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
   });
 });

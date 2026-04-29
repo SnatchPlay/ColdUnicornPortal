@@ -21,40 +21,31 @@ File: [`src/app/pages/admin-dashboard-page.tsx`](../../../src/app/pages/admin-da
 
 Global operational command center. Designed for a single glance: send-trend health, flag clients needing attention, and surface manager load.
 
-### 1.2 Metric cards (4) вЂ” [04-metrics В§12](./04-metrics-catalog.md#12-manager-dashboard-aggregates)
+### 1.2 Metric cards (3) вЂ” [04-metrics В§12](./04-metrics-catalog.md#12-manager-dashboard-aggregates)
 
 | # | Label | Value | Hint |
 |---|-------|-------|------|
 | 1 | Clients | `scopedClients.length` | number of clients without assigned manager, e.g. "3 without manager" |
 | 2 | Active campaigns | `count(scopedCampaigns WHERE status='active')` | `"global operational volume"` |
 | 3 | Lead pipeline | `scopedLeads.length` | `${wonLeads} closed` |
-| 4 | Unclassified replies | `count(replies WHERE classification IS NULL)` | "needs triage" |
 
 Scope functions resolve to all rows for admin/super_admin.
 
-### 1.3 Campaign momentum surface (21-day area chart)
+### 1.3 Campaign momentum surfaces (3 separate 21-day charts)
 
-`Surface title="Campaign momentum"` with a recharts `AreaChart` ([В§13 Admin campaign momentum](./04-metrics-catalog.md#13-admin-campaign-momentum)).
+Three separate `Surface` blocks, each with its own recharts `AreaChart` ([В§13 Admin campaign momentum](./04-metrics-catalog.md#13-admin-campaign-momentum)).
 
-- **Series:**
-  - `sent` вЂ” cyan `#38bdf8`, fill opacity 0.13.
-  - `replies` вЂ” green `#22c55e`, fill opacity 0.13.
-  - `positive` вЂ” amber `#f59e0b`, fill opacity 0.13.
+- **Charts:**
+  - `Campaign momentum: Sent` вЂ” `sent` series, cyan `#38bdf8`.
+  - `Campaign momentum: Replies` вЂ” `replies` series, green `#22c55e`.
+  - `Campaign momentum: Positive` вЂ” `positive` series, amber `#f59e0b`.
 - **X axis:** `label` (date formatted `d MMM`).
 - **Grid:** `CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false}`.
 - **Tooltip:** admin `TOOLTIP` object (dark slate, `cursor: false`).
 - **Data:** inline aggregation of `scopedCampaignStats` over last 21 days by `report_date` (not the `admin_dashboard_daily` view, though the view is equivalent).
-- **Empty state:** "No campaign trend data".
+- **Empty state:** each chart displays "No campaign trend data".
 
-### 1.4 Non-active clients surface (formerly "At-risk")
-
-Surface showing clients whose `status в€€ ('On hold', 'Offboarding', 'Sales')`. Columns: Client, Status badge, Manager, KPI progress summary.
-
-> **Renamed** per [BUSINESS_LOGIC decision (2026-04-25)](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-at-risk-to-non-active). Status set may be extended to include `Inactive` вЂ” tracked as **BL-6**.
-
-Row count and filter come straight from `scopedClients` (all clients, since admin).
-
-### 1.5 Manager capacity surface
+### 1.4 Manager capacity surface
 
 One row per user with `role='manager'`.
 
@@ -67,7 +58,7 @@ One row per user with `role='manager'`.
 
 Purpose: identify over- or under-loaded managers.
 
-### 1.6 Controls
+### 1.5 Controls
 
 No timeframe picker on this dashboard вЂ” the momentum chart is hard-wired to the last 21 days, the surfaces are snapshots as of "now". The manager dashboard is similar.
 

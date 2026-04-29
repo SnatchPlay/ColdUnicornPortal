@@ -22,6 +22,7 @@ import {
   PortalSurface,
   ResponsiveChart,
 } from "../components/portal-ui";
+import { ChartTextSummary } from "../components/app-ui";
 import {
   getCampaignPerformance,
   getClientKpis,
@@ -511,15 +512,18 @@ export function ClientDashboardPage() {
           {dailySent.length === 0 ? (
             <EmptyPortalState title="No sent data" description="No email activity is available for this period." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={dailySent}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Daily sent chart with ${dailySent.length} points and total ${formatCompact(kpis.emailsSent)} emails.`} />
+              <ResponsiveChart>
+                <BarChart data={dailySent}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
 
@@ -527,15 +531,18 @@ export function ClientDashboardPage() {
           {weeklyLeadsSeries.length === 0 ? (
             <EmptyPortalState title="No weekly lead data" description="No MQL activity for selected range." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={weeklyLeadsSeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="count" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Weekly MQL chart with ${weeklyLeadsSeries.length} weeks.`} />
+              <ResponsiveChart>
+                <BarChart data={weeklyLeadsSeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="count" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
       </div>
@@ -613,21 +620,24 @@ export function ClientDashboardPage() {
           {velocitySeries.length === 0 ? (
             <EmptyPortalState title="No velocity data" description="Not enough campaign or lead movement in selected timeframe." />
           ) : (
-            <ResponsiveChart>
-              <ComposedChart data={velocitySeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="left" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar yAxisId="left" dataKey="emailsDelta" radius={[4, 4, 0, 0]}>
-                  {velocitySeries.map((item) => (
-                    <Cell key={item.week} fill={item.emailsDelta >= 0 ? "#3b82f6" : "#1d4ed8"} />
-                  ))}
-                </Bar>
-                <Line yAxisId="right" dataKey="mqls" stroke="#22c55e" strokeWidth={2.5} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Velocity chart with ${velocitySeries.length} weekly points comparing email delta and MQLs.`} />
+              <ResponsiveChart>
+                <ComposedChart data={velocitySeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar yAxisId="left" dataKey="emailsDelta" radius={[4, 4, 0, 0]}>
+                    {velocitySeries.map((item) => (
+                      <Cell key={item.week} fill={item.emailsDelta >= 0 ? "#3b82f6" : "#1d4ed8"} />
+                    ))}
+                  </Bar>
+                  <Line yAxisId="right" dataKey="mqls" stroke="#22c55e" strokeWidth={2.5} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
 

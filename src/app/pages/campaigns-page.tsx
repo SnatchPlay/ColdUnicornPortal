@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { DateRangeButton } from "../components/portal-ui";
-import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns, scopeClients } from "../lib/selectors";
@@ -276,7 +276,7 @@ function InternalCampaignsPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search campaign name or external id"
-              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none transition focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15 xl:col-span-2"
+              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-neutral-400 focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15 xl:col-span-2"
             />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger
@@ -552,6 +552,9 @@ function InternalCampaignsPage() {
                 <EmptyState title="No daily metrics yet" description="This chart will appear when campaign activity data becomes available." />
               ) : (
                 <div className="h-72 rounded-2xl border border-border bg-black/10 p-3">
+                  <ChartTextSummary
+                    summary={`Campaign daily chart with ${selectedCampaignStats.length} points for sent, replies, and bounces.`}
+                  />
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={selectedCampaignStats}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />

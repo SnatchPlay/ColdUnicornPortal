@@ -1,4 +1,4 @@
-# 14 � Condition Rules
+﻿# 14 · Condition Rules
 
 Dynamic operational health layer for client surfaces. This system replaces spreadsheet-only conditional formatting with data-driven, safe rules persisted in Supabase and evaluated in the portal runtime.
 
@@ -23,7 +23,7 @@ Dynamic operational health layer for client surfaces. This system replaces sprea
 The condition system is for **read/evaluate/display only**:
 
 - It evaluates client operational metrics into explainable condition results.
-- It drives row/cell highlighting, badges, and health filtering in `ClientsPage`.
+- It drives row/cell highlighting, row-level health rollups, and health filtering in `ClientsPage`.
 - It does not mutate ingestion counters or trigger external side effects.
 
 Hard boundaries:
@@ -44,7 +44,7 @@ raw Supabase snapshot
 > createClientMetrics() + client condition context
 > evaluate safe JSON DSL rules
 > condition results
-> row/cell styles + badges + filters + tooltip explanations
+> row/cell styles + health rollups + filters + tooltip explanations
 ```
 
 Runtime entry points:
@@ -147,7 +147,19 @@ Resolution behavior:
 - Higher severity always dominates lower severity visually.
 - For same severity, lower numeric `priority` wins.
 
-### 5.3 DoD dynamic bucket mode
+### 5.3 Health score rollup
+
+`getHealthScore(results)` computes row-level score in `[0..100]`:
+
+- base `100`
+- `critical_over`: `-60`
+- `danger`: `-25`
+- `warning`: `-8`
+- `info` / `good`: excluded
+
+Rows are sorted worst-first by default (`healthScore ASC`) in the clients overview.
+
+### 5.4 DoD dynamic bucket mode
 
 DoD rules are reusable via runtime `value` injection:
 
@@ -227,7 +239,9 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 ### 8.1 Visual behavior
 
 - Row tint based on highest non-good severity
-- Cell highlight by mapped `column_key`
+- One severity badge per row (highest severity only)
+- Row health score (`0..100`)
+- Cell highlight by mapped `column_key`, with reduced cell-fill noise (problem-cell emphasis only)
 - Distinct `critical_over` (fuchsia) style
 - DoD/3DoD/WoW/MoM table cells wired to rule results
 - Setup panel highlights for mapped setup fields (`min_sent`, workspace id, BI setup, Auto-LI key)
@@ -235,9 +249,11 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 ### 8.2 Explainability
 
 - Tooltip/popover per highlighted cell includes rule name, value, message, source sheet/range
-- Per-client badges show matched condition labels
+- Drawer groups matched results into:
+  - `Operational issues`
+  - `Setup gaps`
 
-### 8.3 Filters and badge controls
+### 8.3 Filters
 
 Health filter (highest severity across any surface for the client):
 
@@ -247,7 +263,7 @@ Health filter (highest severity across any surface for the client):
 - `critical`
 - `healthy`
 
-Badge visibility toggles allow hiding/showing severities (including `good`).
+`healthy` includes rows with no non-positive severity (`none`/`good`/`info`).
 
 ---
 
@@ -310,3 +326,4 @@ Coverage includes:
 - Client context mapping fidelity
 - ClientsPage visual behavior (danger/healthy/DoD cases)
 - Admin settings builder visibility + CRUD/validation flow
+

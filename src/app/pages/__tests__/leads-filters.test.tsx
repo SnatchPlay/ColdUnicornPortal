@@ -143,16 +143,16 @@ describe("internal leads filters", () => {
 
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(3);
 
-    await chooseOptionByLabel("Filter leads by reply scope", "OOO only");
+    await chooseOptionByLabel("Filter leads by OOO qualification", "OOO only");
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(1);
     expect(screen.getByRole("button", { name: /lead-ooo Lead/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^MQL\s/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^MQL \(/i }));
     expect(screen.getByText("No leads match the current filters")).toBeInTheDocument();
 
-    await chooseOptionByLabel("Filter leads by reply scope", "All (OOO + Active)");
+    await chooseOptionByLabel("Filter leads by OOO qualification", "All leads");
     await chooseOptionByLabel("Filter leads by campaign", "Campaign Alpha");
-    fireEvent.click(screen.getByRole("button", { name: /All \d+/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /All \(\d+\)/i }));
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /lead-ooo Lead/i })).not.toBeInTheDocument();
   });

@@ -420,7 +420,7 @@ GROUP BY cds.report_date, c.client_id;
 ```
 
 - `security_invoker = on` — caller's RLS applies, so the view respects the same per-role visibility as `campaign_daily_stats`.
-- Hard-coded **21-day** window feeds the Admin Dashboard "Campaign momentum" area chart and manager capacity surface.
+- Hard-coded **21-day** window feeds the Admin Dashboard campaign momentum charts (sent/replies/positive) and manager capacity surface.
 - Not directly queried by the portal at the time of writing; the portal aggregates from `campaign_daily_stats` client-side. The view is kept for future server-side rollups and for BI tools.
 
 ---

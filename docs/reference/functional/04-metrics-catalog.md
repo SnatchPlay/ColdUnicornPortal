@@ -542,43 +542,44 @@ Filtering logic in `manager-dashboard-page.tsx` selects campaigns that are eithe
 
 ## 13. Admin campaign momentum
 
-Chart driven inline in [`admin-dashboard-page.tsx`](../../../src/app/pages/admin-dashboard-page.tsx) (`campaignSeries`, ~lines 81-100), not via a reusable hook.
+Charts are driven inline in [`admin-dashboard-page.tsx`](../../../src/app/pages/admin-dashboard-page.tsx) (`campaignSeries`), using one grouped 21-day dataset.
 
 ```ts
 // Aggregate scoped campaign_daily_stats across the LAST 21 DAYS, grouping by report_date
 for (const stat of scopedCampaignStats) {
-  if (stat.report_date older than 21 days ago) continue;
   byDate.get(stat.report_date) += sent / reply / positive_replies counts;
 }
 ```
 
 Output: `Array<{ date, label, sent, replies, positive }>`.
 
-### 13.1 Campaign momentum series
+### 13.1 Campaign momentum: Sent
 
-- **Where:** Admin Dashboard "Campaign momentum" area chart (3 stacked areas).
-- **Formula per day:**
-  - `sent` = `sum(campaign_daily_stats.sent_count)` over all admin-visible campaigns that day.
-  - `replies` = `sum(campaign_daily_stats.reply_count)`.
-  - `positive` = `sum(campaign_daily_stats.positive_replies_count)`.
-- **Source:** `campaign_daily_stats` (could also come from the `admin_dashboard_daily` view, but the portal uses the raw table today).
-- **Time window:** **21 days** (fixed).
-- **Colors:** sent `#38bdf8`, replies `#22c55e`, positive `#f59e0b`.
+- **Where:** Admin Dashboard `Campaign momentum: Sent` area chart.
+- **Formula per day:** `sum(campaign_daily_stats.sent_count)` over all admin-visible campaigns that day.
+- **Source:** `campaign_daily_stats.sent_count`.
+- **Time window:** fixed **21 days**.
 - **Visible to:** admin, super_admin.
 
-### 13.2 Non-active clients (formerly "At-risk")
+### 13.2 Campaign momentum: Replies
 
-- **Formula:** `clients.filter(c => ['On hold','Offboarding','Sales'].includes(c.status))`.
-- **Where:** Admin Dashboard "Non-active clients" surface.
-- **Naming history:** previously labelled "At-risk clients". Renamed per the [BUSINESS_LOGIC decision (2026-04-25)](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-at-risk-to-non-active); the status set may be extended to also include `Inactive`. Tracked as **BL-6**. The 3-status set is hard-coded in [admin-dashboard-page.tsx:77-79](../../../src/app/pages/admin-dashboard-page.tsx#L77-L79).
+- **Where:** Admin Dashboard `Campaign momentum: Replies` area chart.
+- **Formula per day:** `sum(campaign_daily_stats.reply_count)`.
+- **Source:** `campaign_daily_stats.reply_count`.
+- **Time window:** fixed 21 days.
 
-### 13.3 Manager capacity
+### 13.3 Campaign momentum: Positive
 
-- **Formula:** group scoped entities by `manager_id` в†’ `{ clientsCount, activeCampaignsCount, leadsCount }` per manager.
+- **Where:** Admin Dashboard `Campaign momentum: Positive` area chart.
+- **Formula per day:** `sum(campaign_daily_stats.positive_replies_count)`.
+- **Source:** `campaign_daily_stats.positive_replies_count`.
+- **Time window:** fixed 21 days.
+
+### 13.4 Manager capacity
+
+- **Formula:** group scoped entities by `manager_id` -> `{ clientsCount, activeCampaignsCount, leadsCount }` per manager.
 - **Source:** `users.role='manager'`, `clients.manager_id`, `campaigns`, `leads`.
-- **Where:** Admin Dashboard "Manager capacity" surface.
-
----
+- **Where:** Admin Dashboard `Manager capacity` surface.
 
 ## 14. Supporting helpers
 
@@ -640,5 +641,6 @@ DoD condition checks do not hardcode per-column comparisons. Each DoD schedule/s
 For parity with CS PDCA sheet behavior, the WoW response/human/OOO rules preserve green branches for very low rates (`<0.10%`) and record this in seeded `notes`. See [14 · Condition rules](./14-condition-rules.md#10-known-legacy-quirks).
 
 Next: [05 В· Client portal](./05-client-portal.md).
+
 
 

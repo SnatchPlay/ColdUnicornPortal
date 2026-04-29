@@ -264,6 +264,27 @@ export function getHighestSeverity(results: ConditionEvaluationResult[]): Condit
   return best;
 }
 
+export function getHealthScore(results: ConditionEvaluationResult[]) {
+  if (results.length === 0) return 100;
+
+  let penalty = 0;
+  for (const result of results) {
+    if (result.severity === "critical_over") {
+      penalty += 60;
+      continue;
+    }
+    if (result.severity === "danger") {
+      penalty += 25;
+      continue;
+    }
+    if (result.severity === "warning") {
+      penalty += 8;
+    }
+  }
+
+  return Math.max(0, Math.min(100, 100 - penalty));
+}
+
 export function getRowCondition(results: ConditionEvaluationResult[]): ConditionEvaluationResult | null {
   const rowResults = results.filter((item) => item.applyTo === "row");
   if (rowResults.length === 0) return null;

@@ -19,6 +19,7 @@ import {
   PortalSurface,
   ResponsiveChart,
 } from "../components/portal-ui";
+import { ChartTextSummary } from "../components/app-ui";
 import { getCampaignPerformance } from "../lib/client-view-models";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { formatDate, formatNumber } from "../lib/format";
@@ -167,18 +168,23 @@ export function ClientCampaignsPage() {
             {selectedStats.length === 0 ? (
               <EmptyPortalState title="No daily metrics yet" description="No daily metrics are available for this campaign yet." />
             ) : (
-              <ResponsiveChart>
-                <LineChart data={selectedStats}>
-                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <ChartTooltip />
-                  <Line type="monotone" dataKey="sent" stroke="#22c55e" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="replies" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="opens" stroke="#8b5cf6" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />
-                </LineChart>
-              </ResponsiveChart>
+              <>
+                <ChartTextSummary
+                  summary={`Daily campaign chart for ${selectedCampaign?.name ?? "selected campaign"} with ${selectedStats.length} days.`}
+                />
+                <ResponsiveChart>
+                  <LineChart data={selectedStats}>
+                    <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <ChartTooltip />
+                    <Line type="monotone" dataKey="sent" stroke="#22c55e" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="replies" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="opens" stroke="#8b5cf6" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />
+                  </LineChart>
+                </ResponsiveChart>
+              </>
             )}
           </ChartPanel>
           </div>
@@ -189,15 +195,18 @@ export function ClientCampaignsPage() {
         {performance.length === 0 ? (
           <EmptyPortalState title="No campaign ranking" description="Campaigns need daily stats for this chart." />
         ) : (
-          <ResponsiveChart>
-            <BarChart data={performance.slice(0, 10)}>
-              <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-              <ChartTooltip />
-              <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveChart>
+          <>
+            <ChartTextSummary summary={`Campaign sent-volume chart for top ${Math.min(performance.length, 10)} campaigns.`} />
+            <ResponsiveChart>
+              <BarChart data={performance.slice(0, 10)}>
+                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <ChartTooltip />
+                <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveChart>
+          </>
         )}
       </ChartPanel>
     </div>

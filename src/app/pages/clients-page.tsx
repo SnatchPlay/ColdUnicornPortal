@@ -4,6 +4,7 @@ import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface
 import { Badge } from "../components/ui/badge";
 import { Checkbox } from "../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "../components/ui/utils";
 import {
@@ -19,7 +20,7 @@ import { scopeClients } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { dodCellKey, evaluateClientConditions } from "../lib/conditions/client-condition-results";
-import { getCellCondition, getHighestSeverity, getSeverityClassName } from "../lib/conditions/evaluator";
+import { getCellCondition, getHealthScore, getHighestSeverity, getSeverityClassName } from "../lib/conditions/evaluator";
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
@@ -31,10 +32,9 @@ const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
-const BADGE_SEVERITIES = ["good", "info", "warning", "danger", "critical_over"] as const;
 
 const OVERVIEW_GRID_CLASS =
-  "grid min-w-[2300px] gap-3 [grid-template-columns:var(--clients-overview-columns)]";
+  "grid min-w-[2450px] gap-3 [grid-template-columns:var(--clients-overview-columns)]";
 
 const DOD_BUCKET_ORDER: Record<string, number> = {
   "+2": 0,
@@ -82,12 +82,14 @@ interface ClientOverviewRow {
   managerName: string;
   metrics: ClientMetricsPack["overview"];
   highestSeverity: ConditionSeverity | null;
+  healthScore: number;
 }
 
 type SortDirection = "asc" | "desc";
 type ClientSortKey =
   | "name"
   | "status"
+  | "health"
   | "manager"
   | "schedule"
   | "sent"
@@ -301,8 +303,8 @@ function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity |
   }
   if (!severity) return false;
   if (filter === "critical") return severity === "critical_over";
-  if (filter === "danger") return severity === "danger" || severity === "critical_over";
-  return severity === "warning" || severity === "danger" || severity === "critical_over";
+  if (filter === "danger") return severity === "danger";
+  return severity === "warning";
 }
 
 export function ClientsPage() {
@@ -332,14 +334,9 @@ export function ClientsPage() {
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
-  const [visibleBadgeSeverities, setVisibleBadgeSeverities] = useState<ConditionSeverity[]>([
-    "warning",
-    "danger",
-    "critical_over",
-  ]);
   const [clientSort, setClientSort] = useState<{ key: ClientSortKey; direction: SortDirection }>({
-    key: "updated",
-    direction: "desc",
+    key: "health",
+    direction: "asc",
   });
   const [dodSort, setDodSort] = useState<{ key: DodSortKey; direction: SortDirection }>({
     key: "bucket",
@@ -359,8 +356,8 @@ export function ClientsPage() {
   });
   const overviewColumns = useResizableColumns({
     storageKey: "table:clients:overview-columns",
-    defaultWidths: [240, 160, 190, 150, 150, 150, 150, 230, 230, 170, 170, 180, 170, 170, 170, 150, 150, 150],
-    minWidths: [160, 130, 140, 110, 110, 110, 110, 170, 170, 130, 130, 130, 130, 130, 130, 120, 120, 120],
+    defaultWidths: [220, 220, 160, 180, 150, 150, 150, 150, 220, 220, 170, 170, 180, 170, 170, 170, 150, 150, 150],
+    minWidths: [150, 150, 120, 140, 110, 110, 110, 110, 160, 160, 120, 120, 130, 120, 120, 120, 110, 110, 110],
   });
   const dodColumns = useResizableColumns({
     storageKey: "table:clients:dod-columns",
@@ -483,11 +480,13 @@ export function ClientsPage() {
       const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
       const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
       const conditionPack = conditionPackByClientId.get(client.id);
+      const allResults = conditionPack?.allResults ?? [];
       return {
         client,
         managerName,
         metrics: metrics.overview,
-        highestSeverity: getHighestSeverity(conditionPack?.allResults ?? []),
+        highestSeverity: getHighestSeverity(allResults),
+        healthScore: getHealthScore(allResults),
       };
     });
   }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
@@ -499,6 +498,9 @@ export function ClientsPage() {
       }
       if (clientSort.key === "status") {
         return compareText(left.client.status, right.client.status, clientSort.direction);
+      }
+      if (clientSort.key === "health") {
+        return compareNumber(left.healthScore, right.healthScore, clientSort.direction);
       }
       if (clientSort.key === "manager") {
         return compareText(left.managerName, right.managerName, clientSort.direction);
@@ -553,6 +555,32 @@ export function ClientsPage() {
     () => sortedOverviewRows.filter((row) => matchesHealthFilter(healthFilter, row.highestSeverity)),
     [healthFilter, sortedOverviewRows],
   );
+  const healthFilterCounts = useMemo(() => {
+    const counts = new Map<HealthFilter, number>([
+      ["all", sortedOverviewRows.length],
+      ["critical", 0],
+      ["danger", 0],
+      ["warning", 0],
+      ["healthy", 0],
+    ]);
+
+    for (const row of sortedOverviewRows) {
+      if (matchesHealthFilter("critical", row.highestSeverity)) {
+        counts.set("critical", (counts.get("critical") ?? 0) + 1);
+      }
+      if (matchesHealthFilter("danger", row.highestSeverity)) {
+        counts.set("danger", (counts.get("danger") ?? 0) + 1);
+      }
+      if (matchesHealthFilter("warning", row.highestSeverity)) {
+        counts.set("warning", (counts.get("warning") ?? 0) + 1);
+      }
+      if (matchesHealthFilter("healthy", row.highestSeverity)) {
+        counts.set("healthy", (counts.get("healthy") ?? 0) + 1);
+      }
+    }
+
+    return counts;
+  }, [sortedOverviewRows]);
   const visibleOverviewRows = useMemo(
     () => filteredOverviewRows.slice(0, visibleRowsCount),
     [filteredOverviewRows, visibleRowsCount],
@@ -571,12 +599,26 @@ export function ClientsPage() {
     () => (selectedClient ? conditionPackByClientId.get(selectedClient.id) ?? null : null),
     [conditionPackByClientId, selectedClient],
   );
-  const selectedAllConditions = selectedClientConditionPack?.allResults ?? [];
-  const selectedThreeDodConditions = selectedClientConditionPack?.threeDodResults ?? [];
-  const selectedWowConditions = selectedClientConditionPack?.wowResults ?? [];
-  const selectedMomConditions = selectedClientConditionPack?.momResults ?? [];
-  const selectedSetupConditions = selectedClientConditionPack?.setupResults ?? [];
-  const selectedDodConditions = selectedClientConditionPack?.dodCellResults ?? {};
+  const selectedAllConditions = useMemo(() => selectedClientConditionPack?.allResults ?? [], [selectedClientConditionPack]);
+  const selectedThreeDodConditions = useMemo(() => selectedClientConditionPack?.threeDodResults ?? [], [selectedClientConditionPack]);
+  const selectedWowConditions = useMemo(() => selectedClientConditionPack?.wowResults ?? [], [selectedClientConditionPack]);
+  const selectedMomConditions = useMemo(() => selectedClientConditionPack?.momResults ?? [], [selectedClientConditionPack]);
+  const selectedSetupConditions = useMemo(() => selectedClientConditionPack?.setupResults ?? [], [selectedClientConditionPack]);
+  const selectedDodConditions = useMemo(() => selectedClientConditionPack?.dodCellResults ?? {}, [selectedClientConditionPack]);
+  const selectedOperationalIssues = useMemo(
+    () =>
+      selectedAllConditions
+        .filter((item) => item.severity === "critical_over" || item.severity === "danger" || item.severity === "warning")
+        .filter((item, index, collection) => collection.findIndex((candidate) => candidate.ruleKey === item.ruleKey) === index),
+    [selectedAllConditions],
+  );
+  const selectedSetupGaps = useMemo(
+    () =>
+      selectedSetupConditions
+        .filter((item) => item.severity !== "good")
+        .filter((item, index, collection) => collection.findIndex((candidate) => candidate.ruleKey === item.ruleKey) === index),
+    [selectedSetupConditions],
+  );
 
   const selectedClientMappings = useMemo(
     () => (selectedClient ? clientUsers.filter((item) => item.client_id === selectedClient.id) : []),
@@ -725,17 +767,21 @@ export function ClientsPage() {
     });
   }, [momSort.direction, momSort.key, selectedClientMetrics]);
 
-  function toggleBadgeSeverity(severity: ConditionSeverity) {
-    setVisibleBadgeSeverities((current) =>
-      current.includes(severity) ? current.filter((item) => item !== severity) : current.concat(severity),
-    );
+  function getMetricConditionClassName(severity: ConditionSeverity) {
+    if (severity === "critical_over" || severity === "danger") {
+      return "rounded-md border border-red-400/35 bg-transparent px-2 py-1 text-red-100";
+    }
+    if (severity === "warning") {
+      return "rounded-md px-2 py-1 text-amber-200";
+    }
+    return "rounded-md px-2 py-1 text-muted-foreground";
   }
 
   function renderConditionTooltip(result: ConditionEvaluationResult, content: ReactNode) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className={cn("rounded-lg border px-2 py-1", getSeverityClassName(result.severity))}>{content}</div>
+          <div className={getMetricConditionClassName(result.severity)}>{content}</div>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
           <p><span className="text-neutral-400">Rule:</span> {result.ruleName}</p>
@@ -874,47 +920,33 @@ export function ClientsPage() {
       ) : (
         <Surface title="Client analytics table" subtitle={`${visibleOverviewRows.length} of ${filteredOverviewRows.length} clients in current health filter`}>
           <div className="mb-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Health filter</span>
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Health filter</p>
+            <ToggleGroup
+              type="single"
+              value={healthFilter}
+              onValueChange={(value) => {
+                if (!value) return;
+                setHealthFilter(value as HealthFilter);
+              }}
+              variant="outline"
+              className="w-full flex-wrap rounded-xl border border-border bg-black/10 p-1 md:flex-nowrap"
+            >
               {HEALTH_FILTERS.map((filter) => (
-                <button
-                  key={filter}
-                  onClick={() => setHealthFilter(filter)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs capitalize transition",
-                    healthFilter === filter
-                      ? "border-sky-300/50 bg-sky-500/15 text-sky-100"
-                      : "border-border text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {filter === "all" ? "All clients" : filter === "healthy" ? "Healthy only" : `With ${filter}`}
-                </button>
+                <ToggleGroupItem key={filter} value={filter} className="h-9 flex-1 text-xs md:text-sm">
+                  {filter === "all"
+                    ? `All (${healthFilterCounts.get("all") ?? 0})`
+                    : `${filter === "healthy" ? "Healthy" : filter === "critical" ? "Critical" : filter === "danger" ? "Danger" : "Warning"} (${healthFilterCounts.get(filter) ?? 0})`}
+                </ToggleGroupItem>
               ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Badge visibility</span>
-              {BADGE_SEVERITIES.map((severity) => (
-                <button
-                  key={severity}
-                  onClick={() => toggleBadgeSeverity(severity)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs capitalize transition",
-                    visibleBadgeSeverities.includes(severity)
-                      ? getSeverityClassName(severity)
-                      : "border-border text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {severityLabel(severity)}
-                </button>
-              ))}
-            </div>
+            </ToggleGroup>
           </div>
           <div className="overflow-hidden rounded-2xl border border-border">
             <div className="overflow-x-auto" style={overviewTableStyle}>
               <div className={`${OVERVIEW_GRID_CLASS} border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground`}>
                 {[
                   { key: "name" as const, label: "Client", defaultDirection: "asc" as SortDirection },
-                  { key: "status" as const, label: "Status", defaultDirection: "asc" as SortDirection },
+                  { key: "health" as const, label: "Health", defaultDirection: "asc" as SortDirection },
+                  { key: "status" as const, label: "Lifecycle", defaultDirection: "asc" as SortDirection },
                   { key: "manager" as const, label: "Manager", defaultDirection: "asc" as SortDirection },
                   { key: "prospectsSigned" as const, label: "Prospects signed", defaultDirection: "desc" as SortDirection },
                   { key: "prospectsAdded" as const, label: "Prospects added", defaultDirection: "desc" as SortDirection },
@@ -952,16 +984,17 @@ export function ClientsPage() {
                 ))}
               </div>
 
-              <div className="min-w-[2300px] divide-y divide-border">
+              <div className="min-w-[2450px] divide-y divide-border">
                 {visibleOverviewRows.map((row) => {
                   const isActive = selectedClient?.id === row.client.id;
                   const conditionPack = conditionPackByClientId.get(row.client.id);
                   const allResults = conditionPack?.allResults ?? [];
                   const overviewResults = conditionPack?.overviewResults ?? [];
-                  const visibleBadges = allResults
-                    .filter((result) => visibleBadgeSeverities.includes(result.severity))
-                    .filter((result, index, collection) => collection.findIndex((item) => item.ruleKey === result.ruleKey) === index)
-                    .slice(0, 4);
+                  const rollupSeverity =
+                    row.highestSeverity === "critical_over" || row.highestSeverity === "danger" || row.highestSeverity === "warning"
+                      ? row.highestSeverity
+                      : null;
+                  const rollupCause = allResults.find((result) => result.severity === row.highestSeverity)?.label ?? "All KPIs on target";
                   const rowTint =
                     row.highestSeverity === "critical_over"
                       ? "bg-fuchsia-500/10"
@@ -989,17 +1022,17 @@ export function ClientsPage() {
                       <div>
                         <p className="text-sm">{row.client.name}</p>
                         <p className="mt-1 text-xs text-muted-foreground">{formatMoney(row.client.contracted_amount)}</p>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {visibleBadges.length === 0 ? (
-                            <Badge className="border-emerald-300/45 bg-emerald-500/12 text-[10px] text-emerald-100">Healthy</Badge>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {rollupSeverity ? (
+                            <Badge className={cn("text-[10px]", getSeverityClassName(rollupSeverity))}>{severityLabel(rollupSeverity)}</Badge>
                           ) : (
-                            visibleBadges.map((result) => (
-                              <Badge key={`${result.ruleId}-${result.severity}`} className={cn("text-[10px]", getSeverityClassName(result.severity))}>
-                                {severityLabel(result.severity)} · {result.label}
-                              </Badge>
-                            ))
+                            <Badge className="border-emerald-300/45 bg-emerald-500/12 text-[10px] text-emerald-100">Healthy</Badge>
                           )}
+                          <span className="text-sm font-medium">{row.healthScore}</span>
                         </div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">{rollupCause}</p>
                       </div>
                       <div>
                         <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs">{row.client.status}</span>
@@ -1098,6 +1131,52 @@ export function ClientsPage() {
                   {isSavingDraft ? "Saving..." : "Save changes"}
                 </button>
               </div>
+
+              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm">Operational issues</p>
+                  <p className="text-xs text-muted-foreground">Rule-driven issues that currently need CS attention.</p>
+                </div>
+                {selectedOperationalIssues.length === 0 ? (
+                  <p className="text-sm text-emerald-200">No operational issues. All tracked metrics are healthy.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedOperationalIssues.map((issue) => (
+                      <div key={issue.ruleId} className="rounded-xl border border-border bg-black/20 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className={cn("text-[10px]", getSeverityClassName(issue.severity))}>{severityLabel(issue.severity)}</Badge>
+                          <p className="text-sm">{issue.label}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Rule: {issue.ruleName}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm">Setup gaps</p>
+                  <p className="text-xs text-muted-foreground">Configuration gaps moved out of the row-level table badges.</p>
+                </div>
+                {selectedSetupGaps.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No setup gaps found for this client.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedSetupGaps.map((issue) => (
+                      <div key={issue.ruleId} className="rounded-xl border border-border bg-black/20 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className={cn("text-[10px]", getSeverityClassName(issue.severity))}>{severityLabel(issue.severity)}</Badge>
+                          <p className="text-sm">{issue.label}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Rule: {issue.ruleName}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
                 <div className="space-y-1">

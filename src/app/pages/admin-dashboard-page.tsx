@@ -1,5 +1,4 @@
-import { useMemo } from "react";
-import { Link } from "react-router-dom";
+﻿import { useMemo } from "react";
 import {
   Area,
   AreaChart,
@@ -9,7 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Banner, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber } from "../lib/format";
 import {
   scopeCampaignStats,
@@ -17,7 +16,6 @@ import {
   scopeClients,
   scopeDailyStats,
   scopeLeads,
-  scopeReplies,
 } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -38,9 +36,33 @@ const TOOLTIP = {
   cursor: false,
 };
 
+const MOMENTUM_CHARTS = [
+  {
+    key: "sent" as const,
+    title: "Campaign momentum: Sent",
+    subtitle: "21-day sent trend.",
+    stroke: "#38bdf8",
+    fill: "#38bdf822",
+  },
+  {
+    key: "replies" as const,
+    title: "Campaign momentum: Replies",
+    subtitle: "21-day replies trend.",
+    stroke: "#22c55e",
+    fill: "#22c55e22",
+  },
+  {
+    key: "positive" as const,
+    title: "Campaign momentum: Positive",
+    subtitle: "21-day positive replies trend.",
+    stroke: "#f59e0b",
+    fill: "#f59e0b22",
+  },
+];
+
 export function AdminDashboardPage() {
   const { identity } = useAuth();
-  const { users, clients, campaigns, leads, replies, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
+  const { users, clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
@@ -48,7 +70,6 @@ export function AdminDashboardPage() {
     [campaigns, clients, identity],
   );
   const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
-  const scopedReplies = useMemo(() => (identity ? scopeReplies(identity, clients, replies) : []), [clients, identity, replies]);
   const scopedCampaignStats = useMemo(
     () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
     [campaignDailyStats, campaigns, clients, identity],
@@ -66,16 +87,6 @@ export function AdminDashboardPage() {
   const clientsWithoutManager = useMemo(
     () => scopedClients.filter((client) => !managerIds.has(client.manager_id)).length,
     [managerIds, scopedClients],
-  );
-
-  const unclassifiedReplies = useMemo(
-    () => scopedReplies.filter((reply) => !reply.classification),
-    [scopedReplies],
-  );
-
-  const atRiskClients = useMemo(
-    () => scopedClients.filter((client) => ["On hold", "Offboarding", "Sales"].includes(client.status)),
-    [scopedClients],
   );
 
   const campaignSeries = useMemo(() => {
@@ -150,12 +161,6 @@ export function AdminDashboardPage() {
       hint: `${formatNumber(scopedLeads.filter((lead) => lead.won).length)} won leads`,
       tone: "neutral" as const,
     },
-    {
-      label: "Unclassified replies",
-      value: formatNumber(unclassifiedReplies.length),
-      hint: "Replies that still need operational classification",
-      tone: "warning" as const,
-    },
   ];
 
   if (loading) {
@@ -185,62 +190,40 @@ export function AdminDashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Admin Dashboard"
-        subtitle="Global command surface: assignment health, campaign momentum, and portfolio risk."
+        subtitle="Global command surface: assignment health and campaign momentum."
       />
-
-      <Banner tone="info">
-        Admin quick actions: <Link to="/admin/users" className="underline underline-offset-2">users</Link> ·{" "}
-        <Link to="/admin/clients" className="underline underline-offset-2">clients</Link> ·{" "}
-        <Link to="/admin/campaigns" className="underline underline-offset-2">campaigns</Link> ·{" "}
-        <Link to="/admin/leads" className="underline underline-offset-2">leads</Link>
-      </Banner>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {metrics.map((item) => (
           <MetricCard key={item.label} {...item} />
         ))}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
-        <Surface title="Campaign momentum" subtitle="21-day sent, replies, and positive trend." className="xl:row-span-2">
-          {campaignSeries.length === 0 ? (
-            <EmptyState title="No campaign trend data" description="No campaign trend data is available for the current scope." />
-          ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={campaignSeries}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip {...TOOLTIP} />
-                  <Area type="monotone" dataKey="sent" stroke="#38bdf8" fill="#38bdf822" strokeWidth={2} />
-                  <Area type="monotone" dataKey="replies" stroke="#22c55e" fill="#22c55e22" strokeWidth={2} />
-                  <Area type="monotone" dataKey="positive" stroke="#f59e0b" fill="#f59e0b22" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Surface>
-
-        <Surface title="At-risk clients" subtitle="Clients in hold/offboarding/sales states.">
-          {atRiskClients.length === 0 ? (
-            <EmptyState title="No at-risk clients" description="No clients currently marked as On hold, Offboarding, or Sales." />
-          ) : (
-            <div className="space-y-3">
-              {atRiskClients.slice(0, 8).map((client) => (
-                <div key={client.id} className="rounded-2xl border border-border bg-black/10 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm">{client.name}</p>
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200">
-                      {client.status}
-                    </span>
+        <div className="space-y-5">
+          {MOMENTUM_CHARTS.map((chart) => (
+            <Surface key={chart.key} title={chart.title} subtitle={chart.subtitle}>
+              {campaignSeries.length === 0 ? (
+                <EmptyState title="No campaign trend data" description="No campaign trend data is available for the current scope." />
+              ) : (
+                <>
+                  <ChartTextSummary summary={`${chart.title} chart with ${campaignSeries.length} daily points.`} />
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={campaignSeries}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <Tooltip {...TOOLTIP} />
+                        <Area type="monotone" dataKey={chart.key} stroke={chart.stroke} fill={chart.fill} strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">Due date: {formatDate(client.contract_due_date)}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Surface>
+                </>
+              )}
+            </Surface>
+          ))}
+        </div>
+
         <Surface
           title="Manager capacity"
           subtitle="Visible load split across managers and assignments."

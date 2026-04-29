@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -8,8 +8,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
   ReceiptText,
   Rocket,
   Settings,
@@ -26,6 +24,14 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./ui/breadcrumb";
 import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -55,7 +61,7 @@ const ADMIN_NAV: NavItem[] = [
 const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
   client: [
     { to: "/client/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { to: "/client/leads", label: "My Pipeline", icon: Users },
+    { to: "/client/leads", label: "Leads", icon: Users },
     { to: "/client/campaigns", label: "Campaigns", icon: Rocket },
     { to: "/client/statistics", label: "Analytics", icon: BarChart3 },
     { to: "/client/settings", label: "Settings", icon: Settings },
@@ -75,12 +81,35 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
   super_admin: ADMIN_NAV,
 };
 
-const SIDEBAR_VISIBILITY_STORAGE_KEY = "app_shell_sidebar_hidden";
+const MOBILE_PRIMARY_BY_ROLE: Record<AppRole, string[]> = {
+  client: ["/client/dashboard", "/client/leads", "/client/campaigns", "/client/settings"],
+  manager: ["/manager/dashboard", "/manager/clients", "/manager/leads", "/manager/campaigns"],
+  admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
+  super_admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
+};
+
+const SIDEBAR_HIDDEN_STORAGE_KEY = "app_shell_sidebar_hidden";
+const SIDEBAR_MODE_STORAGE_KEY = "app_shell_sidebar_mode";
 
 function roleHomePath(role: AppRole) {
   if (role === "super_admin" || role === "admin") return "/admin/dashboard";
   if (role === "manager") return "/manager/dashboard";
   return "/client/dashboard";
+}
+
+function readInitialSidebarHidden() {
+  if (typeof window === "undefined") return false;
+
+  const legacy = window.localStorage.getItem(SIDEBAR_HIDDEN_STORAGE_KEY);
+  if (legacy === "1") return true;
+  if (legacy === "0") return false;
+
+  const mode = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+  return mode === "hidden";
+}
+
+function isPathActive(currentPath: string, itemPath: string) {
+  return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -91,10 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [managerTargetId, setManagerTargetId] = useState("");
   const [clientTargetId, setClientTargetId] = useState("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSidebarHidden, setIsSidebarHidden] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(SIDEBAR_VISIBILITY_STORAGE_KEY) === "1";
-  });
+  const [isDesktopSidebarHidden, setIsDesktopSidebarHidden] = useState(() => readInitialSidebarHidden());
 
   const managerOptions = useMemo(
     () =>
@@ -116,8 +142,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_VISIBILITY_STORAGE_KEY, isSidebarHidden ? "1" : "0");
-  }, [isSidebarHidden]);
+    window.localStorage.setItem(SIDEBAR_HIDDEN_STORAGE_KEY, isDesktopSidebarHidden ? "1" : "0");
+  }, [isDesktopSidebarHidden]);
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
@@ -129,22 +155,32 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const navItems = NAV_BY_ROLE[identity.role];
   const homePath = navItems[0]?.to ?? "/";
+  const hasDesktopSidebar = !isDesktopSidebarHidden;
+  const mobilePrimary = navItems.filter((item) => MOBILE_PRIMARY_BY_ROLE[identity.role].includes(item.to));
+  const currentRolePrefix = identity.role === "super_admin" ? "admin" : identity.role;
+  const rootPath = `/${currentRolePrefix}`;
+  const crumbHomePath = roleHomePath(identity.role);
+  const pathParts = location.pathname.split("/").filter(Boolean);
+  const pageLabel =
+    navItems.find((item) => isPathActive(location.pathname, item.to))?.label ??
+    pathParts[pathParts.length - 1]?.replace(/-/g, " ") ??
+    "Page";
 
-  const sidebarPanel = (
+  const sidebarPanel = () => (
     <>
       <Link to={homePath} onClick={() => setIsMobileMenuOpen(false)} className="border-b border-[#1f1f1f] px-6 py-6">
-        <div>
+        <div className="flex items-center">
           <img src={coldUnicornLogo} alt="ColdUnicorn" className="h-10 w-auto object-contain" />
-          <p className="mt-3 text-sm leading-5 text-neutral-500">ColdUnicorn PDCA Platform</p>
         </div>
+        <p className="mt-3 text-sm leading-5 text-neutral-500">ColdUnicorn PDCA Platform</p>
       </Link>
 
-      <div className="border-b border-[#1f1f1f] px-7 py-6">
-        <p className="text-sm text-neutral-400">{identity.role === "client" ? "Client workspace" : "Workspace"}</p>
-        <p className="mt-2 text-base text-white">
-          {identity.role === "client" ? activeClient?.name ?? identity.fullName : getRoleLabel(identity.role)}
-        </p>
-      </div>
+      {identity.role === "client" ? (
+        <div className="border-b border-[#1f1f1f] px-7 py-6">
+          <p className="text-sm text-neutral-400">Client workspace</p>
+          <p className="mt-2 text-base text-white">{activeClient?.name ?? identity.fullName}</p>
+        </div>
+      ) : null}
 
       <nav className="space-y-2 px-4 py-4">
         {navItems.map((item) => {
@@ -163,14 +199,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )
               }
             >
-              <Icon className="h-5 w-5" />
-              <span>{item.label}</span>
+              <Icon className="h-5 w-5 shrink-0" />
+              <span className="truncate">{item.label}</span>
             </NavLink>
           );
         })}
       </nav>
 
-      {activeClient && (
+      {activeClient ? (
         <div className="mx-4 mt-auto rounded-xl border border-[#1f1f1f] bg-[#101010] p-4">
           <p className="text-sm text-neutral-400">Contract KPIs</p>
           <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
@@ -184,7 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="mt-4 border-t border-[#1f1f1f] px-4 py-4">
         {runtimeConfig.allowInternalImpersonation && actorIdentity?.role === "super_admin" && (
@@ -320,26 +356,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#030303] text-white">
       <div className="flex min-h-screen">
-        {!isSidebarHidden && (
+        {hasDesktopSidebar && (
           <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col overflow-y-auto border-r border-[#1f1f1f] bg-[#050505] lg:flex">
-            {sidebarPanel}
+            {sidebarPanel()}
           </aside>
         )}
 
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetContent
             side="left"
-            className="w-[86vw] max-w-[320px] border-r border-[#1f1f1f] bg-[#050505] p-0 text-white [&>button]:hidden lg:hidden"
+            className="w-[86vw] max-w-[320px] border-r border-[#1f1f1f] bg-[#050505] p-0 text-white lg:hidden"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>Navigation</SheetTitle>
               <SheetDescription>Open workspace navigation and account controls.</SheetDescription>
             </SheetHeader>
-            <div className="flex h-full flex-col overflow-y-auto">{sidebarPanel}</div>
+            <div className="flex h-full flex-col overflow-y-auto">{sidebarPanel()}</div>
           </SheetContent>
         </Sheet>
 
-        <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 sm:px-4 sm:py-6 lg:px-10 lg:py-8">
+        <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4 lg:hidden">
             <button
               onClick={() => setIsMobileMenuOpen(true)}
@@ -349,21 +385,67 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Menu className="h-4 w-4" />
               <span>Menu</span>
             </button>
-            <p className="truncate text-sm text-neutral-400">{getRoleLabel(identity.role)}</p>
+            <p className="truncate text-sm text-neutral-400">{pageLabel}</p>
           </div>
-          <div className="mb-4 hidden lg:flex">
+
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4">
+            <div className="min-w-0">
+              <Breadcrumb>
+                <BreadcrumbList className="text-xs sm:text-sm">
+                  <BreadcrumbItem>
+                    <BreadcrumbLink asChild>
+                      <Link to={crumbHomePath}>{getRoleLabel(identity.role)}</Link>
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    {location.pathname === rootPath ? (
+                      <BreadcrumbPage>Home</BreadcrumbPage>
+                    ) : (
+                      <BreadcrumbPage>{pageLabel}</BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+            </div>
             <button
-              onClick={() => setIsSidebarHidden((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-lg border border-[#242424] bg-[#080808] px-3 py-2 text-sm text-neutral-300 transition hover:bg-[#111] hover:text-white"
-              aria-label={isSidebarHidden ? "Show sidebar menu" : "Hide sidebar menu"}
+              onClick={() => setIsDesktopSidebarHidden((current) => !current)}
+              className="hidden items-center gap-2 rounded-lg border border-[#242424] bg-[#080808] px-3 py-2 text-sm text-neutral-300 transition hover:bg-[#111] hover:text-white lg:inline-flex"
+              aria-label="Toggle menu"
             >
-              {isSidebarHidden ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-              <span>{isSidebarHidden ? "Show menu" : "Hide menu"}</span>
+              <Menu className="h-4 w-4" />
+              <span>{isDesktopSidebarHidden ? "Show menu" : "Hide menu"}</span>
             </button>
           </div>
+
           {children}
         </main>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#1f1f1f] bg-[#050505]/95 px-2 py-2 backdrop-blur lg:hidden" aria-label="Primary navigation">
+        <ul className="grid grid-cols-4 gap-1">
+          {mobilePrimary.map((item) => {
+            const Icon = item.icon;
+            const active = isPathActive(location.pathname, item.to);
+            return (
+              <li key={item.to}>
+                <button
+                  onClick={() => navigate(item.to)}
+                  className={cn(
+                    "flex w-full flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] transition",
+                    active
+                      ? "bg-[#232323] text-white"
+                      : "text-neutral-400 hover:bg-[#111] hover:text-white",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   );
 }

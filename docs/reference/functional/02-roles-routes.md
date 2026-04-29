@@ -216,9 +216,23 @@ From top to bottom ([`app-shell.tsx:133-286`](../../../src/app/components/app-sh
 5. **Impersonation panel** — only for `actorIdentity.role === "super_admin"` when `runtimeConfig.allowInternalImpersonation` is truthy. See §7.
 6. **User footer** — initials avatar, `fullName`, `getRoleLabel(role)`, sign-out icon button.
 
-The sidebar can be hidden on desktop via a panel button; visibility is persisted in `localStorage` under `app_shell_sidebar_hidden` ([`app-shell.tsx:78`](../../../src/app/components/app-shell.tsx#L78)).
+Desktop sidebar state is binary and persisted in `localStorage`:
 
-On mobile (below `lg`), the sidebar is behind a hamburger button and opens as a `Sheet`.
+- shown
+- hidden
+
+Storage key: `app_shell_sidebar_hidden` (`"1"`/`"0"`), with backward-compatible read from legacy `app_shell_sidebar_mode === 'hidden'`.
+
+On mobile (below `lg`):
+
+- sidebar opens via hamburger `Sheet` for full navigation
+- fixed **bottom nav** shows 4 primary destinations per role
+- secondary destinations stay in the `Sheet`
+
+### Header controls and breadcrumbs
+
+- Top content header renders breadcrumbs (`role -> current page`) for route orientation.
+- Desktop uses one burger-style `Menu` toggle button for sidebar show/hide (no multi-mode states).
 
 ---
 

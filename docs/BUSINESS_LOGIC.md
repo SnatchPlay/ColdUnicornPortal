@@ -206,7 +206,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 | Invoices | Editable issue date, amount, status. **Creation is ingestion-only.** |
 | Blacklist | Admin: add/remove. Manager: read-only banner. |
 | Admin user management | Send/resend/revoke invitations. Tabs: Overview / Pending / Accepted / Expired. |
-| Admin dashboard | 4 global metric cards. 21-day Campaign momentum area chart. Non-active clients surface ([renamed from "At-risk"](#decision-2026-04-25-rename-at-risk-to-non-active)). Manager capacity surface (top 8). |
+| Admin dashboard | 3 global metric cards. Campaign momentum split into 3 separate 21-day charts (sent/replies/positive). Manager capacity surface (top 8). |
 | Settings | All roles: profile name + password + sign out. Internal roles: identity card + reset link sender. Admin/super-admin: condition-rules builder section. |
 | Metrics | DoD, 3-DoD, WoW, MoM rollups computed client-side over the snapshot ([04-metrics-catalog.md](reference/functional/04-metrics-catalog.md)). |
 | Dynamic health layer | Safe JSON DSL condition rules evaluated against client metric context and rendered on Clients surfaces. |
@@ -218,7 +218,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 - **SQL (in our metrics)** вЂ” same set as MQL. The historical "SQL" label in DoD/WoW/MoM views means *MQL leads counted* (case-insensitive match on `qualification === 'mql'`); it is **not** a separate stage. New copy should prefer "MQL"; "SQL" is retained where it would be disruptive to rename.
 - **Meeting Booked vs Meeting Held** вЂ” `meeting_booked` is the manager's signal that the meeting is on the calendar; `meeting_held` confirms it actually happened. Some metrics use one, some the other ([04-metrics В§11.3](reference/functional/04-metrics-catalog.md#113-mom-meetings)). Code is canonical.
 - **Reply scope filter** вЂ” filters **leads by their `qualification` value** (`OOO` vs not-OOO), not replies by classification. The label is being renamed to make this clear ([decision](#decision-2026-04-25-rename-reply-scope-filter)).
-- **Non-active clients** вЂ” clients with `status в€€ ('On hold', 'Offboarding', 'Sales')`. Surfaced on the Admin dashboard for visibility. (See [decision](#decision-2026-04-25-rename-at-risk-to-non-active).)
+- **Non-active clients** вЂ” clients with `status в€€ ('On hold', 'Offboarding', 'Sales')`.
 - **OOO routing** вЂ” the act of replying back to an Out-Of-Office reply with a follow-up campaign. The portal stores configuration (`client_ooo_routing` table + `clients.auto_ooo_enabled`); n8n executes the routing.
 
 ### 4.3 Configuration vs execution split
@@ -277,7 +277,7 @@ Source: created by admin (likely via SQL today; UI creation is on the [backlog](
 `status` enum drives visibility surfaces:
 
 - `Active`, `Abo` вЂ” operational; default surface population.
-- `On hold`, `Offboarding`, `Sales` вЂ” surface in Admin "Non-active clients".
+- `On hold`, `Offboarding`, `Sales` вЂ” non-active operational states.
 - `Inactive` вЂ” fully retired; not surfaced.
 
 `manager_id` is **not nullable** вЂ” every client must have an assigned manager. Reassignment is admin-only ([decision](#decision-2026-04-25-manager-reassignment-only-not-unassign)).
@@ -486,7 +486,7 @@ Items that appeared in the archived spec or initial scoping but are explicitly *
 | **Issue tracking per client** (`client_issues` table) | Not part of current product. Use external ticket system. |
 | **Auto-generated weekly/monthly reports** (CSV/PDF export) | Reporting is consumed via dashboards. Export is not a goal. |
 | **Partnerships / Lost Clients / ABM tables** | Not part of the agency portal in this iteration. |
-| **Reply triage UI** | All replies are classified by n8n. "Unclassified" is a transient ingestion state, not a queue users act on. The Admin dashboard count is informational only. |
+| **Reply triage UI** | All replies are classified by n8n. "Unclassified" is a transient ingestion state, not a queue users act on. |
 | **In-portal email/SMS delivery** | Notifications are dispatched by n8n. The portal is a configuration surface, not a sender. |
 | **Magic-link-only auth (no password)** | Both flows are supported; magic link is opt-in via env flag. |
 
@@ -505,7 +505,7 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 | BL-3 | LinkedIn API key UI | A7 | Add `linkedin_api_key` field to manager/admin client drawer. |
 | BL-4 | Workshops / harmonogramy / cold-Ads ecosystem fields | A7 | Schema columns + UI in the manager/admin drawer. Specify exact field set before implementing. |
 | BL-5 | Agency CRM kanban (`agency_crm_deals`) | C5 decision | Admin/sales-manager UI for the agency's own pipeline. RLS already exists. |
-| BL-6 | Rename "at-risk" в†’ "non-active clients" surface | B3 decision | Admin dashboard label + (optionally) extend the status set to `On hold + Offboarding + Inactive + Sales`. |
+| BL-6 | *(Closed)* Remove non-active clients dashboard surface | 2026-04-29 decision | Surface removed from Admin dashboard. |
 | BL-7 | Rename "Reply scope" filter в†’ "Lead OOO scope" | B6 decision | Lead pages (`/manager/leads`, `/admin/leads`, `/client/leads`). |
 | BL-8 | State-machine validation for lead transitions | E1 / spec | Optional: enforce `meeting_held в‡’ meeting_booked`, `won` terminality, etc. |
 | BL-9 | Orphan auth-user recovery tool | C6 | Admin UI to provision `public.users` row for a stuck `auth.users` entry. |
@@ -549,7 +549,16 @@ Filter previously labelled "All / Active only / OOO only" on the leads pages fil
 
 ### Decision (2026-04-25): No reply triage UI
 
-Every reply is classified by n8n. The portal does not need a triage workflow. The "Unclassified replies" count on the Admin dashboard remains as a sanity check on ingestion.
+Every reply is classified by n8n. The portal does not need a triage workflow.
+
+### Decision (2026-04-29): Admin dashboard simplification
+
+Removed two Admin dashboard surfaces to reduce noise:
+
+- `Unclassified replies` KPI card
+- `Non-active clients` panel
+
+Also split the previous combined campaign momentum chart into three independent 21-day charts (sent / replies / positive).
 
 **References:** Gap analysis В§A11.
 

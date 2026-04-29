@@ -187,28 +187,36 @@ Editable fields:
 
 Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations В§2](./09-mutations-rls.md).
 
-### 2.4 Filtering, health filters, and badge visibility
+### 2.4 Filtering and health segmentation
 
 - Search box by client name.
 - Status filter dropdown (one of `client_status` enum, or "All").
 - Manager filter (admin only sees non-trivial values; for managers the dropdown is redundant).
-- Health filter by highest severity across all client surfaces:
-  - `All clients`
-  - `With warnings`
-  - `With danger`
-  - `With critical`
-  - `Healthy only`
-- Badge-severity visibility toggles allow showing/hiding `good`, `info`, `warning`, `danger`, `critical_over` badges.
+- One segmented health filter with live counts, based on row highest severity:
+  - `All`
+  - `Warning`
+  - `Danger`
+  - `Critical`
+  - `Healthy`
 
-### 2.5 Condition highlighting and explainability
+`Healthy` includes rows with no matched severity or only `good/info` outcomes.
+
+### 2.5 Condition highlighting, rollup, and explainability
 
 Rule results are loaded from `condition_rules` and evaluated at runtime per client.
 
+- Row rollup model:
+  - one severity badge per row (highest severity only)
+  - per-row `healthScore` (0..100, lower = worse) with default sort `worst first`
+  - lifecycle and health split into separate overview columns
 - Row tint: highest non-good severity.
-- Cell highlight: per-column condition result (`cell` rules).
+- Cell highlight: per-column condition result (`cell` rules), with reduced fill noise (problem-cell emphasis only).
 - Distinct `critical_over` style (fuchsia/magenta family) separate from danger.
 - Tooltip on highlighted values includes rule name, value, message, and source sheet/range.
 - DoD table uses dynamic runtime keys (`dod:{bucket}:{schedule|sent}`) to evaluate one reusable rule across multiple cells.
+- Drawer issue model:
+  - `Operational issues`: warning/danger/critical items
+  - `Setup gaps`: setup/info-like gaps moved out of row-level badge noise
 
 ### 2.6 Empty / loading / error
 
@@ -229,8 +237,9 @@ Editable lead workspace. Change qualification, mark milestones (meeting booked/h
 
 - `PortalSearch`-style search on name / email / company / title / country.
 - Campaign filter (Select).
-- Reply scope filter (All / Active / OOO). **Note:** despite the name, this filters **leads by `qualification`** (`OOO` vs not-`OOO`), not replies by classification. Rename to "Lead OOO scope" tracked as **BL-7** ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-reply-scope-filter)).
+- OOO qualification filter (`All leads` / `Non-OOO only` / `OOO only`). This filters leads by `qualification`, not replies.
 - Pipeline stage chips (same as client pipeline; click to filter).
+- URL state contract: `q`, `campaign`, `stage`, `replyScope`, `sort`, `dir`, `range`, `from`, `to`, `page`.
 
 ### 3.3 Lead table
 
@@ -245,7 +254,7 @@ Resizable columns, storage key `table:leads:columns`, defaults `[380, 300, 220, 
 
 Sorting keys: `lead`, `company`, `status` (by stage position in `PIPELINE_STAGES`), `updated`. Default: `updated` DESC.
 
-Pagination: `PAGE_SIZE = 50` with "Load more".
+Pagination: `PAGE_SIZE = 50` with numbered pagination, persisted in URL via `page`.
 
 ### 3.4 Lead drawer (editable)
 

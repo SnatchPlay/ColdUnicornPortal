@@ -67,7 +67,7 @@ The agency tracks lost clients elsewhere; the portal's role is current-active op
 
 ### OoS-8 вЂ” Reply triage UI
 
-Every reply is classified by **n8n**. The portal does not classify replies. The "Unclassified replies" count on the Admin dashboard is a sanity check on ingestion вЂ” if the count grows, n8n is not working, not "the user needs to classify". See [11-integrations В§6](./11-integrations.md#6-reply-classification).
+Every reply is classified by **n8n**. The portal does not classify replies. If unclassified replies are present in raw data, that is an ingestion/classification issue in n8n, not a portal workflow. See [11-integrations В§6](./11-integrations.md#6-reply-classification).
 
 ### OoS-9 вЂ” In-portal email/SMS dispatch
 
@@ -121,7 +121,7 @@ What is in scope but **not yet built**. Single source: [BUSINESS_LOGIC.md В§11
 - **BL-3** LinkedIn API key field in manager/admin client drawer.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields (schema + UI).
 - **BL-5** Agency CRM kanban for `agency_crm_deals`.
-- **BL-6** Rename "At-risk" в†’ "Non-active clients"; optionally extend status set.
+- **BL-6 (closed):** Removed the non-active clients dashboard surface in the 2026-04-29 simplification pass.
 - **BL-7** Rename "Reply scope" filter в†’ "Lead OOO scope".
 - **BL-8** State-machine validation for lead transitions.
 - **BL-9** Orphan auth-user recovery tool.

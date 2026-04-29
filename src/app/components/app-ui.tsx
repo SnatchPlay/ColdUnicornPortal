@@ -145,3 +145,7 @@ export function InlineLinkButton({
     </button>
   );
 }
+
+export function ChartTextSummary({ summary }: { summary: string }) {
+  return <p className="sr-only">{summary}</p>;
+}
