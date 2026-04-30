@@ -22,6 +22,7 @@ import {
   PortalSurface,
   ResponsiveChart,
 } from "../components/portal-ui";
+import { ChartTextSummary } from "../components/app-ui";
 import {
   getCampaignPerformance,
   getClientKpis,
@@ -104,17 +105,24 @@ export function ClientStatisticsPage() {
         {activity.length === 0 ? (
           <EmptyPortalState title="No pipeline activity" description="No live lead timestamps are available for this view." />
         ) : (
-          <ResponsiveChart>
-            <LineChart data={activity}>
-              <CartesianGrid stroke="#141414" strokeDasharray="3 3" />
-              <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-              <ChartTooltip />
-              <Line type="monotone" dataKey="mqls" stroke="#3b82f6" strokeWidth={2.5} />
-              <Line type="monotone" dataKey="meetings" stroke="#8b5cf6" strokeWidth={2.5} />
-              <Line type="monotone" dataKey="won" stroke="#22c55e" strokeWidth={2.5} />
-            </LineChart>
-          </ResponsiveChart>
+          <>
+            <ChartTextSummary
+              summary={`Pipeline activity chart with ${activity.length} points. Current totals: ${formatNumber(
+                kpis.mqls,
+              )} MQLs, ${formatNumber(kpis.meetings)} meetings, ${formatNumber(kpis.won)} won.`}
+            />
+            <ResponsiveChart>
+              <LineChart data={activity}>
+                <CartesianGrid stroke="#141414" strokeDasharray="3 3" />
+                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <ChartTooltip />
+                <Line type="monotone" dataKey="mqls" stroke="#3b82f6" strokeWidth={2.5} />
+                <Line type="monotone" dataKey="meetings" stroke="#8b5cf6" strokeWidth={2.5} />
+                <Line type="monotone" dataKey="won" stroke="#22c55e" strokeWidth={2.5} />
+              </LineChart>
+            </ResponsiveChart>
+          </>
         )}
       </ChartPanel>
 
@@ -123,15 +131,18 @@ export function ClientStatisticsPage() {
           {dailySent.length === 0 ? (
             <EmptyPortalState title="No send volume" description="No email activity is available for this period." />
           ) : (
-            <ResponsiveChart>
-              <AreaChart data={dailySent}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Area type="monotone" dataKey="sent" stroke="#22c55e" fill="#22c55e22" strokeWidth={2.5} />
-              </AreaChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Daily sent area chart with ${dailySent.length} points and total sent ${formatNumber(kpis.emailsSent)}.`} />
+              <ResponsiveChart>
+                <AreaChart data={dailySent}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Area type="monotone" dataKey="sent" stroke="#22c55e" fill="#22c55e22" strokeWidth={2.5} />
+                </AreaChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
 
@@ -139,15 +150,23 @@ export function ClientStatisticsPage() {
           {performance.length === 0 ? (
             <EmptyPortalState title="No campaign stats" description="Not enough campaign activity to calculate performance." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={performance.slice(0, 8)}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="replyRate" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary
+                summary={`Campaign reply-rate ranking for top ${Math.min(
+                  performance.length,
+                  8,
+                )} campaigns in selected timeframe.`}
+              />
+              <ResponsiveChart>
+                <BarChart data={performance.slice(0, 8)}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="replyRate" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
       </div>

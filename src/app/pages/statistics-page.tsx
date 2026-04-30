@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { DateRangeButton } from "../components/portal-ui";
-import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads } from "../lib/selectors";
@@ -252,30 +252,33 @@ function InternalStatisticsPage() {
           {trendSeries.length === 0 ? (
             <EmptyState title="No trend data yet" description="No activity data is available for the selected filters." />
           ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendSeries}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    cursor={false}
-                    contentStyle={{
-                      backgroundColor: "rgba(2,6,23,0.98)",
-                      border: "1px solid rgba(148,163,184,0.2)",
-                      borderRadius: "16px",
-                      color: "#fff",
-                    }}
-                    labelStyle={{ color: "rgba(226,232,240,0.92)" }}
-                    itemStyle={{ color: "#f8fafc" }}
-                  />
-                  <Line type="monotone" dataKey="sent" stroke="#38bdf8" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="opens" stroke="#a78bfa" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <>
+              <ChartTextSummary summary={`Trend chart with ${trendSeries.length} points for sent, replies, opens, and bounces.`} />
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendSeries}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={false}
+                      contentStyle={{
+                        backgroundColor: "rgba(2,6,23,0.98)",
+                        border: "1px solid rgba(148,163,184,0.2)",
+                        borderRadius: "16px",
+                        color: "#fff",
+                      }}
+                      labelStyle={{ color: "rgba(226,232,240,0.92)" }}
+                      itemStyle={{ color: "#f8fafc" }}
+                    />
+                    <Line type="monotone" dataKey="sent" stroke="#38bdf8" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="opens" stroke="#a78bfa" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </>
           )}
         </Surface>
 
@@ -283,28 +286,31 @@ function InternalStatisticsPage() {
           {qualificationSeries.length === 0 ? (
             <EmptyState title="No leads available" description="Once visible leads exist, the qualification mix appears here." />
           ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={qualificationSeries} dataKey="value" nameKey="name" outerRadius={110} innerRadius={64}>
-                    {qualificationSeries.map((entry, index) => (
-                      <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    cursor={false}
-                    contentStyle={{
-                      backgroundColor: "rgba(2,6,23,0.98)",
-                      border: "1px solid rgba(148,163,184,0.2)",
-                      borderRadius: "16px",
-                      color: "#fff",
-                    }}
-                    labelStyle={{ color: "rgba(226,232,240,0.92)" }}
-                    itemStyle={{ color: "#f8fafc" }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <>
+              <ChartTextSummary summary={`Lead qualification pie chart with ${qualificationSeries.length} qualification buckets.`} />
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={qualificationSeries} dataKey="value" nameKey="name" outerRadius={110} innerRadius={64}>
+                      {qualificationSeries.map((entry, index) => (
+                        <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      cursor={false}
+                      contentStyle={{
+                        backgroundColor: "rgba(2,6,23,0.98)",
+                        border: "1px solid rgba(148,163,184,0.2)",
+                        borderRadius: "16px",
+                        color: "#fff",
+                      }}
+                      labelStyle={{ color: "rgba(226,232,240,0.92)" }}
+                      itemStyle={{ color: "#f8fafc" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </>
           )}
         </Surface>
       </div>

@@ -1,40 +1,50 @@
-import { runtimeConfig } from "../lib/env";
+﻿import { runtimeConfig } from "../lib/env";
 import { supabase } from "../lib/supabase";
 import type {
-  CampaignDailyStatRecord,
   CampaignRecord,
+  ConditionRuleRecord,
   ClientUserRecord,
   ClientRecord,
   CoreSnapshot,
-  DailyStatRecord,
   DomainRecord,
   EmailExcludeRecord,
   InviteRecord,
   InviteRequest,
   InvoiceRecord,
   LeadRecord,
-  ReplyRecord,
   UserRecord,
 } from "../types/core";
+import type {
+  LoadIdentityResult,
+  OrmGatewayAction,
+  OrmGatewayEnvelope,
+  OrmGatewayRequest,
+  OrmGatewayResponseMap,
+} from "./orm-gateway-contract";
 
-type RepositoryOperation = "select" | "update" | "upsert" | "delete";
+type RepositoryOperation = "select" | "insert" | "update" | "upsert" | "delete";
 type RepositoryErrorKind = "permission" | "network" | "timeout" | "unknown";
 
 const SNAPSHOT_RETRY_DELAYS_MS = [250, 600] as const;
 
-// Window for heavy daily-stat tables. Shipping the full history on every
-// mount blows past the authenticated-role statement_timeout once seed
-// volumes cross ~10k rows; the dashboard only renders the last 21 days,
-// so we cap at 90 to leave headroom for drill-down views.
-const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
-const DAILY_STATS_WINDOW_DAYS = 180;
-
-function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
+const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: RepositoryOperation }> = {
+  loadSnapshot: { table: "snapshot", operation: "select" },
+  loadConditionRules: { table: "condition_rules", operation: "select" },
+  updateClient: { table: "clients", operation: "update" },
+  updateCampaign: { table: "campaigns", operation: "update" },
+  updateLead: { table: "leads", operation: "update" },
+  updateDomain: { table: "domains", operation: "update" },
+  updateInvoice: { table: "invoices", operation: "update" },
+  createConditionRule: { table: "condition_rules", operation: "insert" },
+  updateConditionRule: { table: "condition_rules", operation: "update" },
+  deleteConditionRule: { table: "condition_rules", operation: "delete" },
+  upsertClientUserMapping: { table: "client_users", operation: "upsert" },
+  deleteClientUserMapping: { table: "client_users", operation: "delete" },
+  upsertEmailExcludeDomain: { table: "email_exclude_list", operation: "upsert" },
+  deleteEmailExcludeDomain: { table: "email_exclude_list", operation: "delete" },
+  loadIdentity: { table: "users", operation: "select" },
+  updateProfileName: { table: "users", operation: "update" },
+};
 
 export class RepositoryError extends Error {
   readonly table: string;
@@ -221,8 +231,8 @@ async function getSessionAccessToken() {
   return accessToken;
 }
 
-async function performInviteFunctionRequest(
-  functionName: "send-invite" | "manage-invites",
+async function performEdgeFunctionRequest(
+  functionName: "send-invite" | "manage-invites" | "orm-gateway",
   accessToken: string,
   body: Record<string, unknown>,
 ) {
@@ -245,12 +255,12 @@ async function invokeInviteEdgeFunction<TResponse>(
 ): Promise<TResponse> {
   const client = ensureSupabase();
   const firstToken = await getSessionAccessToken();
-  let response = await performInviteFunctionRequest(functionName, firstToken, body);
+  let response = await performEdgeFunctionRequest(functionName, firstToken, body);
 
   if (response.status === 401) {
     const refresh = await client.auth.refreshSession();
     if (!refresh.error && refresh.data.session?.access_token) {
-      response = await performInviteFunctionRequest(functionName, refresh.data.session.access_token, body);
+      response = await performEdgeFunctionRequest(functionName, refresh.data.session.access_token, body);
     }
   }
 
@@ -281,56 +291,89 @@ async function invokeInviteEdgeFunction<TResponse>(
   return payload as TResponse;
 }
 
-export interface Repository {
-  loadSnapshot(options?: {
-    includeDailyStats?: boolean;
-    leadsLimit?: number;
-  }): Promise<CoreSnapshot>;
-  updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
-  updateCampaign(campaignId: string, patch: Partial<CampaignRecord>): Promise<CampaignRecord>;
-  updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
-  updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
-  updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
-  sendInvite(payload: InviteRequest): Promise<{ inviteId: string | null }>;
-  listInvites(): Promise<InviteRecord[]>;
-  resendInvite(inviteId: string): Promise<InviteRecord>;
-  revokeInvite(inviteId: string): Promise<void>;
-  upsertClientUserMapping(userId: string, clientId: string): Promise<ClientUserRecord>;
-  deleteClientUserMapping(mappingId: string): Promise<void>;
-  upsertEmailExcludeDomain(domain: string): Promise<EmailExcludeRecord>;
-  deleteEmailExcludeDomain(domain: string): Promise<void>;
-}
-
-interface SelectOptions {
-  limit?: number;
-  gteColumn?: string;
-  gteValue?: string;
-}
-
-async function selectTable<T>(
-  table: string,
-  orderBy = "created_at",
-  options: SelectOptions = {},
-): Promise<T[]> {
+async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
+  action: TAction,
+  payload: Omit<Extract<OrmGatewayRequest, { action: TAction }>, "action">,
+): Promise<OrmGatewayResponseMap[TAction]> {
   const client = ensureSupabase();
+  const firstToken = await getSessionAccessToken();
+  const body = { action, ...payload } as Record<string, unknown>;
+  const meta = ORM_ACTION_META[action];
+
+  let response = await performEdgeFunctionRequest("orm-gateway", firstToken, body);
+
+  if (response.status === 401) {
+    const refresh = await client.auth.refreshSession();
+    if (!refresh.error && refresh.data.session?.access_token) {
+      response = await performEdgeFunctionRequest("orm-gateway", refresh.data.session.access_token, body);
+    }
+  }
+
+  const text = await response.text();
+  let envelope: OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]> | null = null;
+
+  if (text) {
+    try {
+      envelope = JSON.parse(text) as OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]>;
+    } catch {
+      envelope = null;
+    }
+  }
+
+  const fallbackMessage = `ORM gateway request failed with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`;
+
+  if (!response.ok) {
+    const errorMessage = envelope && !envelope.ok ? envelope.error.message : fallbackMessage;
+    const errorCode = envelope && !envelope.ok ? envelope.error.code : undefined;
+    const errorDetails = envelope && !envelope.ok ? envelope.error.details : undefined;
+    const errorHint = envelope && !envelope.ok ? envelope.error.hint : undefined;
+
+    throw new RepositoryError({
+      table: meta.table,
+      operation: meta.operation,
+      kind: classifyErrorKind(errorMessage, errorCode),
+      message: errorMessage,
+      code: errorCode,
+      details: errorDetails,
+      hint: errorHint,
+    });
+  }
+
+  if (!envelope) {
+    throw new RepositoryError({
+      table: meta.table,
+      operation: meta.operation,
+      kind: "unknown",
+      message: "ORM gateway returned an invalid response payload.",
+    });
+  }
+
+  if (!envelope.ok) {
+    throw new RepositoryError({
+      table: meta.table,
+      operation: meta.operation,
+      kind: classifyErrorKind(envelope.error.message, envelope.error.code),
+      message: envelope.error.message,
+      code: envelope.error.code,
+      details: envelope.error.details,
+      hint: envelope.error.hint,
+    });
+  }
+
+  return envelope.data;
+}
+
+async function invokeOrmGatewaySelectWithRetry<TAction extends OrmGatewayAction>(
+  action: TAction,
+  payload: Omit<Extract<OrmGatewayRequest, { action: TAction }>, "action">,
+): Promise<OrmGatewayResponseMap[TAction]> {
+  const meta = ORM_ACTION_META[action];
 
   for (let attempt = 0; attempt <= SNAPSHOT_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      let query = client.from(table).select("*").order(orderBy, { ascending: false });
-      if (options.gteColumn && options.gteValue) {
-        query = query.gte(options.gteColumn, options.gteValue);
-      }
-      if (typeof options.limit === "number") {
-        query = query.limit(options.limit);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        throw mapRepositoryError(error, table, "select");
-      }
-      return (data ?? []) as T[];
+      return await invokeOrmGatewayAction(action, payload);
     } catch (reason) {
-      const mapped = mapRepositoryError(reason, table, "select");
+      const mapped = mapRepositoryError(reason, meta.table, meta.operation);
       const isLastAttempt = attempt === SNAPSHOT_RETRY_DELAYS_MS.length;
       if (isLastAttempt || !isRetryable(mapped)) {
         throw mapped;
@@ -340,11 +383,42 @@ async function selectTable<T>(
   }
 
   throw new RepositoryError({
-    table,
-    operation: "select",
+    table: meta.table,
+    operation: meta.operation,
     kind: "unknown",
-    message: "Failed to load table after retries.",
+    message: "ORM gateway select failed after retries.",
   });
+}
+
+export interface Repository {
+  loadSnapshot(options?: {
+    includeDailyStats?: boolean;
+    leadsLimit?: number;
+  }): Promise<CoreSnapshot>;
+  loadConditionRules(): Promise<ConditionRuleRecord[]>;
+  updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
+  updateCampaign(campaignId: string, patch: Partial<CampaignRecord>): Promise<CampaignRecord>;
+  updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
+  updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
+  updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
+  createConditionRule(
+    input: Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at" | "created_by"> & { created_by?: string | null },
+  ): Promise<ConditionRuleRecord>;
+  updateConditionRule(
+    ruleId: string,
+    patch: Partial<Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at">>,
+  ): Promise<ConditionRuleRecord>;
+  deleteConditionRule(ruleId: string): Promise<void>;
+  sendInvite(payload: InviteRequest): Promise<{ inviteId: string | null }>;
+  listInvites(): Promise<InviteRecord[]>;
+  resendInvite(inviteId: string): Promise<InviteRecord>;
+  revokeInvite(inviteId: string): Promise<void>;
+  upsertClientUserMapping(userId: string, clientId: string): Promise<ClientUserRecord>;
+  deleteClientUserMapping(mappingId: string): Promise<void>;
+  upsertEmailExcludeDomain(domain: string): Promise<EmailExcludeRecord>;
+  deleteEmailExcludeDomain(domain: string): Promise<void>;
+  loadIdentity(sessionUserId: string): Promise<LoadIdentityResult>;
+  updateProfileName(sessionUserId: string, fullName: string): Promise<UserRecord>;
 }
 
 export const repository: Repository = {
@@ -352,81 +426,52 @@ export const repository: Repository = {
     const includeDailyStats = options?.includeDailyStats ?? true;
     const leadsLimit = options?.leadsLimit;
 
-    const campaignStatsSince = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
-    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
-
-    const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList] =
-      await Promise.all([
-        selectTable<UserRecord>("users"),
-        selectTable<ClientRecord>("clients"),
-        selectTable<ClientUserRecord>("client_users"),
-        selectTable<CampaignRecord>("campaigns"),
-        selectTable<LeadRecord>("leads", "updated_at", { limit: leadsLimit }),
-        selectTable<ReplyRecord>("replies", "received_at"),
-        selectTable<CampaignDailyStatRecord>("campaign_daily_stats", "report_date", {
-          gteColumn: "report_date",
-          gteValue: campaignStatsSince,
-        }),
-        includeDailyStats
-          ? selectTable<DailyStatRecord>("daily_stats", "report_date", {
-              gteColumn: "report_date",
-              gteValue: dailyStatsSince,
-            })
-          : Promise.resolve([]),
-        selectTable<DomainRecord>("domains", "updated_at"),
-        selectTable<InvoiceRecord>("invoices", "issue_date"),
-        selectTable<EmailExcludeRecord>("email_exclude_list", "created_at"),
-      ]);
-
-    return {
-      users,
-      clients,
-      clientUsers,
-      campaigns,
-      leads,
-      replies,
-      campaignDailyStats,
-      dailyStats,
-      domains,
-      invoices,
-      emailExcludeList,
-    };
+    return invokeOrmGatewaySelectWithRetry("loadSnapshot", {
+      includeDailyStats,
+      leadsLimit,
+    });
   },
+
+  async loadConditionRules() {
+    return invokeOrmGatewaySelectWithRetry("loadConditionRules", {});
+  },
+
   async updateClient(clientId, patch) {
-    const client = ensureSupabase();
-    const { data, error } = await client.from("clients").update(patch).eq("id", clientId).select("*").single();
-    if (error) throw mapRepositoryError(error, "clients", "update");
-    return data as ClientRecord;
+    return invokeOrmGatewayAction("updateClient", { clientId, patch });
   },
+
   async updateCampaign(campaignId, patch) {
-    const client = ensureSupabase();
-    const { data, error } = await client
-      .from("campaigns")
-      .update(patch)
-      .eq("id", campaignId)
-      .select("*")
-      .single();
-    if (error) throw mapRepositoryError(error, "campaigns", "update");
-    return data as CampaignRecord;
+    return invokeOrmGatewayAction("updateCampaign", { campaignId, patch });
   },
+
   async updateLead(leadId, patch) {
-    const client = ensureSupabase();
-    const { data, error } = await client.from("leads").update(patch).eq("id", leadId).select("*").single();
-    if (error) throw mapRepositoryError(error, "leads", "update");
-    return data as LeadRecord;
+    return invokeOrmGatewayAction("updateLead", { leadId, patch });
   },
+
   async updateDomain(domainId, patch) {
-    const client = ensureSupabase();
-    const { data, error } = await client.from("domains").update(patch).eq("id", domainId).select("*").single();
-    if (error) throw mapRepositoryError(error, "domains", "update");
-    return data as DomainRecord;
+    return invokeOrmGatewayAction("updateDomain", { domainId, patch });
   },
+
   async updateInvoice(invoiceId, patch) {
-    const client = ensureSupabase();
-    const { data, error } = await client.from("invoices").update(patch).eq("id", invoiceId).select("*").single();
-    if (error) throw mapRepositoryError(error, "invoices", "update");
-    return data as InvoiceRecord;
+    return invokeOrmGatewayAction("updateInvoice", { invoiceId, patch });
   },
+
+  async createConditionRule(input) {
+    return invokeOrmGatewayAction("createConditionRule", { input });
+  },
+
+  async updateConditionRule(ruleId, patch) {
+    const payload = {
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+    return invokeOrmGatewayAction("updateConditionRule", { ruleId, patch: payload });
+  },
+
+  async deleteConditionRule(ruleId) {
+    await invokeOrmGatewayAction("deleteConditionRule", { ruleId });
+  },
+
   async sendInvite(payload) {
     ensureSupabase();
     const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; inviteId?: string; error?: string }>(
@@ -439,6 +484,7 @@ export const repository: Repository = {
 
     return { inviteId: typedData.inviteId ?? null };
   },
+
   async listInvites() {
     ensureSupabase();
     const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; invites?: InviteRecord[]; error?: string }>(
@@ -451,6 +497,7 @@ export const repository: Repository = {
 
     return typedData.invites ?? [];
   },
+
   async resendInvite(inviteId) {
     ensureSupabase();
     const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; invite?: InviteRecord; error?: string }>(
@@ -463,6 +510,7 @@ export const repository: Repository = {
 
     return typedData.invite;
   },
+
   async revokeInvite(inviteId) {
     ensureSupabase();
     const typedData = await invokeInviteEdgeFunction<{ ok?: boolean; error?: string }>("manage-invites", {
@@ -473,34 +521,29 @@ export const repository: Repository = {
       throw mapRepositoryError(typedData.error ?? "Could not revoke invitation.", "invites", "delete");
     }
   },
+
   async upsertClientUserMapping(userId, clientId) {
-    const client = ensureSupabase();
-    const { data, error } = await client
-      .from("client_users")
-      .upsert({ user_id: userId, client_id: clientId }, { onConflict: "user_id" })
-      .select("*")
-      .single();
-    if (error) throw mapRepositoryError(error, "client_users", "upsert");
-    return data as ClientUserRecord;
+    return invokeOrmGatewayAction("upsertClientUserMapping", { userId, clientId });
   },
+
   async deleteClientUserMapping(mappingId) {
-    const client = ensureSupabase();
-    const { error } = await client.from("client_users").delete().eq("id", mappingId);
-    if (error) throw mapRepositoryError(error, "client_users", "delete");
+    await invokeOrmGatewayAction("deleteClientUserMapping", { mappingId });
   },
+
   async upsertEmailExcludeDomain(domain) {
-    const client = ensureSupabase();
-    const { data, error } = await client
-      .from("email_exclude_list")
-      .upsert({ domain }, { onConflict: "domain" })
-      .select("*")
-      .single();
-    if (error) throw mapRepositoryError(error, "email_exclude_list", "upsert");
-    return data as EmailExcludeRecord;
+    return invokeOrmGatewayAction("upsertEmailExcludeDomain", { domain });
   },
+
   async deleteEmailExcludeDomain(domain) {
-    const client = ensureSupabase();
-    const { error } = await client.from("email_exclude_list").delete().eq("domain", domain);
-    if (error) throw mapRepositoryError(error, "email_exclude_list", "delete");
+    await invokeOrmGatewayAction("deleteEmailExcludeDomain", { domain });
+  },
+
+  async loadIdentity(sessionUserId) {
+    return invokeOrmGatewaySelectWithRetry("loadIdentity", { sessionUserId });
+  },
+
+  async updateProfileName(sessionUserId, fullName) {
+    const { user } = await invokeOrmGatewayAction("updateProfileName", { sessionUserId, fullName });
+    return user;
   },
 };

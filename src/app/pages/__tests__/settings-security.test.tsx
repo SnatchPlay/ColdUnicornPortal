@@ -2,16 +2,27 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "../settings-page";
 import { useAuth } from "../../providers/auth";
+import { useCoreData } from "../../providers/core-data";
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
+vi.mock("../../providers/core-data", () => ({
+  useCoreData: vi.fn(),
+}));
 
 const mockedUseAuth = vi.mocked(useAuth);
+const mockedUseCoreData = vi.mocked(useCoreData);
 
 describe("settings security controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUseCoreData.mockReturnValue({
+      conditionRules: [],
+      createConditionRule: vi.fn(async () => {}),
+      updateConditionRule: vi.fn(async () => {}),
+      deleteConditionRule: vi.fn(async () => {}),
+    } as never);
   });
 
   it("handles profile name, password, reset link request, and sign out", async () => {

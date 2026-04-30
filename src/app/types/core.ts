@@ -23,6 +23,9 @@ export type ReplyClassification =
   | "Spam_Inbound"
   | "other";
 export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
+export type ConditionTargetEntity = "client" | "campaign" | "lead";
+export type ConditionScopeType = "global" | "client" | "manager";
+export type ConditionApplyTo = "row" | "cell" | "badge" | "section";
 
 export interface UserRecord {
   id: string;
@@ -209,6 +212,31 @@ export interface EmailExcludeRecord {
   created_at: string;
 }
 
+export interface ConditionRuleRecord {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  target_entity: ConditionTargetEntity;
+  surface: string;
+  metric_key: string;
+  source_sheet: string | null;
+  source_range: string | null;
+  scope_type: ConditionScopeType;
+  client_id: string | null;
+  manager_id: string | null;
+  apply_to: ConditionApplyTo;
+  column_key: string | null;
+  branches: unknown;
+  base_filter: unknown | null;
+  priority: number;
+  enabled: boolean;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Identity {
   id: string;
   fullName: string;
@@ -251,4 +279,5 @@ export interface CoreSnapshot {
   domains: DomainRecord[];
   invoices: InvoiceRecord[];
   emailExcludeList: EmailExcludeRecord[];
+  conditionRules: ConditionRuleRecord[];
 }

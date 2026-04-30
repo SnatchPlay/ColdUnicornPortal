@@ -1,11 +1,11 @@
-# 09 · Mutations & RLS
+﻿# 09 · Mutations & RLS
 
 Every write path in the portal, the RLS policy that guards it, who is allowed to invoke it, and the optimistic-update behaviour. Matches (and supersedes) the short matrix in [`docs/reference/mutation-ownership-matrix.md`](../mutation-ownership-matrix.md).
 
 ## Contents
 
 1. [Architecture](#1-architecture)
-2. [Direct PostgREST mutations](#2-direct-postgrest-mutations)
+2. [ORM Gateway Mutations](#2-orm-gateway-mutations)
 3. [Edge functions](#3-edge-functions)
 4. [Mutation ownership matrix](#4-mutation-ownership-matrix)
 5. [Optimistic updates & rollback](#5-optimistic-updates--rollback)
@@ -20,7 +20,7 @@ All writes funnel through the `Repository` interface exported from [`src/app/dat
 
 > **Ingestion-only tables.** The portal **must never** issue INSERT or UPDATE against `replies`, `campaign_daily_stats`, or `daily_stats`. Those rows are owned by **n8n** ([11-integrations.md §2](./11-integrations.md#2-ingestion-only-tables)). `domains`, `invoices`, `leads`, `campaigns` are partially shared: ingestion creates rows, the portal mutates a whitelisted subset of fields.
 
-> **ORM direction.** Drizzle is the canonical schema and migration tool ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-drizzle-orm-is-the-canonical-access-layer)). New queries should prefer the Drizzle query builder where it improves clarity and type-safety; today the repository hand-writes `supabase.from(...)` calls. Migration to Drizzle querying is tracked as **BL-11**. Either way, the `Repository` interface stays the only boundary.
+> **ORM runtime status.** BL-11 is shipped: runtime reads/writes now go through `orm-gateway`, which executes Drizzle ORM queries with transaction-local JWT claim + role passthrough so existing RLS policies remain authoritative. The `Repository` interface is still the only frontend data boundary.
 
 1. Invoke the repository method.
 2. On success, patch the local `snapshot` with the returned row.
@@ -32,9 +32,9 @@ RLS is the authoritative access boundary. Client-side role checks in UI (e.g. di
 
 ---
 
-## 2. Direct PostgREST mutations
+## 2. ORM Gateway Mutations
 
-All use `supabase.from(table).update/upsert/delete(...).select("*")...`. See [repository.ts:395-505](../../../src/app/data/repository.ts#L395-L505).
+All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gateway` with an action payload. The gateway runs Drizzle queries server-side and returns typed envelopes (`{ ok, data }` / `{ ok, error }`).
 
 ### 2.1 `updateClient(clientId, patch)` — [repository.ts:395-400](../../../src/app/data/repository.ts#L395-L400)
 
@@ -103,11 +103,33 @@ All use `supabase.from(table).update/upsert/delete(...).select("*")...`. See [re
 - **Allowed roles:** admin, super_admin.
 - **Called from:** Blacklist page (Remove button).
 
+### 2.10 `loadConditionRules()`
+
+- **Table:** `condition_rules`.
+- **Statement:** `SELECT * FROM condition_rules ORDER BY priority ASC, created_at ASC`.
+- **RLS:** `condition_rules_select_scoped`.
+- **Allowed roles:** manager (scoped/global read), admin, super_admin.
+- **Blocked role:** client.
+
+### 2.11 `createConditionRule(input)` / `updateConditionRule(ruleId, patch)`
+
+- **Table:** `condition_rules`.
+- **RLS:** `condition_rules_admin_insert` / `condition_rules_admin_update`.
+- **Allowed roles:** admin, super_admin only.
+- **Called from:** admin settings condition-rules builder.
+
+### 2.12 `deleteConditionRule(ruleId)`
+
+- **Table:** `condition_rules`.
+- **RLS:** `condition_rules_admin_delete`.
+- **Allowed roles:** admin, super_admin only.
+- **Called from:** admin settings condition-rules builder.
+
 ---
 
 ## 3. Edge functions
 
-Authenticated calls to `/functions/v1/send-invite` and `/functions/v1/manage-invites`. Both go through `invokeInviteEdgeFunction(fnName, body)` ([repository.ts:242-282](../../../src/app/data/repository.ts#L242-L282)).
+Runtime data actions call `/functions/v1/orm-gateway`. Invitation lifecycle remains on `/functions/v1/send-invite` and `/functions/v1/manage-invites`.
 
 ### 3.1 Auth handshake
 
@@ -167,7 +189,7 @@ Canonical authorization per entity. "Own" = the subject's own row (e.g. a user u
 
 "Assigned" = the record's `client_id` is among clients where `clients.manager_id = auth.uid()`.
 
-Clients do not write anything through the portal. Their sole mutations go through Supabase Auth (`updatePassword`, `updateProfileName`, `requestPasswordReset`, `signOut`) which are scoped to their own `auth.users` row.
+Clients do not write domain entities through the portal. Their account actions still go through Supabase Auth (`updatePassword`, `requestPasswordReset`, `signOut`), while profile-name persistence now routes through `orm-gateway` to `public.users` under `users_update_self` (`id = auth.uid()`).
 
 ---
 
@@ -239,7 +261,7 @@ Mutations are never auto-retried — to avoid duplicate inserts / non-idempotent
 
 ### 7.1 Bulk snapshot on mount
 
-`CoreDataProvider` calls `repository.loadSnapshot()` once when the provider mounts and whenever the session changes. Eleven tables fetched in parallel:
+`CoreDataProvider` calls `repository.loadSnapshot()` once when the provider mounts and whenever the session changes. Eleven snapshot tables are fetched in parallel, then `condition_rules` are fetched as a separate read-path call:
 
 | Table | Order by | Window |
 |-------|----------|--------|
@@ -254,6 +276,7 @@ Mutations are never auto-retried — to avoid duplicate inserts / non-idempotent
 | `domains` | `updated_at DESC` | — |
 | `invoices` | `issue_date DESC` | — |
 | `email_exclude_list` | `created_at DESC` | — |
+| `condition_rules` | `priority ASC, created_at ASC` | loaded separately; skipped for `client` role |
 
 The 90/180-day windows exist to keep the authenticated-role `statement_timeout` comfortable (the dashboard only shows the last 21 days; 90 is headroom for drill-downs). Constants in [repository.ts:29-30](../../../src/app/data/repository.ts#L29-L30).
 
@@ -269,3 +292,4 @@ The 90/180-day windows exist to keep the authenticated-role `statement_timeout` 
 Pages typically rely on the optimistic snapshot patching; they do **not** call `refresh()` after every save. This avoids a full snapshot re-fetch after a trivial field edit.
 
 Next: [10 · Non-functional requirements](./10-nfr.md).
+

@@ -113,6 +113,7 @@ export const users = pgTable("users", {
 	unique("users_email_key").on(table.email),
 	pgPolicy("users_select_self", { as: "permissive", for: "select", to: ["authenticated"], using: sql`(auth.uid() = id)` }),
 	pgPolicy("users_select_internal", { as: "permissive", for: "select", to: ["authenticated"] }),
+	pgPolicy("users_update_self", { as: "permissive", for: "update", to: ["authenticated"], using: sql`(auth.uid() = id)`, withCheck: sql`(auth.uid() = id)` }),
 ]);
 
 export const campaigns = pgTable("campaigns", {
@@ -281,6 +282,55 @@ export const emailExcludeList = pgTable("email_exclude_list", {
 	pgPolicy("email_exclude_list_insert_admin", { as: "permissive", for: "insert", to: ["authenticated"] }),
 	pgPolicy("email_exclude_list_update_admin", { as: "permissive", for: "update", to: ["authenticated"] }),
 	pgPolicy("email_exclude_list_delete_admin", { as: "permissive", for: "delete", to: ["authenticated"] }),
+]);
+
+export const conditionRules = pgTable("condition_rules", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	key: text().notNull(),
+	name: text().notNull(),
+	description: text(),
+	targetEntity: text("target_entity").default('client').notNull(),
+	surface: text().notNull(),
+	metricKey: text("metric_key").notNull(),
+	sourceSheet: text("source_sheet"),
+	sourceRange: text("source_range"),
+	scopeType: text("scope_type").default('global').notNull(),
+	clientId: uuid("client_id"),
+	managerId: uuid("manager_id"),
+	applyTo: text("apply_to").default('cell').notNull(),
+	columnKey: text("column_key"),
+	branches: jsonb().notNull(),
+	baseFilter: jsonb("base_filter"),
+	priority: integer().default(100).notNull(),
+	enabled: boolean().default(true).notNull(),
+	notes: text(),
+	createdBy: uuid("created_by"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_condition_rules_lookup").using("btree", table.targetEntity.asc().nullsLast().op("text_ops"), table.surface.asc().nullsLast().op("text_ops"), table.enabled.asc().nullsLast().op("bool_ops"), table.priority.asc().nullsLast().op("int4_ops")),
+	index("idx_condition_rules_client_scope").using("btree", table.clientId.asc().nullsLast().op("uuid_ops")).where(sql`scope_type = 'client'::text`),
+	index("idx_condition_rules_manager_scope").using("btree", table.managerId.asc().nullsLast().op("uuid_ops")).where(sql`scope_type = 'manager'::text`),
+	unique("condition_rules_key_key").on(table.key),
+	foreignKey({
+			columns: [table.clientId],
+			foreignColumns: [clients.id],
+			name: "condition_rules_client_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.managerId],
+			foreignColumns: [users.id],
+			name: "condition_rules_manager_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.createdBy],
+			foreignColumns: [users.id],
+			name: "condition_rules_created_by_fkey"
+		}),
+	pgPolicy("condition_rules_select_scoped", { as: "permissive", for: "select", to: ["authenticated"] }),
+	pgPolicy("condition_rules_admin_insert", { as: "permissive", for: "insert", to: ["authenticated"] }),
+	pgPolicy("condition_rules_admin_update", { as: "permissive", for: "update", to: ["authenticated"] }),
+	pgPolicy("condition_rules_admin_delete", { as: "permissive", for: "delete", to: ["authenticated"] }),
 ]);
 
 export const agencyCrmDeals = pgTable("agency_crm_deals", {

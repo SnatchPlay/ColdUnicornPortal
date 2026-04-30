@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { campaigns, leads, clients, dailyStats, replies, users, clientOooRouting, campaignDailyStats, invoices, agencyCrmDeals, clientUsers, domains } from "./schema";
+import { campaigns, leads, clients, dailyStats, replies, users, clientOooRouting, campaignDailyStats, invoices, agencyCrmDeals, clientUsers, domains, conditionRules } from "./schema";
 
 export const leadsRelations = relations(leads, ({one, many}) => ({
 	campaign: one(campaigns, {
@@ -35,6 +35,7 @@ export const clientsRelations = relations(clients, ({one, many}) => ({
 	invoices: many(invoices),
 	clientUsers: many(clientUsers),
 	domains: many(domains),
+	conditionRules: many(conditionRules),
 }));
 
 export const dailyStatsRelations = relations(dailyStats, ({one}) => ({
@@ -104,5 +105,16 @@ export const domainsRelations = relations(domains, ({one}) => ({
 	client: one(clients, {
 		fields: [domains.clientId],
 		references: [clients.id]
+	}),
+}));
+
+export const conditionRulesRelations = relations(conditionRules, ({one}) => ({
+	client: one(clients, {
+		fields: [conditionRules.clientId],
+		references: [clients.id]
+	}),
+	manager: one(users, {
+		fields: [conditionRules.managerId],
+		references: [users.id]
 	}),
 }));

@@ -28,6 +28,7 @@ This reference documents the PdcaFigmaTest portal (ColdUnicorn PDCA) end-to-end:
 | 11 | [11-integrations.md](./11-integrations.md) | n8n / Smartlead / Bison topology; ingestion-only tables; notification + OOO routing |
 | 12 | [12-hidden-rules.md](./12-hidden-rules.md) | Magic numbers, implicit branches, naming traps, mutation semantics, auth error codes |
 | 13 | [13-out-of-scope.md](./13-out-of-scope.md) | Explicit legacy: features that will not be built. Mirror of BUSINESS_LOGIC §10. |
+| 14 | [14-condition-rules.md](./14-condition-rules.md) | Dynamic condition rules engine, DSL, seeded CS PDCA rules, UI surfaces, and legacy quirks |
 
 ## Conventions
 
@@ -60,3 +61,4 @@ When code changes, update:
 7. `13-out-of-scope.md` (and BUSINESS_LOGIC §10/§11) if scope moves between *out of scope*, *backlog*, and *built*.
 
 This index does not need updating unless a new file is added.
+

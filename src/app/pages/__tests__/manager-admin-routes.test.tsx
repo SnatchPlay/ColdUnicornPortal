@@ -221,15 +221,17 @@ describe("manager/admin route states", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("removes admin reply triage queue panel and keeps campaign panel stretched", () => {
+  it("removes admin unclassified and at-risk surfaces and shows split momentum charts", () => {
     mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
     mockedUseCoreData.mockReturnValue(makeCoreData({ loading: false, error: null }) as never);
 
     renderRoute(AdminDashboardPage);
 
-    expect(screen.queryByText("Reply triage queue")).not.toBeInTheDocument();
-    const campaignSection = screen.getByText("Campaign momentum").closest("section");
-    expect(campaignSection?.className).toContain("xl:row-span-2");
+    expect(screen.queryByText("Unclassified replies")).not.toBeInTheDocument();
+    expect(screen.queryByText("At-risk clients")).not.toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Sent")).toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Replies")).toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Positive")).toBeInTheDocument();
   });
 
   it("removes manager reply triage panel and keeps campaign watchlist stretched", () => {

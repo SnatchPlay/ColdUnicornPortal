@@ -19,16 +19,15 @@ The product embodies the **PDCA loop** (Plan-Do-Check-Act): managers plan outrea
   ─────────────────                      ────────
   react-router        ─── routes ─┐
   AuthProvider        ─── auth ───┼───▶  auth.users (Supabase Auth)
-  CoreDataProvider    ─── read ───┼───▶  public.* (users, clients, campaigns,
+  CoreDataProvider    ─── read ───┼───▶  Edge Function: orm-gateway
      loadSnapshot()               │         leads, replies, daily_stats,
                                   │         campaign_daily_stats, domains,
                                   │         invoices, email_exclude_list)
   repository          ─── write ──┤
      update*                      │
-                                  └───▶  RLS policies (private.can_access_client,
-                                             can_manage_client, is_internal_user,
-                                             is_admin_user, current_app_role)
+                                  └───▶  Postgres via Drizzle ORM + RLS passthrough
   repository          ─── fn  ────────▶ Edge Functions:
+     data actions                          - orm-gateway
      sendInvite                            - send-invite
      listInvites / resend / revoke         - manage-invites
 ```
@@ -38,7 +37,7 @@ Key properties:
 - **Three cooperating systems.** Smartlead/Bison send and receive emails; **n8n** ingests counters/replies and dispatches notifications + OOO routing; **the portal** is a thin read+config surface on top of Supabase. The portal never sends notifications, never classifies replies, never calls Smartlead/Bison APIs. See [11-integrations.md](./11-integrations.md) for the full topology.
 - **Single source of truth is Supabase** (ADR-0001). No alternative local-data path; the app refuses to boot if `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` are missing.
 - **RLS is the primary access-control layer.** Client-side scope functions (`lib/selectors.ts`) exist as defence in depth and for consistent UI filtering — they do not enforce security.
-- **Bulk snapshot loading**, no realtime. `CoreDataProvider` calls `repository.loadSnapshot()` once on mount with 90-day and 180-day windows on the fact tables; UI refreshes after mutations by patching the in-memory snapshot and falling back to `refresh()` for reconciliation.
+- **Bulk snapshot loading**, no realtime. `CoreDataProvider` calls `repository.loadSnapshot()` once on mount; repository dispatches to `orm-gateway` which executes Drizzle queries with the same 90/180-day windows on the fact tables. UI refreshes after mutations by patching the in-memory snapshot and falling back to `refresh()` for reconciliation.
 - **Metrics are computed client-side.** Granular rows ship to the browser so that timeframe pickers and drill-downs work without re-fetching.
 - **Role-based route shells** (ADR-0002). Each role has its own URL prefix (`/client/*`, `/manager/*`, `/admin/*`) and its own navigation menu defined in [`app-shell.tsx`](../../../src/app/components/app-shell.tsx).
 - **Client sees outreach campaigns only** (ADR-0003). Enforced at both RLS (`campaign_daily_stats_select_scoped`) and client-side (`scopeCampaigns`).
@@ -103,8 +102,7 @@ src/
       login-page.tsx           — multi-mode (signin / reset / magic link)
       reset-password-page.tsx
     data/
-      repository.ts            — Supabase access + invite edge functions
-      schema/                  — client-side TS schema helpers (Drizzle)
+      repository.ts            — runtime data boundary (orm-gateway + invite edge functions)
     lib/
       env.ts                   — runtimeConfig (publishable key, flags)
       supabase.ts              — createClient
@@ -123,6 +121,7 @@ src/
     styles/                    — Tailwind base
     test/                      — vitest setup
 supabase/
+  functions/orm-gateway/       — Drizzle runtime data gateway (RLS passthrough)
   drizzle/schema.ts            — the authoritative Drizzle schema reflecting the live project
   migrations/                  — SQL migrations (RLS performance fix, admin dashboard view)
 docs/

@@ -111,7 +111,7 @@ describe("leads pagination", () => {
     mockedUseCoreData.mockReturnValue(makeCoreData() as never);
   });
 
-  it("shows first page and loads more leads on demand", () => {
+  it("shows first page and moves to next page", () => {
     render(
       <MemoryRouter>
         <LeadsPage />
@@ -119,11 +119,11 @@ describe("leads pagination", () => {
     );
 
     expect(screen.getByText("50 of 75 leads in current scope")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load more leads" })).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Load more leads" }));
+    fireEvent.click(screen.getByRole("link", { name: "Go to next page" }));
 
-    expect(screen.getByText("75 of 75 leads in current scope")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more leads" })).not.toBeInTheDocument();
+    expect(screen.getByText("25 of 75 leads in current scope")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
   });
 });

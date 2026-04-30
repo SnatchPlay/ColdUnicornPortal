@@ -1,4 +1,4 @@
-# 06 · Manager Portal
+﻿# 06 В· Manager Portal
 
 Pages served under `/manager/*` for users with `identity.role === "manager"`. Data is scoped by `clients.manager_id = identity.id` (see `scopeClients` in [`selectors.ts`](../../../src/app/lib/selectors.ts)). RLS enforces the same boundary on the server via `private.can_access_client`.
 
@@ -18,7 +18,7 @@ All internal pages (manager + admin) use `Surface`, `PageHeader`, `MetricCard`, 
 
 ---
 
-## 1. Dashboard — `ManagerDashboardPage`
+## 1. Dashboard вЂ” `ManagerDashboardPage`
 
 File: [`src/app/pages/manager-dashboard-page.tsx`](../../../src/app/pages/manager-dashboard-page.tsx). Route: `/manager/dashboard`.
 
@@ -28,13 +28,13 @@ Day-one view for the Customer Success manager. Surfaces anomalies that need acti
 
 ### 1.2 Metric cards (4)
 
-`MetricCard` row at the top. See [04-metrics §12](./04-metrics-catalog.md#12-manager-dashboard-aggregates).
+`MetricCard` row at the top. See [04-metrics В§12](./04-metrics-catalog.md#12-manager-dashboard-aggregates).
 
 | # | Label | Value | Data |
 |---|-------|-------|------|
 | 1 | Assigned clients | `scopedClients.length` | `scopeClients` by `manager_id` |
 | 2 | Active campaigns | `count(scopedCampaigns WHERE status='active')` | `scopeCampaigns` |
-| 3 | Leads in progress | `count(scopedLeads WHERE stage ∉ ('won','rejected'))` (approx; actual uses recency filter) | `scopeLeads` |
+| 3 | Leads in progress | `count(scopedLeads WHERE stage в€‰ ('won','rejected'))` (approx; actual uses recency filter) | `scopeLeads` |
 | 4 | Unclassified replies | `count(scopedReplies WHERE classification IS NULL)` | `scopeReplies` |
 
 ### 1.3 Campaign watchlist surface
@@ -60,11 +60,11 @@ Columns:
 - Client name
 - Status (badge)
 - Campaigns count (`scopeCampaigns` filtered to this client)
-- MQLs this month (from `scopeLeads` filtered to this client, `qualification='MQL'`, created this month — aligns with [§11.2 MoM SQL](./04-metrics-catalog.md#112-mom-sql-leads))
+- MQLs this month (from `scopeLeads` filtered to this client, `qualification='MQL'`, created this month вЂ” aligns with [В§11.2 MoM SQL](./04-metrics-catalog.md#112-mom-sql-leads))
 - Won (this month)
 - KPI progress bar: `min(mqls / client.kpi_leads, 1)` rendered as a horizontal bar
 
-Clicking a client row navigates to `/manager/clients?selected=…` or scrolls the `ClientsPage` focus (implementation detail: via `navigate` with state; the effect is that `ClientsPage` opens with the client drawer selected).
+Clicking a client row navigates to `/manager/clients?selected=вЂ¦` or scrolls the `ClientsPage` focus (implementation detail: via `navigate` with state; the effect is that `ClientsPage` opens with the client drawer selected).
 
 ### 1.5 Lead queue surface
 
@@ -87,7 +87,7 @@ Data: `scopedLeads` sorted by `updated_at DESC` then sliced to 10.
 
 ---
 
-## 2. Clients — `ClientsPage`
+## 2. Clients вЂ” `ClientsPage`
 
 File: [`src/app/pages/clients-page.tsx`](../../../src/app/pages/clients-page.tsx). Route: `/manager/clients` (and `/admin/clients`).
 
@@ -99,7 +99,7 @@ Deep client operations view. Five tabs showing the same client roster with diffe
 
 Tabs are a role-filter like toggle; the row set is the same (scoped clients), only the projected columns change. Selected tab is stored in component state (not URL).
 
-#### Overview tab — columns
+#### Overview tab вЂ” columns
 
 Resizable via `useResizableColumns` with storage key `table:clients:overview:columns`.
 
@@ -107,8 +107,13 @@ Resizable via `useResizableColumns` with storage key `table:clients:overview:col
 |--------|--------|--------|
 | Client | `clients.name` | — |
 | Manager | `users.first_name + last_name` (joined by `manager_id`) | — |
-| Schedule | `clients.min_daily_sent` | — |
-| Sent | today's `daily_stats.emails_sent` | [DoD §8.2](./04-metrics-catalog.md#82-emails-sent-dod-bucket-0--1--2--3--4) bucket 0 |
+| Sent (today) | `ClientMetricsOverview.sentToday` | [DoD §8.2](./04-metrics-catalog.md#82-emails-sent-dod-bucket-0--1--2--3--4) bucket 0 |
+| Prospects signed | `clients.prospects_signed` | Condition baseline |
+| Prospects added | `clients.prospects_added` | Condition baseline |
+| Min sent | `clients.min_daily_sent` | Condition baseline |
+| Inboxes | `clients.inboxes_count` | Capacity baseline |
+| Schedule (today / +1 / +2) | `ClientMetricsOverview.scheduleToday/scheduleTomorrow/scheduleDayAfter` | DoD schedule context |
+| Sent (0/-1/-2) | `ClientMetricsOverview.sentToday/sentYesterday/sentTwoDaysAgo` | DoD sent context |
 | 3-DoD Total | `ClientMetricsOverview.threeDodTotal` | [§9.1](./04-metrics-catalog.md#91-3-dod-total-leads) |
 | 3-DoD SQL | `ClientMetricsOverview.threeDodSql` | [§9.2](./04-metrics-catalog.md#92-3-dod-sql-leads) |
 | WoW Response | `wowResponseRate` | [§10.3](./04-metrics-catalog.md#103-wow-response-rate) |
@@ -121,21 +126,21 @@ Resizable via `useResizableColumns` with storage key `table:clients:overview:col
 
 Sorting via column-header buttons. `null` rate values sort last.
 
-#### DoD tab — columns
+#### DoD tab вЂ” columns
 
 One row per client; columns are the 7 buckets from `createClientMetrics().dodRows`:
 
 | Bucket | Schedule | Sent |
 |--------|----------|------|
-| +2 | `schedule_day_after` | — |
-| +1 | `schedule_tomorrow` | — |
+| +2 | `schedule_day_after` | вЂ” |
+| +1 | `schedule_tomorrow` | вЂ” |
 | 0  | `schedule_today`     | emails_sent today |
-| -1 | —                    | emails_sent yesterday |
-| -2 | —                    | emails_sent -2 |
-| -3 | —                    | emails_sent -3 |
-| -4 | —                    | emails_sent -4 |
+| -1 | вЂ”                    | emails_sent yesterday |
+| -2 | вЂ”                    | emails_sent -2 |
+| -3 | вЂ”                    | emails_sent -3 |
+| -4 | вЂ”                    | emails_sent -4 |
 
-#### 3-DoD tab — columns
+#### 3-DoD tab вЂ” columns
 
 Per client, one row per bucket in `threeDodRows`:
 
@@ -143,7 +148,7 @@ Per client, one row per bucket in `threeDodRows`:
 |--------|-------|-----|
 | 0 / -1 / -2 / -3 / -4 | 3-DoD Total Leads | 3-DoD SQL Leads |
 
-#### WoW tab — columns
+#### WoW tab вЂ” columns
 
 Per client, one row per bucket in `wowRows`:
 
@@ -151,7 +156,7 @@ Per client, one row per bucket in `wowRows`:
 |--------|-------|-----|----------|-------|--------|-----|----------|
 | 0 / -1 / -2 / -3 | as `totalLeads`, `sqlLeads`, `responseRate`, `humanRate`, `bounceRate`, `oooRate`, `negativeRate` |
 
-#### MoM tab — columns
+#### MoM tab вЂ” columns
 
 Per client, one row per bucket in `momRows`:
 
@@ -180,22 +185,47 @@ Editable fields:
 | KPI meetings (month target) | number | `clients.kpi_meetings` |
 | Contract info | read-only display | `contracted_amount`, `contract_due_date` |
 
-Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations §2](./09-mutations-rls.md).
+Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations В§2](./09-mutations-rls.md).
 
-### 2.4 Filtering & search
+### 2.4 Filtering and health segmentation
 
 - Search box by client name.
 - Status filter dropdown (one of `client_status` enum, or "All").
 - Manager filter (admin only sees non-trivial values; for managers the dropdown is redundant).
+- One segmented health filter with live counts, based on row highest severity:
+  - `All`
+  - `Warning`
+  - `Danger`
+  - `Critical`
+  - `Healthy`
 
-### 2.5 Empty / loading / error
+`Healthy` includes rows with no matched severity or only `good/info` outcomes.
+
+### 2.5 Condition highlighting, rollup, and explainability
+
+Rule results are loaded from `condition_rules` and evaluated at runtime per client.
+
+- Row rollup model:
+  - one severity badge per row (highest severity only)
+  - per-row `healthScore` (0..100, lower = worse) with default sort `worst first`
+  - lifecycle and health split into separate overview columns
+- Row tint: highest non-good severity.
+- Cell highlight: per-column condition result (`cell` rules), with reduced fill noise (problem-cell emphasis only).
+- Distinct `critical_over` style (fuchsia/magenta family) separate from danger.
+- Tooltip on highlighted values includes rule name, value, message, and source sheet/range.
+- DoD table uses dynamic runtime keys (`dod:{bucket}:{schedule|sent}`) to evaluate one reusable rule across multiple cells.
+- Drawer issue model:
+  - `Operational issues`: warning/danger/critical items
+  - `Setup gaps`: setup/info-like gaps moved out of row-level badge noise
+
+### 2.6 Empty / loading / error
 
 - `<EmptyState>` when scoped list is empty.
 - `LoadingState` / `<Banner>` as above.
 
 ---
 
-## 3. Leads — `InternalLeadsPage`
+## 3. Leads вЂ” `InternalLeadsPage`
 
 File: [`src/app/pages/leads-page.tsx`](../../../src/app/pages/leads-page.tsx) (renders `InternalLeadsPage` for non-client roles). Route: `/manager/leads`.
 
@@ -207,8 +237,9 @@ Editable lead workspace. Change qualification, mark milestones (meeting booked/h
 
 - `PortalSearch`-style search on name / email / company / title / country.
 - Campaign filter (Select).
-- Reply scope filter (All / Active / OOO). **Note:** despite the name, this filters **leads by `qualification`** (`OOO` vs not-`OOO`), not replies by classification. Rename to "Lead OOO scope" tracked as **BL-7** ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-rename-reply-scope-filter)).
+- OOO qualification filter (`All leads` / `Non-OOO only` / `OOO only`). This filters leads by `qualification`, not replies.
 - Pipeline stage chips (same as client pipeline; click to filter).
+- URL state contract: `q`, `campaign`, `stage`, `replyScope`, `sort`, `dir`, `range`, `from`, `to`, `page`.
 
 ### 3.3 Lead table
 
@@ -223,7 +254,7 @@ Resizable columns, storage key `table:leads:columns`, defaults `[380, 300, 220, 
 
 Sorting keys: `lead`, `company`, `status` (by stage position in `PIPELINE_STAGES`), `updated`. Default: `updated` DESC.
 
-Pagination: `PAGE_SIZE = 50` with "Load more".
+Pagination: `PAGE_SIZE = 50` with numbered pagination, persisted in URL via `page`.
 
 ### 3.4 Lead drawer (editable)
 
@@ -242,7 +273,7 @@ Metadata (read-only): Email, job title, company, campaign name, step (`message_n
 
 Replies history: listed sorted by `received_at DESC`; each entry shows classification badge, language code, subject, body, received date.
 
-Save: `useCoreData().updateLead(lead.id, patch)` → `repository.updateLead`. Optimistic; revert on error. Per ADR-0004, only the listed fields are actually sent. Escape closes drawer.
+Save: `useCoreData().updateLead(lead.id, patch)` в†’ `repository.updateLead`. Optimistic; revert on error. Per ADR-0004, only the listed fields are actually sent. Escape closes drawer.
 
 ### 3.5 Scope
 
@@ -251,7 +282,7 @@ Save: `useCoreData().updateLead(lead.id, patch)` → `repository.updateLead`. Op
 
 ---
 
-## 4. Campaigns — `InternalCampaignsPage`
+## 4. Campaigns вЂ” `InternalCampaignsPage`
 
 File: [`src/app/pages/campaigns-page.tsx`](../../../src/app/pages/campaigns-page.tsx). Route: `/manager/campaigns`.
 
@@ -289,13 +320,13 @@ Fields:
 
 Read-only metadata: `external_id`, `type`, `start_date`, `gender_target`, `client_id` (rendered as client name), counts summary.
 
-Embedded chart: **Daily performance** LineChart for the selected campaign over the current timeframe (`sent`, `replies`, `opens`, `bounces` — same four series as Client Campaigns daily volume chart).
+Embedded chart: **Daily performance** LineChart for the selected campaign over the current timeframe (`sent`, `replies`, `opens`, `bounces` вЂ” same four series as Client Campaigns daily volume chart).
 
-Save: `useCoreData().updateCampaign(campaign.id, patch)` → `repository.updateCampaign`. RLS: `campaigns_update_scoped` requires `can_manage_client`.
+Save: `useCoreData().updateCampaign(campaign.id, patch)` в†’ `repository.updateCampaign`. RLS: `campaigns_update_scoped` requires `can_manage_client`.
 
 ---
 
-## 5. Analytics — `InternalStatisticsPage`
+## 5. Analytics вЂ” `InternalStatisticsPage`
 
 File: [`src/app/pages/statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx). Route: `/manager/statistics`.
 
@@ -317,7 +348,7 @@ Only displays campaigns / leads under `scopeClients` for the manager. Admin sees
 
 ---
 
-## 6. Domains — `DomainsPage`
+## 6. Domains вЂ” `DomainsPage`
 
 File: [`src/app/pages/domains-page.tsx`](../../../src/app/pages/domains-page.tsx). Route: `/manager/domains`.
 
@@ -351,7 +382,7 @@ Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_cl
 
 ---
 
-## 7. Invoices — `InvoicesPage`
+## 7. Invoices вЂ” `InvoicesPage`
 
 File: [`src/app/pages/invoices-page.tsx`](../../../src/app/pages/invoices-page.tsx). Route: `/manager/invoices`.
 
@@ -371,17 +402,17 @@ File: [`src/app/pages/invoices-page.tsx`](../../../src/app/pages/invoices-page.t
 
 ### 7.3 Drawer (editable)
 
-- `issue_date`, `amount`, `status` — editable.
+- `issue_date`, `amount`, `status` вЂ” editable.
 - Save: `repository.updateInvoice`.
 - RLS: `invoices_update_admin` policy name; the production SQL allows managers too per `mutation-ownership-matrix.md`.
 
 ---
 
-## 8. Blacklist — `BlacklistPage`
+## 8. Blacklist вЂ” `BlacklistPage`
 
 File: [`src/app/pages/blacklist-page.tsx`](../../../src/app/pages/blacklist-page.tsx). Route: `/manager/blacklist`.
 
-### 8.1 Mode — manager
+### 8.1 Mode вЂ” manager
 
 **Read-only.** A `Banner` at the top reminds the user that only admins can modify the list. The form inputs are hidden.
 
@@ -391,7 +422,7 @@ One row per entry:
 
 - `domain`
 - `created_at` (formatted)
-- Remove button — **not rendered** for manager.
+- Remove button вЂ” **not rendered** for manager.
 
 Data source: `email_exclude_list` table. `scopeDomains`-style filtering is not needed; the list is agency-wide.
 
@@ -401,11 +432,11 @@ Visible to internal users per `email_exclude_list_select_internal` RLS policy (`
 
 ## 8.5 Planned ecosystem fields
 
-Today the manager drawer on Clients page covers `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, and `setup_info`. Several ecosystem fields are on the backlog ([BUSINESS_LOGIC §11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built)):
+Today the manager drawer on Clients page covers `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, and `setup_info`. Several ecosystem fields are on the backlog ([BUSINESS_LOGIC В§11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built)):
 
-- **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. Today only the boolean toggle exists.
-- **BL-3** LinkedIn API key (`linkedin_api_key`) — schema field exists, drawer UI does not surface it yet.
-- **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
+- **BL-2** OOO routing rows (`client_ooo_routing`) вЂ” manager/admin UI to configure per-client follow-up campaigns. Today only the boolean toggle exists.
+- **BL-3** LinkedIn API key (`linkedin_api_key`) вЂ” schema field exists, drawer UI does not surface it yet.
+- **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields вЂ” schema columns + drawer UI both pending.
 
 Until these ship, the corresponding configuration is managed in SQL or in n8n flows directly.
 
@@ -415,9 +446,11 @@ Until these ship, the corresponding configuration is managed in SQL or in n8n fl
 
 `SettingsPage` for manager, additionally showing:
 
-- **Current Identity card** — displays `actorIdentity` (always) and `identity` (when impersonating), plus `isImpersonating` boolean and session email. Not visible to clients.
-- **Request reset link** form — email input + "Send reset link" button. Calls `requestPasswordReset(email)` on the AuthProvider.
+- **Current Identity card** вЂ” displays `actorIdentity` (always) and `identity` (when impersonating), plus `isImpersonating` boolean and session email. Not visible to clients.
+- **Request reset link** form вЂ” email input + "Send reset link" button. Calls `requestPasswordReset(email)` on the AuthProvider.
 
-Other sections identical to the client view (see [05 §5](./05-client-portal.md#5-settings)).
+Other sections identical to the client view (see [05 В§5](./05-client-portal.md#5-settings)).
 
-Next: [07 · Admin portal](./07-admin-portal.md).
+Next: [07 В· Admin portal](./07-admin-portal.md).
+
+

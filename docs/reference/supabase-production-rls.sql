@@ -81,6 +81,7 @@ alter table public.daily_stats enable row level security;
 alter table public.domains enable row level security;
 alter table public.invoices enable row level security;
 alter table public.email_exclude_list enable row level security;
+alter table public.condition_rules enable row level security;
 
 drop policy if exists "users_select_internal_or_self" on public.users;
 create policy "users_select_internal_or_self"
@@ -91,6 +92,14 @@ using (
   public.is_internal_user()
   or id = auth.uid()
 );
+
+drop policy if exists "users_update_self" on public.users;
+create policy "users_update_self"
+on public.users
+for update
+to authenticated
+using (id = auth.uid())
+with check (id = auth.uid());
 
 drop policy if exists "client_users_select_visible" on public.client_users;
 create policy "client_users_select_visible"
@@ -259,6 +268,38 @@ using (public.is_internal_user());
 drop policy if exists "email_exclude_list_admin_manage" on public.email_exclude_list;
 create policy "email_exclude_list_admin_manage"
 on public.email_exclude_list
+for all
+to authenticated
+using (public.is_admin_user())
+with check (public.is_admin_user());
+
+drop policy if exists "condition_rules_select_scoped" on public.condition_rules;
+create policy "condition_rules_select_scoped"
+on public.condition_rules
+for select
+to authenticated
+using (
+  public.is_admin_user()
+  or (
+    public.current_app_role() = 'manager'
+    and (
+      scope_type = 'global'
+      or (scope_type = 'manager' and manager_id = auth.uid())
+      or (
+        scope_type = 'client'
+        and client_id in (
+          select c.id
+          from public.clients c
+          where c.manager_id = auth.uid()
+        )
+      )
+    )
+  )
+);
+
+drop policy if exists "condition_rules_admin_manage" on public.condition_rules;
+create policy "condition_rules_admin_manage"
+on public.condition_rules
 for all
 to authenticated
 using (public.is_admin_user())
