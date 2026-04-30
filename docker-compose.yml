@@ -1,0 +1,28 @@
+services:
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+        VITE_APP_BASE_URL: ${VITE_APP_BASE_URL}
+        VITE_APP_ENV: ${VITE_APP_ENV}
+        VITE_AUTH_INVITE_ONLY: ${VITE_AUTH_INVITE_ONLY}
+        VITE_AUTH_ALLOW_SELF_SIGNUP: ${VITE_AUTH_ALLOW_SELF_SIGNUP}
+        VITE_AUTH_ALLOW_MAGIC_LINK: ${VITE_AUTH_ALLOW_MAGIC_LINK}
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.http.routers.portal.entrypoints=websecure
+      - traefik.http.routers.portal.rule=Host(`portal.coldunicorn.com`)
+      - traefik.http.routers.portal.tls=true
+      - traefik.http.routers.portal.tls.certresolver=letsencrypt
+      - traefik.http.services.portal.loadbalancer.server.port=80
+
+networks:
+  traefik-public:
+    external: true
