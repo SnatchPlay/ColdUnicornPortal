@@ -12,6 +12,8 @@ function trimTrailingSlash(value: string) {
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? "";
+const legacyCrmSupabaseUrl = trimTrailingSlash(import.meta.env.VITE_LEGACY_CRM_SUPABASE_URL?.trim() ?? "");
+const legacyCrmPublishableKey = import.meta.env.VITE_LEGACY_CRM_PUBLISHABLE_KEY?.trim() ?? "";
 const configuredBaseUrl = trimTrailingSlash(import.meta.env.VITE_APP_BASE_URL?.trim() ?? "");
 const appEnv =
   import.meta.env.VITE_APP_ENV?.trim().toLowerCase() ??
@@ -34,6 +36,9 @@ const missingVars = [
 export const runtimeConfig = {
   supabaseUrl,
   supabasePublishableKey,
+  legacyCrmSupabaseUrl,
+  legacyCrmPublishableKey,
+  legacyCrmConfigured: Boolean(legacyCrmSupabaseUrl && legacyCrmPublishableKey),
   appBaseUrl,
   appEnv,
   isProduction,

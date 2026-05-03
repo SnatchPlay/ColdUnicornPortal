@@ -11,6 +11,7 @@ Where the portal ends and n8n / Smartlead / Bison begin. This file is the implem
 5. [OOO routing](#5-ooo-routing)
 6. [Reply classification](#6-reply-classification)
 7. [Failure modes & invariants](#7-failure-modes--invariants)
+8. [CRM integration](#crm-integration)
 
 ---
 
@@ -127,6 +128,72 @@ Important boundary behaviours to preserve:
 - **Edge function 401 retry.** The portal refreshes the session and retries once on 401 ([repository.ts:250-256](../../../src/app/data/repository.ts#L250-L256)). If retries fail, do not retry further — surface to the user.
 
 If integration breaks, the portal should keep working in read-only mode using whatever was last ingested. Do not add fallback "portal sends emails directly" code paths.
+
+---
+
+## CRM integration
+
+Lets a client authorize their own CRM (Salesforce / Zoho / API-key providers like HubSpot, Pipedrive, monday) so n8n can sync meetings, replies, and won deals downstream.
+
+**Two-Supabase architecture.** The CRM provider catalog (`crm_providers`, `crm_provider_fields`) and OAuth/credentials edge functions live on a **separate Supabase project** (the legacy CRM project, `ykrwrrwuqbtffovhwqjg`). Our project (`bnetnuzxynmdftiadwef`) only stores **status mirror** in `clients.crm_config`. Tokens and secrets never reach our project.
+
+```
+Client portal (this repo)                Legacy CRM Supabase project
+─────────────────────                    ───────────────────────────
+/client/settings                         crm_providers (catalog)
+   ↓ CrmIntegrationCard                  crm_provider_fields
+   ↓ select provider, fill form          oauth_sessions (PKCE state)
+   ├─ API-key  ──fetch──▶  submit-crm-credentials
+   │                            ↓
+   │                       client_crm_credentials
+   │                            ↓ POST
+   │                       Make / n8n webhook
+   │                            ↓
+   │                       n8n connects to CRM
+   ├─ Salesforce OAuth ──▶ salesforce-oauth/init  ──redirect──▶ login.salesforce.com
+   │                                                              ↓ user consents
+   │                       salesforce-oauth/callback  ◀──redirect──┘
+   │                            ↓
+   │                       salesforce_integrations + Make webhook
+   │                            ↓ redirect back to portal with ?status=connected
+   │                       /client/settings  ──updateClient(crm_config)──▶ our DB
+   └─ Zoho OAuth ──▶ accounts.zoho.{region}/oauth/v2/auth  ──redirect─┐
+                                                                        ↓
+                       /client/settings  (code in URL)  ──fetch──▶ zoho-token-exchange
+                                                                        ↓
+                                                                Make webhook + our DB
+```
+
+**`clients.crm_config`** (JSON, mirror only — see [`CrmIntegrationConfig`](../../../src/app/types/core.ts)):
+
+```jsonc
+{
+  "provider": "salesforce",
+  "display_name": "Salesforce",
+  "auth_type": "oauth2",
+  "status": "connected",        // pending | connected | failed | disconnected
+  "connected_at": "2026-05-03T18:22:04Z",
+  "updated_at": "2026-05-03T18:22:04Z",
+  "last_error": null,
+  "metadata": { "env": "production" }
+}
+```
+
+**Env vars.** `VITE_LEGACY_CRM_SUPABASE_URL` + `VITE_LEGACY_CRM_PUBLISHABLE_KEY`. If either is blank the CRM card hides itself with an inline notice — no other code paths require them.
+
+**Files.**
+- [`src/app/lib/crm-integration.ts`](../../../src/app/lib/crm-integration.ts) — separate Supabase client, provider fetcher, edge-function callers.
+- [`src/app/components/crm-integration-card.tsx`](../../../src/app/components/crm-integration-card.tsx) — UI + status persistence to `clients.crm_config`.
+- [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.tsx) — renders the card when `identity.role === "client"`.
+
+**Security boundary invariants:**
+- The legacy publishable key in our `.env` is the **anon** key for the legacy project. It only grants access to the policies on `crm_providers` (read) + the verify-jwt-disabled edge functions. It does **not** unlock token tables.
+- The portal **never** receives access tokens. Token storage is in the legacy project's `salesforce_integrations` / `client_crm_credentials` and from there forwarded to the Make/n8n webhook.
+- Disconnect (`updateClient(clientId, { crm_config: null })`) only clears our status mirror. Cleanup on the legacy side is a manual / n8n responsibility — flag this if/when it becomes a real concern.
+
+**Why two projects?** The CRM-integration form shipped first as a standalone tool on its own Supabase project. Re-pointing the edge functions + secrets at our project means migrating Salesforce App callback URLs, `MAKE_WEBHOOK_URL`, and re-doing the security review. Cheaper to call across projects until that work is justified.
+
+**Backlog (Phase 2).** Move `crm_providers` + edge functions into our project so `crm_config` and tokens are co-located, with proper RLS gating reads to the owning client. Tracked in [BUSINESS_LOGIC §11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built).
 
 ---
 

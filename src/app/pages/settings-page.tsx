@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../components/ui/utils";
 import {
@@ -436,11 +437,17 @@ export function SettingsPage() {
     signOut,
   } = useAuth();
   const {
+    clients,
     conditionRules,
     createConditionRule,
     updateConditionRule,
     deleteConditionRule,
   } = useCoreData();
+  const activeClient = useMemo(
+    () => clients.find((client) => client.id === identity?.clientId) ?? null,
+    [clients, identity?.clientId],
+  );
+  const showCrmIntegration = identity?.role === "client";
   const [displayName, setDisplayName] = useState(identity?.fullName ?? "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -1105,6 +1112,8 @@ export function SettingsPage() {
           </div>
         </Surface>
       </div>
+
+      {showCrmIntegration && <CrmIntegrationCard client={activeClient} />}
 
       {canManageConditionRules && (
         <Surface title="Condition rules" subtitle="Admin-only operational health rules builder for clients surfaces.">

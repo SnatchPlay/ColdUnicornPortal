@@ -229,6 +229,7 @@ File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.t
 | Profile name | `displayName` text input | "Update name" | `updateProfileName(normalizedName)` |
 | Change password | `password`, `confirmPassword` | "Update password" | `updatePassword(password)` |
 | Sign out | _(button)_ | "Sign out" | `signOut()` |
+| **CRM integration** | provider select + dynamic credentials form | "Connect with OAuth" / "Submit credentials" / "Disconnect" | `useCoreData().updateClient(clientId, { crm_config })` (status only) — credentials forwarded to legacy CRM Supabase project edge functions ([see 11 · Integrations §CRM Integration](./11-integrations.md#crm-integration)) |
 
 ### 5.2 Sections hidden from client
 
@@ -244,7 +245,37 @@ File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.t
 
 All three actions set a local `message: { tone: "info"|"warning"|"danger"; text: string }` which renders as a `Banner` above the form. On success the relevant input is cleared (passwords) or left as-is (name).
 
-### 5.5 Planned: client self-service notification preferences
+### 5.5 CRM integration card
+
+Component: [`CrmIntegrationCard`](../../../src/app/components/crm-integration-card.tsx). Visible only when `identity.role === "client"`. Hidden completely when `VITE_LEGACY_CRM_SUPABASE_URL` / `VITE_LEGACY_CRM_PUBLISHABLE_KEY` are blank (shows an inline notice instead).
+
+**Architecture.** The CRM provider catalog and OAuth/credential exchange edge functions live on a **separate Supabase project** (legacy CRM project, env vars `VITE_LEGACY_CRM_SUPABASE_URL` / `VITE_LEGACY_CRM_PUBLISHABLE_KEY`). The portal:
+
+1. Fetches `crm_providers` + `crm_provider_fields` from the legacy project (read-only).
+2. Forwards user-entered credentials / triggers OAuth via the legacy edge functions:
+   - `submit-crm-credentials` (API-key providers)
+   - `salesforce-oauth/init` + `/callback` (Salesforce server-side PKCE flow)
+   - `zoho-token-exchange` (Zoho user-redirect flow)
+3. Mirrors connection status into our project's `clients.crm_config` (JSON) via `updateClient` so the portal can render badge + last-connected timestamp without re-querying the legacy project.
+
+**`clients.crm_config` shape** (mirrors `CrmIntegrationConfig` from [`types/core.ts`](../../../src/app/types/core.ts)):
+
+```jsonc
+{
+  "provider": "salesforce",
+  "display_name": "Salesforce",
+  "auth_type": "oauth2",
+  "status": "connected",        // pending | connected | failed | disconnected
+  "connected_at": "2026-05-03T18:22:04Z",
+  "updated_at": "2026-05-03T18:22:04Z",
+  "last_error": null,
+  "metadata": { "env": "production" }
+}
+```
+
+**Disconnect** clears `crm_config` to `null`. Secrets/tokens never reach our project — they live only in the legacy `client_crm_credentials` / `salesforce_integrations` tables and the n8n/Make webhook downstream.
+
+### 5.6 Planned: client self-service notification preferences
 
 Backlog item **BL-1** ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-notifications-and-ooo-routing-are-split-between-portal-and-n8n) and [BUSINESS_LOGIC §8](../../BUSINESS_LOGIC.md#8-settings--ecosystem-configuration)): expose `clients.notification_emails` and `clients.sms_phone_numbers` (the destinations n8n uses for alert dispatch) on `/client/settings` so the client can edit them without going through the manager. Schema is unchanged; only UI work. Manager retains override on `/manager/clients`.
 

@@ -510,6 +510,7 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 | BL-8 | State-machine validation for lead transitions | E1 / spec | Optional: enforce `meeting_held в‡’ meeting_booked`, `won` terminality, etc. |
 | BL-9 | Orphan auth-user recovery tool | C6 | Admin UI to provision `public.users` row for a stuck `auth.users` entry. |
 | BL-10 | Visible impersonation warning in UI | C7 | Banner reminder that mutations during impersonation are signed by the actor, not the impersonated identity. |
+| BL-11 | Migrate CRM-integration backend into our Supabase project | 2026-05-03 decision | Move `crm_providers`, edge functions (`submit-crm-credentials`, `salesforce-oauth`, `zoho-token-exchange`), and tokens out of the legacy CRM project (`ykrwrrwuqbtffovhwqjg`) and into `bnetnuzxynmdftiadwef`. Requires re-registering Salesforce App callback URLs and re-doing the security review. Tracked under [11 · CRM integration §Phase 2](./reference/functional/11-integrations.md#crm-integration). |
 
 ---
 
@@ -550,6 +551,21 @@ Filter previously labelled "All / Active only / OOO only" on the leads pages fil
 ### Decision (2026-04-25): No reply triage UI
 
 Every reply is classified by n8n. The portal does not need a triage workflow.
+
+### Decision (2026-05-03): Client CRM integration ships against the legacy Supabase project
+
+Added a "CRM integration" card on `/client/settings` that lets a client authorize their own CRM (Salesforce / Zoho / API-key providers). The provider catalog and OAuth/credential exchange edge functions are reused from the standalone legacy CRM project (`ykrwrrwuqbtffovhwqjg`); our project (`bnetnuzxynmdftiadwef`) only stores a status mirror in `clients.crm_config`.
+
+**Rationale:** The legacy CRM-integration tool is already wired into the Make/n8n pipeline that performs the actual CRM sync. Re-pointing the edge functions + Salesforce App + `MAKE_WEBHOOK_URL` at our project is a security-review-gated migration; not worth blocking the client-facing UI on it. Cross-project calls cost us two extra env vars and a separate Supabase client; the alternative was dropping the feature or porting the backend before any UI exists.
+
+**Trade-offs accepted:**
+- Two Supabase clients on the frontend (main + legacy CRM project, anon keys only).
+- Tokens live in the legacy project, not ours. The portal sees only "connected / pending / failed" status.
+- Disconnect clears our status mirror but does not revoke tokens on the legacy side — n8n / manual cleanup required for full revoke.
+
+**Phase 2** (tracked as [BL-11](#11-open-backlog-planned-not-built)): migrate the backend into our project.
+
+**References:** [11 · CRM integration](./reference/functional/11-integrations.md#crm-integration), [05 · Client portal §5.5](./reference/functional/05-client-portal.md#55-crm-integration-card).
 
 ### Decision (2026-04-29): Admin dashboard simplification
 

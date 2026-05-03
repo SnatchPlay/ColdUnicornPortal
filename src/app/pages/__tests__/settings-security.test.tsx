@@ -18,10 +18,12 @@ describe("settings security controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedUseCoreData.mockReturnValue({
+      clients: [],
       conditionRules: [],
       createConditionRule: vi.fn(async () => {}),
       updateConditionRule: vi.fn(async () => {}),
       deleteConditionRule: vi.fn(async () => {}),
+      updateClient: vi.fn(async () => {}),
     } as never);
   });
 

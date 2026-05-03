@@ -68,10 +68,12 @@ describe("settings condition rules builder", () => {
       signOut: vi.fn(async () => {}),
     } as never);
     mockedUseCoreData.mockReturnValue({
+      clients: [],
       conditionRules: [makeRule()],
       createConditionRule: vi.fn(async () => {}),
       updateConditionRule,
       deleteConditionRule: vi.fn(async () => {}),
+      updateClient: vi.fn(async () => {}),
     } as never);
 
     render(<SettingsPage />);
@@ -97,10 +99,12 @@ describe("settings condition rules builder", () => {
       signOut: vi.fn(async () => {}),
     } as never);
     mockedUseCoreData.mockReturnValue({
+      clients: [],
       conditionRules: [makeRule()],
       createConditionRule,
       updateConditionRule: vi.fn(async () => {}),
       deleteConditionRule: vi.fn(async () => {}),
+      updateClient: vi.fn(async () => {}),
     } as never);
 
     render(<SettingsPage />);
@@ -122,10 +126,12 @@ describe("settings condition rules builder", () => {
       signOut: vi.fn(async () => {}),
     } as never);
     mockedUseCoreData.mockReturnValue({
+      clients: [],
       conditionRules: [makeRule()],
       createConditionRule,
       updateConditionRule: vi.fn(async () => {}),
       deleteConditionRule: vi.fn(async () => {}),
+      updateClient: vi.fn(async () => {}),
     } as never);
 
     render(<SettingsPage />);

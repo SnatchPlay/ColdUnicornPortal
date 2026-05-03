@@ -27,6 +27,19 @@ export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";
 export type ConditionApplyTo = "row" | "cell" | "badge" | "section";
 
+export type CrmIntegrationStatus = "pending" | "connected" | "failed" | "disconnected";
+
+export interface CrmIntegrationConfig {
+  provider: string;
+  display_name: string;
+  auth_type: "oauth2" | "api_key";
+  status: CrmIntegrationStatus;
+  connected_at: string | null;
+  updated_at: string;
+  last_error?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface UserRecord {
   id: string;
   created_at: string;
