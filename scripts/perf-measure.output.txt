@@ -1,67 +1,53 @@
-2026-05-17T09:12:50.830Z === PERF MEASURE START ===
-2026-05-17T09:12:53.932Z → navigate to /login
-2026-05-17T09:12:54.597Z → wait for login form
-[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.20 ms
-2026-05-17T09:12:54.923Z → click Sign in
-2026-05-17T09:12:55.034Z → wait for redirect into /admin|/manager|/client
-[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.30 ms
-2026-05-17T09:12:59.226Z ✓ landed on http://localhost:5175/admin/dashboard
-2026-05-17T09:12:59.227Z → navigate to /admin/clients
-2026-05-17T09:12:59.365Z → wait for first row button to render
+2026-05-17T09:30:51.692Z === PERF MEASURE START ===
+2026-05-17T09:30:54.010Z → navigate to /login
+2026-05-17T09:30:54.437Z → wait for login form
+[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.10 ms
+2026-05-17T09:30:54.597Z → click Sign in
+2026-05-17T09:30:54.670Z → wait for redirect into /admin|/manager|/client
 [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
+2026-05-17T09:30:58.807Z ✓ landed on http://localhost:5175/admin/dashboard
+2026-05-17T09:30:58.809Z → navigate to /admin/clients
+2026-05-17T09:30:58.933Z → wait for first row button to render
 [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
 [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
 [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
 [CONSOLE] [TEMP PERF] ClientsPage render #1
-[CONSOLE] [TEMP PERF] memo conditionPackByClientId (clients=0, rules=0): 0.20 ms
-[CONSOLE] [TEMP PERF] memo megaRows (clients=0): 0.10 ms
+[CONSOLE] [TEMP PERF] memo conditionPackByClientId (clients=0, rules=0): 0.10 ms
+[CONSOLE] [TEMP PERF] memo megaRows (clients=0): 0.00 ms
 [CONSOLE] [TEMP PERF] memo sortedMegaRows (rows=0, key=health): 0.00 ms
-[CONSOLE] [TEMP PERF] memo filteredMegaRows (in=0): 0.10 ms
-[CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2220.7ms readBody=1510.4ms bodySize=12112054 bytes (11828.2 KB)
-[CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 62.9ms
-[CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 3823.9 ms
+[CONSOLE] [TEMP PERF] memo filteredMegaRows (in=0): 0.00 ms
+[CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2333.2ms readBody=1298.1ms bodySize=12112136 bytes (11828.3 KB)
+[CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 57.4ms
 [CONSOLE] [TEMP PERF] snapshot row counts: clients=43 users=9 clientUsers=4 campaigns=500 leads=1450 replies=0 campaignDailyStats=18687 dailyStats=3313 domains=0 invoices=0 emailExcludeList=161 conditionRules=23
-[CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2245.3ms readBody=1569.1ms bodySize=12112054 bytes (11828.2 KB)
-[CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 81.2ms
-[CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 3898.8 ms
+[CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 3692.3 ms
+[CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2424.9ms readBody=1288.7ms bodySize=12112136 bytes (11828.3 KB)
+[CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 69.3ms
+[CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 3813.9 ms
 [CONSOLE] [TEMP PERF] snapshot row counts: clients=43 users=9 clientUsers=4 campaigns=500 leads=1450 replies=0 campaignDailyStats=18687 dailyStats=3313 domains=0 invoices=0 emailExcludeList=161 conditionRules=23
 [CONSOLE] [TEMP PERF] ClientsPage render #2
-[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=43, leads=1450, dailyStats=3313): 16.90 ms
-[CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2662.8ms readBody=1367.0ms bodySize=12112054 bytes (11828.2 KB)
-[CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 57.2ms
-[CONSOLE] [TEMP PERF] snapshot row counts: clients=43 users=9 clientUsers=4 campaigns=500 leads=1450 replies=0 campaignDailyStats=18687 dailyStats=3313 domains=0 invoices=0 emailExcludeList=161 conditionRules=23
-[CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 4089.0 ms
+[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=43, leads=1450, dailyStats=3313): 16.70 ms
 [CONSOLE] [TEMP PERF] ClientsPage render #3
-[CONSOLE] [TEMP PERF] memo conditionPackByClientId (clients=43, rules=23): 12.10 ms
-[CONSOLE] [TEMP PERF] memo megaRows (clients=43): 0.70 ms
-[CONSOLE] [TEMP PERF] memo sortedMegaRows (rows=43, key=health): 0.30 ms
+[CONSOLE] [TEMP PERF] memo conditionPackByClientId (clients=43, rules=23): 10.60 ms
+[CONSOLE] [TEMP PERF] memo megaRows (clients=43): 0.80 ms
+[CONSOLE] [TEMP PERF] memo sortedMegaRows (rows=43, key=health): 0.40 ms
 [CONSOLE] [TEMP PERF] memo filteredMegaRows (in=43): 0.20 ms
 [CONSOLE] [TEMP PERF] ClientsMegaTable (rows=43) render #1
 [CONSOLE] [TEMP PERF] ClientsPage render #4
-[CONSOLE] [TEMP PERF] memo metricsByClientId (clients=43, leads=1450, dailyStats=3313): 9.70 ms
-[CONSOLE] [TEMP PERF] ClientsPage render #5
-[CONSOLE] [TEMP PERF] memo conditionPackByClientId (clients=43, rules=23): 4.50 ms
-[CONSOLE] [TEMP PERF] memo megaRows (clients=43): 0.30 ms
-[CONSOLE] [TEMP PERF] memo sortedMegaRows (rows=43, key=health): 0.10 ms
-[CONSOLE] [TEMP PERF] memo filteredMegaRows (in=43): 0.00 ms
-[CONSOLE] [TEMP PERF] ClientsMegaTable (rows=43) render #2
-[CONSOLE] [TEMP PERF] ClientsPage render #6
-2026-05-17T09:13:07.467Z === MARKER: about to click first row ===
+2026-05-17T09:31:06.801Z === MARKER: about to click first row ===
 
 === MARKER: about to click first row ===
 
-2026-05-17T09:13:07.485Z row buttons present: 43
-2026-05-17T09:13:07.495Z → click row: Open details for UniTalk
+2026-05-17T09:31:06.811Z row buttons present: 43
+2026-05-17T09:31:06.820Z → click row: Open details for UniTalk
 [CONSOLE] [TEMP PERF] row click → openClient(f2923c57-ed69-43f5-b9e5-a84e420e6949)
-[CONSOLE] [TEMP PERF] ClientsPage render #7
-[CONSOLE] [TEMP PERF] ClientsMegaTable (rows=43) render #3
+[CONSOLE] [TEMP PERF] ClientsPage render #5
 [CONSOLE] [TEMP PERF] ClientDrawer render #1
-[CONSOLE] [TEMP PERF] click → drawer mounted (DOM): 313.70 ms
+[CONSOLE] [TEMP PERF] click → drawer mounted (DOM): 36.60 ms
 [CONSOLE] [TEMP PERF] ClientDrawer mounted (useLayoutEffect)
-[CONSOLE] [TEMP PERF] click → drawer painted (rAF): 396.20 ms
-[CONSOLE] [TEMP PERF] ClientsPage render #8
+[CONSOLE] [TEMP PERF] click → drawer painted (rAF): 87.80 ms
+[CONSOLE] [TEMP PERF] ClientsPage render #6
 
 === MARKER: 2s after row click ===
 
-2026-05-17T09:13:10.010Z drawer dialog count: 1
-2026-05-17T09:13:11.019Z === PERF MEASURE END ===
+2026-05-17T09:31:08.994Z drawer dialog count: 1
+2026-05-17T09:31:09.997Z === PERF MEASURE END ===

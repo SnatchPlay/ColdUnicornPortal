@@ -1,6 +1,5 @@
-import { useMemo, type CSSProperties, type ReactNode } from "react";
-// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
-import { useRenderCounter } from "../../lib/__perf";
+import { memo, useMemo, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import type { SelectionStore } from "./selection-store";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
@@ -537,20 +536,98 @@ export interface ClientsMegaTableProps {
   sort: MegaSortState;
   onSortChange: (next: MegaSortState) => void;
   onRowClick: (clientId: string) => void;
-  selectedClientId: string | null;
+  selectionStore: SelectionStore;
   storageKey?: string;
 }
 
-export function ClientsMegaTable({
+interface MegaRowProps {
+  row: ClientMegaRow;
+  rIdx: number;
+  cols: MegaColumn[];
+  widths: number[];
+  stickyOffsets: Map<number, number>;
+  colBorderClasses: string[];
+  onRowClick: (clientId: string) => void;
+  selectionStore: SelectionStore;
+}
+
+const MegaRow = memo(function MegaRow({
+  row,
+  rIdx,
+  cols,
+  widths,
+  stickyOffsets,
+  colBorderClasses,
+  onRowClick,
+  selectionStore,
+}: MegaRowProps) {
+  // Subscribe per-row so only the previously-selected and newly-selected
+  // rows re-render when the selection changes. The table shell does not.
+  const isSelected = useSyncExternalStore(
+    selectionStore.subscribe,
+    () => selectionStore.get() === row.client.id,
+    () => false,
+  );
+  const rowTint = rIdx % 2 ? "bg-black/20" : "bg-transparent";
+
+  return (
+    <button
+      onClick={() => onRowClick(row.client.id)}
+      aria-label={`Open details for ${row.client.name}`}
+      className={cn(
+        "flex h-9 w-full text-left transition focus:outline-none focus:ring-1 focus:ring-sky-400/50",
+        rowTint,
+        isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
+      )}
+    >
+      {cols.map((col, i) => {
+        const w = widths[i] ?? col.width;
+        const style: CSSProperties = { width: w, minWidth: w };
+        if (col.sticky) {
+          style.position = "sticky";
+          style.left = stickyOffsets.get(i) ?? 0;
+          style.zIndex = 5;
+          style.background = isSelected
+            ? "rgba(56, 189, 248, 0.06)"
+            : rIdx % 2
+            ? "#0a0a0a"
+            : "#070707";
+        }
+
+        const condition = cellCondition(row, col);
+        const content = col.render(row);
+
+        return (
+          <div
+            key={col.id}
+            style={style}
+            className={cn(
+              "flex items-center px-1.5 text-xs",
+              colBorderClasses[i],
+              col.align === "left"
+                ? "justify-start"
+                : col.align === "right"
+                ? "justify-end"
+                : "justify-center",
+              col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.07)]" : "",
+            )}
+          >
+            {col.sticky ? content : renderCellWithCondition(content, condition)}
+          </div>
+        );
+      })}
+    </button>
+  );
+});
+
+function ClientsMegaTableImpl({
   rows,
   sort,
   onSortChange,
   onRowClick,
-  selectedClientId,
+  selectionStore,
   storageKey = "table:clients:mega-columns",
 }: ClientsMegaTableProps) {
-  // [TEMP PERF] count renders of ClientsMegaTable
-  useRenderCounter(`ClientsMegaTable (rows=${rows.length})`);
   const cols = MEGA_COLUMNS;
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);
@@ -628,6 +705,16 @@ export function ClientsMegaTable({
     if (subBoundarySet.has(i)) return "border-r border-r-white/25";
     return "border-r border-white/10";
   }
+
+  // Precompute per-column border class once so MegaRow gets a referentially
+  // stable string[] prop and its memo bails out across renders.
+  const colBorderClasses = useMemo(
+    () => cols.map((_, i) => colBorderClass(i)),
+    // colBorderClass depends on the boundary sets, which depend on cols.
+    // cols is module-level; boundary sets are useMemo'd with [cols] deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cols, groupBoundarySet, subBoundarySet],
+  );
 
   function toggleSort(col: MegaColumn) {
     if (sort.key === col.id) {
@@ -723,63 +810,24 @@ export function ClientsMegaTable({
 
           {/* Rows */}
           <div className="divide-y divide-white/10">
-            {rows.map((row, rIdx) => {
-              const isSelected = selectedClientId === row.client.id;
-              const rowTint = rIdx % 2 ? "bg-black/20" : "bg-transparent";
-
-              return (
-                <button
-                  key={row.client.id}
-                  onClick={() => onRowClick(row.client.id)}
-                  aria-label={`Open details for ${row.client.name}`}
-                  className={cn(
-                    "flex h-9 w-full text-left transition focus:outline-none focus:ring-1 focus:ring-sky-400/50",
-                    rowTint,
-                    isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
-                  )}
-                >
-                  {cols.map((col, i) => {
-                    const w = widths[i] ?? col.width;
-                    const style: CSSProperties = { width: w, minWidth: w };
-                    if (col.sticky) {
-                      style.position = "sticky";
-                      style.left = stickyOffsets.get(i) ?? 0;
-                      style.zIndex = 5;
-                      style.background = isSelected
-                        ? "rgba(56, 189, 248, 0.06)"
-                        : rIdx % 2
-                        ? "#0a0a0a"
-                        : "#070707";
-                    }
-
-                    const condition = cellCondition(row, col);
-                    const content = col.render(row);
-
-                    return (
-                      <div
-                        key={col.id}
-                        style={style}
-                        className={cn(
-                          "flex items-center px-1.5 text-xs",
-                          colBorderClass(i),
-                          col.align === "left"
-                            ? "justify-start"
-                            : col.align === "right"
-                            ? "justify-end"
-                            : "justify-center",
-                          col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.07)]" : "",
-                        )}
-                      >
-                        {col.sticky ? content : renderCellWithCondition(content, condition)}
-                      </div>
-                    );
-                  })}
-                </button>
-              );
-            })}
+            {rows.map((row, rIdx) => (
+              <MegaRow
+                key={row.client.id}
+                row={row}
+                rIdx={rIdx}
+                cols={cols}
+                widths={widths}
+                stickyOffsets={stickyOffsets}
+                colBorderClasses={colBorderClasses}
+                onRowClick={onRowClick}
+                selectionStore={selectionStore}
+              />
+            ))}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+export const ClientsMegaTable = memo(ClientsMegaTableImpl);

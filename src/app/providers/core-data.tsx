@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -118,9 +119,29 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // [TEMP PERF] trace mount + refresh trigger source — investigating double loadSnapshot
+  const mountCountRef = useRef(0);
+  const refreshCountRef = useRef(0);
+  const prevIdentityRef = useRef<typeof identity>(null);
+  const prevAuthLoadingRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    mountCountRef.current += 1;
+    console.log(`[TEMP PERF][snapshot-trace] CoreDataProvider MOUNT #${mountCountRef.current}`);
+    return () => {
+      console.log(`[TEMP PERF][snapshot-trace] CoreDataProvider UNMOUNT (after ${refreshCountRef.current} refresh calls)`);
+    };
+  }, []);
+  // [TEMP PERF] /end
+
   const refresh = useCallback(async () => {
     const includeDailyStats = identity?.role !== "client";
     const includeConditionRules = identity?.role !== "client";
+
+    // [TEMP PERF] count refresh invocations
+    refreshCountRef.current += 1;
+    const refreshId = refreshCountRef.current;
+    console.log(`[TEMP PERF][snapshot-trace] refresh() #${refreshId} START (identityId=${identity?.id ?? "null"}, role=${identity?.role ?? "null"})`);
+    // [TEMP PERF] /end
 
     setLoading(true);
     try {
@@ -147,6 +168,36 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
           `emailExcludeList=${snapshotData.emailExcludeList.length} ` +
           `conditionRules=${conditionRules.length}`,
       );
+      // [TEMP PERF] per-dataset JSON-size breakdown for payload audit
+      const sizeOf = (value: unknown) => {
+        try {
+          return JSON.stringify(value).length;
+        } catch {
+          return -1;
+        }
+      };
+      const sizes: Record<string, number> = {
+        clients: sizeOf(snapshotData.clients),
+        users: sizeOf(snapshotData.users),
+        clientUsers: sizeOf(snapshotData.clientUsers),
+        campaigns: sizeOf(snapshotData.campaigns),
+        leads: sizeOf(snapshotData.leads),
+        replies: sizeOf(snapshotData.replies),
+        campaignDailyStats: sizeOf(snapshotData.campaignDailyStats),
+        dailyStats: sizeOf(snapshotData.dailyStats),
+        domains: sizeOf(snapshotData.domains),
+        invoices: sizeOf(snapshotData.invoices),
+        emailExcludeList: sizeOf(snapshotData.emailExcludeList),
+        conditionRules: sizeOf(conditionRules),
+      };
+      const total = Object.values(sizes).reduce((a, b) => a + (b > 0 ? b : 0), 0);
+      const entries = Object.entries(sizes).sort((a, b) => b[1] - a[1]);
+      for (const [name, bytes] of entries) {
+        const pct = total > 0 ? ((bytes / total) * 100).toFixed(1) : "0.0";
+        perfLog(`snapshot size: ${name.padEnd(20)} ${(bytes / 1024).toFixed(1).padStart(9)} KB  (${pct.padStart(5)}%)`);
+      }
+      perfLog(`snapshot size: TOTAL                ${(total / 1024).toFixed(1).padStart(9)} KB`);
+      // [TEMP PERF] /end size-breakdown
       // [TEMP PERF] /end
       startTransition(() => {
         setSnapshot({
@@ -163,6 +214,17 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
   }, [identity?.role]);
 
   useEffect(() => {
+    // [TEMP PERF] diff the deps so we know what fired this effect
+    const identityChanged = prevIdentityRef.current !== identity;
+    const authLoadingChanged = prevAuthLoadingRef.current !== authLoading;
+    console.log(
+      `[TEMP PERF][snapshot-trace] refresh-effect fired ` +
+        `(authLoading: ${prevAuthLoadingRef.current} → ${authLoading}${authLoadingChanged ? " *" : ""}, ` +
+        `identity ref changed: ${identityChanged}, identityId=${identity?.id ?? "null"})`,
+    );
+    prevIdentityRef.current = identity;
+    prevAuthLoadingRef.current = authLoading;
+    // [TEMP PERF] /end
     if (authLoading) return;
     if (!identity) {
       setSnapshot(EMPTY_SNAPSHOT);

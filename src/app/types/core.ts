@@ -156,42 +156,38 @@ export interface ReplyRecord {
   is_forwarded: boolean;
 }
 
+// Snapshot DTO — fields are pruned to what the frontend actually reads.
+// Fields dropped from the wire format vs. the underlying DB row (no consumer
+// in production source as of payload audit): id, created_at, inboxes_active.
 export interface CampaignDailyStatRecord {
-  id: string;
-  created_at: string;
   campaign_id: string;
   report_date: string;
   sent_count: number | null;
   reply_count: number | null;
   bounce_count: number | null;
   unique_open_count: number | null;
-  inboxes_active: number;
   positive_replies_count: number;
 }
 
+// Snapshot DTO — fields are pruned to what the frontend actually reads.
+// Fields dropped from the wire format vs. the underlying DB row (no consumer
+// in production source as of payload audit): id, created_at, me_count,
+// won_count, prospects_in_base, inboxes_count, week_number, month_number,
+// year.
 export interface DailyStatRecord {
-  id: string;
   client_id: string;
   report_date: string;
   emails_sent: number;
-  prospects_in_base: number;
   mql_count: number;
-  me_count: number;
   response_count: number;
   bounce_count: number;
-  won_count: number;
   negative_count: number;
   ooo_count: number;
   human_replies_count: number;
-  inboxes_count: number;
   prospects_count: number;
   schedule_today: number | null;
   schedule_tomorrow: number | null;
   schedule_day_after: number | null;
-  week_number: number | null;
-  month_number: number | null;
-  year: number | null;
-  created_at: string;
 }
 
 export interface DomainRecord {

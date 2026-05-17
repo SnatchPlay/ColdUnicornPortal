@@ -1,0 +1,84 @@
+# snapshot-trace 2026-05-17T12:24:45.742Z
+# base=http://localhost:5175
+
+
+────────────────────────────────────────────────────────────────────────
+  FLOW 1: direct URL load /admin/clients (cold tab, must sign in first)
+────────────────────────────────────────────────────────────────────────
+[  1128ms] → goto /login
+[  1460ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.10 ms
+[  1486ms] [CONSOLE] [TEMP PERF][snapshot-trace] CoreDataProvider MOUNT #1
+[  1486ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: null → true *, identity ref changed: false, identityId=null)
+[  1517ms] [CONSOLE] [TEMP PERF][auth] syncSessionState start (origin=getSession, sessionUser=none)
+[  1517ms] [CONSOLE] [TEMP PERF][auth] syncSessionState commit (origin=getSession, identityId=null)
+[  1526ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: true → false *, identity ref changed: false, identityId=null)
+[  1526ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=INITIAL_SESSION
+[  1549ms] [CONSOLE] [TEMP PERF][auth] syncSessionState SKIP duplicate (origin=onAuthStateChange:INITIAL_SESSION, sessionUser=none)
+[  1601ms] → click Sign in
+[  4839ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=SIGNED_IN
+[  4840ms] [CONSOLE] [TEMP PERF][auth] syncSessionState start (origin=onAuthStateChange:SIGNED_IN, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  5761ms] [CONSOLE] [TEMP PERF][auth] syncSessionState commit (origin=onAuthStateChange:SIGNED_IN, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  5762ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.10 ms
+[  5799ms] ✓ landed on http://localhost:5175/admin/dashboard
+[  5800ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: false → false, identity ref changed: true, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  5800ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh() #1 START (identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac, role=super_admin)
+
+────────────────────────────────────────────────────────────────────────
+  FLOW 1 BEGIN — full reload at /admin/clients
+────────────────────────────────────────────────────────────────────────
+[  5801ms] → page.goto /admin/clients (full reload)
+[  5908ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
+[  5913ms] [CONSOLE] [TEMP PERF][snapshot-trace] CoreDataProvider MOUNT #1
+[  5913ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: null → true *, identity ref changed: false, identityId=null)
+[  5954ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=SIGNED_IN
+[  5955ms] [CONSOLE] [TEMP PERF][auth] syncSessionState start (origin=onAuthStateChange:SIGNED_IN, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  5960ms] [CONSOLE] [TEMP PERF][auth] syncSessionState SKIP duplicate (origin=getSession, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  5961ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=INITIAL_SESSION
+[  5962ms] [CONSOLE] [TEMP PERF][auth] syncSessionState SKIP duplicate (origin=onAuthStateChange:INITIAL_SESSION, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  6637ms] [CONSOLE] [TEMP PERF][auth] syncSessionState commit (origin=onAuthStateChange:SIGNED_IN, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  6638ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
+[  6664ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: true → false *, identity ref changed: true, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[  6664ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh() #1 START (identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac, role=super_admin)
+[  9348ms] [CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2104.6ms readBody=572.5ms bodySize=12112115 bytes (11828.2 KB)
+[  9393ms] [CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 44.5ms
+[  9394ms] [CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 2729.3 ms
+[  9394ms] [CONSOLE] [TEMP PERF] snapshot row counts: clients=43 users=9 clientUsers=4 campaigns=500 leads=1450 replies=0 campaignDailyStats=18687 dailyStats=3313 domains=0 invoices=0 emailExcludeList=161 conditionRules=23
+[  9418ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=43, leads=1450, dailyStats=3313): 15.00 ms
+[ 11408ms] FLOW 1 END (elapsed=5606ms, snapshot-row-counts-lines=1)
+
+────────────────────────────────────────────────────────────────────────
+  FLOW 2 BEGIN — in-app navigation /admin/dashboard → /admin/clients
+────────────────────────────────────────────────────────────────────────
+[ 11410ms] → page.goto /admin/dashboard (full reload to set baseline)
+[ 11501ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
+[ 11506ms] [CONSOLE] [TEMP PERF][snapshot-trace] CoreDataProvider MOUNT #1
+[ 11506ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: null → true *, identity ref changed: false, identityId=null)
+[ 11507ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=SIGNED_IN
+[ 11510ms] [CONSOLE] [TEMP PERF][auth] syncSessionState start (origin=onAuthStateChange:SIGNED_IN, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[ 11514ms] [CONSOLE] [TEMP PERF][auth] syncSessionState SKIP duplicate (origin=getSession, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[ 11515ms] [CONSOLE] [TEMP PERF][auth] syncSessionState SKIP duplicate (origin=onAuthStateChange:INITIAL_SESSION, sessionUser=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[ 11515ms] [CONSOLE] [TEMP PERF][auth] onAuthStateChange event=INITIAL_SESSION
+[ 12418ms] [CONSOLE] [TEMP PERF][auth] syncSessionState commit (origin=onAuthStateChange:SIGNED_IN, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[ 12418ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=0, leads=0, dailyStats=0): 0.00 ms
+[ 12445ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh-effect fired (authLoading: true → false *, identity ref changed: true, identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac)
+[ 12445ms] [CONSOLE] [TEMP PERF][snapshot-trace] refresh() #1 START (identityId=a46b2eaa-be36-4b8c-8559-82c74db778ac, role=super_admin)
+[ 15049ms] [CONSOLE] [TEMP PERF] loadSnapshot HTTP: fetch=2074.9ms readBody=520.7ms bodySize=12112115 bytes (11828.2 KB)
+[ 15109ms] [CONSOLE] [TEMP PERF] loadSnapshot JSON.parse: 60.0ms
+[ 15109ms] [CONSOLE] [TEMP PERF] snapshot row counts: clients=43 users=9 clientUsers=4 campaigns=500 leads=1450 replies=0 campaignDailyStats=18687 dailyStats=3313 domains=0 invoices=0 emailExcludeList=161 conditionRules=23
+[ 15109ms] [CONSOLE] [TEMP PERF] loadSnapshot+conditionRules total: 2666.4 ms
+[ 15140ms] [CONSOLE] [TEMP PERF] memo metricsByClientId (clients=43, leads=1450, dailyStats=3313): 17.40 ms
+[ 17172ms] baseline /admin/dashboard loaded (snapshot-row-counts-lines=1)
+[ 17173ms] → click sidebar 'Clients' link
+[ 20262ms] FLOW 2 END (snapshot-row-counts-lines during nav=0)
+
+────────────────────────────────────────────────────────────────────────
+  FLOW 3 BEGIN — back-and-forth /admin/clients ↔ /admin/dashboard
+────────────────────────────────────────────────────────────────────────
+[ 20266ms] → click sidebar 'Dashboard'
+[ 21836ms] mid-flow at /admin/dashboard (snapshot-row-counts-lines=0)
+[ 21837ms] → click sidebar 'Clients' (second time)
+[ 24921ms] FLOW 3 END (snapshot-row-counts-lines on return=0)
+
+────────────────────────────────────────────────────────────────────────
+  DONE
+────────────────────────────────────────────────────────────────────────
