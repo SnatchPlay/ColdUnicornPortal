@@ -9,28 +9,19 @@ describe("buildClientConditionContext", () => {
     const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     const dailyStats = [
       {
-        id: "d1",
         client_id: "client-1",
         report_date: iso,
         emails_sent: 150,
-        prospects_in_base: 0,
         mql_count: 0,
-        me_count: 0,
         response_count: 12,
         bounce_count: 3,
-        won_count: 0,
         negative_count: 1,
         ooo_count: 4,
         human_replies_count: 8,
-        inboxes_count: 0,
         prospects_count: 0,
         schedule_today: 160,
         schedule_tomorrow: 170,
         schedule_day_after: 180,
-        week_number: 17,
-        month_number: 4,
-        year: 2026,
-        created_at: `${iso}T00:00:00.000Z`,
       },
     ];
 

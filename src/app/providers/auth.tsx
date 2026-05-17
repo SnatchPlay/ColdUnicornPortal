@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -121,21 +122,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isImpersonating =
     runtimeConfig.allowInternalImpersonation && actorIdentity?.role === "super_admin" && Boolean(impersonatedIdentity);
 
+  // De-dup guard against redundant identity resolution on full page load.
+  //
+  // On a cold tab with a persisted session, Supabase triggers `syncSessionState`
+  // three times concurrently:
+  //   1. `supabase.auth.getSession()` promise resolution
+  //   2. `onAuthStateChange` "INITIAL_SESSION" event
+  //   3. `onAuthStateChange` "SIGNED_IN" event (restored persisted session)
+  // All three carry the same session. Without this guard each one runs its own
+  // `loadIdentity` round-trip and commits a fresh `actorIdentity` reference,
+  // which downstream `CoreDataProvider` reacts to with a duplicate
+  // `loadSnapshot` (~12 MB × 2). The signature is `${user.id}:${access_token}`
+  // for a real session, or the literal `"null"` for signed-out. Genuine
+  // transitions — sign-in (new token), sign-out (`"null"`), token-refresh
+  // (new access_token) — produce a different signature and are not blocked.
+  //
+  // The ref is claimed synchronously *before* `loadIdentity` awaits, so
+  // concurrent callers short-circuit before issuing parallel network calls.
+  // On soft failure (real session but `identity === null` with a non-null
+  // errorCode), the signature is rolled back in `finally` so the same session
+  // can be retried by a later auth event or by `refreshIdentity()`.
+  const lastSyncedSignatureRef = useRef<string | null>(null);
+
   useEffect(() => {
     let active = true;
 
-    const syncSessionState = async (nextSession: Session | null) => {
+    // [TEMP PERF] trace which path sets the auth identity — investigating double loadSnapshot
+    const syncSessionState = async (nextSession: Session | null, origin: string) => {
       if (!active) return;
+
+      const signature = nextSession ? `${nextSession.user.id}:${nextSession.access_token}` : "null";
+      if (lastSyncedSignatureRef.current === signature) {
+        // [TEMP PERF] redacted log — never print the signature itself
+        console.log(
+          `[TEMP PERF][auth] syncSessionState SKIP duplicate (origin=${origin}, sessionUser=${nextSession?.user?.id ?? "none"})`,
+        );
+        return;
+      }
+      // Claim BEFORE awaiting loadIdentity so concurrent callers short-circuit.
+      lastSyncedSignatureRef.current = signature;
+
+      console.log(`[TEMP PERF][auth] syncSessionState start (origin=${origin}, sessionUser=${nextSession?.user?.id ?? "none"})`);
       setSession(nextSession);
 
-      const next = await loadIdentity(nextSession);
-      if (!active) return;
+      let committedUsableIdentity = false;
+      try {
+        const next = await loadIdentity(nextSession);
+        if (!active) return;
 
-      setActorIdentity(next.identity);
-      setImpersonatedIdentity((current) => (next.identity?.role === "super_admin" ? current : null));
-      setError(next.error);
-      setErrorCode(next.errorCode);
-      setLoading(false);
+        console.log(`[TEMP PERF][auth] syncSessionState commit (origin=${origin}, identityId=${next.identity?.id ?? "null"})`);
+        setActorIdentity(next.identity);
+        setImpersonatedIdentity((current) => (next.identity?.role === "super_admin" ? current : null));
+        setError(next.error);
+        setErrorCode(next.errorCode);
+        setLoading(false);
+
+        // "Success" for de-dup purposes means we reached a stable end state
+        // for this signature: either a real identity for a real session, or a
+        // clean signed-out commit. A soft failure (real session but null
+        // identity + errorCode) is NOT terminal — roll the signature back so a
+        // retry can re-attempt without first having to invalidate the token.
+        committedUsableIdentity = nextSession === null || next.identity !== null;
+      } finally {
+        if (!committedUsableIdentity && lastSyncedSignatureRef.current === signature) {
+          lastSyncedSignatureRef.current = null;
+        }
+      }
     };
 
     if (!supabase) {
@@ -157,12 +209,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      await syncSessionState(data.session);
+      await syncSessionState(data.session, "getSession");
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      // [TEMP PERF] log the auth-event type so we know whether INITIAL_SESSION etc. fires
+      console.log(`[TEMP PERF][auth] onAuthStateChange event=${event}`);
       window.setTimeout(() => {
-        void syncSessionState(nextSession);
+        void syncSessionState(nextSession, `onAuthStateChange:${event}`);
       }, 0);
     });
 

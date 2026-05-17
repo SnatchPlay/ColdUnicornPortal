@@ -14,28 +14,19 @@ function makeDailyStat(
   scheduleDayAfter = 0,
 ) {
   return {
-    id: `ds-${date}`,
     client_id: "client-1",
     report_date: date,
     emails_sent: sent,
-    prospects_in_base: 0,
     mql_count: 0,
-    me_count: 0,
     response_count: response,
     bounce_count: bounce,
-    won_count: 0,
     negative_count: negative,
     ooo_count: ooo,
     human_replies_count: human,
-    inboxes_count: 0,
     prospects_count: 0,
     schedule_today: scheduleToday,
     schedule_tomorrow: scheduleTomorrow,
     schedule_day_after: scheduleDayAfter,
-    week_number: 16,
-    month_number: 4,
-    year: 2026,
-    created_at: `${date}T00:00:00.000Z`,
   };
 }
 

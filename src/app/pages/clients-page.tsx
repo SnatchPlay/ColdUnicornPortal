@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
-import { mark, measureSync, perfLog, useRenderCounter } from "../lib/__perf";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
@@ -27,6 +25,7 @@ import {
   type ClientMegaRow,
   type MegaSortState,
 } from "./clients-page/mega-table";
+import { createSelectionStore } from "./clients-page/selection-store";
 
 const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
@@ -83,8 +82,6 @@ function compareMega(left: ClientMegaRow, right: ClientMegaRow, sort: MegaSortSt
 }
 
 export function ClientsPage() {
-  // [TEMP PERF] count renders of ClientsPage
-  useRenderCounter("ClientsPage");
   const { identity } = useAuth();
   const {
     clients,
@@ -106,6 +103,11 @@ export function ClientsPage() {
   const [createClientDraft, setCreateClientDraft] = useState<CreateClientDraft | null>(null);
   const [isSubmittingCreateClient, setIsSubmittingCreateClient] = useState(false);
 
+  // INVARIANT: `selectedClientId` (React state) and `selectionStore` (external
+  // store consumed per-row in the mega-table) must stay in sync. Mutate them
+  // ONLY through `openClient` / `closeClient` below — never call
+  // `setSelectedClientId` or `selectionStore.set` directly. Drift between the
+  // two will desynchronize the row-highlight from the drawer.
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [draft, setDraft] = useState<ClientDraft | null>(null);
@@ -133,34 +135,29 @@ export function ClientsPage() {
   );
 
   const conditionPackByClientId = useMemo(() => {
-    // [TEMP PERF] measure condition-pack build cost
-    return measureSync(`conditionPackByClientId (clients=${scopedClients.length}, rules=${normalizedConditionRules.length})`, () => {
-      const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
-      for (const client of scopedClients) {
-        const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
-        const manager = managerById.get(client.manager_id) ?? null;
-        const context = buildClientConditionContext({
-          client,
-          manager,
-          metricsOverview: metrics.overview,
-          dodRows: metrics.dodRows,
-          threeDodRows: metrics.threeDodRows,
-          wowRows: metrics.wowRows,
-          momRows: metrics.momRows,
-          campaigns: [],
-          leads: [],
-          dailyStats: [],
-        });
-        packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
-      }
-      return packs;
-    });
-    // [TEMP PERF] /end
+    const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
+    for (const client of scopedClients) {
+      const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+      const manager = managerById.get(client.manager_id) ?? null;
+      const context = buildClientConditionContext({
+        client,
+        manager,
+        metricsOverview: metrics.overview,
+        dodRows: metrics.dodRows,
+        threeDodRows: metrics.threeDodRows,
+        wowRows: metrics.wowRows,
+        momRows: metrics.momRows,
+        campaigns: [],
+        leads: [],
+        dailyStats: [],
+      });
+      packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
+    }
+    return packs;
   }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById]);
 
   const megaRows = useMemo<ClientMegaRow[]>(() => {
-    // [TEMP PERF] measure mega-row build cost
-    return measureSync(`megaRows (clients=${scopedClients.length})`, () => scopedClients.map((client) => {
+    return scopedClients.map((client) => {
       const manager = managerById.get(client.manager_id);
       const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
       const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
@@ -177,32 +174,23 @@ export function ClientsPage() {
         rollupCause,
         conditionPack,
       };
-    }));
-    // [TEMP PERF] /end
+    });
   }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
 
   const sortedMegaRows = useMemo(() => {
-    // [TEMP PERF] measure sort cost
-    return measureSync(`sortedMegaRows (rows=${megaRows.length}, key=${sort.key})`, () =>
-      megaRows.slice().sort((a, b) => compareMega(a, b, sort)),
-    );
-    // [TEMP PERF] /end
+    return megaRows.slice().sort((a, b) => compareMega(a, b, sort));
   }, [megaRows, sort]);
 
   const nameSearchTrimmed = nameSearch.trim().toLowerCase();
   const filteredMegaRows = useMemo(
     () =>
-      // [TEMP PERF] measure filter cost
-      measureSync(`filteredMegaRows (in=${sortedMegaRows.length})`, () =>
-        sortedMegaRows.filter((row) => {
-          if (!matchesHealthFilter(healthFilter, row.highestSeverity)) return false;
-          if (nameSearchTrimmed && !row.client.name.toLowerCase().includes(nameSearchTrimmed)) return false;
-          if (statusFilter.size > 0 && !statusFilter.has(row.client.status)) return false;
-          if (managerFilter !== "all" && row.client.manager_id !== managerFilter) return false;
-          return true;
-        }),
-      ),
-      // [TEMP PERF] /end
+      sortedMegaRows.filter((row) => {
+        if (!matchesHealthFilter(healthFilter, row.highestSeverity)) return false;
+        if (nameSearchTrimmed && !row.client.name.toLowerCase().includes(nameSearchTrimmed)) return false;
+        if (statusFilter.size > 0 && !statusFilter.has(row.client.status)) return false;
+        if (managerFilter !== "all" && row.client.manager_id !== managerFilter) return false;
+        return true;
+      }),
     [healthFilter, nameSearchTrimmed, statusFilter, managerFilter, sortedMegaRows],
   );
 
@@ -304,28 +292,38 @@ export function ClientsPage() {
   const canInviteUsers =
     identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
 
-  // Open the drawer: select the client AND seed the draft in the same React event.
-  // This batches both state updates into one render so the drawer mounts on the
-  // first render after the click (no useEffect-driven second render).
+  // External store that broadcasts the selected-client id to per-row
+  // subscribers in the mega-table. Decouples the row highlight from React
+  // props so `ClientsMegaTable` does not re-render on drawer open/close.
+  const selectionStore = useMemo(createSelectionStore, []);
+
+  // Open the drawer: select the client AND seed the draft in the same React
+  // event. React batches the state updates into one render so the drawer
+  // mounts on the first render after the click.
   const openClient = useCallback(
     (id: string) => {
       const client = scopedClients.find((c) => c.id === id) ?? null;
+      selectionStore.set(id);
       setSelectedClientId(id);
       setDraft(client ? toClientDraft(client) : null);
       setMappingUserId("");
       setInviteEmail("");
       setInviteMessage(null);
     },
-    [scopedClients],
+    [scopedClients, selectionStore],
   );
 
   const closeClient = useCallback(() => {
+    selectionStore.set(null);
     setSelectedClientId(null);
     setDraft(null);
     setMappingUserId("");
     setInviteEmail("");
     setInviteMessage(null);
-  }, []);
+  }, [selectionStore]);
+
+  // Stable row-click handler passed to the memoized table.
+  const handleRowClick = useCallback((id: string) => openClient(id), [openClient]);
 
   // Reset visible rows when scope or filter changes; drop selection if scope no longer holds it
   useEffect(() => {
@@ -577,13 +575,8 @@ export function ClientsPage() {
             rows={visibleMegaRows}
             sort={sort}
             onSortChange={setSort}
-            onRowClick={(id) => {
-              // [TEMP PERF] mark moment of user click — paired with drawer-mounted in ClientDrawer
-              mark("drawer-click");
-              perfLog(`row click → openClient(${id})`);
-              openClient(id);
-            }}
-            selectedClientId={selectedClientId}
+            onRowClick={handleRowClick}
+            selectionStore={selectionStore}
           />
 
           {hasMoreClients && (

@@ -30,28 +30,19 @@ function makeAuth(role: "admin" | "manager" = "admin") {
 
 function makeDailyStat(clientId: string, date: string, sent: number, scheduleToday = 0, scheduleTomorrow = 0, scheduleDayAfter = 0) {
   return {
-    id: `${clientId}-${date}`,
     client_id: clientId,
     report_date: date,
     emails_sent: sent,
-    prospects_in_base: 0,
     mql_count: 0,
-    me_count: 0,
     response_count: Math.round(sent * 0.2),
     bounce_count: Math.round(sent * 0.05),
-    won_count: 0,
     negative_count: Math.round(sent * 0.01),
     ooo_count: Math.round(sent * 0.03),
     human_replies_count: Math.round(sent * 0.1),
-    inboxes_count: 0,
     prospects_count: 0,
     schedule_today: scheduleToday,
     schedule_tomorrow: scheduleTomorrow,
     schedule_day_after: scheduleDayAfter,
-    week_number: 16,
-    month_number: 4,
-    year: 2026,
-    created_at: `${date}T00:00:00.000Z`,
   };
 }
 

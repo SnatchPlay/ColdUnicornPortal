@@ -243,45 +243,42 @@ function toReplyRecord(row: typeof schema.replies.$inferSelect) {
   };
 }
 
+// Snapshot DTO — fields trimmed to what the frontend reads. Dropped from the
+// wire payload (unused in production source as of payload audit, see
+// CampaignDailyStatRecord in src/app/types/core.ts):
+//   id, createdAt, inboxesActive
 function toCampaignDailyStatRecord(row: typeof schema.campaignDailyStats.$inferSelect) {
   return {
-    id: row.id,
-    created_at: row.createdAt,
     campaign_id: row.campaignId,
     report_date: row.reportDate,
     sent_count: row.sentCount,
     reply_count: row.replyCount,
     bounce_count: row.bounceCount,
     unique_open_count: row.uniqueOpenCount,
-    inboxes_active: row.inboxesActive,
     positive_replies_count: row.positiveRepliesCount,
   };
 }
 
+// Snapshot DTO — fields trimmed to what the frontend reads. Dropped from the
+// wire payload (unused in production source as of payload audit, see
+// DailyStatRecord in src/app/types/core.ts):
+//   id, createdAt, meCount, wonCount, prospectsInBase, inboxesCount,
+//   weekNumber, monthNumber, year
 function toDailyStatRecord(row: typeof schema.dailyStats.$inferSelect) {
   return {
-    id: row.id,
     client_id: row.clientId,
     report_date: row.reportDate,
     emails_sent: row.emailsSent,
-    prospects_in_base: row.prospectsInBase,
     mql_count: row.mqlCount,
-    me_count: row.meCount,
     response_count: row.responseCount,
     bounce_count: row.bounceCount,
-    won_count: row.wonCount,
     negative_count: row.negativeCount,
     ooo_count: row.oooCount,
     human_replies_count: row.humanRepliesCount,
-    inboxes_count: row.inboxesCount,
     prospects_count: row.prospectsCount,
     schedule_today: row.scheduleToday,
     schedule_tomorrow: row.scheduleTomorrow,
     schedule_day_after: row.scheduleDayAfter,
-    week_number: row.weekNumber,
-    month_number: row.monthNumber,
-    year: row.year,
-    created_at: row.createdAt,
   };
 }
 

@@ -1,7 +1,5 @@
-import { useLayoutEffect, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
-// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
-import { mark, measureBetween, perfLog, useRenderCounter } from "../../lib/__perf";
 import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { Badge } from "../../components/ui/badge";
@@ -415,29 +413,6 @@ export function ClientDrawer({
   onRemoveClientUserMapping,
   onInviteUser,
 }: ClientDrawerProps) {
-  // [TEMP PERF] count renders of ClientDrawer
-  useRenderCounter("ClientDrawer");
-
-  // [TEMP PERF] mark when the drawer has actually been committed to the DOM.
-  // useLayoutEffect with empty deps fires once after mount, after DOM mutation
-  // but before paint. We also schedule an rAF callback for the post-paint measurement.
-  useLayoutEffect(() => {
-    mark("drawer-mounted");
-    measureBetween("click → drawer mounted (DOM)", "drawer-click", "drawer-mounted");
-    measureBetween("seed-draft useEffect → drawer mounted", "draft-seeded", "drawer-mounted");
-    if (typeof requestAnimationFrame !== "undefined") {
-      requestAnimationFrame(() => {
-        mark("drawer-painted");
-        measureBetween("click → drawer painted (rAF)", "drawer-click", "drawer-painted");
-      });
-    }
-    perfLog("ClientDrawer mounted (useLayoutEffect)");
-    return () => {
-      perfLog("ClientDrawer unmounted");
-    };
-  }, []);
-  // [TEMP PERF] /end
-
   const operationalIssues = (conditionPack?.allResults ?? [])
     .filter((r) => r.severity === "critical_over" || r.severity === "danger" || r.severity === "warning")
     .filter((r, idx, list) => list.findIndex((c) => c.ruleKey === r.ruleKey) === idx);
