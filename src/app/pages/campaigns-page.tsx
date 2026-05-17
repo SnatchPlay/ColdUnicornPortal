@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useDeferredValue, type CSSProperties } from "react";
 import { X } from "lucide-react";
 import {
   Bar,
@@ -12,6 +12,7 @@ import {
 import { DateRangeButton } from "../components/portal-ui";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns, scopeClients } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
@@ -23,6 +24,19 @@ import { ClientCampaignsPage } from "./client-campaigns-page";
 
 const PAGE_SIZE = 50;
 const ALL_FILTER_VALUE = "__all__";
+
+const CAMPAIGN_TYPES: CampaignRecord["type"][] = ["outreach", "ooo", "nurture", "ooo_followup"];
+const CAMPAIGN_STATUSES: CampaignRecord["status"][] = ["draft", "launching", "active", "stopped", "completed"];
+
+interface CreateCampaignDraft {
+  clientId: string;
+  externalId: string;
+  name: string;
+  type: CampaignRecord["type"] | "";
+  status: CampaignRecord["status"] | "";
+  databaseSize: number | null;
+  startDate: string;
+}
 
 interface CampaignDraft {
   name: string;
@@ -89,10 +103,14 @@ export function CampaignsPage() {
 
 function InternalCampaignsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, campaignDailyStats, updateCampaign, loading, error, refresh } = useCoreData();
+  const { clients, campaigns, campaignDailyStats, createCampaign, updateCampaign, loading, error, refresh } = useCoreData();
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  const [createCampaignDraft, setCreateCampaignDraft] = useState<CreateCampaignDraft | null>(null);
+  const [isSubmittingCreateCampaign, setIsSubmittingCreateCampaign] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [statusFilter, setStatusFilter] = useState<string>(ALL_FILTER_VALUE);
   const [clientFilterId, setClientFilterId] = useState<string>(ALL_FILTER_VALUE);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
@@ -129,7 +147,7 @@ function InternalCampaignsPage() {
     [scopedStats, timeframe],
   );
   const filteredCampaigns = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = deferredQuery.trim().toLowerCase();
     return scopedCampaigns.filter((campaign) => {
       const matchesQuery =
         normalizedQuery.length === 0 ||
@@ -139,7 +157,7 @@ function InternalCampaignsPage() {
       const matchesClient = clientFilterId === ALL_FILTER_VALUE || campaign.client_id === clientFilterId;
       return matchesQuery && matchesStatus && matchesClient;
     });
-  }, [clientFilterId, query, scopedCampaigns, statusFilter]);
+  }, [clientFilterId, deferredQuery, scopedCampaigns, statusFilter]);
   const selectedCampaign = useMemo(
     () => filteredCampaigns.find((item) => item.id === selectedCampaignId) ?? null,
     [filteredCampaigns, selectedCampaignId],
@@ -217,6 +235,43 @@ function InternalCampaignsPage() {
     }));
   const timeframeLabel = getTimeframeLabel(timeframe);
 
+  function openCreateCampaign() {
+    setCreateCampaignDraft({
+      clientId: scopedClients[0]?.id ?? "",
+      externalId: "",
+      name: "",
+      type: "",
+      status: "draft",
+      databaseSize: null,
+      startDate: "",
+    });
+    setIsCreatingCampaign(true);
+  }
+
+  async function handleCreateCampaign() {
+    if (!createCampaignDraft || !createCampaignDraft.clientId || !createCampaignDraft.externalId.trim() || !createCampaignDraft.name.trim() || !createCampaignDraft.type || !createCampaignDraft.status) return;
+    setIsSubmittingCreateCampaign(true);
+    try {
+      await createCampaign({
+        client_id: createCampaignDraft.clientId,
+        external_id: createCampaignDraft.externalId.trim(),
+        name: createCampaignDraft.name.trim(),
+        type: createCampaignDraft.type as CampaignRecord["type"],
+        status: createCampaignDraft.status as CampaignRecord["status"],
+        database_size: createCampaignDraft.databaseSize,
+        start_date: createCampaignDraft.startDate || null,
+        positive_responses: 0,
+        gender_target: null,
+      });
+      setIsCreatingCampaign(false);
+      setCreateCampaignDraft(null);
+    } catch {
+      // error shown via toast from core-data
+    } finally {
+      setIsSubmittingCreateCampaign(false);
+    }
+  }
+
   async function patchCampaign(campaign: CampaignRecord, patch: Partial<CampaignRecord>) {
     await updateCampaign(campaign.id, patch);
   }
@@ -264,7 +319,17 @@ function InternalCampaignsPage() {
       <PageHeader
         title="Campaigns"
         subtitle="Shared campaign workspace with table overview and drawer-based campaign details."
-        actions={<DateRangeButton value={timeframe} onChange={setTimeframe} />}
+        actions={
+          <div className="flex items-center gap-3">
+            <DateRangeButton value={timeframe} onChange={setTimeframe} />
+            <button
+              onClick={openCreateCampaign}
+              className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+            >
+              New campaign
+            </button>
+          </div>
+        }
       />
 
       {scopedCampaigns.length === 0 ? (
@@ -403,6 +468,122 @@ function InternalCampaignsPage() {
           )}
         </Surface>
       ) : null}
+
+      <Sheet open={isCreatingCampaign} onOpenChange={setIsCreatingCampaign}>
+        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
+          <SheetHeader className="p-6 pb-2">
+            <SheetTitle className="text-white">New campaign</SheetTitle>
+            <SheetDescription>Fill in the required fields to create a new campaign.</SheetDescription>
+          </SheetHeader>
+          {createCampaignDraft && (
+            <div className="space-y-4 px-6 pb-6">
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
+                <Select value={createCampaignDraft.clientId} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, clientId: v } : d)}>
+                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {scopedClients.map((client) => (
+                      <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                        {client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">External ID (Smartlead/Bison) *</span>
+                <input
+                  value={createCampaignDraft.externalId}
+                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, externalId: e.target.value } : d)}
+                  placeholder="e.g. 12345"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
+                <input
+                  value={createCampaignDraft.name}
+                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, name: e.target.value } : d)}
+                  placeholder="Campaign name"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Type *</span>
+                <Select value={createCampaignDraft.type} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, type: v as CampaignRecord["type"] } : d)}>
+                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {CAMPAIGN_TYPES.map((t) => (
+                      <SelectItem key={t} value={t} className="text-white focus:bg-[#1a1a1a] focus:text-white">{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
+                <Select value={createCampaignDraft.status} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, status: v as CampaignRecord["status"] } : d)}>
+                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {CAMPAIGN_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Database size</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={createCampaignDraft.databaseSize ?? ""}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setCreateCampaignDraft((d) => d ? { ...d, databaseSize: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
+                  }}
+                  placeholder="Optional"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Start date</span>
+                <input
+                  type="date"
+                  value={createCampaignDraft.startDate}
+                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, startDate: e.target.value } : d)}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
+                />
+              </label>
+
+              <button
+                onClick={() => { void handleCreateCampaign(); }}
+                disabled={
+                  isSubmittingCreateCampaign ||
+                  !createCampaignDraft.clientId ||
+                  !createCampaignDraft.externalId.trim() ||
+                  !createCampaignDraft.name.trim() ||
+                  !createCampaignDraft.type ||
+                  !createCampaignDraft.status
+                }
+                className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmittingCreateCampaign ? "Creating..." : "Create campaign"}
+              </button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {selectedCampaign && draft && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/55" onClick={() => setSelectedCampaignId(null)}>

@@ -9,7 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
+import { measureSync, perfLog } from "../lib/__perf";
 import { RepositoryError, repository } from "../data/repository";
+import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
+import { scopeClients } from "../lib/selectors";
 import { useAuth } from "./auth";
 import type {
   CampaignRecord,
@@ -29,6 +33,11 @@ interface CoreDataContextValue extends CoreSnapshot {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  metricsByClientId: ReadonlyMap<string, ClientMetricsPack>;
+  createClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  createCampaign: (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  createLead: (input: Omit<LeadRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  createDomain: (input: Omit<DomainRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
   updateClient: (clientId: string, patch: Partial<ClientRecord>) => Promise<void>;
   updateCampaign: (campaignId: string, patch: Partial<CampaignRecord>) => Promise<void>;
   updateLead: (leadId: string, patch: Partial<LeadRecord>) => Promise<void>;
@@ -115,10 +124,30 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     setLoading(true);
     try {
+      // [TEMP PERF] time the full refresh (snapshot + condition rules)
+      const t0 = performance.now();
       const [snapshotData, conditionRules] = await Promise.all([
         repository.loadSnapshot({ includeDailyStats }),
         includeConditionRules ? repository.loadConditionRules() : Promise.resolve([]),
       ]);
+      const totalMs = performance.now() - t0;
+      perfLog(`loadSnapshot+conditionRules total: ${totalMs.toFixed(1)} ms`);
+      perfLog(
+        `snapshot row counts: ` +
+          `clients=${snapshotData.clients.length} ` +
+          `users=${snapshotData.users.length} ` +
+          `clientUsers=${snapshotData.clientUsers.length} ` +
+          `campaigns=${snapshotData.campaigns.length} ` +
+          `leads=${snapshotData.leads.length} ` +
+          `replies=${snapshotData.replies.length} ` +
+          `campaignDailyStats=${snapshotData.campaignDailyStats.length} ` +
+          `dailyStats=${snapshotData.dailyStats.length} ` +
+          `domains=${snapshotData.domains.length} ` +
+          `invoices=${snapshotData.invoices.length} ` +
+          `emailExcludeList=${snapshotData.emailExcludeList.length} ` +
+          `conditionRules=${conditionRules.length}`,
+      );
+      // [TEMP PERF] /end
       startTransition(() => {
         setSnapshot({
           ...snapshotData,
@@ -144,6 +173,66 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [authLoading, identity, refresh]);
 
+  const createClient = useCallback(async (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => {
+    try {
+      const created = await repository.createClient(input);
+      startTransition(() => {
+        setSnapshot((current) => ({ ...current, clients: [created, ...current.clients] }));
+        setError(null);
+      });
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const createCampaign = useCallback(async (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">) => {
+    try {
+      const created = await repository.createCampaign(input);
+      startTransition(() => {
+        setSnapshot((current) => ({ ...current, campaigns: [created, ...current.campaigns] }));
+        setError(null);
+      });
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const createLead = useCallback(async (input: Omit<LeadRecord, "id" | "created_at" | "updated_at">) => {
+    try {
+      const created = await repository.createLead(input);
+      startTransition(() => {
+        setSnapshot((current) => ({ ...current, leads: [created, ...current.leads] }));
+        setError(null);
+      });
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
+  const createDomain = useCallback(async (input: Omit<DomainRecord, "id" | "created_at" | "updated_at">) => {
+    try {
+      const created = await repository.createDomain(input);
+      startTransition(() => {
+        setSnapshot((current) => ({ ...current, domains: [created, ...current.domains] }));
+        setError(null);
+      });
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, []);
+
   const updateClient = useCallback(async (clientId: string, patch: Partial<ClientRecord>) => {
     const previous = snapshot.clients.find((item) => item.id === clientId);
     if (!previous) {
@@ -161,19 +250,23 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const updated = await repository.updateClient(clientId, patch);
-      setSnapshot((current) => ({
-        ...current,
-        clients: current.clients.map((item) => (item.id === clientId ? updated : item)),
-      }));
-      setError(null);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          clients: current.clients.map((item) => (item.id === clientId ? updated : item)),
+        }));
+        setError(null);
+      });
     } catch (reason) {
       const message = mapCoreDataError(reason);
-      setSnapshot((current) => ({
-        ...current,
-        clients: current.clients.map((item) => (item.id === clientId ? previous : item)),
-      }));
       setError(message);
       toast.error(message);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          clients: current.clients.map((item) => (item.id === clientId ? previous : item)),
+        }));
+      });
     }
   }, [snapshot.clients]);
 
@@ -194,19 +287,23 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const updated = await repository.updateCampaign(campaignId, patch);
-      setSnapshot((current) => ({
-        ...current,
-        campaigns: current.campaigns.map((item) => (item.id === campaignId ? updated : item)),
-      }));
-      setError(null);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          campaigns: current.campaigns.map((item) => (item.id === campaignId ? updated : item)),
+        }));
+        setError(null);
+      });
     } catch (reason) {
       const message = mapCoreDataError(reason);
-      setSnapshot((current) => ({
-        ...current,
-        campaigns: current.campaigns.map((item) => (item.id === campaignId ? previous : item)),
-      }));
       setError(message);
       toast.error(message);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          campaigns: current.campaigns.map((item) => (item.id === campaignId ? previous : item)),
+        }));
+      });
     }
   }, [snapshot.campaigns]);
 
@@ -227,19 +324,23 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const updated = await repository.updateLead(leadId, patch);
-      setSnapshot((current) => ({
-        ...current,
-        leads: current.leads.map((item) => (item.id === leadId ? updated : item)),
-      }));
-      setError(null);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          leads: current.leads.map((item) => (item.id === leadId ? updated : item)),
+        }));
+        setError(null);
+      });
     } catch (reason) {
       const message = mapCoreDataError(reason);
-      setSnapshot((current) => ({
-        ...current,
-        leads: current.leads.map((item) => (item.id === leadId ? previous : item)),
-      }));
       setError(message);
       toast.error(message);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          leads: current.leads.map((item) => (item.id === leadId ? previous : item)),
+        }));
+      });
     }
   }, [snapshot.leads]);
 
@@ -260,19 +361,23 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const updated = await repository.updateDomain(domainId, patch);
-      setSnapshot((current) => ({
-        ...current,
-        domains: current.domains.map((item) => (item.id === domainId ? updated : item)),
-      }));
-      setError(null);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          domains: current.domains.map((item) => (item.id === domainId ? updated : item)),
+        }));
+        setError(null);
+      });
     } catch (reason) {
       const message = mapCoreDataError(reason);
-      setSnapshot((current) => ({
-        ...current,
-        domains: current.domains.map((item) => (item.id === domainId ? previous : item)),
-      }));
       setError(message);
       toast.error(message);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          domains: current.domains.map((item) => (item.id === domainId ? previous : item)),
+        }));
+      });
     }
   }, [snapshot.domains]);
 
@@ -293,19 +398,23 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
     try {
       const updated = await repository.updateInvoice(invoiceId, patch);
-      setSnapshot((current) => ({
-        ...current,
-        invoices: current.invoices.map((item) => (item.id === invoiceId ? updated : item)),
-      }));
-      setError(null);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          invoices: current.invoices.map((item) => (item.id === invoiceId ? updated : item)),
+        }));
+        setError(null);
+      });
     } catch (reason) {
       const message = mapCoreDataError(reason);
-      setSnapshot((current) => ({
-        ...current,
-        invoices: current.invoices.map((item) => (item.id === invoiceId ? previous : item)),
-      }));
       setError(message);
       toast.error(message);
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          invoices: current.invoices.map((item) => (item.id === invoiceId ? previous : item)),
+        }));
+      });
     }
   }, [snapshot.invoices]);
 
@@ -572,12 +681,53 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
     }
   }, [snapshot.emailExcludeList]);
 
+  const metricsByClientId = useMemo<ReadonlyMap<string, ClientMetricsPack>>(() => {
+    // [TEMP PERF] measure global metric-pack build cost
+    return measureSync(
+      `metricsByClientId (clients=${snapshot.clients.length}, leads=${snapshot.leads.length}, dailyStats=${snapshot.dailyStats.length})`,
+      () => {
+        const scopedList = identity ? scopeClients(identity, snapshot.clients) : [];
+        const clientIds = new Set(scopedList.map((c) => c.id));
+        const statsByClient = new Map<string, typeof snapshot.dailyStats>();
+        const leadsByClient = new Map<string, typeof snapshot.leads>();
+        for (const client of scopedList) {
+          statsByClient.set(client.id, []);
+          leadsByClient.set(client.id, []);
+        }
+        for (const stat of snapshot.dailyStats) {
+          if (clientIds.has(stat.client_id)) {
+            (statsByClient.get(stat.client_id) as typeof snapshot.dailyStats).push(stat);
+          }
+        }
+        for (const lead of snapshot.leads) {
+          if (clientIds.has(lead.client_id)) {
+            (leadsByClient.get(lead.client_id) as typeof snapshot.leads).push(lead);
+          }
+        }
+        const result = new Map<string, ClientMetricsPack>();
+        for (const client of scopedList) {
+          result.set(
+            client.id,
+            createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []),
+          );
+        }
+        return result;
+      },
+    );
+    // [TEMP PERF] /end
+  }, [identity, snapshot.clients, snapshot.dailyStats, snapshot.leads]);
+
   const value = useMemo<CoreDataContextValue>(
     () => ({
       ...snapshot,
       loading,
       error,
       refresh,
+      metricsByClientId,
+      createClient,
+      createCampaign,
+      createLead,
+      createDomain,
       updateClient,
       updateCampaign,
       updateLead,
@@ -601,11 +751,16 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       error,
       listInvites,
       loading,
+      metricsByClientId,
       refresh,
       resendInvite,
       revokeInvite,
       sendInvite,
       snapshot,
+      createClient,
+      createCampaign,
+      createLead,
+      createDomain,
       updateCampaign,
       updateClient,
       updateDomain,

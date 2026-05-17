@@ -1,321 +1,98 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
+import { mark, measureSync, perfLog, useRenderCounter } from "../lib/__perf";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
-import { Badge } from "../components/ui/badge";
-import { Checkbox } from "../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "../components/ui/utils";
-import {
-  createClientMetrics,
-  type ClientMetricsPack,
-  type DodRow,
-  type MomRow,
-  type ThreeDodRow,
-  type WowRow,
-} from "../lib/client-metrics";
-import { formatDate, formatMoney, formatNumber } from "../lib/format";
+import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
 import { scopeClients } from "../lib/selectors";
-import { useResizableColumns } from "../lib/use-resizable-columns";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
-import { dodCellKey, evaluateClientConditions } from "../lib/conditions/client-condition-results";
-import { getCellCondition, getHealthScore, getHighestSeverity, getSeverityClassName } from "../lib/conditions/evaluator";
+import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
+import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator";
 import { toConditionRule } from "../lib/conditions/mapper";
-import type { ConditionEvaluationResult, ConditionSeverity } from "../lib/conditions/types";
+import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
-import type { ClientRecord } from "../types/core";
+import {
+  ClientDrawer,
+  buildClientPatch,
+  toClientDraft,
+  type ClientDraft,
+} from "./clients-page/client-drawer";
+import {
+  ClientsMegaTable,
+  MEGA_COLUMNS,
+  type ClientMegaRow,
+  type MegaSortState,
+} from "./clients-page/mega-table";
 
-const CLIENT_STATUSES: ClientRecord["status"][] = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"];
-const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
-const OVERVIEW_GRID_CLASS =
-  "grid min-w-[2450px] gap-3 [grid-template-columns:var(--clients-overview-columns)]";
+const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
 
-const DOD_BUCKET_ORDER: Record<string, number> = {
-  "+2": 0,
-  "+1": 1,
-  "0": 2,
-  "-1": 3,
-  "-2": 4,
-  "-3": 5,
-  "-4": 6,
-};
-const THREE_DOD_BUCKET_ORDER: Record<string, number> = {
-  "0": 0,
-  "-1": 1,
-  "-2": 2,
-  "-3": 3,
-  "-4": 4,
-};
-const WOW_BUCKET_ORDER: Record<string, number> = {
-  "0": 0,
-  "-1": 1,
-  "-2": 2,
-  "-3": 3,
-};
-const MOM_BUCKET_ORDER: Record<string, number> = {
-  "0": 0,
-  "-1": 1,
-  "-2": 2,
-  "-3": 3,
-};
-
-interface ClientDraft {
+interface CreateClientDraft {
   name: string;
-  status: ClientRecord["status"];
-  minDailySent: number;
-  inboxesCount: number;
-  notificationEmails: string[];
-  smsPhoneNumbers: string[];
-  autoOooEnabled: boolean;
-  setupInfo: string;
   managerId: string;
+  status: (typeof CLIENT_STATUSES)[number] | "";
+  externalWorkspaceId: number | null;
+  externalApiKey: string;
+  kpiLeads: number | null;
+  kpiMeetings: number | null;
+  contractedAmount: number | null;
+  contractDueDate: string;
 }
 
-interface ClientOverviewRow {
-  client: ClientRecord;
-  managerName: string;
-  metrics: ClientMetricsPack["overview"];
-  highestSeverity: ConditionSeverity | null;
-  healthScore: number;
-}
+const STATUS_COLORS: Record<string, string> = {
+  Active: "border-emerald-500 bg-emerald-900/40 text-emerald-200",
+  Abo: "border-sky-400 bg-sky-900/40 text-sky-200",
+  Sales: "border-violet-400 bg-violet-900/40 text-violet-200",
+  "On hold": "border-amber-400 bg-amber-900/40 text-amber-200",
+  Offboarding: "border-orange-400 bg-orange-900/40 text-orange-200",
+  Inactive: "border-red-500 bg-red-900/40 text-red-200",
+};
 
-type SortDirection = "asc" | "desc";
-type ClientSortKey =
-  | "name"
-  | "status"
-  | "health"
-  | "manager"
-  | "schedule"
-  | "sent"
-  | "prospectsSigned"
-  | "prospectsAdded"
-  | "minSent"
-  | "inboxes"
-  | "threeDodTotal"
-  | "threeDodSql"
-  | "wowResponse"
-  | "wowHuman"
-  | "wowBounce"
-  | "wowOoo"
-  | "wowSql"
-  | "momSql"
-  | "updated";
-type DodSortKey = "bucket" | "schedule" | "sent";
-type ThreeDodSortKey = "bucket" | "totalLeads" | "sqlLeads";
-type WowSortKey = "bucket" | "totalLeads" | "sqlLeads" | "responseRate" | "humanRate" | "bounceRate" | "oooRate" | "negativeRate";
-type MomSortKey = "bucket" | "totalLeads" | "sqlLeads" | "meetings" | "won";
-
-function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
-  const safeLeft = (left ?? "").toLowerCase();
-  const safeRight = (right ?? "").toLowerCase();
-  const result = safeLeft.localeCompare(safeRight);
-  return direction === "asc" ? result : -result;
-}
-
-function compareNumber(left: number | null | undefined, right: number | null | undefined, direction: SortDirection) {
-  const safeLeft = left ?? Number.NEGATIVE_INFINITY;
-  const safeRight = right ?? Number.NEGATIVE_INFINITY;
-  const result = safeLeft - safeRight;
-  return direction === "asc" ? result : -result;
-}
-
-function compareBucket(
-  left: string,
-  right: string,
-  direction: SortDirection,
-  order: Record<string, number>,
-) {
-  const leftRank = order[left] ?? Number.MAX_SAFE_INTEGER;
-  const rightRank = order[right] ?? Number.MAX_SAFE_INTEGER;
-  return compareNumber(leftRank, rightRank, direction);
-}
-
-function sortIndicator(active: boolean, direction: SortDirection) {
-  if (!active) return "sort";
-  return direction === "asc" ? "asc" : "desc";
-}
-
-function normalizeStringList(items: string[]) {
-  return items.map((item) => item.trim()).filter(Boolean);
-}
-
-function isValidEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-interface StringListEditorProps {
-  values: string[];
-  onChange: (next: string[]) => void;
-  placeholder?: string;
-  inputType?: "text" | "email" | "tel";
-  emptyLabel: string;
-  addLabel: string;
-  removeLabel: string;
-}
-
-function StringListEditor({
-  values,
-  onChange,
-  placeholder,
-  inputType = "text",
-  emptyLabel,
-  addLabel,
-  removeLabel,
-}: StringListEditorProps) {
-  const updateAt = (index: number, value: string) => {
-    const next = values.slice();
-    next[index] = value;
-    onChange(next);
-  };
-  const removeAt = (index: number) => {
-    onChange(values.filter((_, currentIndex) => currentIndex !== index));
-  };
-  const append = () => {
-    onChange([...values, ""]);
-  };
-  return (
-    <div className="space-y-2">
-      {values.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{emptyLabel}</p>
-      ) : (
-        <ul className="space-y-2">
-          {values.map((value, index) => (
-            <li key={index} className="flex items-center gap-2">
-              <input
-                type={inputType}
-                value={value}
-                onChange={(event) => updateAt(index, event.target.value)}
-                placeholder={placeholder}
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => removeAt(index)}
-                aria-label={removeLabel}
-                title={removeLabel}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/20 text-muted-foreground transition hover:border-red-400/40 hover:text-red-200"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <button
-        type="button"
-        onClick={append}
-        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-muted-foreground transition hover:border-sky-400/40 hover:text-sky-100"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        {addLabel}
-      </button>
-    </div>
-  );
-}
-
-function toClientDraft(client: ClientRecord): ClientDraft {
-  return {
-    name: client.name,
-    status: client.status,
-    minDailySent: client.min_daily_sent,
-    inboxesCount: client.inboxes_count,
-    notificationEmails: client.notification_emails ?? [],
-    smsPhoneNumbers: client.sms_phone_numbers ?? [],
-    autoOooEnabled: client.auto_ooo_enabled,
-    setupInfo: client.setup_info ?? "",
-    managerId: client.manager_id,
-  };
-}
-
-function buildClientPatch(client: ClientRecord, draft: ClientDraft, canEditAssignments: boolean): Partial<ClientRecord> {
-  const patch: Partial<ClientRecord> = {};
-
-  if (client.name !== draft.name) {
-    patch.name = draft.name;
-  }
-  if (client.status !== draft.status) {
-    patch.status = draft.status;
-  }
-  if (client.min_daily_sent !== draft.minDailySent) {
-    patch.min_daily_sent = draft.minDailySent;
-  }
-  if (client.inboxes_count !== draft.inboxesCount) {
-    patch.inboxes_count = draft.inboxesCount;
-  }
-
-  const nextNotificationEmails = normalizeStringList(draft.notificationEmails);
-  if (JSON.stringify(client.notification_emails ?? []) !== JSON.stringify(nextNotificationEmails)) {
-    patch.notification_emails = nextNotificationEmails;
-  }
-
-  const nextSmsPhones = normalizeStringList(draft.smsPhoneNumbers);
-  if (JSON.stringify(client.sms_phone_numbers ?? []) !== JSON.stringify(nextSmsPhones)) {
-    patch.sms_phone_numbers = nextSmsPhones;
-  }
-
-  const nextSetupInfo = draft.setupInfo.trim();
-  if ((client.setup_info ?? "") !== draft.setupInfo) {
-    patch.setup_info = nextSetupInfo.length > 0 ? draft.setupInfo : null;
-  }
-
-  if (client.auto_ooo_enabled !== draft.autoOooEnabled) {
-    patch.auto_ooo_enabled = draft.autoOooEnabled;
-  }
-
-  if (canEditAssignments && client.manager_id !== draft.managerId) {
-    patch.manager_id = draft.managerId;
-  }
-
-  return patch;
-}
-
-function formatMetricCell(value: number | null | undefined) {
-  return value === null || value === undefined ? "-" : formatNumber(value);
-}
-
-function formatRate(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatTriple(left: number | null | undefined, middle: number | null | undefined, right: number | null | undefined) {
-  return `${formatMetricCell(left)} / ${formatMetricCell(middle)} / ${formatMetricCell(right)}`;
-}
-
-function severityLabel(severity: ConditionSeverity) {
-  if (severity === "critical_over") return "Critical";
-  if (severity === "danger") return "Danger";
-  if (severity === "warning") return "Warning";
-  if (severity === "info") return "Info";
-  return "Good";
-}
-
-function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity | null) {
+function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity | null): boolean {
   if (filter === "all") return true;
-  if (filter === "healthy") {
-    return !severity || severity === "good" || severity === "info";
-  }
+  if (filter === "healthy") return !severity || severity === "good" || severity === "info";
   if (!severity) return false;
   if (filter === "critical") return severity === "critical_over";
   if (filter === "danger") return severity === "danger";
   return severity === "warning";
 }
 
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function compareMega(left: ClientMegaRow, right: ClientMegaRow, sort: MegaSortState): number {
+  const col = MEGA_COLUMNS.find((c) => c.id === sort.key);
+  if (!col || !col.sortValue) return 0;
+  const a = col.sortValue(left);
+  const b = col.sortValue(right);
+  const dir = sort.direction === "asc" ? 1 : -1;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === "number" && typeof b === "number") {
+    return (a - b) * dir;
+  }
+  return String(a).localeCompare(String(b)) * dir;
+}
+
 export function ClientsPage() {
+  // [TEMP PERF] count renders of ClientsPage
+  useRenderCounter("ClientsPage");
   const { identity } = useAuth();
   const {
     clients,
     users,
     clientUsers,
-    leads,
-    dailyStats,
+    metricsByClientId,
     conditionRules = [],
+    createClient,
     updateClient,
     sendInvite,
     upsertClientUserMapping,
@@ -324,6 +101,11 @@ export function ClientsPage() {
     error,
     refresh,
   } = useCoreData();
+
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const [createClientDraft, setCreateClientDraft] = useState<CreateClientDraft | null>(null);
+  const [isSubmittingCreateClient, setIsSubmittingCreateClient] = useState(false);
+
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [draft, setDraft] = useState<ClientDraft | null>(null);
@@ -334,484 +116,243 @@ export function ClientsPage() {
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
-  const [clientSort, setClientSort] = useState<{ key: ClientSortKey; direction: SortDirection }>({
-    key: "health",
-    direction: "asc",
-  });
-  const [dodSort, setDodSort] = useState<{ key: DodSortKey; direction: SortDirection }>({
-    key: "bucket",
-    direction: "asc",
-  });
-  const [threeDodSort, setThreeDodSort] = useState<{ key: ThreeDodSortKey; direction: SortDirection }>({
-    key: "bucket",
-    direction: "asc",
-  });
-  const [wowSort, setWowSort] = useState<{ key: WowSortKey; direction: SortDirection }>({
-    key: "bucket",
-    direction: "asc",
-  });
-  const [momSort, setMomSort] = useState<{ key: MomSortKey; direction: SortDirection }>({
-    key: "bucket",
-    direction: "asc",
-  });
-  const overviewColumns = useResizableColumns({
-    storageKey: "table:clients:overview-columns",
-    defaultWidths: [220, 220, 160, 180, 150, 150, 150, 150, 220, 220, 170, 170, 180, 170, 170, 170, 150, 150, 150],
-    minWidths: [150, 150, 120, 140, 110, 110, 110, 110, 160, 160, 120, 120, 130, 120, 120, 120, 110, 110, 110],
-  });
-  const dodColumns = useResizableColumns({
-    storageKey: "table:clients:dod-columns",
-    defaultWidths: [130, 220, 220],
-    minWidths: [100, 140, 140],
-  });
-  const threeDodColumns = useResizableColumns({
-    storageKey: "table:clients:three-dod-columns",
-    defaultWidths: [130, 220, 220],
-    minWidths: [100, 140, 140],
-  });
-  const wowColumns = useResizableColumns({
-    storageKey: "table:clients:wow-columns",
-    defaultWidths: [100, 130, 130, 150, 150, 150, 150, 150],
-    minWidths: [80, 100, 100, 110, 110, 110, 110, 110],
-  });
-  const momColumns = useResizableColumns({
-    storageKey: "table:clients:mom-columns",
-    defaultWidths: [120, 170, 170, 170, 170],
-    minWidths: [90, 120, 120, 120, 120],
-  });
-  const overviewTableStyle = useMemo(
-    () =>
-      ({
-        "--clients-overview-columns": overviewColumns.template,
-      }) as CSSProperties,
-    [overviewColumns.template],
-  );
-  const dodTableStyle = useMemo(
-    () =>
-      ({
-        "--clients-dod-columns": dodColumns.template,
-      }) as CSSProperties,
-    [dodColumns.template],
-  );
-  const threeDodTableStyle = useMemo(
-    () =>
-      ({
-        "--clients-three-dod-columns": threeDodColumns.template,
-      }) as CSSProperties,
-    [threeDodColumns.template],
-  );
-  const wowTableStyle = useMemo(
-    () =>
-      ({
-        "--clients-wow-columns": wowColumns.template,
-      }) as CSSProperties,
-    [wowColumns.template],
-  );
-  const momTableStyle = useMemo(
-    () =>
-      ({
-        "--clients-mom-columns": momColumns.template,
-      }) as CSSProperties,
-    [momColumns.template],
-  );
+  const [nameSearch, setNameSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [managerFilter, setManagerFilter] = useState("all");
+  const [sort, setSort] = useState<MegaSortState>({ key: "health", direction: "asc" });
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const managerUsers = useMemo(() => users.filter((item) => item.role === "manager"), [users]);
-  const clientRoleUsers = useMemo(() => users.filter((item) => item.role === "client"), [users]);
-  const managerById = useMemo(() => new Map(managerUsers.map((manager) => [manager.id, manager])), [managerUsers]);
+  const managerUsers = useMemo(() => users.filter((u) => u.role === "manager"), [users]);
+  const clientRoleUsers = useMemo(() => users.filter((u) => u.role === "client"), [users]);
+  const managerById = useMemo(() => new Map(managerUsers.map((m) => [m.id, m] as const)), [managerUsers]);
 
-  const scopedClientIds = useMemo(() => new Set(scopedClients.map((item) => item.id)), [scopedClients]);
-  const metricsByClientId = useMemo(() => {
-    const statsByClient = new Map<string, typeof dailyStats>();
-    const leadsByClient = new Map<string, typeof leads>();
 
-    for (const client of scopedClients) {
-      statsByClient.set(client.id, []);
-      leadsByClient.set(client.id, []);
-    }
-
-    for (const stat of dailyStats) {
-      if (!scopedClientIds.has(stat.client_id)) continue;
-      (statsByClient.get(stat.client_id) as typeof dailyStats).push(stat);
-    }
-
-    for (const lead of leads) {
-      if (!scopedClientIds.has(lead.client_id)) continue;
-      (leadsByClient.get(lead.client_id) as typeof leads).push(lead);
-    }
-
-    const byClient = new Map<string, ClientMetricsPack>();
-    for (const client of scopedClients) {
-      byClient.set(client.id, createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []));
-    }
-
-    return byClient;
-  }, [dailyStats, leads, scopedClientIds, scopedClients]);
-
-  const normalizedConditionRules = useMemo(() => conditionRules.map(toConditionRule), [conditionRules]);
+  const normalizedConditionRules = useMemo(
+    () => conditionRules.map(toConditionRule),
+    [conditionRules],
+  );
 
   const conditionPackByClientId = useMemo(() => {
-    const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
-
-    for (const client of scopedClients) {
-      const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
-      const manager = managerById.get(client.manager_id) ?? null;
-      const context = buildClientConditionContext({
-        client,
-        manager,
-        metricsOverview: metrics.overview,
-        dodRows: metrics.dodRows,
-        threeDodRows: metrics.threeDodRows,
-        wowRows: metrics.wowRows,
-        momRows: metrics.momRows,
-        campaigns: [],
-        leads: [],
-        dailyStats: [],
-      });
-      packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
-    }
-
-    return packs;
+    // [TEMP PERF] measure condition-pack build cost
+    return measureSync(`conditionPackByClientId (clients=${scopedClients.length}, rules=${normalizedConditionRules.length})`, () => {
+      const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
+      for (const client of scopedClients) {
+        const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+        const manager = managerById.get(client.manager_id) ?? null;
+        const context = buildClientConditionContext({
+          client,
+          manager,
+          metricsOverview: metrics.overview,
+          dodRows: metrics.dodRows,
+          threeDodRows: metrics.threeDodRows,
+          wowRows: metrics.wowRows,
+          momRows: metrics.momRows,
+          campaigns: [],
+          leads: [],
+          dailyStats: [],
+        });
+        packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
+      }
+      return packs;
+    });
+    // [TEMP PERF] /end
   }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById]);
 
-  const overviewRows = useMemo<ClientOverviewRow[]>(() => {
-    return scopedClients.map((client) => {
+  const megaRows = useMemo<ClientMegaRow[]>(() => {
+    // [TEMP PERF] measure mega-row build cost
+    return measureSync(`megaRows (clients=${scopedClients.length})`, () => scopedClients.map((client) => {
       const manager = managerById.get(client.manager_id);
       const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
       const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
-      const conditionPack = conditionPackByClientId.get(client.id);
+      const conditionPack = conditionPackByClientId.get(client.id) ?? null;
       const allResults = conditionPack?.allResults ?? [];
+      const highestSeverity = getHighestSeverity(allResults);
+      const rollupCause = allResults.find((r) => r.severity === highestSeverity)?.label ?? "All KPIs on target";
       return {
         client,
         managerName,
-        metrics: metrics.overview,
-        highestSeverity: getHighestSeverity(allResults),
+        metrics,
+        highestSeverity,
         healthScore: getHealthScore(allResults),
+        rollupCause,
+        conditionPack,
       };
-    });
+    }));
+    // [TEMP PERF] /end
   }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
 
-  const sortedOverviewRows = useMemo(() => {
-    return overviewRows.slice().sort((left, right) => {
-      if (clientSort.key === "name") {
-        return compareText(left.client.name, right.client.name, clientSort.direction);
-      }
-      if (clientSort.key === "status") {
-        return compareText(left.client.status, right.client.status, clientSort.direction);
-      }
-      if (clientSort.key === "health") {
-        return compareNumber(left.healthScore, right.healthScore, clientSort.direction);
-      }
-      if (clientSort.key === "manager") {
-        return compareText(left.managerName, right.managerName, clientSort.direction);
-      }
-      if (clientSort.key === "schedule") {
-        return compareNumber(left.metrics.scheduleToday, right.metrics.scheduleToday, clientSort.direction);
-      }
-      if (clientSort.key === "sent") {
-        return compareNumber(left.metrics.sentToday, right.metrics.sentToday, clientSort.direction);
-      }
-      if (clientSort.key === "prospectsSigned") {
-        return compareNumber(left.client.prospects_signed, right.client.prospects_signed, clientSort.direction);
-      }
-      if (clientSort.key === "prospectsAdded") {
-        return compareNumber(left.client.prospects_added, right.client.prospects_added, clientSort.direction);
-      }
-      if (clientSort.key === "minSent") {
-        return compareNumber(left.client.min_daily_sent, right.client.min_daily_sent, clientSort.direction);
-      }
-      if (clientSort.key === "inboxes") {
-        return compareNumber(left.client.inboxes_count, right.client.inboxes_count, clientSort.direction);
-      }
-      if (clientSort.key === "threeDodTotal") {
-        return compareNumber(left.metrics.threeDodTotal, right.metrics.threeDodTotal, clientSort.direction);
-      }
-      if (clientSort.key === "threeDodSql") {
-        return compareNumber(left.metrics.threeDodSql, right.metrics.threeDodSql, clientSort.direction);
-      }
-      if (clientSort.key === "wowResponse") {
-        return compareNumber(left.metrics.wowResponseRate, right.metrics.wowResponseRate, clientSort.direction);
-      }
-      if (clientSort.key === "wowHuman") {
-        return compareNumber(left.metrics.wowHumanRate, right.metrics.wowHumanRate, clientSort.direction);
-      }
-      if (clientSort.key === "wowBounce") {
-        return compareNumber(left.metrics.wowBounceRate, right.metrics.wowBounceRate, clientSort.direction);
-      }
-      if (clientSort.key === "wowOoo") {
-        return compareNumber(left.metrics.wowOooRate, right.metrics.wowOooRate, clientSort.direction);
-      }
-      if (clientSort.key === "wowSql") {
-        return compareNumber(left.metrics.wowSql, right.metrics.wowSql, clientSort.direction);
-      }
-      if (clientSort.key === "momSql") {
-        return compareNumber(left.metrics.momSql, right.metrics.momSql, clientSort.direction);
-      }
-      return compareText(left.client.updated_at, right.client.updated_at, clientSort.direction);
-    });
-  }, [clientSort.direction, clientSort.key, overviewRows]);
+  const sortedMegaRows = useMemo(() => {
+    // [TEMP PERF] measure sort cost
+    return measureSync(`sortedMegaRows (rows=${megaRows.length}, key=${sort.key})`, () =>
+      megaRows.slice().sort((a, b) => compareMega(a, b, sort)),
+    );
+    // [TEMP PERF] /end
+  }, [megaRows, sort]);
 
-  const filteredOverviewRows = useMemo(
-    () => sortedOverviewRows.filter((row) => matchesHealthFilter(healthFilter, row.highestSeverity)),
-    [healthFilter, sortedOverviewRows],
+  const nameSearchTrimmed = nameSearch.trim().toLowerCase();
+  const filteredMegaRows = useMemo(
+    () =>
+      // [TEMP PERF] measure filter cost
+      measureSync(`filteredMegaRows (in=${sortedMegaRows.length})`, () =>
+        sortedMegaRows.filter((row) => {
+          if (!matchesHealthFilter(healthFilter, row.highestSeverity)) return false;
+          if (nameSearchTrimmed && !row.client.name.toLowerCase().includes(nameSearchTrimmed)) return false;
+          if (statusFilter.size > 0 && !statusFilter.has(row.client.status)) return false;
+          if (managerFilter !== "all" && row.client.manager_id !== managerFilter) return false;
+          return true;
+        }),
+      ),
+      // [TEMP PERF] /end
+    [healthFilter, nameSearchTrimmed, statusFilter, managerFilter, sortedMegaRows],
   );
+
   const healthFilterCounts = useMemo(() => {
     const counts = new Map<HealthFilter, number>([
-      ["all", sortedOverviewRows.length],
+      ["all", sortedMegaRows.length],
       ["critical", 0],
       ["danger", 0],
       ["warning", 0],
       ["healthy", 0],
     ]);
-
-    for (const row of sortedOverviewRows) {
-      if (matchesHealthFilter("critical", row.highestSeverity)) {
-        counts.set("critical", (counts.get("critical") ?? 0) + 1);
-      }
-      if (matchesHealthFilter("danger", row.highestSeverity)) {
-        counts.set("danger", (counts.get("danger") ?? 0) + 1);
-      }
-      if (matchesHealthFilter("warning", row.highestSeverity)) {
-        counts.set("warning", (counts.get("warning") ?? 0) + 1);
-      }
-      if (matchesHealthFilter("healthy", row.highestSeverity)) {
-        counts.set("healthy", (counts.get("healthy") ?? 0) + 1);
-      }
+    for (const row of sortedMegaRows) {
+      if (matchesHealthFilter("critical", row.highestSeverity)) counts.set("critical", (counts.get("critical") ?? 0) + 1);
+      if (matchesHealthFilter("danger", row.highestSeverity)) counts.set("danger", (counts.get("danger") ?? 0) + 1);
+      if (matchesHealthFilter("warning", row.highestSeverity)) counts.set("warning", (counts.get("warning") ?? 0) + 1);
+      if (matchesHealthFilter("healthy", row.highestSeverity)) counts.set("healthy", (counts.get("healthy") ?? 0) + 1);
     }
-
     return counts;
-  }, [sortedOverviewRows]);
-  const visibleOverviewRows = useMemo(
-    () => filteredOverviewRows.slice(0, visibleRowsCount),
-    [filteredOverviewRows, visibleRowsCount],
+  }, [sortedMegaRows]);
+
+  const visibleMegaRows = useMemo(
+    () => filteredMegaRows.slice(0, visibleRowsCount),
+    [filteredMegaRows, visibleRowsCount],
   );
-  const hasMoreClients = visibleRowsCount < filteredOverviewRows.length;
+  const hasMoreClients = visibleRowsCount < filteredMegaRows.length;
 
   const selectedClient = useMemo(
-    () => scopedClients.find((item) => item.id === selectedClientId) ?? null,
+    () => scopedClients.find((c) => c.id === selectedClientId) ?? null,
     [scopedClients, selectedClientId],
   );
-  const selectedClientMetrics = useMemo(
-    () => (selectedClient ? metricsByClientId.get(selectedClient.id) ?? createClientMetrics([], []) : null),
-    [metricsByClientId, selectedClient],
-  );
-  const selectedClientConditionPack = useMemo(
+  const selectedConditionPack = useMemo(
     () => (selectedClient ? conditionPackByClientId.get(selectedClient.id) ?? null : null),
     [conditionPackByClientId, selectedClient],
   );
-  const selectedAllConditions = useMemo(() => selectedClientConditionPack?.allResults ?? [], [selectedClientConditionPack]);
-  const selectedThreeDodConditions = useMemo(() => selectedClientConditionPack?.threeDodResults ?? [], [selectedClientConditionPack]);
-  const selectedWowConditions = useMemo(() => selectedClientConditionPack?.wowResults ?? [], [selectedClientConditionPack]);
-  const selectedMomConditions = useMemo(() => selectedClientConditionPack?.momResults ?? [], [selectedClientConditionPack]);
-  const selectedSetupConditions = useMemo(() => selectedClientConditionPack?.setupResults ?? [], [selectedClientConditionPack]);
-  const selectedDodConditions = useMemo(() => selectedClientConditionPack?.dodCellResults ?? {}, [selectedClientConditionPack]);
-  const selectedOperationalIssues = useMemo(
-    () =>
-      selectedAllConditions
-        .filter((item) => item.severity === "critical_over" || item.severity === "danger" || item.severity === "warning")
-        .filter((item, index, collection) => collection.findIndex((candidate) => candidate.ruleKey === item.ruleKey) === index),
-    [selectedAllConditions],
-  );
-  const selectedSetupGaps = useMemo(
-    () =>
-      selectedSetupConditions
-        .filter((item) => item.severity !== "good")
-        .filter((item, index, collection) => collection.findIndex((candidate) => candidate.ruleKey === item.ruleKey) === index),
-    [selectedSetupConditions],
-  );
-
   const selectedClientMappings = useMemo(
-    () => (selectedClient ? clientUsers.filter((item) => item.client_id === selectedClient.id) : []),
+    () => (selectedClient ? clientUsers.filter((m) => m.client_id === selectedClient.id) : []),
     [clientUsers, selectedClient],
   );
-
-  const clientById = useMemo(() => new Map(clients.map((item) => [item.id, item.name])), [clients]);
-  const mappingByUserId = useMemo(() => new Map(clientUsers.map((item) => [item.user_id, item])), [clientUsers]);
-
-  const selectedMapping = useMemo(
-    () => clientUsers.find((item) => item.user_id === mappingUserId) ?? null,
-    [clientUsers, mappingUserId],
-  );
-
-  const selectedMappingClientName = useMemo(() => {
-    if (!selectedMapping) return null;
-    return clients.find((item) => item.id === selectedMapping.client_id)?.name ?? "Unknown client";
-  }, [clients, selectedMapping]);
-
   const selectedManagerName = useMemo(() => {
-    if (!selectedClient) return "-";
-    const manager = users.find((item) => item.id === selectedClient.manager_id);
-    if (!manager) return "-";
+    if (!selectedClient) return "—";
+    const manager = users.find((u) => u.id === selectedClient.manager_id);
+    if (!manager) return "—";
     return `${manager.first_name} ${manager.last_name}`.trim();
   }, [selectedClient, users]);
 
   const canEditAssignments = identity?.role === "admin" || identity?.role === "super_admin";
-  const canInviteUsers = identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
-  const setupMinSentCondition = getCellCondition(selectedSetupConditions, "min_sent");
-  const setupWorkspaceCondition = getCellCondition(selectedSetupConditions, "spreadsheet_or_workspace_id");
-  const setupBiCondition = getCellCondition(selectedSetupConditions, "bi_setup");
-  const setupAutoLiCondition = getCellCondition(selectedSetupConditions, "auto_li_api_key");
 
-  useEffect(() => {
-    setVisibleRowsCount(PAGE_SIZE);
-    if (selectedClientId && !scopedClients.some((item) => item.id === selectedClientId)) {
-      setSelectedClientId(null);
+  function openCreateClient() {
+    setCreateClientDraft({
+      name: "",
+      managerId: identity?.role === "manager" ? (identity.userId ?? "") : "",
+      status: "Active",
+      externalWorkspaceId: null,
+      externalApiKey: "",
+      kpiLeads: null,
+      kpiMeetings: null,
+      contractedAmount: null,
+      contractDueDate: "",
+    });
+    setIsCreatingClient(true);
+  }
+
+  async function handleCreateClient() {
+    if (!createClientDraft || !createClientDraft.name.trim() || !createClientDraft.managerId || !createClientDraft.status) return;
+    setIsSubmittingCreateClient(true);
+    try {
+      await createClient({
+        name: createClientDraft.name.trim(),
+        manager_id: createClientDraft.managerId,
+        status: createClientDraft.status as (typeof CLIENT_STATUSES)[number],
+        kpi_leads: createClientDraft.kpiLeads,
+        kpi_meetings: createClientDraft.kpiMeetings,
+        contracted_amount: createClientDraft.contractedAmount,
+        contract_due_date: createClientDraft.contractDueDate || null,
+        external_workspace_id: createClientDraft.externalWorkspaceId,
+        external_api_key: createClientDraft.externalApiKey.trim() || null,
+        min_daily_sent: 0,
+        inboxes_count: 0,
+        crm_config: null,
+        sms_phone_numbers: null,
+        notification_emails: null,
+        auto_ooo_enabled: false,
+        linkedin_api_key: null,
+        prospects_signed: 0,
+        prospects_added: 0,
+        setup_info: null,
+        bi_setup_done: false,
+        lost_reason: null,
+        notes: null,
+      });
+      setIsCreatingClient(false);
+      setCreateClientDraft(null);
+    } catch {
+      // error shown via toast from core-data
+    } finally {
+      setIsSubmittingCreateClient(false);
     }
-  }, [scopedClients, selectedClientId, healthFilter]);
+  }
+  const canInviteUsers =
+    identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
 
-  useEffect(() => {
-    if (!selectedClient) {
-      setDraft(null);
+  // Open the drawer: select the client AND seed the draft in the same React event.
+  // This batches both state updates into one render so the drawer mounts on the
+  // first render after the click (no useEffect-driven second render).
+  const openClient = useCallback(
+    (id: string) => {
+      const client = scopedClients.find((c) => c.id === id) ?? null;
+      setSelectedClientId(id);
+      setDraft(client ? toClientDraft(client) : null);
       setMappingUserId("");
       setInviteEmail("");
       setInviteMessage(null);
-      return;
-    }
+    },
+    [scopedClients],
+  );
 
-    setDraft(toClientDraft(selectedClient));
+  const closeClient = useCallback(() => {
+    setSelectedClientId(null);
+    setDraft(null);
     setMappingUserId("");
     setInviteEmail("");
     setInviteMessage(null);
-  }, [selectedClient]);
+  }, []);
 
+  // Reset visible rows when scope or filter changes; drop selection if scope no longer holds it
+  useEffect(() => {
+    setVisibleRowsCount(PAGE_SIZE);
+    if (selectedClientId && !scopedClients.some((c) => c.id === selectedClientId)) {
+      closeClient();
+    }
+  }, [scopedClients, selectedClientId, healthFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
+
+  // Esc closes drawer
   useEffect(() => {
     if (!selectedClient) return;
-
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setSelectedClientId(null);
-      }
+      if (event.key === "Escape") closeClient();
     }
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedClient]);
+  }, [selectedClient, closeClient]);
 
   const draftPatch = useMemo(() => {
     if (!selectedClient || !draft) return {};
     return buildClientPatch(selectedClient, draft, canEditAssignments);
   }, [canEditAssignments, draft, selectedClient]);
-
   const isDraftDirty = Object.keys(draftPatch).length > 0;
 
-  const sortedDodRows = useMemo(() => {
-    if (!selectedClientMetrics) return [];
-    return selectedClientMetrics.dodRows.slice().sort((left, right) => {
-      if (dodSort.key === "bucket") {
-        return compareBucket(left.bucket, right.bucket, dodSort.direction, DOD_BUCKET_ORDER);
-      }
-      if (dodSort.key === "schedule") {
-        return compareNumber(left.schedule, right.schedule, dodSort.direction);
-      }
-      return compareNumber(left.sent, right.sent, dodSort.direction);
-    });
-  }, [dodSort.direction, dodSort.key, selectedClientMetrics]);
-
-  const sortedThreeDodRows = useMemo(() => {
-    if (!selectedClientMetrics) return [];
-    return selectedClientMetrics.threeDodRows.slice().sort((left, right) => {
-      if (threeDodSort.key === "bucket") {
-        return compareBucket(left.bucket, right.bucket, threeDodSort.direction, THREE_DOD_BUCKET_ORDER);
-      }
-      if (threeDodSort.key === "totalLeads") {
-        return compareNumber(left.totalLeads, right.totalLeads, threeDodSort.direction);
-      }
-      return compareNumber(left.sqlLeads, right.sqlLeads, threeDodSort.direction);
-    });
-  }, [selectedClientMetrics, threeDodSort.direction, threeDodSort.key]);
-
-  const sortedWowRows = useMemo(() => {
-    if (!selectedClientMetrics) return [];
-    return selectedClientMetrics.wowRows.slice().sort((left, right) => {
-      if (wowSort.key === "bucket") {
-        return compareBucket(left.bucket, right.bucket, wowSort.direction, WOW_BUCKET_ORDER);
-      }
-      if (wowSort.key === "totalLeads") {
-        return compareNumber(left.totalLeads, right.totalLeads, wowSort.direction);
-      }
-      if (wowSort.key === "sqlLeads") {
-        return compareNumber(left.sqlLeads, right.sqlLeads, wowSort.direction);
-      }
-      if (wowSort.key === "responseRate") {
-        return compareNumber(left.responseRate, right.responseRate, wowSort.direction);
-      }
-      if (wowSort.key === "humanRate") {
-        return compareNumber(left.humanRate, right.humanRate, wowSort.direction);
-      }
-      if (wowSort.key === "bounceRate") {
-        return compareNumber(left.bounceRate, right.bounceRate, wowSort.direction);
-      }
-      if (wowSort.key === "oooRate") {
-        return compareNumber(left.oooRate, right.oooRate, wowSort.direction);
-      }
-      return compareNumber(left.negativeRate, right.negativeRate, wowSort.direction);
-    });
-  }, [selectedClientMetrics, wowSort.direction, wowSort.key]);
-
-  const sortedMomRows = useMemo(() => {
-    if (!selectedClientMetrics) return [];
-    return selectedClientMetrics.momRows.slice().sort((left, right) => {
-      if (momSort.key === "bucket") {
-        return compareBucket(left.bucket, right.bucket, momSort.direction, MOM_BUCKET_ORDER);
-      }
-      if (momSort.key === "totalLeads") {
-        return compareNumber(left.totalLeads, right.totalLeads, momSort.direction);
-      }
-      if (momSort.key === "sqlLeads") {
-        return compareNumber(left.sqlLeads, right.sqlLeads, momSort.direction);
-      }
-      if (momSort.key === "meetings") {
-        return compareNumber(left.meetings, right.meetings, momSort.direction);
-      }
-      return compareNumber(left.won, right.won, momSort.direction);
-    });
-  }, [momSort.direction, momSort.key, selectedClientMetrics]);
-
-  function getMetricConditionClassName(severity: ConditionSeverity) {
-    if (severity === "critical_over" || severity === "danger") {
-      return "rounded-md border border-red-400/35 bg-transparent px-2 py-1 text-red-100";
-    }
-    if (severity === "warning") {
-      return "rounded-md px-2 py-1 text-amber-200";
-    }
-    return "rounded-md px-2 py-1 text-muted-foreground";
-  }
-
-  function renderConditionTooltip(result: ConditionEvaluationResult, content: ReactNode) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className={getMetricConditionClassName(result.severity)}>{content}</div>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
-          <p><span className="text-neutral-400">Rule:</span> {result.ruleName}</p>
-          <p><span className="text-neutral-400">Value:</span> {String(result.value ?? "-")}</p>
-          {result.threshold !== undefined && (
-            <p><span className="text-neutral-400">Threshold:</span> {String(result.threshold)}</p>
-          )}
-          <p><span className="text-neutral-400">Message:</span> {result.message}</p>
-          <p><span className="text-neutral-400">Source:</span> {result.sourceSheet ?? "-"} {result.sourceRange ?? ""}</p>
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  function renderMetricCellWithCondition(
-    content: ReactNode,
-    columnKey: string,
-    candidates: ConditionEvaluationResult[],
-  ) {
-    const condition = getCellCondition(candidates, columnKey);
-    if (!condition) return <span className="text-muted-foreground">{content}</span>;
-    return renderConditionTooltip(
-      condition,
-      <span className="text-muted-foreground">{content}</span>,
-    );
-  }
-
-  async function saveDraft() {
+  const handleSave = useCallback(async () => {
     if (!selectedClient || !draft || !isDraftDirty) return;
-
     setIsSavingDraft(true);
     try {
       await updateClient(selectedClient.id, draftPatch);
@@ -819,16 +360,15 @@ export function ClientsPage() {
     } finally {
       setIsSavingDraft(false);
     }
-  }
+  }, [draft, draftPatch, isDraftDirty, selectedClient, updateClient]);
 
-  function cancelDraft() {
+  const handleCancel = useCallback(() => {
     if (!selectedClient) return;
     setDraft(toClientDraft(selectedClient));
-  }
+  }, [selectedClient]);
 
-  async function assignClientUser() {
+  const handleAssignClientUser = useCallback(async () => {
     if (!selectedClient || !mappingUserId) return;
-
     setIsSavingMapping(true);
     try {
       await upsertClientUserMapping(mappingUserId, selectedClient.id);
@@ -836,37 +376,34 @@ export function ClientsPage() {
     } finally {
       setIsSavingMapping(false);
     }
-  }
+  }, [mappingUserId, selectedClient, upsertClientUserMapping]);
 
-  async function removeClientUserMapping(mappingId: string) {
-    setIsSavingMapping(true);
-    try {
-      await deleteClientUserMapping(mappingId);
-    } finally {
-      setIsSavingMapping(false);
-    }
-  }
+  const handleRemoveClientUserMapping = useCallback(
+    async (mappingId: string) => {
+      setIsSavingMapping(true);
+      try {
+        await deleteClientUserMapping(mappingId);
+      } finally {
+        setIsSavingMapping(false);
+      }
+    },
+    [deleteClientUserMapping],
+  );
 
-  async function inviteUser() {
+  const handleInviteUser = useCallback(async () => {
     const normalizedEmail = inviteEmail.trim().toLowerCase();
     if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
       setInviteMessage({ tone: "warning", text: "Enter a valid email before sending an invitation." });
       return;
     }
-
     if (!selectedClient) {
       setInviteMessage({ tone: "warning", text: "Select a client before inviting a client user." });
       return;
     }
-
     setIsSendingInvite(true);
     setInviteMessage(null);
     try {
-      await sendInvite({
-        email: normalizedEmail,
-        role: "client",
-        clientId: selectedClient.id,
-      });
+      await sendInvite({ email: normalizedEmail, role: "client", clientId: selectedClient.id });
       setInviteEmail("");
       setInviteMessage({ tone: "info", text: `Client invitation sent to ${normalizedEmail}.` });
     } catch {
@@ -874,7 +411,7 @@ export function ClientsPage() {
     } finally {
       setIsSendingInvite(false);
     }
-  }
+  }, [inviteEmail, selectedClient, sendInvite]);
 
   if (!identity || identity.role === "client") {
     return (
@@ -885,17 +422,12 @@ export function ClientsPage() {
     );
   }
 
-  if (loading) {
-    return <LoadingState />;
-  }
+  if (loading) return <LoadingState />;
 
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          title="Clients"
-          subtitle="Operational client control surface for managing core client settings."
-        />
+        <PageHeader title="Clients" subtitle="Operational client control surface for managing core client settings." />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
           onClick={() => {
@@ -912,167 +444,147 @@ export function ClientsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Clients"
-        subtitle="Primary analytics hub for manager/admin quick analysis with drawer-based drill-down."
+        subtitle="Dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in a single horizontally-scrollable surface. Click any row to open the configuration drawer."
+        actions={
+          <button
+            onClick={openCreateClient}
+            className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
+          >
+            New client
+          </button>
+        }
       />
 
       {scopedClients.length === 0 ? (
-        <EmptyState title="No clients assigned" description="The current identity does not have any visible clients." />
+        <EmptyState
+          title="No clients assigned"
+          description="The current identity does not have any visible clients."
+        />
       ) : (
-        <Surface title="Client analytics table" subtitle={`${visibleOverviewRows.length} of ${filteredOverviewRows.length} clients in current health filter`}>
+        <Surface
+          title="Client PDCA grid"
+          subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter`}
+        >
+          {/* ── Filter bar ─────────────────────────────────────── */}
           <div className="mb-4 space-y-3">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Health filter</p>
-            <ToggleGroup
-              type="single"
-              value={healthFilter}
-              onValueChange={(value) => {
-                if (!value) return;
-                setHealthFilter(value as HealthFilter);
-              }}
-              variant="outline"
-              className="w-full flex-wrap rounded-xl border border-border bg-black/10 p-1 md:flex-nowrap"
-            >
-              {HEALTH_FILTERS.map((filter) => (
-                <ToggleGroupItem key={filter} value={filter} className="h-9 flex-1 text-xs md:text-sm">
-                  {filter === "all"
-                    ? `All (${healthFilterCounts.get("all") ?? 0})`
-                    : `${filter === "healthy" ? "Healthy" : filter === "critical" ? "Critical" : filter === "danger" ? "Danger" : "Warning"} (${healthFilterCounts.get(filter) ?? 0})`}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-border">
-            <div className="overflow-x-auto" style={overviewTableStyle}>
-              <div className={`${OVERVIEW_GRID_CLASS} border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground`}>
-                {[
-                  { key: "name" as const, label: "Client", defaultDirection: "asc" as SortDirection },
-                  { key: "health" as const, label: "Health", defaultDirection: "asc" as SortDirection },
-                  { key: "status" as const, label: "Lifecycle", defaultDirection: "asc" as SortDirection },
-                  { key: "manager" as const, label: "Manager", defaultDirection: "asc" as SortDirection },
-                  { key: "prospectsSigned" as const, label: "Prospects signed", defaultDirection: "desc" as SortDirection },
-                  { key: "prospectsAdded" as const, label: "Prospects added", defaultDirection: "desc" as SortDirection },
-                  { key: "minSent" as const, label: "Min sent", defaultDirection: "desc" as SortDirection },
-                  { key: "inboxes" as const, label: "Inboxes", defaultDirection: "desc" as SortDirection },
-                  { key: "schedule" as const, label: "DoD schedule +2/+1/0", defaultDirection: "desc" as SortDirection },
-                  { key: "sent" as const, label: "DoD sent 0/-1/-2", defaultDirection: "desc" as SortDirection },
-                  { key: "threeDodTotal" as const, label: "3DoD total", defaultDirection: "desc" as SortDirection },
-                  { key: "threeDodSql" as const, label: "3DoD SQL", defaultDirection: "desc" as SortDirection },
-                  { key: "wowResponse" as const, label: "WoW response", defaultDirection: "desc" as SortDirection },
-                  { key: "wowHuman" as const, label: "WoW human", defaultDirection: "desc" as SortDirection },
-                  { key: "wowBounce" as const, label: "WoW bounce", defaultDirection: "desc" as SortDirection },
-                  { key: "wowOoo" as const, label: "WoW OOO", defaultDirection: "desc" as SortDirection },
-                  { key: "wowSql" as const, label: "WoW SQL", defaultDirection: "desc" as SortDirection },
-                  { key: "momSql" as const, label: "MoM SQL", defaultDirection: "desc" as SortDirection },
-                  { key: "updated" as const, label: "Updated", defaultDirection: "desc" as SortDirection },
-                ].map((column, index, collection) => (
-                  <div key={column.key} className="relative min-w-0">
-                    <button
-                      onClick={() =>
-                        setClientSort((current) =>
-                          current.key === column.key
-                            ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                            : { key: column.key, direction: column.defaultDirection },
-                        )
-                      }
-                      className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                    >
-                      {column.label} ({sortIndicator(clientSort.key === column.key, clientSort.direction)})
-                    </button>
-                    {index < collection.length - 1 && (
-                      <div onMouseDown={overviewColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                    )}
-                  </div>
+            {/* Row 1: Health */}
+            <div className="flex items-center gap-2">
+              <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
+              <ToggleGroup
+                type="single"
+                value={healthFilter}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setHealthFilter(value as HealthFilter);
+                }}
+                variant="outline"
+                className="flex-1 flex-wrap rounded-xl border border-border bg-black/10 p-1 md:flex-nowrap"
+              >
+                {HEALTH_FILTERS.map((filter) => (
+                  <ToggleGroupItem key={filter} value={filter} className="h-8 flex-1 text-xs">
+                    {filter === "all"
+                      ? `All (${healthFilterCounts.get("all") ?? 0})`
+                      : `${
+                          filter === "healthy"
+                            ? "Healthy"
+                            : filter === "critical"
+                            ? "Critical"
+                            : filter === "danger"
+                            ? "Danger"
+                            : "Warning"
+                        } (${healthFilterCounts.get(filter) ?? 0})`}
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
+            </div>
 
-              <div className="min-w-[2450px] divide-y divide-border">
-                {visibleOverviewRows.map((row) => {
-                  const isActive = selectedClient?.id === row.client.id;
-                  const conditionPack = conditionPackByClientId.get(row.client.id);
-                  const allResults = conditionPack?.allResults ?? [];
-                  const overviewResults = conditionPack?.overviewResults ?? [];
-                  const rollupSeverity =
-                    row.highestSeverity === "critical_over" || row.highestSeverity === "danger" || row.highestSeverity === "warning"
-                      ? row.highestSeverity
-                      : null;
-                  const rollupCause = allResults.find((result) => result.severity === row.highestSeverity)?.label ?? "All KPIs on target";
-                  const rowTint =
-                    row.highestSeverity === "critical_over"
-                      ? "bg-fuchsia-500/10"
-                      : row.highestSeverity === "danger"
-                        ? "bg-red-500/8"
-                        : row.highestSeverity === "warning"
-                          ? "bg-amber-500/8"
-                          : "";
+            {/* Row 2: Search + Status + Manager */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Name search */}
+              <input
+                type="search"
+                value={nameSearch}
+                onChange={(e) => setNameSearch(e.target.value)}
+                placeholder="Search by name…"
+                className="h-8 min-w-[160px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
+              />
 
-                  const renderCell = (columnKey: string, content: ReactNode) => {
-                    const condition = getCellCondition(allResults, columnKey) ?? getCellCondition(overviewResults, columnKey);
-                    if (!condition) {
-                      return <div>{content}</div>;
-                    }
-                    return renderConditionTooltip(condition, content);
-                  };
-
+              {/* Status multi-select pills */}
+              <div className="flex flex-wrap gap-1.5">
+                {CLIENT_STATUSES.map((s) => {
+                  const active = statusFilter.has(s);
                   return (
                     <button
-                      key={row.client.id}
-                      onClick={() => setSelectedClientId(row.client.id)}
-                      aria-label={`Open details for ${row.client.name}`}
-                      className={`${OVERVIEW_GRID_CLASS} w-max px-4 py-4 text-left transition ${isActive ? "bg-sky-500/10" : "hover:bg-white/5"} ${rowTint}`}
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setStatusFilter((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s)) next.delete(s);
+                          else next.add(s);
+                          return next;
+                        });
+                      }}
+                      className={cn(
+                        "rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition",
+                        active
+                          ? STATUS_COLORS[s]
+                          : "border-white/15 bg-transparent text-white/40 hover:border-white/30 hover:text-white/70",
+                      )}
                     >
-                      <div>
-                        <p className="text-sm">{row.client.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{formatMoney(row.client.contracted_amount)}</p>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          {rollupSeverity ? (
-                            <Badge className={cn("text-[10px]", getSeverityClassName(rollupSeverity))}>{severityLabel(rollupSeverity)}</Badge>
-                          ) : (
-                            <Badge className="border-emerald-300/45 bg-emerald-500/12 text-[10px] text-emerald-100">Healthy</Badge>
-                          )}
-                          <span className="text-sm font-medium">{row.healthScore}</span>
-                        </div>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">{rollupCause}</p>
-                      </div>
-                      <div>
-                        <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs">{row.client.status}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{row.managerName}</p>
-                      {renderCell("prospects_signed", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.prospects_signed)}</p>)}
-                      {renderCell("prospects_added", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.prospects_added)}</p>)}
-                      {renderCell("min_sent", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.min_daily_sent)}</p>)}
-                      {renderCell("inboxes", <p className="text-sm text-muted-foreground">{formatMetricCell(row.client.inboxes_count)}</p>)}
-                      {renderCell(
-                        "schedule_today",
-                        <p className="text-sm text-muted-foreground">
-                          {formatTriple(
-                            row.metrics.scheduleDayAfter,
-                            row.metrics.scheduleTomorrow,
-                            row.metrics.scheduleToday,
-                          )}
-                        </p>,
-                      )}
-                      {renderCell(
-                        "sent_today",
-                        <p className="text-sm text-muted-foreground">
-                          {formatTriple(row.metrics.sentToday, row.metrics.sentYesterday, row.metrics.sentTwoDaysAgo)}
-                        </p>,
-                      )}
-                      {renderCell("three_dod_total", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodTotal)}</p>)}
-                      {renderCell("three_dod_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.threeDodSql)}</p>)}
-                      {renderCell("wow_total_response_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowResponseRate)}</p>)}
-                      {renderCell("wow_human_response_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowHumanRate)}</p>)}
-                      {renderCell("wow_bounce_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowBounceRate)}</p>)}
-                      {renderCell("wow_ooo_rate", <p className="text-sm text-muted-foreground">{formatRate(row.metrics.wowOooRate)}</p>)}
-                      {renderCell("wow_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.wowSql)}</p>)}
-                      {renderCell("mom_sql", <p className="text-sm text-muted-foreground">{formatMetricCell(row.metrics.momSql)}</p>)}
-                      <p className="text-sm text-muted-foreground">{formatDate(row.client.updated_at, { day: "2-digit", month: "short" })}</p>
+                      {s}
                     </button>
                   );
                 })}
               </div>
+
+              {/* Manager filter — admin only */}
+              {canEditAssignments && managerUsers.length > 0 && (
+                <Select value={managerFilter} onValueChange={setManagerFilter}>
+                  <SelectTrigger className="h-8 min-w-[140px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
+                    <SelectValue placeholder="All managers" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All managers</SelectItem>
+                    {managerUsers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.first_name} {m.last_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Clear all */}
+              {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || healthFilter !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNameSearch("");
+                    setStatusFilter(new Set());
+                    setManagerFilter("all");
+                    setHealthFilter("all");
+                  }}
+                  className="h-8 rounded-lg border border-white/15 bg-black/20 px-3 text-xs text-white/50 transition hover:border-white/30 hover:text-white"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           </div>
+
+          <ClientsMegaTable
+            rows={visibleMegaRows}
+            sort={sort}
+            onSortChange={setSort}
+            onRowClick={(id) => {
+              // [TEMP PERF] mark moment of user click — paired with drawer-mounted in ClientDrawer
+              mark("drawer-click");
+              perfLog(`row click → openClient(${id})`);
+              openClient(id);
+            }}
+            selectedClientId={selectedClientId}
+          />
 
           {hasMoreClients && (
             <div className="mt-4 flex justify-center">
@@ -1087,634 +599,164 @@ export function ClientsPage() {
         </Surface>
       )}
 
-      {selectedClient && draft && selectedClientMetrics && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/55" onClick={() => setSelectedClientId(null)}>
-          <aside
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${selectedClient.name} details`}
-            className="flex h-full w-full max-w-[980px] flex-col border-l border-border bg-[#050505] shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-border p-6">
-              <div>
-                <h2 className="text-xl">{selectedClient.name}</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Client workspace grouped by summary, performance metrics, configuration, and user access.
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedClientId(null)}
-                className="rounded-xl border border-border p-2 text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
-                aria-label="Close client details"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => cancelDraft()}
-                  disabled={!isDraftDirty || isSavingDraft}
-                  className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Cancel changes
-                </button>
-                <button
-                  onClick={() => {
-                    void saveDraft();
-                  }}
-                  disabled={!isDraftDirty || isSavingDraft}
-                  className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSavingDraft ? "Saving..." : "Save changes"}
-                </button>
-              </div>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">Operational issues</p>
-                  <p className="text-xs text-muted-foreground">Rule-driven issues that currently need CS attention.</p>
-                </div>
-                {selectedOperationalIssues.length === 0 ? (
-                  <p className="text-sm text-emerald-200">No operational issues. All tracked metrics are healthy.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {selectedOperationalIssues.map((issue) => (
-                      <div key={issue.ruleId} className="rounded-xl border border-border bg-black/20 p-3">
-                        <div className="flex items-center gap-2">
-                          <Badge className={cn("text-[10px]", getSeverityClassName(issue.severity))}>{severityLabel(issue.severity)}</Badge>
-                          <p className="text-sm">{issue.label}</p>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Rule: {issue.ruleName}</p>
-                      </div>
+      <Sheet open={isCreatingClient} onOpenChange={setIsCreatingClient}>
+        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
+          <SheetHeader className="p-6 pb-2">
+            <SheetTitle className="text-white">New client</SheetTitle>
+            <SheetDescription>Fill in the required fields to create a new client account.</SheetDescription>
+          </SheetHeader>
+          {createClientDraft && (
+            <div className="space-y-4 px-6 pb-6">
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
+                <input
+                  value={createClientDraft.name}
+                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, name: e.target.value } : d)}
+                  placeholder="Client name"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+                />
+              </label>
+              {canEditAssignments && (
+                <label className="block space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager *</span>
+                  <Select value={createClientDraft.managerId} onValueChange={(v) => setCreateClientDraft((d) => d ? { ...d, managerId: v } : d)}>
+                    <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                      <SelectValue placeholder="Select manager" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                      {managerUsers.map((m) => (
+                        <SelectItem key={m.id} value={m.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          {m.first_name} {m.last_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              )}
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
+                <Select value={createClientDraft.status} onValueChange={(v) => setCreateClientDraft((d) => d ? { ...d, status: v as (typeof CLIENT_STATUSES)[number] } : d)}>
+                  <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {CLIENT_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
                     ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">Setup gaps</p>
-                  <p className="text-xs text-muted-foreground">Configuration gaps moved out of the row-level table badges.</p>
-                </div>
-                {selectedSetupGaps.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No setup gaps found for this client.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {selectedSetupGaps.map((issue) => (
-                      <div key={issue.ruleId} className="rounded-xl border border-border bg-black/20 p-3">
-                        <div className="flex items-center gap-2">
-                          <Badge className={cn("text-[10px]", getSeverityClassName(issue.severity))}>{severityLabel(issue.severity)}</Badge>
-                          <p className="text-sm">{issue.label}</p>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Rule: {issue.ruleName}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">Client summary</p>
-                  <p className="text-xs text-muted-foreground">Quick context for ownership, contract, and automation flags.</p>
-                </div>
-                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned manager</p>
-                    <p className="mt-2 text-sm">{selectedManagerName}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract amount</p>
-                    <p className="mt-2 text-sm">{formatMoney(selectedClient.contracted_amount)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract due date</p>
-                    <p className="mt-2 text-sm">{formatDate(selectedClient.contract_due_date)}</p>
-                  </div>
-                  {setupWorkspaceCondition
-                    ? renderConditionTooltip(
-                        setupWorkspaceCondition,
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</p>
-                          <p className="mt-2 text-sm">{selectedClient.external_workspace_id ?? "-"}</p>
-                        </div>,
-                      )
-                    : (
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</p>
-                          <p className="mt-2 text-sm">{selectedClient.external_workspace_id ?? "-"}</p>
-                        </div>
-                      )}
-                  {setupBiCondition
-                    ? renderConditionTooltip(
-                        setupBiCondition,
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup</p>
-                          <p className="mt-2 text-sm">{selectedClient.bi_setup_done ? "Complete" : "Pending"}</p>
-                        </div>,
-                      )
-                    : (
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup</p>
-                          <p className="mt-2 text-sm">{selectedClient.bi_setup_done ? "Complete" : "Pending"}</p>
-                        </div>
-                      )}
-                  {setupAutoLiCondition
-                    ? renderConditionTooltip(
-                        setupAutoLiCondition,
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto-LI API key</p>
-                          <p className="mt-2 text-sm">{selectedClient.linkedin_api_key ? "Configured" : "Missing"}</p>
-                        </div>,
-                      )
-                    : (
-                        <div className="rounded-2xl border border-border bg-black/10 p-4">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto-LI API key</p>
-                          <p className="mt-2 text-sm">{selectedClient.linkedin_api_key ? "Configured" : "Missing"}</p>
-                        </div>
-                      )}
-                  <label className="rounded-2xl border border-border bg-black/10 p-4">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Auto OOO</span>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="text-sm">{draft.autoOooEnabled ? "Enabled" : "Disabled"}</span>
-                      <Checkbox
-                        checked={draft.autoOooEnabled}
-                        onCheckedChange={(checked) =>
-                          setDraft((current) => (current ? { ...current, autoOooEnabled: checked === true } : current))
-                        }
-                        className="h-4 w-4"
-                      />
-                    </div>
-                  </label>
-                </div>
-              </section>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">Performance metrics</p>
-                  <p className="text-xs text-muted-foreground">DoD, 3DoD, WoW, and MoM metric tables for fast comparison.</p>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">DoD (schedule and sent)</p>
-                  <div className="overflow-hidden rounded-2xl border border-border">
-                    <div className="overflow-x-auto" style={dodTableStyle}>
-                      <div className="grid min-w-[680px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground [grid-template-columns:var(--clients-dod-columns)]">
-                        {[
-                          { key: "bucket" as const, label: "Offset" },
-                          { key: "schedule" as const, label: "Planned emails" },
-                          { key: "sent" as const, label: "Sent emails" },
-                        ].map((column, index, collection) => (
-                          <div key={column.key} className="relative min-w-0">
-                            <button
-                              onClick={() =>
-                                setDodSort((current) =>
-                                  current.key === column.key
-                                    ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                                    : { key: column.key, direction: column.key === "bucket" ? "asc" : "desc" },
-                                )
-                              }
-                              className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                            >
-                              {column.label} ({sortIndicator(dodSort.key === column.key, dodSort.direction)})
-                            </button>
-                            {index < collection.length - 1 && (
-                              <div onMouseDown={dodColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="min-w-[680px] divide-y divide-border">
-                        {sortedDodRows.map((row: DodRow) => (
-                          <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-dod-columns)]">
-                            <span>{row.bucket}</span>
-                            {(() => {
-                              const key = dodCellKey(row.bucket, "schedule");
-                              const result = getCellCondition(selectedDodConditions[key] ?? [], key);
-                              if (!result) return <span className="text-muted-foreground">{formatMetricCell(row.schedule)}</span>;
-                              return renderConditionTooltip(result, <span className="text-muted-foreground">{formatMetricCell(row.schedule)}</span>);
-                            })()}
-                            {(() => {
-                              const key = dodCellKey(row.bucket, "sent");
-                              const result = getCellCondition(selectedDodConditions[key] ?? [], key);
-                              if (!result) return <span className="text-muted-foreground">{formatMetricCell(row.sent)}</span>;
-                              return renderConditionTooltip(result, <span className="text-muted-foreground">{formatMetricCell(row.sent)}</span>);
-                            })()}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">3DoD leads</p>
-                  <div className="overflow-hidden rounded-2xl border border-border">
-                    <div className="overflow-x-auto" style={threeDodTableStyle}>
-                      <div className="grid min-w-[680px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground [grid-template-columns:var(--clients-three-dod-columns)]">
-                        {[
-                          { key: "bucket" as const, label: "Offset" },
-                          { key: "totalLeads" as const, label: "Total leads" },
-                          { key: "sqlLeads" as const, label: "SQL leads" },
-                        ].map((column, index, collection) => (
-                          <div key={column.key} className="relative min-w-0">
-                            <button
-                              onClick={() =>
-                                setThreeDodSort((current) =>
-                                  current.key === column.key
-                                    ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                                    : { key: column.key, direction: column.key === "bucket" ? "asc" : "desc" },
-                                )
-                              }
-                              className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                            >
-                              {column.label} ({sortIndicator(threeDodSort.key === column.key, threeDodSort.direction)})
-                            </button>
-                            {index < collection.length - 1 && (
-                              <div onMouseDown={threeDodColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="min-w-[680px] divide-y divide-border">
-                        {sortedThreeDodRows.map((row: ThreeDodRow) => (
-                          <div key={row.bucket} className="grid min-w-[680px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-three-dod-columns)]">
-                            <span>{row.bucket}</span>
-                            {renderMetricCellWithCondition(formatMetricCell(row.totalLeads), "three_dod_total", selectedThreeDodConditions)}
-                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "three_dod_sql", selectedThreeDodConditions)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">WoW rates and leads</p>
-                  <div className="overflow-hidden rounded-2xl border border-border">
-                    <div className="overflow-x-auto" style={wowTableStyle}>
-                      <div className="grid min-w-[980px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground [grid-template-columns:var(--clients-wow-columns)]">
-                        {[
-                          { key: "bucket" as const, label: "Week" },
-                          { key: "totalLeads" as const, label: "Total" },
-                          { key: "sqlLeads" as const, label: "SQL" },
-                          { key: "responseRate" as const, label: "Response" },
-                          { key: "humanRate" as const, label: "Human" },
-                          { key: "bounceRate" as const, label: "Bounce" },
-                          { key: "oooRate" as const, label: "OOO" },
-                          { key: "negativeRate" as const, label: "Negative" },
-                        ].map((column, index, collection) => (
-                          <div key={column.key} className="relative min-w-0">
-                            <button
-                              onClick={() =>
-                                setWowSort((current) =>
-                                  current.key === column.key
-                                    ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                                    : { key: column.key, direction: column.key === "bucket" ? "asc" : "desc" },
-                                )
-                              }
-                              className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                            >
-                              {column.label} ({sortIndicator(wowSort.key === column.key, wowSort.direction)})
-                            </button>
-                            {index < collection.length - 1 && (
-                              <div onMouseDown={wowColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="min-w-[980px] divide-y divide-border">
-                        {sortedWowRows.map((row: WowRow) => (
-                          <div key={row.bucket} className="grid min-w-[980px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-wow-columns)]">
-                            <span>{row.bucket}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.totalLeads)}</span>
-                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "wow_sql", selectedWowConditions)}
-                            {renderMetricCellWithCondition(formatRate(row.responseRate), "wow_total_response_rate", selectedWowConditions)}
-                            {renderMetricCellWithCondition(formatRate(row.humanRate), "wow_human_response_rate", selectedWowConditions)}
-                            {renderMetricCellWithCondition(formatRate(row.bounceRate), "wow_bounce_rate", selectedWowConditions)}
-                            {renderMetricCellWithCondition(formatRate(row.oooRate), "wow_ooo_rate", selectedWowConditions)}
-                            {renderMetricCellWithCondition(formatRate(row.negativeRate), "wow_negative_rate", selectedWowConditions)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">MoM pipeline</p>
-                  <div className="overflow-hidden rounded-2xl border border-border">
-                    <div className="overflow-x-auto" style={momTableStyle}>
-                      <div className="grid min-w-[800px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground [grid-template-columns:var(--clients-mom-columns)]">
-                        {[
-                          { key: "bucket" as const, label: "Month" },
-                          { key: "totalLeads" as const, label: "Total leads" },
-                          { key: "sqlLeads" as const, label: "SQL leads" },
-                          { key: "meetings" as const, label: "Meetings" },
-                          { key: "won" as const, label: "Won" },
-                        ].map((column, index, collection) => (
-                          <div key={column.key} className="relative min-w-0">
-                            <button
-                              onClick={() =>
-                                setMomSort((current) =>
-                                  current.key === column.key
-                                    ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                                    : { key: column.key, direction: column.key === "bucket" ? "asc" : "desc" },
-                                )
-                              }
-                              className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                            >
-                              {column.label} ({sortIndicator(momSort.key === column.key, momSort.direction)})
-                            </button>
-                            {index < collection.length - 1 && (
-                              <div onMouseDown={momColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="min-w-[800px] divide-y divide-border">
-                        {sortedMomRows.map((row: MomRow) => (
-                          <div key={row.bucket} className="grid min-w-[800px] gap-3 px-4 py-3 text-sm [grid-template-columns:var(--clients-mom-columns)]">
-                            <span>{row.bucket}</span>
-                            <span className="text-muted-foreground">{formatMetricCell(row.totalLeads)}</span>
-                            {renderMetricCellWithCondition(formatMetricCell(row.sqlLeads), "mom_sql", selectedMomConditions)}
-                            {renderMetricCellWithCondition(formatMetricCell(row.meetings), "mom_meetings", selectedMomConditions)}
-                            {renderMetricCellWithCondition(formatMetricCell(row.won), "mom_won", selectedMomConditions)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">Client configuration</p>
-                  <p className="text-xs text-muted-foreground">Core settings used by campaign operations.</p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client display name</span>
-                    <input
-                      value={draft.name}
-                      onChange={(event) => setDraft((current) => (current ? { ...current, name: event.target.value } : current))}
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client lifecycle status</span>
-                    <Select
-                      value={draft.status}
-                      onValueChange={(value) =>
-                        setDraft((current) => (current ? { ...current, status: value as ClientRecord["status"] } : current))
-                      }
-                    >
-                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                        {CLIENT_STATUSES.map((status) => (
-                          <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                            {status}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label className={cn("space-y-2", setupMinSentCondition ? "rounded-xl border p-3" : "", setupMinSentCondition ? getSeverityClassName(setupMinSentCondition.severity) : "")}>
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Minimum emails per day</span>
-                    <input
-                      type="number"
-                      value={draft.minDailySent}
-                      onChange={(event) =>
-                        setDraft((current) => {
-                          if (!current) return current;
-                          const value = Number(event.target.value);
-                          return { ...current, minDailySent: Number.isFinite(value) ? Math.max(0, value) : 0 };
-                        })
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                    {setupMinSentCondition && (
-                      <p className="text-xs text-muted-foreground">{setupMinSentCondition.message}</p>
-                    )}
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active inbox count</span>
-                    <input
-                      type="number"
-                      value={draft.inboxesCount}
-                      onChange={(event) =>
-                        setDraft((current) => {
-                          if (!current) return current;
-                          const value = Number(event.target.value);
-                          return { ...current, inboxesCount: Number.isFinite(value) ? Math.max(0, value) : 0 };
-                        })
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
-                  <div className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Notification email recipients</span>
-                    <StringListEditor
-                      values={draft.notificationEmails}
-                      onChange={(next) =>
-                        setDraft((current) => (current ? { ...current, notificationEmails: next } : current))
-                      }
-                      placeholder="name@company.com"
-                      inputType="email"
-                      emptyLabel="No email recipients yet."
-                      addLabel="Add email"
-                      removeLabel="Remove email"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">SMS alert phone numbers</span>
-                    <StringListEditor
-                      values={draft.smsPhoneNumbers}
-                      onChange={(next) =>
-                        setDraft((current) => (current ? { ...current, smsPhoneNumbers: next } : current))
-                      }
-                      placeholder="+1 555 123 4567"
-                      inputType="tel"
-                      emptyLabel="No phone numbers yet."
-                      addLabel="Add phone number"
-                      removeLabel="Remove phone number"
-                    />
-                  </div>
-                  {canEditAssignments && (
-                    <label className="space-y-2">
-                      <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned manager</span>
-                      <Select
-                        value={draft.managerId || undefined}
-                        onValueChange={(value) => setDraft((current) => (current ? { ...current, managerId: value } : current))}
-                      >
-                        <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                          <SelectValue placeholder="Select manager" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                          {managerUsers.map((manager) => (
-                            <SelectItem
-                              key={manager.id}
-                              value={manager.id}
-                              className="text-white focus:bg-[#1a1a1a] focus:text-white"
-                            >
-                              {`${manager.first_name} ${manager.last_name}`.trim()}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </label>
-                  )}
-                </div>
-
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</span>
+                <input
+                  type="number"
+                  value={createClientDraft.externalWorkspaceId ?? ""}
+                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, externalWorkspaceId: e.target.value === "" ? null : Number(e.target.value) } : d)}
+                  placeholder="Smartlead workspace ID"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+                />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace API key</span>
+                <input
+                  value={createClientDraft.externalApiKey}
+                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, externalApiKey: e.target.value } : d)}
+                  placeholder="Smartlead API key"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 font-mono text-xs"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup notes</span>
-                  <textarea
-                    rows={4}
-                    value={draft.setupInfo}
-                    onChange={(event) => setDraft((current) => (current ? { ...current, setupInfo: event.target.value } : current))}
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>
+                  <input
+                    type="number"
+                    value={createClientDraft.kpiLeads ?? ""}
+                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, kpiLeads: e.target.value === "" ? null : Number(e.target.value) } : d)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
                   />
                 </label>
-              </section>
-
-              <section className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                <div className="space-y-1">
-                  <p className="text-sm">User access management</p>
-                  <p className="text-xs text-muted-foreground">
-                    Invite client users and manage active client-user mappings in one place.
-                  </p>
-                </div>
-
-                {canInviteUsers && (
-                  <div className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                    <div className="space-y-1">
-                      <p className="text-sm">Invite a client portal user</p>
-                      <p className="text-xs text-muted-foreground">Invite target is fixed to {selectedClient.name}.</p>
-                    </div>
-                    {inviteMessage && <Banner tone={inviteMessage.tone}>{inviteMessage.text}</Banner>}
-                    <div className="flex flex-wrap items-end gap-3">
-                      <label className="min-w-0 flex-1 space-y-2 sm:min-w-[16rem]">
-                        <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">User email</span>
-                        <input
-                          type="email"
-                          value={inviteEmail}
-                          onChange={(event) => setInviteEmail(event.target.value)}
-                          placeholder="name@company.com"
-                          className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                        />
-                      </label>
-                      <button
-                        onClick={() => {
-                          void inviteUser();
-                        }}
-                        disabled={isSendingInvite || !inviteEmail.trim()}
-                        className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isSendingInvite ? "Sending..." : "Send invitation"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {canEditAssignments && (
-                  <div className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
-                    <div className="space-y-1">
-                      <p className="text-sm">Active client-user mappings</p>
-                      <p className="text-xs text-muted-foreground">
-                        Each client user can be linked to one client. Re-assignment moves access to this client.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-end gap-3">
-                      <label className="min-w-0 flex-1 space-y-2 sm:min-w-[16rem]">
-                        <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client user account</span>
-                        <Select
-                          value={mappingUserId || CLIENT_USER_PLACEHOLDER}
-                          onValueChange={(value) => setMappingUserId(value === CLIENT_USER_PLACEHOLDER ? "" : value)}
-                        >
-                          <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                            <SelectValue placeholder="Select a client user account" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                            <SelectItem value={CLIENT_USER_PLACEHOLDER} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                              Select a client user account
-                            </SelectItem>
-                            {clientRoleUsers.map((user) => {
-                              const mapping = mappingByUserId.get(user.id);
-                              const mappedClientName = mapping ? clientById.get(mapping.client_id) ?? "Unknown client" : null;
-                              return (
-                                <SelectItem key={user.id} value={user.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                                  {`${user.first_name} ${user.last_name}`.trim()} - {user.email}
-                                  {mappedClientName ? ` (mapped: ${mappedClientName})` : ""}
-                                </SelectItem>
-                              );
-                            })}
-                          </SelectContent>
-                        </Select>
-                      </label>
-                      <button
-                        onClick={() => {
-                          void assignClientUser();
-                        }}
-                        disabled={!mappingUserId || isSavingMapping}
-                        className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isSavingMapping ? "Applying..." : "Assign user"}
-                      </button>
-                    </div>
-
-                    {selectedMapping && selectedMapping.client_id !== selectedClient.id && (
-                      <Banner tone="warning">
-                        Selected user is currently mapped to {selectedMappingClientName}. Saving will re-assign access.
-                      </Banner>
-                    )}
-
-                    {selectedClientMappings.length === 0 ? (
-                      <EmptyState title="No mapped users" description="Assign client users to grant portal access." />
-                    ) : (
-                      <div className="space-y-2">
-                        {selectedClientMappings.map((mapping) => {
-                          const user = users.find((item) => item.id === mapping.user_id);
-                          return (
-                            <div
-                              key={mapping.id}
-                              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-black/20 px-4 py-3"
-                            >
-                              <div>
-                                <p className="text-sm">{user ? `${user.first_name} ${user.last_name}`.trim() : mapping.user_id}</p>
-                                <p className="text-xs text-muted-foreground">{user?.email ?? "Email unavailable"}</p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  void removeClientUserMapping(mapping.id);
-                                }}
-                                disabled={isSavingMapping}
-                                className="rounded-full border border-border px-3 py-1.5 text-xs text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Remove mapping
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI meetings</span>
+                  <input
+                    type="number"
+                    value={createClientDraft.kpiMeetings ?? ""}
+                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, kpiMeetings: e.target.value === "" ? null : Number(e.target.value) } : d)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contracted amount</span>
+                  <input
+                    type="number"
+                    value={createClientDraft.contractedAmount ?? ""}
+                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, contractedAmount: e.target.value === "" ? null : Number(e.target.value) } : d)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract due date</span>
+                  <input
+                    type="date"
+                    value={createClientDraft.contractDueDate}
+                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, contractDueDate: e.target.value } : d)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+              <button
+                onClick={() => { void handleCreateClient(); }}
+                disabled={isSubmittingCreateClient || !createClientDraft.name.trim() || !createClientDraft.managerId || !createClientDraft.status}
+                className="w-full rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmittingCreateClient ? "Creating..." : "Create client"}
+              </button>
             </div>
-          </aside>
-        </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {selectedClient && draft && (
+        <ClientDrawer
+          client={selectedClient}
+          draft={draft}
+          setDraft={setDraft}
+          conditionPack={selectedConditionPack}
+          managerName={selectedManagerName}
+          managerUsers={managerUsers}
+          clientRoleUsers={clientRoleUsers}
+          allClients={clients}
+          allUsers={users}
+          selectedClientMappings={selectedClientMappings}
+          allClientUsers={clientUsers}
+          mappingUserId={mappingUserId}
+          setMappingUserId={setMappingUserId}
+          inviteEmail={inviteEmail}
+          setInviteEmail={setInviteEmail}
+          inviteMessage={inviteMessage}
+          isSavingDraft={isSavingDraft}
+          isSavingMapping={isSavingMapping}
+          isSendingInvite={isSendingInvite}
+          isDraftDirty={isDraftDirty}
+          canEditAssignments={canEditAssignments}
+          canInviteUsers={canInviteUsers}
+          onClose={closeClient}
+          onSave={() => {
+            void handleSave();
+          }}
+          onCancel={handleCancel}
+          onAssignClientUser={() => {
+            void handleAssignClientUser();
+          }}
+          onRemoveClientUserMapping={(id) => {
+            void handleRemoveClientUserMapping(id);
+          }}
+          onInviteUser={() => {
+            void handleInviteUser();
+          }}
+        />
       )}
     </div>
   );
 }
-

@@ -80,6 +80,26 @@ export interface UpdateInvoicePayload {
   patch: Partial<InvoiceRecord>;
 }
 
+export interface CreateClientPayload {
+  action: "createClient";
+  input: Omit<ClientRecord, "id" | "created_at" | "updated_at">;
+}
+
+export interface CreateCampaignPayload {
+  action: "createCampaign";
+  input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">;
+}
+
+export interface CreateLeadPayload {
+  action: "createLead";
+  input: Omit<LeadRecord, "id" | "created_at" | "updated_at">;
+}
+
+export interface CreateDomainPayload {
+  action: "createDomain";
+  input: Omit<DomainRecord, "id" | "created_at" | "updated_at">;
+}
+
 export interface CreateConditionRulePayload {
   action: "createConditionRule";
   input: Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at" | "created_by"> & { created_by?: string | null };
@@ -136,6 +156,10 @@ export type OrmGatewayRequest =
   | UpdateLeadPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
+  | CreateClientPayload
+  | CreateCampaignPayload
+  | CreateLeadPayload
+  | CreateDomainPayload
   | CreateConditionRulePayload
   | UpdateConditionRulePayload
   | DeleteConditionRulePayload
@@ -166,6 +190,10 @@ export interface OrmGatewayResponseMap {
   updateLead: LeadRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
+  createClient: ClientRecord;
+  createCampaign: CampaignRecord;
+  createLead: LeadRecord;
+  createDomain: DomainRecord;
   createConditionRule: ConditionRuleRecord;
   updateConditionRule: ConditionRuleRecord;
   deleteConditionRule: { ok: true };
@@ -277,6 +305,34 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "updateInvoice requires invoiceId and patch object." };
     }
     return { ok: true, value: { action, invoiceId: String(payload.invoiceId), patch: payload.patch as Partial<InvoiceRecord> } };
+  }
+
+  if (action === "createClient") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createClient requires input object." };
+    }
+    return { ok: true, value: { action, input: payload.input as CreateClientPayload["input"] } };
+  }
+
+  if (action === "createCampaign") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createCampaign requires input object." };
+    }
+    return { ok: true, value: { action, input: payload.input as CreateCampaignPayload["input"] } };
+  }
+
+  if (action === "createLead") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createLead requires input object." };
+    }
+    return { ok: true, value: { action, input: payload.input as CreateLeadPayload["input"] } };
+  }
+
+  if (action === "createDomain") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createDomain requires input object." };
+    }
+    return { ok: true, value: { action, input: payload.input as CreateDomainPayload["input"] } };
   }
 
   if (action === "createConditionRule") {

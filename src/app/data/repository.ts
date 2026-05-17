@@ -35,6 +35,10 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateLead: { table: "leads", operation: "update" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
+  createClient: { table: "clients", operation: "insert" },
+  createCampaign: { table: "campaigns", operation: "insert" },
+  createLead: { table: "leads", operation: "insert" },
+  createDomain: { table: "domains", operation: "insert" },
   createConditionRule: { table: "condition_rules", operation: "insert" },
   updateConditionRule: { table: "condition_rules", operation: "update" },
   deleteConditionRule: { table: "condition_rules", operation: "delete" },
@@ -300,6 +304,11 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const body = { action, ...payload } as Record<string, unknown>;
   const meta = ORM_ACTION_META[action];
 
+  // [TEMP PERF] only instrument loadSnapshot — the dominant call
+  const isLoadSnapshot = action === "loadSnapshot";
+  const tFetchStart = isLoadSnapshot ? performance.now() : 0;
+  // [TEMP PERF] /start
+
   let response = await performEdgeFunctionRequest("orm-gateway", firstToken, body);
 
   if (response.status === 401) {
@@ -309,12 +318,29 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     }
   }
 
+  // [TEMP PERF] measure fetch + text + parse for loadSnapshot
+  const tFetchEnd = isLoadSnapshot ? performance.now() : 0;
   const text = await response.text();
+  const tTextEnd = isLoadSnapshot ? performance.now() : 0;
+  if (isLoadSnapshot) {
+    console.log(
+      `[TEMP PERF] loadSnapshot HTTP: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
+        `readBody=${(tTextEnd - tFetchEnd).toFixed(1)}ms ` +
+        `bodySize=${text.length} bytes (${(text.length / 1024).toFixed(1)} KB)`,
+    );
+  }
+  // [TEMP PERF] /end
   let envelope: OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]> | null = null;
 
   if (text) {
     try {
+      // [TEMP PERF] measure JSON.parse cost for loadSnapshot
+      const tParseStart = isLoadSnapshot ? performance.now() : 0;
       envelope = JSON.parse(text) as OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]>;
+      if (isLoadSnapshot) {
+        console.log(`[TEMP PERF] loadSnapshot JSON.parse: ${(performance.now() - tParseStart).toFixed(1)}ms`);
+      }
+      // [TEMP PERF] /end
     } catch {
       envelope = null;
     }
@@ -396,6 +422,10 @@ export interface Repository {
     leadsLimit?: number;
   }): Promise<CoreSnapshot>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
+  createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
+  createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
+  createLead(input: Omit<LeadRecord, "id" | "created_at" | "updated_at">): Promise<LeadRecord>;
+  createDomain(input: Omit<DomainRecord, "id" | "created_at" | "updated_at">): Promise<DomainRecord>;
   updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
   updateCampaign(campaignId: string, patch: Partial<CampaignRecord>): Promise<CampaignRecord>;
   updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
@@ -434,6 +464,22 @@ export const repository: Repository = {
 
   async loadConditionRules() {
     return invokeOrmGatewaySelectWithRetry("loadConditionRules", {});
+  },
+
+  async createClient(input) {
+    return invokeOrmGatewayAction("createClient", { input });
+  },
+
+  async createCampaign(input) {
+    return invokeOrmGatewayAction("createCampaign", { input });
+  },
+
+  async createLead(input) {
+    return invokeOrmGatewayAction("createLead", { input });
+  },
+
+  async createDomain(input) {
+    return invokeOrmGatewayAction("createDomain", { input });
   },
 
   async updateClient(clientId, patch) {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientsPage } from "../clients-page";
 import { useAuth } from "../../providers/auth";
 import { useCoreData } from "../../providers/core-data";
+import { createClientMetrics } from "../../lib/client-metrics";
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
@@ -183,10 +184,22 @@ function makeCoreData(overrides?: Record<string, unknown>) {
     deleteClientUserMapping: vi.fn(async () => {}),
   };
 
-  return {
-    ...base,
-    ...overrides,
-  };
+  const merged = { ...base, ...overrides };
+  const effectiveStats = merged.dailyStats as typeof base.dailyStats;
+  const effectiveLeads = merged.leads as typeof base.leads;
+  const effectiveClients = merged.clients as typeof base.clients;
+
+  const metricsByClientId = new Map(
+    effectiveClients.map((c) => [
+      c.id,
+      createClientMetrics(
+        effectiveStats.filter((s) => s.client_id === c.id),
+        effectiveLeads.filter((l) => l.client_id === c.id),
+      ),
+    ]),
+  );
+
+  return { ...merged, metricsByClientId };
 }
 
 function renderPage() {
@@ -250,20 +263,21 @@ describe("clients operational tooling", () => {
     expect(core.updateClient).toHaveBeenCalledWith("client-1", expect.objectContaining({ name: "Acme Final" }));
   });
 
-  it("renders DoD/3DoD/WoW/MoM metric tables in drawer", () => {
+  it("renders DoD/3DoD/WoW/MoM metric groups in the mega-table", () => {
     const core = makeCoreData();
     mockedUseCoreData.mockReturnValue(core as never);
 
     renderPage();
-    expect(screen.getByRole("button", { name: /DoD schedule \+2\/\+1\/0/i })).toBeInTheDocument();
-    expect(screen.getByText("410 / 395 / 380")).toBeInTheDocument();
-
-    openClientDrawer();
-
-    expect(screen.getByText("DoD (schedule and sent)")).toBeInTheDocument();
-    expect(screen.getByText("3DoD leads")).toBeInTheDocument();
-    expect(screen.getByText("WoW rates and leads")).toBeInTheDocument();
-    expect(screen.getByText("MoM pipeline")).toBeInTheDocument();
+    // Group bands (top-level header tier) for each metric family
+    expect(screen.getByText("DoD Schedule")).toBeInTheDocument();
+    expect(screen.getByText("DoD Daily sent")).toBeInTheDocument();
+    expect(screen.getByText("3-Day rolling")).toBeInTheDocument();
+    expect(screen.getByText("Week over Week")).toBeInTheDocument();
+    expect(screen.getByText("Month over Month")).toBeInTheDocument();
+    // Schedule value 410 (+2) is unique to schedule_day_after for today
+    expect(screen.getByText("410")).toBeInTheDocument();
+    // 395 appears in both schedule +1 and DoD sent -1 — at least one match
+    expect(screen.getAllByText("395").length).toBeGreaterThan(0);
   });
 
   it("supports assigning and removing client-user mappings in drawer", async () => {
@@ -385,7 +399,7 @@ describe("clients operational tooling", () => {
 
     renderPage();
 
-    const momSqlHeader = screen.getByRole("button", { name: /MoM SQL/i });
+    const momSqlHeader = screen.getByRole("button", { name: "Sort by MoM SQL 0" });
     fireEvent.click(momSqlHeader);
 
     const rowButtons = screen.getAllByRole("button", { name: /Open details for/i });

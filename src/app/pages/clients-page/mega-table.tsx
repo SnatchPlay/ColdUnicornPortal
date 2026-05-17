@@ -1,0 +1,785 @@
+import { useMemo, type CSSProperties, type ReactNode } from "react";
+// [TEMP PERF] perf instrumentation — remove with the rest of `[TEMP PERF]` blocks
+import { useRenderCounter } from "../../lib/__perf";
+import { Badge } from "../../components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
+import { cn } from "../../components/ui/utils";
+import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../../lib/client-metrics";
+import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
+import { dodCellKey } from "../../lib/conditions/client-condition-results";
+import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
+import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
+import { formatNumber } from "../../lib/format";
+import { useResizableColumns } from "../../lib/use-resizable-columns";
+import type { ClientRecord } from "../../types/core";
+
+export type SortDirection = "asc" | "desc";
+
+export interface ClientMegaRow {
+  client: ClientRecord;
+  managerName: string;
+  metrics: ClientMetricsPack;
+  highestSeverity: ConditionSeverity | null;
+  healthScore: number;
+  rollupCause: string;
+  conditionPack: ReturnType<typeof evaluateClientConditions> | null;
+}
+
+export interface MegaSortState {
+  key: string;
+  direction: SortDirection;
+}
+
+type Align = "left" | "center" | "right";
+type Group = "cs" | "basic" | "dodSched" | "dodSent" | "td3" | "wow" | "mom";
+
+interface MegaColumn {
+  id: string;
+  group: Group;
+  sub: string;
+  label: string;
+  width: number;
+  minWidth: number;
+  align: Align;
+  sticky?: boolean;
+  /** Render the cell content (without condition wrapper). */
+  render: (row: ClientMegaRow) => ReactNode;
+  /** Sort comparator key — string or number. */
+  sortValue?: (row: ClientMegaRow) => string | number | null;
+  /** Optional explicit condition column key (matches `column_key` on condition rules). */
+  conditionKey?: string;
+  /** Condition cell key for DoD per-bucket lookup (overrides conditionKey). */
+  dodBucket?: string;
+  dodKind?: "schedule" | "sent";
+  defaultDirection?: SortDirection;
+}
+
+const GROUP_META: Record<Group, { label: string }> = {
+  cs: { label: "Customer Success" },
+  basic: { label: "Basic" },
+  dodSched: { label: "DoD Schedule" },
+  dodSent: { label: "DoD Daily sent" },
+  td3: { label: "3-Day rolling" },
+  wow: { label: "Week over Week" },
+  mom: { label: "Month over Month" },
+};
+
+const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
+const DOD_SENT_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
+const TD3_TOTAL_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
+const TD3_SQL_BUCKETS = ["0", "-1", "-2"] as const;
+const WOW_BUCKETS = ["0", "-1", "-2", "-3"] as const;
+const MOM_BUCKETS = ["0", "-1", "-2", "-3"] as const;
+
+function formatNum(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return formatNumber(value);
+}
+
+function formatRate(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function bucketMap<T extends { bucket: string }>(rows: T[]): Map<string, T> {
+  const m = new Map<string, T>();
+  for (const r of rows) m.set(r.bucket, r);
+  return m;
+}
+
+function dodLookup(row: ClientMegaRow, bucket: string): DodRow | undefined {
+  return bucketMap(row.metrics.dodRows).get(bucket);
+}
+function td3Lookup(row: ClientMegaRow, bucket: string): ThreeDodRow | undefined {
+  return bucketMap(row.metrics.threeDodRows).get(bucket);
+}
+function wowLookup(row: ClientMegaRow, bucket: string): WowRow | undefined {
+  return bucketMap(row.metrics.wowRows).get(bucket);
+}
+function momLookup(row: ClientMegaRow, bucket: string): MomRow | undefined {
+  return bucketMap(row.metrics.momRows).get(bucket);
+}
+
+function buildColumns(): MegaColumn[] {
+  const out: MegaColumn[] = [];
+
+  // --- Sticky (Customer Success) -----------------------------------------
+  out.push({
+    id: "name",
+    group: "cs",
+    sub: "Customer Success",
+    label: "Client",
+    width: 220,
+    minWidth: 160,
+    align: "left",
+    sticky: true,
+    defaultDirection: "asc",
+    render: (row) => {
+      const sev = row.highestSeverity;
+      const sevForBadge =
+        sev === "critical_over" || sev === "danger" || sev === "warning" ? sev : null;
+      return (
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-sm text-foreground">{row.client.name}</span>
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {sevForBadge ? (
+              <Badge className={cn("shrink-0 text-[9px] px-1 py-0", getSeverityClassName(sevForBadge))}>
+                {sevForBadge === "critical_over" ? "Critical" : sevForBadge === "danger" ? "Danger" : "Warning"}
+              </Badge>
+            ) : (
+              <Badge className="shrink-0 border-emerald-400/60 bg-emerald-500/20 text-[9px] text-emerald-200 px-1 py-0">
+                Healthy
+              </Badge>
+            )}
+            {row.rollupCause && row.rollupCause !== "All KPIs on target" ? (
+              <span className="truncate text-[9px] text-muted-foreground">{row.rollupCause}</span>
+            ) : (
+              <span className="truncate text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                {row.client.status}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    },
+    sortValue: (row) => row.client.name.toLowerCase(),
+  });
+
+  out.push({
+    id: "manager",
+    group: "cs",
+    sub: "Customer Success",
+    label: "Manager",
+    width: 130,
+    minWidth: 100,
+    align: "left",
+    sticky: true,
+    defaultDirection: "asc",
+    render: (row) => <span className="truncate text-xs text-muted-foreground">{row.managerName}</span>,
+    sortValue: (row) => row.managerName.toLowerCase(),
+  });
+
+  // --- Basic --------------------------------------------------------------
+  out.push({
+    id: "status",
+    group: "basic",
+    sub: "Basic",
+    label: "Status",
+    width: 80,
+    minWidth: 68,
+    align: "center",
+    defaultDirection: "asc",
+    render: (row) => {
+      const s = row.client.status ?? "—";
+      const cls =
+        s === "Active"
+          ? "border-emerald-500 bg-emerald-900/60"
+          : s === "Abo"
+          ? "border-sky-400 bg-sky-900/60"
+          : s === "Sales"
+          ? "border-violet-400 bg-violet-900/60"
+          : s === "On hold"
+          ? "border-amber-400 bg-amber-900/60"
+          : s === "Offboarding"
+          ? "border-orange-400 bg-orange-900/60"
+          : s === "Inactive"
+          ? "border-red-500 bg-red-900/60"
+          : "border-border bg-white/5";
+      return (
+        <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white", cls)}>
+          {s}
+        </span>
+      );
+    },
+    sortValue: (row) => row.client.status ?? "",
+  });
+  out.push({
+    id: "inboxes",
+    group: "basic",
+    sub: "Basic",
+    label: "Inboxes",
+    width: 64,
+    minWidth: 52,
+    align: "center",
+    conditionKey: "inboxes",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.inboxes_count),
+    sortValue: (row) => row.client.inboxes_count ?? null,
+  });
+  out.push({
+    id: "prospects_signed",
+    group: "basic",
+    sub: "Basic",
+    label: "Signed",
+    width: 68,
+    minWidth: 56,
+    align: "center",
+    conditionKey: "prospects_signed",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.prospects_signed),
+    sortValue: (row) => row.client.prospects_signed ?? null,
+  });
+  out.push({
+    id: "prospects_added",
+    group: "basic",
+    sub: "Basic",
+    label: "Added",
+    width: 68,
+    minWidth: 56,
+    align: "center",
+    conditionKey: "prospects_added",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.prospects_added),
+    sortValue: (row) => row.client.prospects_added ?? null,
+  });
+  out.push({
+    id: "min_sent",
+    group: "basic",
+    sub: "Basic",
+    label: "Min sent",
+    width: 68,
+    minWidth: 56,
+    align: "center",
+    conditionKey: "min_sent",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.min_daily_sent),
+    sortValue: (row) => row.client.min_daily_sent ?? null,
+  });
+  out.push({
+    id: "kpi_leads",
+    group: "basic",
+    sub: "Basic",
+    label: "KPI L",
+    width: 56,
+    minWidth: 48,
+    align: "center",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.kpi_leads),
+    sortValue: (row) => row.client.kpi_leads ?? null,
+  });
+  out.push({
+    id: "kpi_meetings",
+    group: "basic",
+    sub: "Basic",
+    label: "KPI M",
+    width: 56,
+    minWidth: 48,
+    align: "center",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.client.kpi_meetings),
+    sortValue: (row) => row.client.kpi_meetings ?? null,
+  });
+  out.push({
+    id: "bi_setup",
+    group: "basic",
+    sub: "Basic",
+    label: "Bi",
+    width: 44,
+    minWidth: 40,
+    align: "center",
+    conditionKey: "bi_setup",
+    defaultDirection: "desc",
+    render: (row) => (row.client.bi_setup_done ? "✓" : "—"),
+    sortValue: (row) => (row.client.bi_setup_done ? 1 : 0),
+  });
+
+  // --- DoD Schedule -------------------------------------------------------
+  for (const b of DOD_SCHED_BUCKETS) {
+    out.push({
+      id: `dod-sched-${b}`,
+      group: "dodSched",
+      sub: "Schedule",
+      label: b,
+      width: 50,
+      minWidth: 42,
+      align: "center",
+      dodBucket: b,
+      dodKind: "schedule",
+      defaultDirection: "desc",
+      render: (row) => formatNum(dodLookup(row, b)?.schedule ?? null),
+      sortValue: (row) => dodLookup(row, b)?.schedule ?? null,
+    });
+  }
+
+  // --- DoD Daily sent -----------------------------------------------------
+  for (const b of DOD_SENT_BUCKETS) {
+    out.push({
+      id: `dod-sent-${b}`,
+      group: "dodSent",
+      sub: "Daily sent",
+      label: b,
+      width: 50,
+      minWidth: 42,
+      align: "center",
+      dodBucket: b,
+      dodKind: "sent",
+      defaultDirection: "desc",
+      render: (row) => formatNum(dodLookup(row, b)?.sent ?? null),
+      sortValue: (row) => dodLookup(row, b)?.sent ?? null,
+    });
+  }
+
+  // --- 3-DoD --------------------------------------------------------------
+  for (const b of TD3_TOTAL_BUCKETS) {
+    out.push({
+      id: `td3-total-${b}`,
+      group: "td3",
+      sub: "3-DoD TOTAL leads",
+      label: b,
+      width: 42,
+      minWidth: 36,
+      align: "center",
+      conditionKey: "three_dod_total",
+      defaultDirection: "desc",
+      render: (row) => formatNum(td3Lookup(row, b)?.totalLeads ?? null),
+      sortValue: (row) => td3Lookup(row, b)?.totalLeads ?? null,
+    });
+  }
+  for (const b of TD3_SQL_BUCKETS) {
+    out.push({
+      id: `td3-sql-${b}`,
+      group: "td3",
+      sub: "3-DoD SQL leads",
+      label: b,
+      width: 42,
+      minWidth: 36,
+      align: "center",
+      conditionKey: "three_dod_sql",
+      defaultDirection: "desc",
+      render: (row) => formatNum(td3Lookup(row, b)?.sqlLeads ?? null),
+      sortValue: (row) => td3Lookup(row, b)?.sqlLeads ?? null,
+    });
+  }
+
+  // --- WoW (Response / Human / Bounce / OOO rates, plus SQL counts) ------
+  const wowMetrics: Array<{
+    key: string;
+    label: string;
+    conditionKey: string;
+    format: "rate" | "num";
+    pick: (row: WowRow) => number | null;
+  }> = [
+    {
+      key: "resp",
+      label: "Resp",
+      conditionKey: "wow_total_response_rate",
+      format: "rate",
+      pick: (r) => r.responseRate,
+    },
+    {
+      key: "human",
+      label: "Human",
+      conditionKey: "wow_human_response_rate",
+      format: "rate",
+      pick: (r) => r.humanRate,
+    },
+    {
+      key: "bnc",
+      label: "Bnc",
+      conditionKey: "wow_bounce_rate",
+      format: "rate",
+      pick: (r) => r.bounceRate,
+    },
+    {
+      key: "ooo",
+      label: "OOO",
+      conditionKey: "wow_ooo_rate",
+      format: "rate",
+      pick: (r) => r.oooRate,
+    },
+    {
+      key: "sql",
+      label: "SQL",
+      conditionKey: "wow_sql",
+      format: "num",
+      pick: (r) => r.sqlLeads,
+    },
+  ];
+
+  for (const m of wowMetrics) {
+    for (const b of WOW_BUCKETS) {
+      out.push({
+        id: `wow-${m.key}-${b}`,
+        group: "wow",
+        sub: `WoW ${m.label}`,
+        label: b,
+        width: m.format === "rate" ? 50 : 42,
+        minWidth: 38,
+        align: "center",
+        conditionKey: m.conditionKey,
+        defaultDirection: "desc",
+        render: (row) => {
+          const v = m.pick(wowLookup(row, b) as WowRow);
+          return m.format === "rate" ? formatRate(v ?? null) : formatNum(v ?? null);
+        },
+        sortValue: (row) => m.pick(wowLookup(row, b) as WowRow) ?? null,
+      });
+    }
+  }
+
+  // --- MoM ----------------------------------------------------------------
+  const momMetrics: Array<{
+    key: string;
+    label: string;
+    conditionKey: string;
+    pick: (row: MomRow) => number | null;
+  }> = [
+    { key: "sql", label: "SQL", conditionKey: "mom_sql", pick: (r) => r.sqlLeads },
+    { key: "mtg", label: "Mtg", conditionKey: "mom_meetings", pick: (r) => r.meetings },
+    { key: "won", label: "Won", conditionKey: "mom_won", pick: (r) => r.won },
+  ];
+  for (const m of momMetrics) {
+    for (const b of MOM_BUCKETS) {
+      out.push({
+        id: `mom-${m.key}-${b}`,
+        group: "mom",
+        sub: `MoM ${m.label}`,
+        label: b,
+        width: 42,
+        minWidth: 36,
+        align: "center",
+        conditionKey: m.conditionKey,
+        defaultDirection: "desc",
+        render: (row) => formatNum(m.pick(momLookup(row, b) as MomRow) ?? null),
+        sortValue: (row) => m.pick(momLookup(row, b) as MomRow) ?? null,
+      });
+    }
+  }
+
+  return out;
+}
+
+export const MEGA_COLUMNS = buildColumns();
+export const MEGA_COLUMN_COUNT = MEGA_COLUMNS.length;
+const STICKY_INDICES = MEGA_COLUMNS.map((c, i) => (c.sticky ? i : -1)).filter((i) => i >= 0);
+
+function computeStickyOffsets(widths: number[]): Map<number, number> {
+  const m = new Map<number, number>();
+  let cum = 0;
+  for (const i of STICKY_INDICES) {
+    m.set(i, cum);
+    cum += widths[i] ?? 0;
+  }
+  return m;
+}
+
+function cellCondition(row: ClientMegaRow, col: MegaColumn): ConditionEvaluationResult | undefined {
+  if (!row.conditionPack) return undefined;
+  if (col.dodBucket && col.dodKind) {
+    const key = dodCellKey(col.dodBucket, col.dodKind);
+    return getCellCondition(row.conditionPack.dodCellResults[key] ?? [], key);
+  }
+  if (!col.conditionKey) return undefined;
+  return (
+    getCellCondition(row.conditionPack.allResults, col.conditionKey) ??
+    getCellCondition(row.conditionPack.overviewResults, col.conditionKey)
+  );
+}
+
+function severityLabel(severity: ConditionSeverity): string {
+  if (severity === "critical_over") return "Critical";
+  if (severity === "danger") return "Danger";
+  if (severity === "warning") return "Warning";
+  if (severity === "info") return "Info";
+  return "Good";
+}
+
+function conditionCellWrapperClass(severity: ConditionSeverity): string {
+  if (severity === "critical_over") {
+    return "rounded border border-fuchsia-400 bg-fuchsia-900/70 text-white font-semibold";
+  }
+  if (severity === "danger") {
+    return "rounded border border-red-500 bg-red-900/70 text-white font-semibold";
+  }
+  if (severity === "warning") {
+    return "rounded border border-amber-400 bg-amber-900/70 text-white font-semibold";
+  }
+  if (severity === "good") {
+    return "rounded border border-emerald-500 bg-emerald-900/70 text-white font-medium";
+  }
+  return "rounded";
+}
+
+function renderCellWithCondition(content: ReactNode, condition: ConditionEvaluationResult | undefined): ReactNode {
+  if (!condition) return <span className="text-white">{content}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className={cn("px-1.5 py-0.5", conditionCellWrapperClass(condition.severity))}>{content}</div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
+        <p>
+          <span className="text-neutral-400">Rule:</span> {condition.ruleName}
+        </p>
+        <p>
+          <span className="text-neutral-400">Value:</span> {String(condition.value ?? "-")}
+        </p>
+        {condition.threshold !== undefined && (
+          <p>
+            <span className="text-neutral-400">Threshold:</span> {String(condition.threshold)}
+          </p>
+        )}
+        <p>
+          <span className="text-neutral-400">Message:</span> {condition.message}
+        </p>
+        <p>
+          <span className="text-neutral-400">{severityLabel(condition.severity)}</span>
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+export interface ClientsMegaTableProps {
+  rows: ClientMegaRow[];
+  sort: MegaSortState;
+  onSortChange: (next: MegaSortState) => void;
+  onRowClick: (clientId: string) => void;
+  selectedClientId: string | null;
+  storageKey?: string;
+}
+
+export function ClientsMegaTable({
+  rows,
+  sort,
+  onSortChange,
+  onRowClick,
+  selectedClientId,
+  storageKey = "table:clients:mega-columns",
+}: ClientsMegaTableProps) {
+  // [TEMP PERF] count renders of ClientsMegaTable
+  useRenderCounter(`ClientsMegaTable (rows=${rows.length})`);
+  const cols = MEGA_COLUMNS;
+  const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
+  const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);
+
+  const resizable = useResizableColumns({
+    storageKey,
+    defaultWidths,
+    minWidths,
+  });
+
+  const widths = useMemo(() => {
+    // useResizableColumns returns a template string; parse it back to numbers.
+    return resizable.template
+      .split(" ")
+      .map((seg) => Number.parseInt(seg.replace("px", ""), 10) || 0);
+  }, [resizable.template]);
+
+  const stickyOffsets = useMemo(() => computeStickyOffsets(widths), [widths]);
+  const totalWidth = useMemo(() => widths.reduce((a, b) => a + b, 0), [widths]);
+
+  // Indices of the last column within each group band — gets a thick separator border.
+  const groupBoundarySet = useMemo(() => {
+    const s = new Set<number>();
+    cols.forEach((col, i) => {
+      if (i === cols.length - 1 || cols[i + 1].group !== col.group) s.add(i);
+    });
+    return s;
+  }, [cols]);
+
+  // Indices of the last column within each sub-band — gets a medium separator border.
+  const subBoundarySet = useMemo(() => {
+    const s = new Set<number>();
+    cols.forEach((col, i) => {
+      if (i === cols.length - 1 || cols[i + 1].sub !== col.sub) s.add(i);
+    });
+    return s;
+  }, [cols]);
+
+  // Group bands segments
+  const groupSegments = useMemo(() => {
+    const segs: Array<{ group: Group; from: number; to: number; width: number }> = [];
+    let cur: { group: Group; from: number; width: number } | null = null;
+    cols.forEach((col, idx) => {
+      const w = widths[idx] ?? col.width;
+      if (!cur || cur.group !== col.group) {
+        if (cur) segs.push({ ...cur, to: idx - 1 });
+        cur = { group: col.group, from: idx, width: w };
+      } else {
+        cur.width += w;
+      }
+    });
+    if (cur) segs.push({ ...cur, to: cols.length - 1 });
+    return segs;
+  }, [cols, widths]);
+
+  const subSegments = useMemo(() => {
+    const segs: Array<{ sub: string; group: Group; from: number; lastIdx: number; width: number }> = [];
+    let cur: { sub: string; group: Group; from: number; lastIdx: number; width: number } | null = null;
+    cols.forEach((col, idx) => {
+      const w = widths[idx] ?? col.width;
+      if (!cur || cur.sub !== col.sub) {
+        if (cur) segs.push(cur);
+        cur = { sub: col.sub, group: col.group, from: idx, lastIdx: idx, width: w };
+      } else {
+        cur.width += w;
+        cur.lastIdx = idx;
+      }
+    });
+    if (cur) segs.push(cur);
+    return segs;
+  }, [cols, widths]);
+
+  function colBorderClass(i: number) {
+    if (groupBoundarySet.has(i)) return "border-r-2 border-r-white/40";
+    if (subBoundarySet.has(i)) return "border-r border-r-white/25";
+    return "border-r border-white/10";
+  }
+
+  function toggleSort(col: MegaColumn) {
+    if (sort.key === col.id) {
+      onSortChange({ key: col.id, direction: sort.direction === "asc" ? "desc" : "asc" });
+    } else {
+      onSortChange({ key: col.id, direction: col.defaultDirection ?? "desc" });
+    }
+  }
+
+  return (
+    <div className="isolate overflow-hidden rounded-2xl border border-white/20">
+      <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 20rem)" }}>
+        <div style={{ width: totalWidth, minWidth: totalWidth }}>
+          {/* Sticky header — three rows stay pinned on vertical scroll */}
+          <div className="sticky top-0 z-20 bg-[#080808]">
+          {/* Group bands */}
+          <div className="flex h-7 border-b border-white/20 bg-[#0a0a0a] text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground">
+            {groupSegments.map((seg) => (
+              <div
+                key={`g-${seg.from}`}
+                style={{ width: seg.width, minWidth: seg.width }}
+                className="flex items-center justify-center border-r-2 border-r-white/40 px-2"
+              >
+                {GROUP_META[seg.group].label}
+              </div>
+            ))}
+          </div>
+
+          {/* Sub bands */}
+          <div className="flex h-6 border-b border-white/15 bg-black/30 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            {subSegments.map((seg, i) => (
+              <div
+                key={`s-${seg.from}-${i}`}
+                style={{ width: seg.width, minWidth: seg.width }}
+                className={cn(
+                  "flex items-center justify-center px-2",
+                  groupBoundarySet.has(seg.lastIdx) ? "border-r-2 border-r-white/40" : "border-r border-r-white/25",
+                )}
+              >
+                {seg.sub}
+              </div>
+            ))}
+          </div>
+
+          {/* Column headers */}
+          <div className="flex h-9 border-b border-white/20 bg-[#080808]">
+            {cols.map((col, i) => {
+              const isActive = sort.key === col.id;
+              const w = widths[i] ?? col.width;
+              const isLast = i === cols.length - 1;
+              const style: CSSProperties = { width: w, minWidth: w };
+              if (col.sticky) {
+                style.position = "sticky";
+                style.left = stickyOffsets.get(i) ?? 0;
+                style.zIndex = 6;
+              }
+              return (
+                <div
+                  key={col.id}
+                  style={style}
+                  className={cn(
+                    "group relative flex items-end px-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    colBorderClass(i),
+                    isActive ? "bg-[#161616] text-foreground" : "bg-[#080808] text-muted-foreground",
+                    col.align === "left"
+                      ? "justify-start"
+                      : col.align === "right"
+                      ? "justify-end"
+                      : "justify-center",
+                    col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.10)]" : "",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(col)}
+                    className="truncate whitespace-nowrap hover:text-foreground"
+                    aria-label={`Sort by ${col.sub} ${col.label}`.trim()}
+                  >
+                    {col.label}
+                    {isActive ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
+                  </button>
+                  {!isLast && (
+                    <div
+                      onMouseDown={resizable.getResizeMouseDown(i)}
+                      className="absolute -right-1 top-0 h-full w-2 cursor-col-resize bg-transparent transition hover:bg-white/15"
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          </div>{/* /sticky header */}
+
+          {/* Rows */}
+          <div className="divide-y divide-white/10">
+            {rows.map((row, rIdx) => {
+              const isSelected = selectedClientId === row.client.id;
+              const rowTint = rIdx % 2 ? "bg-black/20" : "bg-transparent";
+
+              return (
+                <button
+                  key={row.client.id}
+                  onClick={() => onRowClick(row.client.id)}
+                  aria-label={`Open details for ${row.client.name}`}
+                  className={cn(
+                    "flex h-9 w-full text-left transition focus:outline-none focus:ring-1 focus:ring-sky-400/50",
+                    rowTint,
+                    isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
+                  )}
+                >
+                  {cols.map((col, i) => {
+                    const w = widths[i] ?? col.width;
+                    const style: CSSProperties = { width: w, minWidth: w };
+                    if (col.sticky) {
+                      style.position = "sticky";
+                      style.left = stickyOffsets.get(i) ?? 0;
+                      style.zIndex = 5;
+                      style.background = isSelected
+                        ? "rgba(56, 189, 248, 0.06)"
+                        : rIdx % 2
+                        ? "#0a0a0a"
+                        : "#070707";
+                    }
+
+                    const condition = cellCondition(row, col);
+                    const content = col.render(row);
+
+                    return (
+                      <div
+                        key={col.id}
+                        style={style}
+                        className={cn(
+                          "flex items-center px-1.5 text-xs",
+                          colBorderClass(i),
+                          col.align === "left"
+                            ? "justify-start"
+                            : col.align === "right"
+                            ? "justify-end"
+                            : "justify-center",
+                          col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.07)]" : "",
+                        )}
+                      >
+                        {col.sticky ? content : renderCellWithCondition(content, condition)}
+                      </div>
+                    );
+                  })}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
