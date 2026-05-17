@@ -17,6 +17,8 @@ const corsHeaders = {
 
 const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
 const DAILY_STATS_WINDOW_DAYS = 180;
+const REPLIES_WINDOW_DAYS = 180;
+const REPLIES_LIMIT = 5_000;
 const databaseUrl = Deno.env.get("DATABASE_URL")?.trim() ?? Deno.env.get("SUPABASE_DB_URL")?.trim() ?? "";
 const pgClient = databaseUrl
   ? postgres(databaseUrl, {
@@ -442,6 +444,90 @@ function mapConditionRulePatch(patch: Record<string, unknown>) {
   return mapped;
 }
 
+function mapClientInsert(input: Record<string, unknown>) {
+  return {
+    name: input.name,
+    managerId: input.manager_id,
+    status: input.status,
+    kpiLeads: input.kpi_leads ?? null,
+    kpiMeetings: input.kpi_meetings ?? null,
+    contractedAmount: input.contracted_amount ?? null,
+    contractDueDate: input.contract_due_date ?? null,
+    externalWorkspaceId: input.external_workspace_id ?? null,
+    externalApiKey: input.external_api_key ?? null,
+    minDailySent: input.min_daily_sent ?? 0,
+    inboxesCount: input.inboxes_count ?? 0,
+    crmConfig: input.crm_config ?? null,
+    smsPhoneNumbers: input.sms_phone_numbers ?? null,
+    notificationEmails: input.notification_emails ?? null,
+    autoOooEnabled: input.auto_ooo_enabled ?? false,
+    linkedinApiKey: input.linkedin_api_key ?? null,
+    prospectsSigned: input.prospects_signed ?? 0,
+    prospectsAdded: input.prospects_added ?? 0,
+    setupInfo: input.setup_info ?? null,
+    biSetupDone: input.bi_setup_done ?? false,
+    lostReason: input.lost_reason ?? null,
+    notes: input.notes ?? null,
+  };
+}
+
+function mapCampaignInsert(input: Record<string, unknown>) {
+  return {
+    clientId: input.client_id,
+    externalId: input.external_id,
+    type: input.type,
+    name: input.name,
+    status: input.status,
+    databaseSize: input.database_size ?? null,
+    positiveResponses: input.positive_responses ?? 0,
+    startDate: input.start_date ?? null,
+    genderTarget: input.gender_target ?? null,
+  };
+}
+
+function mapLeadInsert(input: Record<string, unknown>) {
+  return {
+    clientId: input.client_id,
+    campaignId: input.campaign_id ?? null,
+    email: input.email ?? null,
+    firstName: input.first_name ?? null,
+    lastName: input.last_name ?? null,
+    jobTitle: input.job_title ?? null,
+    companyName: input.company_name ?? null,
+    linkedinUrl: input.linkedin_url ?? null,
+    gender: input.gender ?? null,
+    qualification: input.qualification ?? null,
+    externalId: input.external_id ?? null,
+    phoneNumber: input.phone_number ?? null,
+    industry: input.industry ?? null,
+    headcountRange: input.headcount_range ?? null,
+    website: input.website ?? null,
+    country: input.country ?? null,
+    meetingBooked: input.meeting_booked ?? false,
+    meetingHeld: input.meeting_held ?? false,
+    offerSent: input.offer_sent ?? false,
+    won: input.won ?? false,
+    addedToOooCampaign: input.added_to_ooo_campaign ?? false,
+    source: input.source ?? "manual",
+    comments: input.comments ?? null,
+  };
+}
+
+function mapDomainInsert(input: Record<string, unknown>) {
+  return {
+    clientId: input.client_id,
+    domainName: input.domain_name,
+    setupEmail: input.setup_email,
+    purchaseDate: input.purchase_date,
+    exchangeDate: input.exchange_date,
+    status: input.status ?? null,
+    reputation: input.reputation ?? null,
+    exchangeCost: input.exchange_cost ?? null,
+    campaignVerifiedAt: input.campaign_verified_at ?? null,
+    warmupVerifiedAt: input.warmup_verified_at ?? null,
+  };
+}
+
 function mapConditionRuleInsert(input: Record<string, unknown>) {
   return {
     key: input.key,
@@ -483,9 +569,12 @@ async function executeAsCaller(request: Request, operation: (tx: any) => Promise
   const role = resolvePassthroughRole(claims.role);
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select set_config('request.jwt.claims', ${claimsJson}, true)`);
-    await tx.execute(sql`select set_config('request.jwt.claim.sub', ${sub}, true)`);
-    await tx.execute(sql`select set_config('request.jwt.claim.role', ${role}, true)`);
+    await tx.execute(
+      sql`SELECT
+        set_config('request.jwt.claims', ${claimsJson}, true),
+        set_config('request.jwt.claim.sub', ${sub}, true),
+        set_config('request.jwt.claim.role', ${role}, true)`,
+    );
     await tx.execute(sql.raw(`set local role ${role}`));
     return operation(tx);
   });
@@ -515,10 +604,26 @@ function classifyAuthErrorCode(message: string) {
   return "unknown" as const;
 }
 
+// [TEMP PERF] wrap a query promise to log its row count and resolution time.
+// Resolution time approximates DB time when queries are kicked off in Promise.all.
+function timedQuery<T>(name: string, promise: Promise<T[]>): Promise<T[]> {
+  const t0 = performance.now();
+  return promise.then((rows) => {
+    const dur = performance.now() - t0;
+    console.log(`[TEMP PERF][orm-gateway] ${name}: ${dur.toFixed(1)}ms, ${rows.length} rows`);
+    return rows;
+  });
+}
+// [TEMP PERF] /end
+
 async function handleAction(tx: any, payload: OrmGatewayRequest) {
   if (payload.action === "loadSnapshot") {
     const includeDailyStats = payload.includeDailyStats ?? true;
     const leadsLimit = payload.leadsLimit;
+    // [TEMP PERF] mark start of loadSnapshot handler (after RLS context is set)
+    const tHandlerStart = performance.now();
+    console.log(`[TEMP PERF][orm-gateway] loadSnapshot start (includeDailyStats=${includeDailyStats}, leadsLimit=${leadsLimit ?? "unbounded"})`);
+    // [TEMP PERF] /end
 
     const campaignStatsSince = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
     const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
@@ -533,7 +638,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       leadsQuery = leadsQuery.limit(Math.max(1, Math.trunc(leadsLimit)));
     }
 
-    const repliesQuery = tx.select().from(schema.replies).orderBy(desc(schema.replies.receivedAt));
+    const repliesQuery = tx
+      .select()
+      .from(schema.replies)
+      .where(gte(schema.replies.receivedAt, isoDaysAgo(REPLIES_WINDOW_DAYS)))
+      .orderBy(desc(schema.replies.receivedAt))
+      .limit(REPLIES_LIMIT);
     const campaignStatsQuery = tx
       .select()
       .from(schema.campaignDailyStats)
@@ -553,19 +663,25 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     const emailExcludeQuery = tx.select().from(schema.emailExcludeList).orderBy(desc(schema.emailExcludeList.createdAt));
 
     const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList] =
+      // [TEMP PERF] wrap each query for per-table duration + row count
       await Promise.all([
-        usersQuery,
-        clientsQuery,
-        clientUsersQuery,
-        campaignsQuery,
-        leadsQuery,
-        repliesQuery,
-        campaignStatsQuery,
-        dailyStatsQuery,
-        domainsQuery,
-        invoicesQuery,
-        emailExcludeQuery,
+        timedQuery("users", usersQuery),
+        timedQuery("clients", clientsQuery),
+        timedQuery("clientUsers", clientUsersQuery),
+        timedQuery("campaigns", campaignsQuery),
+        timedQuery("leads", leadsQuery),
+        timedQuery("replies", repliesQuery),
+        timedQuery("campaignDailyStats", campaignStatsQuery),
+        timedQuery("dailyStats", dailyStatsQuery as Promise<any[]>),
+        timedQuery("domains", domainsQuery),
+        timedQuery("invoices", invoicesQuery),
+        timedQuery("emailExcludeList", emailExcludeQuery),
       ]);
+      // [TEMP PERF] /end
+
+    // [TEMP PERF] log total handler duration (excludes auth + RLS setup)
+    console.log(`[TEMP PERF][orm-gateway] loadSnapshot handler total: ${(performance.now() - tHandlerStart).toFixed(1)}ms`);
+    // [TEMP PERF] /end
 
     return {
       users: users.map(toUserRecord),
@@ -624,6 +740,46 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     const rows = await tx.update(schema.invoices).set(patch).where(eq(schema.invoices.id, payload.invoiceId)).returning();
     if (!rows[0]) fail(404, "Invoice record was not found.");
     return toInvoiceRecord(rows[0]);
+  }
+
+  if (payload.action === "createClient") {
+    const now = new Date().toISOString();
+    const rows = await tx
+      .insert(schema.clients)
+      .values({ id: crypto.randomUUID(), ...mapClientInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
+      .returning();
+    if (!rows[0]) fail(500, "Client could not be created.");
+    return toClientRecord(rows[0]);
+  }
+
+  if (payload.action === "createCampaign") {
+    const now = new Date().toISOString();
+    const rows = await tx
+      .insert(schema.campaigns)
+      .values({ id: crypto.randomUUID(), ...mapCampaignInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
+      .returning();
+    if (!rows[0]) fail(500, "Campaign could not be created.");
+    return toCampaignRecord(rows[0]);
+  }
+
+  if (payload.action === "createLead") {
+    const now = new Date().toISOString();
+    const rows = await tx
+      .insert(schema.leads)
+      .values({ id: crypto.randomUUID(), ...mapLeadInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
+      .returning();
+    if (!rows[0]) fail(500, "Lead could not be created.");
+    return toLeadRecord(rows[0]);
+  }
+
+  if (payload.action === "createDomain") {
+    const now = new Date().toISOString();
+    const rows = await tx
+      .insert(schema.domains)
+      .values({ id: crypto.randomUUID(), ...mapDomainInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
+      .returning();
+    if (!rows[0]) fail(500, "Domain could not be created.");
+    return toDomainRecord(rows[0]);
   }
 
   if (payload.action === "createConditionRule") {

@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+﻿import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Building2,
@@ -115,6 +115,7 @@ function isPathActive(currentPath: string, itemPath: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [, startNavTransition] = useTransition();
   const { users, clients } = useCoreData();
   const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
   const [managerTargetId, setManagerTargetId] = useState("");
@@ -185,23 +186,26 @@ export function AppShell({ children }: { children: ReactNode }) {
       <nav className="space-y-2 px-4 py-4">
         {navItems.map((item) => {
           const Icon = item.icon;
+          const isActive = isPathActive(location.pathname, item.to);
           return (
-            <NavLink
+            <a
               key={item.to}
-              to={item.to}
-              onClick={() => setIsMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-4 rounded-xl border px-4 py-3 text-base transition",
-                  isActive
-                    ? "border-[#3a3a3a] bg-[#232323] text-white"
-                    : "border-transparent text-neutral-400 hover:border-[#242424] hover:bg-[#111] hover:text-white",
-                )
-              }
+              href={item.to}
+              onClick={(e) => {
+                e.preventDefault();
+                setIsMobileMenuOpen(false);
+                startNavTransition(() => navigate(item.to));
+              }}
+              className={cn(
+                "flex items-center gap-4 rounded-xl border px-4 py-3 text-base transition",
+                isActive
+                  ? "border-[#3a3a3a] bg-[#232323] text-white"
+                  : "border-transparent text-neutral-400 hover:border-[#242424] hover:bg-[#111] hover:text-white",
+              )}
             >
               <Icon className="h-5 w-5 shrink-0" />
               <span className="truncate">{item.label}</span>
-            </NavLink>
+            </a>
           );
         })}
       </nav>

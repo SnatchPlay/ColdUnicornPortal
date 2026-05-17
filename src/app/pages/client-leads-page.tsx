@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useDeferredValue, type CSSProperties } from "react";
 import { Download, MessageSquare } from "lucide-react";
 import {
   DateRangeButton,
@@ -54,6 +54,7 @@ export function ClientLeadsPage() {
   const { identity } = useAuth();
   const { clients, leads, replies, campaigns, loading, error, refresh } = useCoreData();
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">("all");
   const [campaignFilter, setCampaignFilter] = useState("all");
   const [replyScope, setReplyScope] = useState<ReplyScope>("all");
@@ -102,17 +103,22 @@ export function ClientLeadsPage() {
     return counts;
   }, [rows]);
 
+  const rowHaystacks = useMemo(
+    () => rows.map((row) => [row.name, row.email, row.company, row.title, row.campaignName].join(" ").toLowerCase()),
+    [rows],
+  );
+
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const haystack = [row.name, row.email, row.company, row.title, row.campaignName].join(" ").toLowerCase();
-      if (!haystack.includes(query.toLowerCase())) return false;
+    const needle = deferredQuery.toLowerCase();
+    return rows.filter((row, i) => {
+      if (needle && !rowHaystacks[i].includes(needle)) return false;
       if (stageFilter !== "all" && row.stage !== stageFilter) return false;
       if (campaignFilter !== "all" && row.campaign?.id !== campaignFilter) return false;
       if (replyScope === "ooo" && row.lead.qualification !== "OOO") return false;
       if (replyScope === "active" && row.lead.qualification === "OOO") return false;
       return true;
     });
-  }, [campaignFilter, query, replyScope, rows, stageFilter]);
+  }, [campaignFilter, deferredQuery, replyScope, rowHaystacks, rows, stageFilter]);
 
   const sortedRows = useMemo(() => {
     return filteredRows.slice().sort((left, right) => {
@@ -143,7 +149,7 @@ export function ClientLeadsPage() {
 
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
-  }, [campaignFilter, query, replyScope, stageFilter, timeframe]);
+  }, [campaignFilter, deferredQuery, replyScope, stageFilter, timeframe]);
 
   const visibleRows = useMemo(() => sortedRows.slice(0, visibleRowsCount), [sortedRows, visibleRowsCount]);
 

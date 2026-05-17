@@ -103,7 +103,47 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Allowed roles:** admin, super_admin.
 - **Called from:** Blacklist page (Remove button).
 
-### 2.10 `loadConditionRules()`
+### 2.10 `createClient(input)` — [repository.ts](../../../src/app/data/repository.ts)
+
+- **Table:** `clients`.
+- **Statement:** `INSERT INTO clients VALUES (<input>) RETURNING *`.
+- **RLS policy:** `clients_insert_internal` — `role IN ('super_admin','admin','manager')` (set-based predicate). Migration: `supabase/migrations/20260517_entity_insert_policies.sql`.
+- **Allowed roles:** admin, super_admin, manager.
+- **Called from:** Clients page "New client" Sheet.
+- **Fields:** `name` (required), `manager_id` (required; auto-set to `identity.userId` for manager), `status` (required), `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`.
+- **Update pattern:** no optimistic update; server returns created row → prepend to `snapshot.clients` in `startTransition`.
+
+### 2.11 `createCampaign(input)` — [repository.ts](../../../src/app/data/repository.ts)
+
+- **Table:** `campaigns`.
+- **Statement:** `INSERT INTO campaigns VALUES (<input>) RETURNING *`.
+- **RLS policy:** `campaigns_insert_internal` — admin/super_admin any client; manager scoped to own `clients.manager_id`. Migration: `20260517_entity_insert_policies.sql`.
+- **Allowed roles:** admin, super_admin, manager (scoped).
+- **Called from:** Campaigns page "New campaign" Sheet.
+- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`.
+- **Update pattern:** no optimistic update; prepend to `snapshot.campaigns` in `startTransition`.
+
+### 2.12 `createLead(input)` — [repository.ts](../../../src/app/data/repository.ts)
+
+- **Table:** `leads`.
+- **Statement:** `INSERT INTO leads VALUES (<input>) RETURNING *`.
+- **RLS policy:** `leads_insert_internal` — same scoping as `createCampaign`. Migration: `20260517_entity_insert_policies.sql`.
+- **Allowed roles:** admin, super_admin, manager (scoped).
+- **Called from:** Leads page "New lead" Sheet.
+- **Fields:** `client_id` (required), `campaign_id` (optional), `first_name`, `last_name`, `email`, `company_name`, `job_title`. `source` is auto-set to `'manual'`.
+- **Update pattern:** no optimistic update; prepend to `snapshot.leads` in `startTransition`.
+
+### 2.13 `createDomain(input)` — [repository.ts](../../../src/app/data/repository.ts)
+
+- **Table:** `domains`.
+- **Statement:** `INSERT INTO domains VALUES (<input>) RETURNING *`.
+- **RLS policy:** `domains_insert_internal` — same scoping as campaigns. Migration: `20260517_entity_insert_policies.sql`.
+- **Allowed roles:** admin, super_admin, manager (scoped).
+- **Called from:** Domains page "New domain" Sheet.
+- **Fields:** `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date` (all required), `exchange_cost`, `status` (optional).
+- **Update pattern:** no optimistic update; prepend to `snapshot.domains` in `startTransition`.
+
+### 2.14 `loadConditionRules()`
 
 - **Table:** `condition_rules`.
 - **Statement:** `SELECT * FROM condition_rules ORDER BY priority ASC, created_at ASC`.

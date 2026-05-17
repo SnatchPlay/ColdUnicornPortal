@@ -111,10 +111,22 @@ export function AdminDashboardPage() {
   }, [scopedCampaignStats]);
 
   const managerCapacityRows = useMemo(() => {
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const activeCampaignCountByClient = new Map<string, number>();
+    for (const c of scopedCampaigns) {
+      if (c.status === "active") {
+        activeCampaignCountByClient.set(c.client_id, (activeCampaignCountByClient.get(c.client_id) ?? 0) + 1);
+      }
+    }
+    const leadCountByClient = new Map<string, number>();
+    for (const l of scopedLeads) {
+      leadCountByClient.set(l.client_id, (leadCountByClient.get(l.client_id) ?? 0) + 1);
+    }
+
     const byManager = new Map<string, { managerName: string; clients: number; activeCampaigns: number; leads: number }>();
 
     for (const client of scopedClients) {
-      const manager = users.find((item) => item.id === client.manager_id);
+      const manager = userMap.get(client.manager_id);
       const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
       const key = manager?.id ?? `unknown:${client.manager_id}`;
 
@@ -126,10 +138,8 @@ export function AdminDashboardPage() {
       };
 
       current.clients += 1;
-      current.activeCampaigns += scopedCampaigns.filter(
-        (campaign) => campaign.client_id === client.id && campaign.status === "active",
-      ).length;
-      current.leads += scopedLeads.filter((lead) => lead.client_id === client.id).length;
+      current.activeCampaigns += activeCampaignCountByClient.get(client.id) ?? 0;
+      current.leads += leadCountByClient.get(client.id) ?? 0;
       byManager.set(key, current);
     }
 
@@ -138,9 +148,10 @@ export function AdminDashboardPage() {
       .slice(0, 8);
   }, [scopedCampaigns, scopedClients, scopedLeads, users]);
 
-  const latestSnapshotDate = scopedDailyStats
-    .map((item) => item.report_date)
-    .sort((left, right) => right.localeCompare(left))[0];
+  const latestSnapshotDate = useMemo(
+    () => scopedDailyStats.map((item) => item.report_date).sort((a, b) => b.localeCompare(a))[0],
+    [scopedDailyStats],
+  );
 
   const metrics = [
     {

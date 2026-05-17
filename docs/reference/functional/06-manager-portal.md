@@ -93,101 +93,88 @@ File: [`src/app/pages/clients-page.tsx`](../../../src/app/pages/clients-page.tsx
 
 ### 2.1 Purpose
 
-Deep client operations view. Five tabs showing the same client roster with different metric projections. Row click opens an editable detail drawer.
+Single dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in **one horizontally-scrolled table** modelled after the team's working Google Sheets. Row click opens an editable detail drawer holding non-statistical client configuration (credentials, contacts, setup notes, issues timeline).
 
-### 2.2 Tabs (Overview, DoD, 3-DoD, WoW, MoM)
+### 2.2 Mega-table layout
 
-Tabs are a role-filter like toggle; the row set is the same (scoped clients), only the projected columns change. Selected tab is stored in component state (not URL).
+One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx) (`MEGA_COLUMNS` constant). Two-level header bands: top-level **group band** + sub-level **sub band** + column-name header row. First 3 columns are CSS-sticky (left edge).
 
-#### Overview tab вЂ” columns
+| Group band | Sub band | Columns |
+|-----------|----------|---------|
+| **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
+| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Bi-setup ✓, Auto-OOO ✓, CRM ✓, Updated |
+| **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
+| **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
+| **3-Day rolling** | 3-DoD TOTAL leads | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads` |
+|  | 3-DoD SQL leads | 0, -1, -2 — `threeDodRows[bucket].sqlLeads` |
+| **Week over Week** | WoW Resp / Human / Bnc / OOO | 0/-1/-2/-3 per metric — rates from `wowRows[bucket]` |
+|  | WoW SQL | 0/-1/-2/-3 — `wowRows[bucket].sqlLeads` |
+| **Month over Month** | MoM SQL / Mtg / Won | 0/-1/-2/-3 per metric — `momRows[bucket]` |
 
-Resizable via `useResizableColumns` with storage key `table:clients:overview:columns`.
+Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `health asc` (worst first).
 
-| Column | Source | Metric |
-|--------|--------|--------|
-| Client | `clients.name` | — |
-| Manager | `users.first_name + last_name` (joined by `manager_id`) | — |
-| Sent (today) | `ClientMetricsOverview.sentToday` | [DoD §8.2](./04-metrics-catalog.md#82-emails-sent-dod-bucket-0--1--2--3--4) bucket 0 |
-| Prospects signed | `clients.prospects_signed` | Condition baseline |
-| Prospects added | `clients.prospects_added` | Condition baseline |
-| Min sent | `clients.min_daily_sent` | Condition baseline |
-| Inboxes | `clients.inboxes_count` | Capacity baseline |
-| Schedule (today / +1 / +2) | `ClientMetricsOverview.scheduleToday/scheduleTomorrow/scheduleDayAfter` | DoD schedule context |
-| Sent (0/-1/-2) | `ClientMetricsOverview.sentToday/sentYesterday/sentTwoDaysAgo` | DoD sent context |
-| 3-DoD Total | `ClientMetricsOverview.threeDodTotal` | [§9.1](./04-metrics-catalog.md#91-3-dod-total-leads) |
-| 3-DoD SQL | `ClientMetricsOverview.threeDodSql` | [§9.2](./04-metrics-catalog.md#92-3-dod-sql-leads) |
-| WoW Response | `wowResponseRate` | [§10.3](./04-metrics-catalog.md#103-wow-response-rate) |
-| WoW Human | `wowHumanRate` | [§10.4](./04-metrics-catalog.md#104-wow-human-reply-rate) |
-| WoW Bounce | `wowBounceRate` | [§10.5](./04-metrics-catalog.md#105-wow-bounce-rate) |
-| WoW OOO | `wowOooRate` | [§10.6](./04-metrics-catalog.md#106-wow-ooo-rate) |
-| WoW SQL | `wowSql` | MQLs in current week |
-| MoM SQL | `momSql` | [§11.2](./04-metrics-catalog.md#112-mom-sql-leads) |
-| Updated | `clients.updated_at` | — |
-
-Sorting via column-header buttons. `null` rate values sort last.
-
-#### DoD tab вЂ” columns
-
-One row per client; columns are the 7 buckets from `createClientMetrics().dodRows`:
-
-| Bucket | Schedule | Sent |
-|--------|----------|------|
-| +2 | `schedule_day_after` | вЂ” |
-| +1 | `schedule_tomorrow` | вЂ” |
-| 0  | `schedule_today`     | emails_sent today |
-| -1 | вЂ”                    | emails_sent yesterday |
-| -2 | вЂ”                    | emails_sent -2 |
-| -3 | вЂ”                    | emails_sent -3 |
-| -4 | вЂ”                    | emails_sent -4 |
-
-#### 3-DoD tab вЂ” columns
-
-Per client, one row per bucket in `threeDodRows`:
-
-| Bucket | Total | SQL |
-|--------|-------|-----|
-| 0 / -1 / -2 / -3 / -4 | 3-DoD Total Leads | 3-DoD SQL Leads |
-
-#### WoW tab вЂ” columns
-
-Per client, one row per bucket in `wowRows`:
-
-| Bucket | Total | SQL | Response | Human | Bounce | OOO | Negative |
-|--------|-------|-----|----------|-------|--------|-----|----------|
-| 0 / -1 / -2 / -3 | as `totalLeads`, `sqlLeads`, `responseRate`, `humanRate`, `bounceRate`, `oooRate`, `negativeRate` |
-
-#### MoM tab вЂ” columns
-
-Per client, one row per bucket in `momRows`:
-
-| Bucket | Total | SQL | Meetings | Won |
-|--------|-------|-----|----------|-----|
-| 0 / -1 / -2 / -3 | `totalLeads`, `sqlLeads`, `meetings`, `won` |
+Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
 ### 2.3 Detail drawer (editable)
 
-Opens on row click. Draft pattern: local `draft` state deviates from `selectedClient`; "Save" and "Cancel" buttons appear when `isDraftDirty`. `Escape` key closes the drawer discarding the draft.
+Opens on row click. Draft pattern: local `draft` state deviates from `selectedClient`; "Save" and "Cancel" buttons appear when `isDraftDirty`. `Escape` key closes the drawer discarding the draft. Defined in [`src/app/pages/clients-page/client-drawer.tsx`](../../../src/app/pages/clients-page/client-drawer.tsx).
 
-Editable fields:
+Sections (top → bottom):
+
+1. **Header** — name, status pill, manager, contract amount + due.
+2. **Operational issues** — timeline of warning/danger/critical condition results (deduped by `ruleKey`).
+3. **Setup gaps** — condition results from the `setup` surface that aren't `good`.
+4. **Credentials & IDs** (read-only, masked + copy) — `external_workspace_id`, `external_api_key`, `linkedin_api_key`, CRM status from `crm_config`.
+5. **Client configuration** — editable form.
+6. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
+7. **User access management** — invite + map client portal users.
+
+Editable fields — **Credentials & IDs** section:
+
+| Field | Control | Source column | Who |
+|-------|---------|---------------|-----|
+| Workspace ID | number input | `clients.external_workspace_id` | manager + admin |
+| Workspace API key | `SecretInput` (show/hide) | `clients.external_api_key` | manager + admin |
+| LinkedIn API key | `SecretInput` (show/hide) | `clients.linkedin_api_key` | manager + admin |
+| CRM status | read-only badge | `clients.crm_config` | — |
+
+Editable fields — **Contract & KPIs** section (admin only, hidden for manager):
 
 | Field | Control | Source column |
 |-------|---------|---------------|
-| Name | text input | `clients.name` |
-| Status | Select | `clients.status` |
-| Manager | Select (users where `role='manager'`) | `clients.manager_id` |
-| Min daily sent | number input | `clients.min_daily_sent` |
-| Inboxes count | number | `clients.inboxes_count` |
-| Notification emails | CSV textarea (parsed with `parseCsv` + email regex validation) | `clients.notification_emails` (text[]) |
-| SMS phone numbers | CSV textarea | `clients.sms_phone_numbers` (text[]) |
-| Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` |
-| Setup info | textarea | `clients.setup_info` |
-| KPI leads (month target) | number | `clients.kpi_leads` |
-| KPI meetings (month target) | number | `clients.kpi_meetings` |
-| Contract info | read-only display | `contracted_amount`, `contract_due_date` |
+| KPI leads / month | number input | `clients.kpi_leads` |
+| KPI meetings / month | number input | `clients.kpi_meetings` |
+| Contracted amount | number input (step 0.01) | `clients.contracted_amount` |
+| Contract due date | date input | `clients.contract_due_date` |
 
-Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations В§2](./09-mutations-rls.md).
+Editable fields — **Client configuration** section:
 
-### 2.4 Filtering and health segmentation
+| Field | Control | Source column | Notes |
+|-------|---------|---------------|-------|
+| Name | text input | `clients.name` | manager + admin |
+| Status | Select | `clients.status` | manager + admin |
+| Manager | Select (users where `role='manager'`) | `clients.manager_id` | **admin only** |
+| Min daily sent | number input | `clients.min_daily_sent` | manager + admin |
+| Inboxes count | number input | `clients.inboxes_count` | manager + admin |
+| Prospects signed | number input | `clients.prospects_signed` | manager + admin |
+| Prospects added | number input | `clients.prospects_added` | manager + admin |
+| Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` | manager + admin |
+| BI setup done | checkbox | `clients.bi_setup_done` | manager + admin |
+| Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Abo}` |
+| Internal notes | textarea | `clients.notes` | Always visible |
+| Setup notes | textarea | `clients.setup_info` | manager + admin |
+
+Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations §2](./09-mutations-rls.md).
+
+### 2.4 Create client Sheet
+
+"New client" button in `PageHeader` actions. Opens a `<Sheet>` (Radix-based side panel). Required fields: `name`, `manager_id`, `status`. Optional: `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`.
+
+- **Manager role:** `manager_id` auto-set to `identity.userId`; field hidden.
+- **Admin / super_admin:** `manager_id` shown as a Select of users with `role='manager'`.
+- Calls `useCoreData().createClient(input)`. On success the new client is prepended to the snapshot (no optimistic update). See [09-mutations §2.10](./09-mutations-rls.md).
+
+### 2.5 Filtering and health segmentation
 
 - Search box by client name.
 - Status filter dropdown (one of `client_status` enum, or "All").
@@ -214,9 +201,10 @@ Rule results are loaded from `condition_rules` and evaluated at runtime per clie
 - Distinct `critical_over` style (fuchsia/magenta family) separate from danger.
 - Tooltip on highlighted values includes rule name, value, message, and source sheet/range.
 - DoD table uses dynamic runtime keys (`dod:{bucket}:{schedule|sent}`) to evaluate one reusable rule across multiple cells.
-- Drawer issue model:
-  - `Operational issues`: warning/danger/critical items
-  - `Setup gaps`: setup/info-like gaps moved out of row-level badge noise
+- Drawer issue model (post-redesign):
+  - `Operational issues`: warning/danger/critical items rendered as a timeline
+  - `Setup gaps`: setup/info-like gaps from the `setup` surface
+  - DoD/3-DoD/WoW/MoM per-bucket condition badges are no longer in the drawer — they live directly in the mega-table cells.
 
 ### 2.6 Empty / loading / error
 
@@ -275,7 +263,13 @@ Replies history: listed sorted by `received_at DESC`; each entry shows classific
 
 Save: `useCoreData().updateLead(lead.id, patch)` в†’ `repository.updateLead`. Optimistic; revert on error. Per ADR-0004, only the listed fields are actually sent. Escape closes drawer.
 
-### 3.5 Scope
+### 3.5 Create lead Sheet
+
+"New lead" button in `PageHeader` actions. Opens a `<Sheet>`. Required field: `client_id`. Optional: `campaign_id` (filtered to selected client's campaigns), `first_name`, `last_name`, `email`, `company_name`, `job_title`. `source` is always `'manual'` (not shown).
+
+Calls `useCoreData().createLead(input)`. See [09-mutations §2.12](./09-mutations-rls.md).
+
+### 3.6 Scope
 
 - Manager: leads whose `client_id` belongs to one of their assigned clients (`clients.manager_id = auth.uid()`).
 - Admin: all leads.
@@ -323,6 +317,12 @@ Read-only metadata: `external_id`, `type`, `start_date`, `gender_target`, `clien
 Embedded chart: **Daily performance** LineChart for the selected campaign over the current timeframe (`sent`, `replies`, `opens`, `bounces` вЂ” same four series as Client Campaigns daily volume chart).
 
 Save: `useCoreData().updateCampaign(campaign.id, patch)` в†’ `repository.updateCampaign`. RLS: `campaigns_update_scoped` requires `can_manage_client`.
+
+### 4.4 Create campaign Sheet
+
+“New campaign” button in `PageHeader` actions (alongside the `DateRangeButton`). Required fields: `client_id`, `external_id` (Smartlead/Bison ID — unique, user-entered), `name`, `type`, `status`. Optional: `database_size`, `start_date`.
+
+Calls `useCoreData().createCampaign(input)`. See [09-mutations §2.11](./09-mutations-rls.md).
 
 ---
 
@@ -380,6 +380,12 @@ Read-only: `purchase_date`, `exchange_date`.
 
 Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_client`.
 
+### 6.4 Create domain Sheet
+
+"New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date`. Optional: `exchange_cost`, `status`.
+
+Calls `useCoreData().createDomain(input)`. See [09-mutations §2.13](./09-mutations-rls.md).
+
 ---
 
 ## 7. Invoices вЂ” `InvoicesPage`
@@ -432,13 +438,12 @@ Visible to internal users per `email_exclude_list_select_internal` RLS policy (`
 
 ## 8.5 Planned ecosystem fields
 
-Today the manager drawer on Clients page covers `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, and `setup_info`. Several ecosystem fields are on the backlog ([BUSINESS_LOGIC В§11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built)):
+The manager drawer on Clients page now covers all `clients` columns except `crm_config` (read-only badge). Remaining backlog:
 
-- **BL-2** OOO routing rows (`client_ooo_routing`) вЂ” manager/admin UI to configure per-client follow-up campaigns. Today only the boolean toggle exists.
-- **BL-3** LinkedIn API key (`linkedin_api_key`) вЂ” schema field exists, drawer UI does not surface it yet.
-- **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields вЂ” schema columns + drawer UI both pending.
+- **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
+- **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
 
-Until these ship, the corresponding configuration is managed in SQL or in n8n flows directly.
+`linkedin_api_key`, `external_workspace_id`, `external_api_key`, `bi_setup_done`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are now editable in the drawer (BL-3 shipped).
 
 ---
 

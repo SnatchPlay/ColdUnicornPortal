@@ -156,6 +156,10 @@ These branches are preserved for parity and documented in rule `notes` pending m
 | `createConditionRule` | Fire-and-forget + toast on failure | Appends and re-sorts `snapshot.conditionRules` on success |
 | `updateConditionRule` | Optimistic + rollback | Replaces row, re-sorts by priority after server ack |
 | `deleteConditionRule` | Optimistic + rollback | Removes row immediately; restores on failure |
+| `createClient` | Server-confirmed, prepend | No optimistic update; server returns row → prepend to `snapshot.clients` |
+| `createCampaign` | Server-confirmed, prepend | Same pattern; prepend to `snapshot.campaigns` |
+| `createLead` | Server-confirmed, prepend | Same pattern; prepend to `snapshot.leads`. `source` always `'manual'` |
+| `createDomain` | Server-confirmed, prepend | Same pattern; prepend to `snapshot.domains` |
 
 Optimistic updates use the pattern: snapshot replace в†’ repository call в†’ on success replace with server response в†’ on failure restore previous + toast. Mutations are **not auto-retried** even on transient failures.
 
@@ -194,7 +198,7 @@ UI preferences kept in `localStorage`. Values are non-secret; clearing them rese
 | `app_shell_sidebar_hidden` | [app-shell.tsx:78](../../../src/app/components/app-shell.tsx#L78) | `"1"` to hide the desktop sidebar; `"0"` or absent to show. |
 | `table:campaigns:columns` | campaigns-page | Resizable column widths |
 | `table:leads:columns` | leads-page | Same |
-| `table:clients:overview:columns` | clients-page (Overview tab; other tabs may have their own keys) | Same |
+| `table:clients:mega-columns` | clients-page mega-table (all ~61 columns; single shared storage key) | Same |
 | `table:client-leads:columns` | client-leads-page | Same |
 | `table:domains:columns` | domains-page | Same |
 | `table:invoices:columns` | invoices-page | Same |
@@ -205,7 +209,7 @@ UI preferences kept in `localStorage`. Values are non-secret; clearing them rese
 
 ## 7. Bucket orderings
 
-DoD / 3-DoD / WoW / MoM tables use **custom** orderings, not alphabetical. Defined as constants in [clients-page.tsx:27-54](../../../src/app/pages/clients-page.tsx#L27-L54):
+DoD / 3-DoD / WoW / MoM column groups in the Clients mega-table use **custom** orderings, not alphabetical. Bucket arrays are defined as constants in [`src/app/pages/clients-page/mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx) (`DOD_SCHED_BUCKETS`, `DOD_SENT_BUCKETS`, `TD3_*_BUCKETS`, `WOW_BUCKETS`, `MOM_BUCKETS`):
 
 | View | Order (left в†’ right) |
 |------|----------------------|
@@ -217,6 +221,17 @@ DoD / 3-DoD / WoW / MoM tables use **custom** orderings, not alphabetical. Defin
 DoD has the asymmetry of three forward-looking schedule buckets (`+2`, `+1`, `0`) and four backward-looking sent buckets (`0` through `-4`). The "0" row uniquely shows both schedule and actual sent.
 
 3-DoD `ClientMetricsOverview.threeDodTotal/Sql` aggregates buckets **0, -1, -2 only** (last 3 days), not the full 5-bucket history ([client-metrics.ts:312-313](../../../src/app/lib/client-metrics.ts#L312-L313)).
+
+---
+
+## 8. Clients mega-table layout conventions
+
+The Clients page uses a single dense flex-row table with two-level header bands. Implementation details that aren't obvious from the rendered output:
+
+- **Sticky columns** are the first 3 (`Client`, `Health`, `Manager`). Sticky offsets are computed cumulatively from the live resized widths in `computeStickyOffsets()` — if column widths change, sticky `left:` offsets recalculate via the memoized parse of `useResizableColumns.template`.
+- **Header bands** (top tier "group", middle tier "sub") are derived by walking the column list and collapsing consecutive equal `group` / `subKey` values. Renaming a `group` mid-list will visually split the band.
+- **Cell tinting precedence**: for a column with a `dodBucket`, `dodCellKey(bucket, kind)` is consulted first (per-bucket DoD rules); otherwise `column.conditionKey` is checked against `allResults` then `overviewResults`. Sticky columns never receive condition tinting (they carry their own status pill / health badge instead).
+- **Sort default per column** is encoded as `defaultDirection` on each column entry. The page-level default sort is `health asc` (worst first), matching the `getHealthScore` convention where lower = worse.
 
 ---
 

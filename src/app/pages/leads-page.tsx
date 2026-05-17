@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useDeferredValue, useMemo, useState, type CSSProperties } from "react";
 import { MessageSquare, Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { DateRangeButton } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Checkbox } from "../components/ui/checkbox";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import {
   Pagination,
   PaginationContent,
@@ -18,7 +19,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { formatDate, getFullName } from "../lib/format";
-import { getLeadStage, scopeCampaigns, scopeLeads, scopeReplies } from "../lib/selectors";
+import { getLeadStage, scopeCampaigns, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
 import {
   TIMEFRAME_PRESETS,
   createDefaultTimeframe,
@@ -33,6 +34,16 @@ import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { LeadRecord, LeadQualification } from "../types/core";
 import { ClientLeadsPage } from "./client-leads-page";
+
+interface CreateLeadDraft {
+  clientId: string;
+  campaignId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  companyName: string;
+  jobTitle: string;
+}
 
 const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
   "preMQL",
@@ -205,11 +216,15 @@ export function LeadsPage() {
 
 function InternalLeadsPage() {
   const { identity } = useAuth();
-  const { clients, leads, replies, campaigns, updateLead, loading, error, refresh } = useCoreData();
+  const { clients, leads, replies, campaigns, createLead, updateLead, loading, error, refresh } = useCoreData();
+  const [isCreatingLead, setIsCreatingLead] = useState(false);
+  const [createLeadDraft, setCreateLeadDraft] = useState<CreateLeadDraft | null>(null);
+  const [isSubmittingCreateLead, setIsSubmittingCreateLead] = useState(false);
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const deferredQuery = useDeferredValue(query);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">(() => {
     const stage = searchParams.get("stage");
     if (stage === "all") return "all";
@@ -252,6 +267,7 @@ function InternalLeadsPage() {
     [leadColumns.template],
   );
 
+  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],
@@ -263,24 +279,26 @@ function InternalLeadsPage() {
     [scopedLeads, timeframe],
   );
 
+  const leadHaystacks = useMemo(
+    () =>
+      timeframeLeads.map((lead) =>
+        [getFullName(lead.first_name, lead.last_name), lead.email, lead.company_name, lead.job_title, lead.country]
+          .join(" ")
+          .toLowerCase(),
+      ),
+    [timeframeLeads],
+  );
+
   const baseFilteredLeads = useMemo(() => {
-    return timeframeLeads.filter((lead) => {
-      const haystack = [
-        getFullName(lead.first_name, lead.last_name),
-        lead.email,
-        lead.company_name,
-        lead.job_title,
-        lead.country,
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(query.toLowerCase())) return false;
+    const needle = deferredQuery.toLowerCase();
+    return timeframeLeads.filter((lead, i) => {
+      if (needle && !leadHaystacks[i].includes(needle)) return false;
       if (campaignFilter !== ALL_FILTER_VALUE && lead.campaign_id !== campaignFilter) return false;
       if (replyScope === "ooo" && lead.qualification !== "OOO") return false;
       if (replyScope === "active" && lead.qualification === "OOO") return false;
       return true;
     });
-  }, [campaignFilter, query, replyScope, timeframeLeads]);
+  }, [campaignFilter, deferredQuery, leadHaystacks, replyScope, timeframeLeads]);
 
   const stageCounts = useMemo(() => {
     const counts = new Map<PipelineStage, number>();
@@ -324,10 +342,64 @@ function InternalLeadsPage() {
   const pageWindow = useMemo(() => buildPageWindow(safeCurrentPage, totalPages), [safeCurrentPage, totalPages]);
   const timeframeLabel = getTimeframeLabel(timeframe);
 
-  const selectedLead = sortedLeads.find((item) => item.id === selectedLeadId) ?? null;
-  const selectedReplies = scopedReplies
-    .filter((item) => item.lead_id === selectedLead?.id)
-    .sort((a, b) => b.received_at.localeCompare(a.received_at));
+  const selectedLead = useMemo(
+    () => sortedLeads.find((item) => item.id === selectedLeadId) ?? null,
+    [selectedLeadId, sortedLeads],
+  );
+  const selectedReplies = useMemo(
+    () =>
+      scopedReplies
+        .filter((item) => item.lead_id === selectedLead?.id)
+        .sort((a, b) => b.received_at.localeCompare(a.received_at)),
+    [scopedReplies, selectedLead],
+  );
+
+  function openCreateLead() {
+    setCreateLeadDraft({
+      clientId: scopedClients[0]?.id ?? "",
+      campaignId: "",
+      firstName: "",
+      lastName: "",
+      email: "",
+      companyName: "",
+      jobTitle: "",
+    });
+    setIsCreatingLead(true);
+  }
+
+  async function handleCreateLead() {
+    if (!createLeadDraft || !createLeadDraft.clientId) return;
+    setIsSubmittingCreateLead(true);
+    try {
+      await createLead({
+        client_id: createLeadDraft.clientId,
+        campaign_id: createLeadDraft.campaignId || null,
+        first_name: createLeadDraft.firstName.trim() || null,
+        last_name: createLeadDraft.lastName.trim() || null,
+        email: createLeadDraft.email.trim() || null,
+        company_name: createLeadDraft.companyName.trim() || null,
+        job_title: createLeadDraft.jobTitle.trim() || null,
+        source: "manual",
+        qualification: null,
+        comments: null,
+        meeting_booked: false,
+        meeting_held: false,
+        offer_sent: false,
+        won: false,
+        country: null,
+        city: null,
+        linkedin_url: null,
+        response_time_label: null,
+        gender: null,
+      });
+      setIsCreatingLead(false);
+      setCreateLeadDraft(null);
+    } catch {
+      // error shown via toast from core-data
+    } finally {
+      setIsSubmittingCreateLead(false);
+    }
+  }
 
   async function patchLead(lead: LeadRecord, patch: Partial<LeadRecord>) {
     await updateLead(lead.id, patch);
@@ -492,7 +564,17 @@ function InternalLeadsPage() {
       <PageHeader
         title="Leads"
         subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
-        actions={<DateRangeButton value={timeframe} onChange={handleTimeframeChange} />}
+        actions={
+          <div className="flex items-center gap-3">
+            <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
+            <button
+              onClick={openCreateLead}
+              className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+            >
+              New lead
+            </button>
+          </div>
+        }
       />
 
       <Surface title="Lead filters" subtitle={`Current timeframe: ${timeframeLabel}`}>
@@ -781,6 +863,121 @@ function InternalLeadsPage() {
           </div>
         </Surface>
       )}
+
+      <Sheet open={isCreatingLead} onOpenChange={setIsCreatingLead}>
+        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
+          <SheetHeader className="p-6 pb-2">
+            <SheetTitle className="text-white">New lead</SheetTitle>
+            <SheetDescription>Fill in the required fields to create a new lead manually.</SheetDescription>
+          </SheetHeader>
+          {createLeadDraft && (
+            <div className="space-y-4 px-6 pb-6">
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
+                <Select
+                  value={createLeadDraft.clientId}
+                  onValueChange={(v) => setCreateLeadDraft((d) => d ? { ...d, clientId: v, campaignId: "" } : d)}
+                >
+                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {scopedClients.map((client) => (
+                      <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                        {client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Campaign</span>
+                <Select
+                  value={createLeadDraft.campaignId || "__none__"}
+                  onValueChange={(v) => setCreateLeadDraft((d) => d ? { ...d, campaignId: v === "__none__" ? "" : v } : d)}
+                >
+                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="No campaign" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    <SelectItem value="__none__" className="text-white focus:bg-[#1a1a1a] focus:text-white">No campaign</SelectItem>
+                    {scopedCampaigns
+                      .filter((c) => c.client_id === createLeadDraft.clientId)
+                      .map((c) => (
+                        <SelectItem key={c.id} value={c.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">First name</span>
+                  <input
+                    value={createLeadDraft.firstName}
+                    onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, firstName: e.target.value } : d)}
+                    placeholder="Optional"
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                  />
+                </label>
+                <label className="block space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last name</span>
+                  <input
+                    value={createLeadDraft.lastName}
+                    onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, lastName: e.target.value } : d)}
+                    placeholder="Optional"
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                  />
+                </label>
+              </div>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email</span>
+                <input
+                  type="email"
+                  value={createLeadDraft.email}
+                  onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, email: e.target.value } : d)}
+                  placeholder="Optional"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Company</span>
+                <input
+                  value={createLeadDraft.companyName}
+                  onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, companyName: e.target.value } : d)}
+                  placeholder="Optional"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Job title</span>
+                <input
+                  value={createLeadDraft.jobTitle}
+                  onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, jobTitle: e.target.value } : d)}
+                  placeholder="Optional"
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+                />
+              </label>
+
+              <p className="text-xs text-muted-foreground">Source will be set to <span className="text-white">manual</span>.</p>
+
+              <button
+                onClick={() => { void handleCreateLead(); }}
+                disabled={isSubmittingCreateLead || !createLeadDraft.clientId}
+                className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmittingCreateLead ? "Creating..." : "Create lead"}
+              </button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {selectedLead && draft && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/55" onClick={() => setSelectedLeadId(null)}>

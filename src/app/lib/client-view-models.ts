@@ -33,10 +33,16 @@ export function getClientKpis(
 ) {
   const prospectsFromCampaigns = sum(campaigns.map((item) => item.database_size));
   const prospectsFromClients = sum(clients.map((item) => item.prospects_added));
+  let mqls = 0, meetings = 0, won = 0;
+  for (const item of leads) {
+    if (item.qualification === "MQL") mqls++;
+    if (item.meeting_booked) meetings++;
+    if (item.won) won++;
+  }
   return {
-    mqls: leads.filter((item) => item.qualification === "MQL").length,
-    meetings: leads.filter((item) => item.meeting_booked).length,
-    won: leads.filter((item) => item.won).length,
+    mqls,
+    meetings,
+    won,
     emailsSent: sum(stats.map((item) => item.sent_count)),
     prospects: prospectsFromCampaigns || prospectsFromClients,
   };
@@ -147,10 +153,18 @@ export function getClientLeadRows(
   campaigns: CampaignRecord[],
   replies: ReplyRecord[],
 ) {
+  const campaignById = new Map(campaigns.map((c) => [c.id, c]));
+  const repliesByLeadId = new Map<string, ReplyRecord[]>();
+  for (const reply of replies) {
+    const bucket = repliesByLeadId.get(reply.lead_id) ?? [];
+    bucket.push(reply);
+    repliesByLeadId.set(reply.lead_id, bucket);
+  }
+
   return leads.map((lead) => {
     const stage = getLeadStage(lead);
-    const campaign = campaigns.find((item) => item.id === lead.campaign_id);
-    const leadReplies = replies.filter((item) => item.lead_id === lead.id);
+    const campaign = campaignById.get(lead.campaign_id ?? "");
+    const leadReplies = repliesByLeadId.get(lead.id) ?? [];
     const hasInlineReply = Boolean(lead.reply_text?.trim());
     const latestReply = leadReplies
       .slice()

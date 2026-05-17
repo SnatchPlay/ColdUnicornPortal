@@ -61,30 +61,35 @@ export function ManagerDashboardPage() {
     [recentThreshold, scopedReplies],
   );
 
-  const clientPortfolio = useMemo(
-    () =>
-      scopedClients
-        .map((client) => {
-          const clientCampaigns = scopedCampaigns.filter((campaign) => campaign.client_id === client.id);
-          const clientLeads = scopedLeads.filter((lead) => lead.client_id === client.id);
-          const mqls = clientLeads.filter((lead) => lead.qualification === "MQL").length;
-          const won = clientLeads.filter((lead) => lead.won).length;
-          const kpiLeads = client.kpi_leads ?? 0;
-          const progress = kpiLeads > 0 ? (mqls / kpiLeads) * 100 : null;
-
-          return {
-            id: client.id,
-            name: client.name,
-            status: client.status,
-            campaigns: clientCampaigns.length,
-            mqls,
-            won,
-            progress,
-          };
-        })
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    [scopedCampaigns, scopedClients, scopedLeads],
-  );
+  const clientPortfolio = useMemo(() => {
+    const campaignCountByClient = new Map<string, number>();
+    for (const c of scopedCampaigns) {
+      campaignCountByClient.set(c.client_id, (campaignCountByClient.get(c.client_id) ?? 0) + 1);
+    }
+    const mqlByClient = new Map<string, number>();
+    const wonByClient = new Map<string, number>();
+    for (const l of scopedLeads) {
+      if (l.qualification === "MQL") mqlByClient.set(l.client_id, (mqlByClient.get(l.client_id) ?? 0) + 1);
+      if (l.won) wonByClient.set(l.client_id, (wonByClient.get(l.client_id) ?? 0) + 1);
+    }
+    return scopedClients
+      .map((client) => {
+        const mqls = mqlByClient.get(client.id) ?? 0;
+        const won = wonByClient.get(client.id) ?? 0;
+        const kpiLeads = client.kpi_leads ?? 0;
+        const progress = kpiLeads > 0 ? (mqls / kpiLeads) * 100 : null;
+        return {
+          id: client.id,
+          name: client.name,
+          status: client.status,
+          campaigns: campaignCountByClient.get(client.id) ?? 0,
+          mqls,
+          won,
+          progress,
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [scopedCampaigns, scopedClients, scopedLeads]);
 
   const leadQueue = useMemo(
     () =>
