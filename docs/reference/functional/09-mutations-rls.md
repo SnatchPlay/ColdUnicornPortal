@@ -53,13 +53,18 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Called from:** Campaigns page drawer save.
 - **Fields:** `name`, `status`, `database_size`, `positive_responses`.
 
-### 2.3 `updateLead(leadId, patch)` — [repository.ts:412-417](../../../src/app/data/repository.ts#L412-L417)
+### 2.3 `updateLead(leadId, patch)` — [repository.ts:493-495](../../../src/app/data/repository.ts#L493-L495)
 
 - **Table:** `leads`.
-- **RLS:** `leads_update_scoped`. Policy predicate lives in `docs/reference/supabase-production-rls.sql`; effectively restricts writes to internal roles that can manage the owning client.
-- **Allowed roles:** admin, super_admin, manager (assigned); **never client** (ADR-0004 + RLS).
+- **RLS:** `leads_update_visible` — predicate `public.can_access_client(client_id)`. RLS itself allows clients of the row's owner; the **client write block is enforced at the UI layer** (`disabled={identity?.role === "client"}` in the drawer) plus the field whitelist in `mapLeadPatch`.
+- **Allowed roles:** admin, super_admin, manager (assigned). UI blocks the client role.
 - **Called from:** Leads page drawer save.
-- **Fields (ADR-0004 whitelist):** `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`.
+- **Fields (ADR-0004 whitelist, enforced server-side in [`supabase/functions/orm-gateway/index.ts` `mapLeadPatch`](../../../supabase/functions/orm-gateway/index.ts)):**
+  - Pipeline: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`
+  - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
+  - Firmographics: `country`, `industry`, `headcount_range`, `website`
+  - OOO: `expected_return_date`, `added_to_ooo_campaign`
+- **Never accepted by gateway (read-only):** `id`, `client_id`, `campaign_id`, `external_id`, `external_blacklist_id`, `external_domain_blacklist_id`, `source`, `reply_text`, `response_time_hours`, `response_time_label`, `message_title`, `message_number`, `created_at`. Keys outside the whitelist are silently dropped — they will not error, just no-op.
 
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:418-423](../../../src/app/data/repository.ts#L418-L423)
 

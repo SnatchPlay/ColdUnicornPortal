@@ -4,6 +4,7 @@ import { ResponsiveContainer, Tooltip } from "recharts";
 import { cn } from "./ui/utils";
 import { formatDate, formatNumber } from "../lib/format";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
+import type { LeadRecord, ReplyRecord } from "../types/core";
 import {
   TIMEFRAME_PRESETS,
   createDefaultTimeframe,
@@ -351,6 +352,95 @@ export function PortalErrorState({
   );
 }
 
+export interface LeadDrawerData {
+  name: string;
+  initials: string;
+  email: string;
+  title: string;
+  company: string;
+  stage: PipelineStage;
+  campaignName: string;
+  step: number | null;
+  replyCount: number;
+  lastReplyDate: string | null;
+  addedDate: string;
+  lead: LeadRecord;
+  replies: ReplyRecord[];
+}
+
+function formatGender(gender: string | null) {
+  if (!gender) return null;
+  return gender.charAt(0).toUpperCase() + gender.slice(1);
+}
+
+function formatQualification(qualification: string | null) {
+  if (!qualification) return "unqualified";
+  return qualification.replace(/_/g, " ");
+}
+
+function formatWebsite(value: string | null) {
+  if (!value) return null;
+  return value.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+function ensureUrl(value: string | null) {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  return `https://${value}`;
+}
+
+function FieldTile({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
+  return (
+    <div className="rounded-2xl bg-[#111] p-4">
+      <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">{label}</p>
+      <div className={cn("mt-2 text-sm text-white break-words", mono && "font-mono text-[13px]")}>{value}</div>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">{children}</p>
+  );
+}
+
+function YesNoPill({ value }: { value: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+        value
+          ? "bg-emerald-500/15 text-emerald-300"
+          : "bg-neutral-500/10 text-neutral-400",
+      )}
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full", value ? "bg-emerald-400" : "bg-neutral-500")} />
+      {value ? "Yes" : "No"}
+    </span>
+  );
+}
+
+function ReplyClassificationBadge({ value }: { value: string | null }) {
+  if (!value) return <span className="text-xs text-neutral-500">unclassified</span>;
+  const tone =
+    value === "Interested"
+      ? "bg-emerald-500/15 text-emerald-300"
+      : value === "OOO"
+        ? "bg-amber-500/15 text-amber-300"
+        : value === "NRR"
+          ? "bg-sky-500/15 text-sky-300"
+          : value === "Left_Company"
+            ? "bg-violet-500/15 text-violet-300"
+            : value === "Spam_Inbound"
+              ? "bg-red-500/15 text-red-300"
+              : "bg-neutral-500/15 text-neutral-300";
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium", tone)}>
+      {value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
 export function LeadDrawer({
   open,
   onClose,
@@ -358,35 +448,7 @@ export function LeadDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  lead: null | {
-    name: string;
-    initials: string;
-    email: string;
-    title: string;
-    company: string;
-    stage: PipelineStage;
-    campaignName: string;
-    step: number | null;
-    replyCount: number;
-    lastReplyDate: string | null;
-    addedDate: string;
-    lead: {
-      linkedin_url: string | null;
-      gender: string | null;
-      industry: string | null;
-      headcount_range: string | null;
-      website: string | null;
-      country: string | null;
-      reply_text: string | null;
-    };
-    replies: Array<{
-      id: string;
-      message_text: string | null;
-      classification: string | null;
-      sequence_step: number | null;
-      received_at: string;
-    }>;
-  };
+  lead: LeadDrawerData | null;
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -447,20 +509,6 @@ export function LeadDrawer({
 
   if (!open || !lead) return null;
 
-  const detailItems = [
-    ["Campaign", lead.campaignName],
-    ["Replied at Step", lead.step ? `Step ${lead.step}` : "No step"],
-    ["Total Replies", formatNumber(lead.replyCount)],
-    ["Gender", lead.lead.gender ?? "Unknown"],
-    ["Created", formatDate(lead.addedDate, { day: "numeric", month: "short", year: "2-digit" })],
-    ["Last Reply", lead.lastReplyDate ? formatDate(lead.lastReplyDate, { day: "numeric", month: "short" }) : "No reply"],
-    ["Industry", lead.lead.industry ?? "Unknown"],
-    ["Headcount", lead.lead.headcount_range ?? "Unknown"],
-    ["Website", lead.lead.website ?? "Unknown"],
-    ["Country", lead.lead.country ?? "Unknown"],
-  ];
-  const inlineReply = lead.lead.reply_text?.trim();
-
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45" onClick={onClose}>
       <aside
@@ -469,7 +517,7 @@ export function LeadDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="lead-drawer-title"
-        className="flex h-full w-full max-w-[620px] flex-col border-l border-[#242424] bg-[#070707] text-white shadow-2xl"
+        className="flex h-full w-full max-w-[640px] flex-col border-l border-[#242424] bg-[#070707] text-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between border-b border-[#1f1f1f] p-6">
@@ -484,8 +532,11 @@ export function LeadDrawer({
               <p className="text-sm text-neutral-400">
                 {lead.title} · {lead.company}
               </p>
-              <div className="mt-3">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <PipelineBadge stage={lead.stage} />
+                <span className="rounded-full bg-[#1a1a1a] px-2.5 py-1 text-xs uppercase tracking-wide text-neutral-300">
+                  {formatQualification(lead.lead.qualification)}
+                </span>
               </div>
             </div>
           </div>
@@ -500,79 +551,267 @@ export function LeadDrawer({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <section className="border-b border-[#1f1f1f] p-6">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">Contact</p>
-            <div className="space-y-3">
-              <div className="rounded-2xl bg-[#111] px-4 py-4 text-base">{lead.email}</div>
-              {lead.lead.linkedin_url ? (
-                <a
-                  href={lead.lead.linkedin_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-2xl bg-[#111] px-4 py-4 text-base text-blue-400 underline-offset-2 hover:underline"
-                >
-                  {lead.lead.linkedin_url}
-                </a>
-              ) : (
-                <div className="rounded-2xl bg-[#111] px-4 py-4 text-base text-neutral-400">LinkedIn unavailable</div>
-              )}
-            </div>
-          </section>
-
-          <section className="border-b border-[#1f1f1f] p-6">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">Details</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {detailItems.map(([label, value]) => (
-                <div key={label} className="rounded-2xl bg-[#111] p-4">
-                  <p className="text-sm text-neutral-400">{label}</p>
-                  <p className="mt-2 text-sm text-white">{value}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="p-6">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">
-              Conversation ({lead.replyCount})
-            </p>
-            {lead.replies.length === 0 && !inlineReply ? (
-              <EmptyPortalState title="No conversation yet" description="Replies table is empty for this lead." />
-            ) : (
-              <div className="space-y-3">
-                {inlineReply && (
-                  <div className="rounded-2xl bg-[#111] p-4">
-                    <div className="mb-3 flex items-center justify-between text-sm">
-                      <span className="inline-flex items-center gap-2 text-neutral-300">
-                        <MessageSquare className="h-4 w-4 text-emerald-400" />
-                        Inbound
-                      </span>
-                    </div>
-                    <p className="text-sm leading-6 text-white">{inlineReply}</p>
-                  </div>
-                )}
-                {lead.replies.map((reply) => (
-                  <div key={reply.id} className="rounded-2xl bg-[#111] p-4">
-                    <div className="mb-3 flex items-center justify-between text-sm">
-                      <span className="inline-flex items-center gap-2 text-neutral-300">
-                        <MessageSquare className="h-4 w-4 text-emerald-400" />
-                        Step {reply.sequence_step ?? "n/a"}
-                      </span>
-                      <span className="text-neutral-400">{formatDate(reply.received_at, { day: "numeric", month: "short" })}</span>
-                    </div>
-                    <p className="text-sm leading-6 text-white">{reply.message_text ?? reply.classification ?? "No text"}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <div className="border-t border-[#1f1f1f] p-5">
-          <button className="w-full rounded-2xl bg-white px-4 py-3 text-base font-medium text-black">
-            Contact
-          </button>
+          <LeadDetailSections lead={lead} />
+          <LeadConversation lead={lead} />
+          <LeadMetaSection lead={lead.lead} />
         </div>
       </aside>
     </div>
+  );
+}
+
+export function LeadDetailSections({ lead }: { lead: LeadDrawerData }) {
+  const record = lead.lead;
+  const websiteHref = ensureUrl(record.website);
+  const websiteLabel = formatWebsite(record.website);
+  return (
+    <>
+      <section className="border-b border-[#1f1f1f] p-6">
+        <SectionLabel>Contact</SectionLabel>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FieldTile
+            label="Email"
+            value={
+              record.email ? (
+                <a href={`mailto:${record.email}`} className="text-blue-400 hover:underline">
+                  {record.email}
+                </a>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )
+            }
+          />
+          <FieldTile
+            label={`Phone${record.phone_source ? ` · ${record.phone_source}` : ""}`}
+            value={
+              record.phone_number ? (
+                <a href={`tel:${record.phone_number}`} className="text-blue-400 hover:underline">
+                  {record.phone_number}
+                </a>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )
+            }
+          />
+          <FieldTile
+            label="LinkedIn"
+            value={
+              record.linkedin_url ? (
+                <a
+                  href={record.linkedin_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate text-blue-400 hover:underline"
+                >
+                  {record.linkedin_url}
+                </a>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )
+            }
+          />
+          <FieldTile
+            label="Website"
+            value={
+              websiteHref ? (
+                <a
+                  href={websiteHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate text-blue-400 hover:underline"
+                >
+                  {websiteLabel}
+                </a>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )
+            }
+          />
+        </div>
+      </section>
+
+      <section className="border-b border-[#1f1f1f] p-6">
+        <SectionLabel>Profile</SectionLabel>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FieldTile label="Gender" value={formatGender(record.gender) ?? <span className="text-neutral-500">—</span>} />
+          <FieldTile label="Country" value={record.country ?? <span className="text-neutral-500">—</span>} />
+          <FieldTile label="Industry" value={record.industry ?? <span className="text-neutral-500">—</span>} />
+          <FieldTile label="Headcount" value={record.headcount_range ?? <span className="text-neutral-500">—</span>} />
+        </div>
+      </section>
+
+      <section className="border-b border-[#1f1f1f] p-6">
+        <SectionLabel>Outreach</SectionLabel>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FieldTile label="Campaign" value={lead.campaignName} />
+          <FieldTile
+            label="Replied at step"
+            value={lead.step ? `Step ${lead.step}` : <span className="text-neutral-500">No step</span>}
+          />
+          <FieldTile label="Total replies" value={formatNumber(lead.replyCount)} />
+          <FieldTile
+            label="Last reply"
+            value={
+              lead.lastReplyDate
+                ? formatDate(lead.lastReplyDate, { day: "numeric", month: "short", year: "2-digit" })
+                : <span className="text-neutral-500">No reply</span>
+            }
+          />
+          <FieldTile
+            label="Response time"
+            value={
+              record.response_time_label
+                ?? (record.response_time_hours != null
+                  ? `${formatNumber(record.response_time_hours)} h`
+                  : <span className="text-neutral-500">—</span>)
+            }
+          />
+          <FieldTile
+            label="Message title"
+            value={record.message_title ?? <span className="text-neutral-500">—</span>}
+          />
+        </div>
+      </section>
+
+      <section className="border-b border-[#1f1f1f] p-6">
+        <SectionLabel>Pipeline state</SectionLabel>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex items-center justify-between rounded-2xl bg-[#111] p-4">
+            <span className="text-xs uppercase tracking-[0.14em] text-neutral-500">Meeting booked</span>
+            <YesNoPill value={record.meeting_booked} />
+          </div>
+          <div className="flex items-center justify-between rounded-2xl bg-[#111] p-4">
+            <span className="text-xs uppercase tracking-[0.14em] text-neutral-500">Meeting held</span>
+            <YesNoPill value={record.meeting_held} />
+          </div>
+          <div className="flex items-center justify-between rounded-2xl bg-[#111] p-4">
+            <span className="text-xs uppercase tracking-[0.14em] text-neutral-500">Offer sent</span>
+            <YesNoPill value={record.offer_sent} />
+          </div>
+          <div className="flex items-center justify-between rounded-2xl bg-[#111] p-4">
+            <span className="text-xs uppercase tracking-[0.14em] text-neutral-500">Won</span>
+            <YesNoPill value={record.won} />
+          </div>
+          {record.qualification === "OOO" || record.added_to_ooo_campaign ? (
+            <div className="sm:col-span-2 flex items-center justify-between rounded-2xl bg-[#111] p-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">OOO return date</p>
+                <p className="mt-2 text-sm text-white">
+                  {record.expected_return_date
+                    ? formatDate(record.expected_return_date, { day: "numeric", month: "short", year: "numeric" })
+                    : <span className="text-neutral-500">unknown</span>}
+                </p>
+              </div>
+              {record.added_to_ooo_campaign && (
+                <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-300">
+                  In OOO campaign
+                </span>
+              )}
+            </div>
+          ) : null}
+        </div>
+        {record.comments && (
+          <div className="mt-3 rounded-2xl bg-[#111] p-4">
+            <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">Comments</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white">{record.comments}</p>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+export function LeadConversation({ lead }: { lead: LeadDrawerData }) {
+  const inlineReply = lead.lead.reply_text?.trim();
+  const sortedReplies = lead.replies
+    .slice()
+    .sort((a, b) => b.received_at.localeCompare(a.received_at));
+  return (
+    <section className="border-b border-[#1f1f1f] p-6">
+      <SectionLabel>Conversation ({lead.replyCount})</SectionLabel>
+      {sortedReplies.length === 0 && !inlineReply ? (
+        <EmptyPortalState title="No conversation yet" description="Replies table is empty for this lead." />
+      ) : (
+        <div className="space-y-3">
+          {inlineReply && (
+            <div className="rounded-2xl bg-[#111] p-4">
+              <div className="mb-3 flex items-center justify-between text-sm">
+                <span className="inline-flex items-center gap-2 text-neutral-300">
+                  <MessageSquare className="h-4 w-4 text-emerald-400" />
+                  Inline reply
+                </span>
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-white">{inlineReply}</p>
+            </div>
+          )}
+          {sortedReplies.map((reply) => (
+            <div key={reply.id} className="rounded-2xl bg-[#111] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 text-neutral-300">
+                    <MessageSquare className="h-4 w-4 text-emerald-400" />
+                    {reply.sequence_step ? `Step ${reply.sequence_step}` : "Inbound"}
+                  </span>
+                  <ReplyClassificationBadge value={reply.classification} />
+                  {reply.language_detected && (
+                    <span className="rounded-full bg-[#1a1a1a] px-2 py-0.5 text-xs uppercase tracking-wide text-neutral-400">
+                      {reply.language_detected}
+                    </span>
+                  )}
+                  {reply.is_automated_reply && (
+                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300">auto</span>
+                  )}
+                  {reply.is_forwarded && (
+                    <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-300">fwd</span>
+                  )}
+                </div>
+                <span className="text-neutral-400">
+                  {formatDate(reply.received_at, { day: "numeric", month: "short", year: "2-digit" })}
+                </span>
+              </div>
+              {reply.message_subject && (
+                <p className="mb-2 text-sm font-medium text-white">{reply.message_subject}</p>
+              )}
+              {reply.from_email_address && (
+                <p className="mb-2 text-xs text-neutral-500">From {reply.from_email_address}</p>
+              )}
+              <p className="whitespace-pre-wrap text-sm leading-6 text-white">
+                {reply.message_text ?? <span className="text-neutral-500">No text</span>}
+              </p>
+              {reply.short_reason && (
+                <p className="mt-3 rounded-xl bg-[#0a0a0a] p-3 text-xs leading-5 text-neutral-400">
+                  <span className="font-medium text-neutral-300">Why: </span>
+                  {reply.short_reason}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function LeadMetaSection({ lead }: { lead: LeadRecord }) {
+  return (
+    <section className="p-6">
+      <SectionLabel>Meta</SectionLabel>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FieldTile
+          label="Created"
+          value={formatDate(lead.created_at, { day: "numeric", month: "short", year: "numeric" })}
+        />
+        <FieldTile
+          label="Updated"
+          value={formatDate(lead.updated_at, { day: "numeric", month: "short", year: "numeric" })}
+        />
+        <FieldTile label="Source" value={lead.source || <span className="text-neutral-500">—</span>} />
+        <FieldTile
+          label="External ID"
+          value={lead.external_id ?? <span className="text-neutral-500">—</span>}
+          mono
+        />
+      </div>
+    </section>
   );
 }
