@@ -386,12 +386,32 @@ function mapCampaignPatch(patch: Record<string, unknown>) {
 
 function mapLeadPatch(patch: Record<string, unknown>) {
   const mapped: Record<string, unknown> = {};
+  // Pipeline state (ADR-0004 original)
   if ("qualification" in patch) mapped.qualification = patch.qualification;
   if ("meeting_booked" in patch) mapped.meetingBooked = patch.meeting_booked;
   if ("meeting_held" in patch) mapped.meetingHeld = patch.meeting_held;
   if ("offer_sent" in patch) mapped.offerSent = patch.offer_sent;
   if ("won" in patch) mapped.won = patch.won;
   if ("comments" in patch) mapped.comments = patch.comments;
+  // Identity (ADR-0004 v2: manager/admin may correct enriched data)
+  if ("email" in patch) mapped.email = patch.email;
+  if ("first_name" in patch) mapped.firstName = patch.first_name;
+  if ("last_name" in patch) mapped.lastName = patch.last_name;
+  if ("job_title" in patch) mapped.jobTitle = patch.job_title;
+  if ("company_name" in patch) mapped.companyName = patch.company_name;
+  if ("linkedin_url" in patch) mapped.linkedinUrl = patch.linkedin_url;
+  if ("phone_number" in patch) mapped.phoneNumber = patch.phone_number;
+  if ("phone_source" in patch) mapped.phoneSource = patch.phone_source;
+  if ("gender" in patch) mapped.gender = patch.gender;
+  // Firmographics
+  if ("country" in patch) mapped.country = patch.country;
+  if ("industry" in patch) mapped.industry = patch.industry;
+  if ("headcount_range" in patch) mapped.headcountRange = patch.headcount_range;
+  if ("website" in patch) mapped.website = patch.website;
+  // OOO state
+  if ("expected_return_date" in patch) mapped.expectedReturnDate = patch.expected_return_date;
+  if ("added_to_ooo_campaign" in patch) mapped.addedToOooCampaign = patch.added_to_ooo_campaign;
+  // Bookkeeping
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }

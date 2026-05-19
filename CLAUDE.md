@@ -364,7 +364,73 @@ In this project specifically: see [09-mutations-rls.md](docs/reference/functiona
 
 Why it matters here: the app's authenticated-role `statement_timeout` is the binding constraint behind the 90/180-day snapshot windows ([10-nfr §1.1](docs/reference/functional/10-nfr.md#11-bulk-snapshot)). The set-based RLS rewrite that took queries from 10.48 s → 0.30 s is the canonical example of what this skill enforces — apply the same lens to every new policy or aggregate.
 
-### 10.2 Frontend & code-quality
+### 10.2 Frontend UI & visual design
+
+The repo's house style is a **dark, dense, data-first dashboard** (see [§4.5 Styles](#45-styles) and [08-charts-catalog.md](docs/reference/functional/08-charts-catalog.md)). Design skills must **respect that constraint** — never swap the palette, never introduce light themes, never replace recharts. Use these skills to raise polish, hierarchy, motion, and information density, not to redesign the product.
+
+**Default pipeline for any UI task** (new page, redesigned section, drawer, table, chart panel):
+
+```
+impeccable (audit + plan)
+   → design-taste-frontend (component architecture + metric-based layout rules)
+      → implement against existing primitives (app-ui.tsx / portal-ui.tsx / ui/)
+         → simplify (cleanup)
+            → Playwright MCP screenshots per role (§9b)
+```
+
+Skip-the-pipeline only for trivial copy / spacing / class tweaks.
+
+#### `impeccable`
+
+**Trigger automatically when** the task involves designing, redesigning, auditing, polishing, or critiquing any UI surface — pages, drawers, tables, forms, empty/error/loading states, onboarding, dashboards, charts, or component variants. Also for visual-hierarchy, IA, accessibility, responsive, theming, motion, micro-interaction, copy, or "make this less bland / less generic" requests.
+
+Treat its output as a **design brief** to be reconciled with [`app-ui.tsx`](src/app/components/app-ui.tsx) / [`portal-ui.tsx`](src/app/components/portal-ui.tsx) primitives. If a recommendation conflicts with [§2 Reuse](#2-reuse-over-recreation) or [§4.5 Styles](#45-styles), the CLAUDE.md rule wins — extend the existing primitive, do not fork it.
+
+#### `design-taste-frontend`
+
+**Trigger when** building or restructuring a non-trivial component (new dashboard panel, new drawer, new chart container, new table layout). It enforces strict component architecture, metric-based spacing/sizing rules, CSS hardware-accelerated motion, and balanced design engineering.
+
+Use it to **codify the structure** before writing JSX. Match its output against the existing CSS-grid table pattern, `useResizableColumns`, and the `MetricCard` / `KpiTile` / `ChartPanel` primitives.
+
+#### `high-end-visual-design`
+
+**Trigger when** the user says "make it feel premium / expensive / agency-grade" or when polishing a flagship surface (top-level dashboards, client portal home, marketing-facing screens). Defines fonts, spacing, shadows, card structures, and animations that defeat the generic-AI look.
+
+In this repo: apply within our dark palette only. Borders stay `#242424`, surfaces stay `#0f0f0f`-family. Use the skill for typographic rhythm, shadow layering, card depth, and motion timing — not for color overhauls.
+
+#### `redesign-existing-projects`
+
+**Trigger when** the task is "redesign / upgrade / modernize this page" — i.e., the page already exists and the user wants a higher-quality version without breaking functionality. The skill audits current design, identifies generic-AI patterns, and applies premium standards without rewrites.
+
+This is the right entry point for "redo the manager dashboard" / "the leads page looks cheap" / "the drawer feels unfinished" type asks. Pair with `impeccable` for the audit and `design-taste-frontend` for the rebuild plan.
+
+#### `minimalist-ui`
+
+**Trigger when** a surface needs to **quiet down** — too much going on, too many borders, too many accent colors, too many KPI tiles competing. The skill produces editorial-grade, calm layouts: typographic contrast, flat bento grids, muted accents, no gradients, no heavy shadows.
+
+Good fit for the client portal landing page and any dense settings / profile / detail view where the data already does the talking.
+
+#### `industrial-brutalist-ui`
+
+**Niche.** Use only when the user explicitly asks for a brutalist / terminal / declassified-blueprint aesthetic (e.g., an internal admin debug surface or a deliberately rough internal tool). Not for client-facing pages. Default to `minimalist-ui` or `high-end-visual-design` instead.
+
+#### `gpt-taste`
+
+**Trigger when** the task asks for marketing/landing-page-grade layout variance, AIDA structure, GSAP scroll motion, editorial typography, gapless bento, inline micro-images, or aggressive scroll-driven sections. **Almost never applies to this product** — we are a dashboard, not a marketing site. Use it only if the user explicitly asks for a marketing/landing surface (none currently exists in scope).
+
+#### `imagegen-frontend-web` / `imagegen-frontend-mobile` / `image-to-code` / `brandkit` / `stitch-design-taste`
+
+**Image-generation / external design tools.** Trigger only when the user explicitly asks for design references, mockups, brand boards, or "generate an image of X" work. They do **not** write code (except `image-to-code`, which implements an existing image). For day-to-day component work, skip them — we already have a design system.
+
+- `image-to-code` — when the user provides (or asks you to generate) a reference image and wants it implemented faithfully.
+- `imagegen-frontend-web` / `imagegen-frontend-mobile` — when the user wants horizontal section references or mobile screen concepts before coding.
+- `brandkit` / `stitch-design-taste` — only for brand identity work or external `DESIGN.md` artifacts (rare here).
+
+#### `full-output-enforcement`
+
+**Trigger when** producing a large, complete frontend file (full page rewrite, large drawer, multi-chart panel) where truncation or placeholder-pattern output would break the change. Bans `// ... rest unchanged` style elisions. Use sparingly — most edits should be `Edit`-tool diffs, not whole-file rewrites.
+
+### 10.3 Code quality & review
 
 #### `simplify`
 
@@ -395,7 +461,7 @@ Use it after `simplify` has cleaned the diff — `review` looks at correctness a
 
 Manually trigger with `/security-review` for a full sweep on the current branch before merging anything that touches the trust boundary.
 
-### 10.3 Operational helpers
+### 10.4 Operational helpers
 
 #### `fewer-permission-prompts`
 
@@ -409,12 +475,16 @@ Use when the user wants to change Claude Code harness behavior — automated hoo
 
 Situational; invoke only when the user explicitly maps onto their description (initializing a new CLAUDE.md elsewhere, customizing keybindings, running recurring tasks, scheduling agents, or working on Claude API / Anthropic SDK code — none of which apply to this React+Supabase product directly).
 
-### 10.4 Skill orchestration rules
+### 10.5 Skill orchestration rules
 
 1. **Never call a skill that isn't in the available-skills list of the current session.** If the system reminder shows it, it's available; otherwise it isn't.
 2. **Don't double-invoke.** A skill already running in the conversation is loaded — follow its instructions instead of calling it again.
-3. **Combine intentionally.** Typical pipeline for a backend change: `supabase-postgres-best-practices` (design) → implement → `simplify` (cleanup) → `security-review` (trust boundary) → `review` (final pass).
-4. **Cite the skill in your response** when its output influenced a decision, so the user can trace why a pattern was chosen.
+3. **Combine intentionally.** Canonical pipelines:
+   - **Backend change:** `supabase-postgres-best-practices` (design) → implement → `simplify` (cleanup) → `security-review` (trust boundary) → `review` (final pass).
+   - **UI change (new or redesigned surface):** `impeccable` (audit + plan) → `design-taste-frontend` (component structure) → optionally `high-end-visual-design` / `minimalist-ui` / `redesign-existing-projects` for tone → implement against existing primitives → `simplify` → Playwright MCP screenshots per role.
+   - **UI change (small tweak):** implement directly → `simplify` → screenshot.
+4. **House rules beat skill output.** If a design skill proposes a light theme, a new color system, a non-recharts chart lib, a new HTTP layer, or a fork of an existing primitive — reject that part of the output and keep the rest. CLAUDE.md §2–§5 always win.
+5. **Cite the skill in your response** when its output influenced a decision, so the user can trace why a pattern was chosen.
 
 ---
 
