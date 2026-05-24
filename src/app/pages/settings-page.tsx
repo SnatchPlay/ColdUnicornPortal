@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
@@ -840,24 +841,26 @@ function ClientsTableCustomization({
                   key={col.id}
                   className="grid grid-cols-[auto_1.4fr_2fr_auto] items-center gap-3 px-3 py-2"
                 >
-                  <div className="flex flex-col gap-0.5">
+                  <div className="flex flex-col gap-1">
                     <button
                       type="button"
                       onClick={() => moveColumn(idx, -1)}
                       disabled={idx === 0}
+                      aria-label={`Move "${describeBuiltInColumn(col)}" up`}
                       title="Move up"
-                      className="rounded border border-white/10 px-1 py-0 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
                     >
-                      ↑
+                      <ChevronUp className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
                       onClick={() => moveColumn(idx, 1)}
                       disabled={idx === orderedColumns.length - 1}
+                      aria-label={`Move "${describeBuiltInColumn(col)}" down`}
                       title="Move down"
-                      className="rounded border border-white/10 px-1 py-0 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
                     >
-                      ↓
+                      <ChevronDown className="h-4 w-4" />
                     </button>
                   </div>
                   <span className="truncate text-xs text-neutral-300">{describeBuiltInColumn(col)}</span>
