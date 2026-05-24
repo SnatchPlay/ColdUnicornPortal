@@ -12,17 +12,27 @@ import type {
   ReplyRecord,
 } from "../types/core";
 
+export function isInternalAdmin(role: AppRole): boolean {
+  return role === "admin" || role === "super_admin" || role === "master_admin";
+}
+
 export function getRoleLabel(role: AppRole) {
-  return role === "manager" ? "CS Manager" : role.replace("_", " ");
+  if (role === "manager") return "CS Manager";
+  if (role === "master_admin") return "Master admin";
+  return role.replace("_", " ");
 }
 
 export function scopeClients(identity: Identity, clients: ClientRecord[]) {
-  if (identity.role === "admin" || identity.role === "super_admin") return clients;
+  if (isInternalAdmin(identity.role)) return clients;
   if (identity.role === "manager") return clients.filter((item) => item.manager_id === identity.id);
   if (identity.role === "client" && identity.clientId) {
     return clients.filter((item) => item.id === identity.clientId);
   }
   return [];
+}
+
+export function sortClientsAlpha<T extends { name: string }>(clients: T[]): T[] {
+  return clients.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function scopeCampaigns(identity: Identity, clients: ClientRecord[], campaigns: CampaignRecord[]) {

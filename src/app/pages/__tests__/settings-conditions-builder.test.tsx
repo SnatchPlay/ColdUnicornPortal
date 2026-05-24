@@ -58,7 +58,7 @@ describe("settings condition rules builder", () => {
     const updateConditionRule = vi.fn(async () => {});
     mockedUseAuth.mockReturnValue({
       actorIdentity: null,
-      identity: { id: "admin-1", fullName: "Admin", email: "admin@test.local", role: "admin" },
+      identity: { id: "super-admin-1", fullName: "Admin", email: "admin@test.local", role: "super_admin" },
       session: { user: { email: "admin@test.local" } },
       error: null,
       isImpersonating: false,
@@ -116,7 +116,7 @@ describe("settings condition rules builder", () => {
     const createConditionRule = vi.fn(async () => {});
     mockedUseAuth.mockReturnValue({
       actorIdentity: null,
-      identity: { id: "admin-1", fullName: "Admin", email: "admin@test.local", role: "admin" },
+      identity: { id: "super-admin-1", fullName: "Admin", email: "admin@test.local", role: "super_admin" },
       session: { user: { email: "admin@test.local" } },
       error: null,
       isImpersonating: false,
@@ -137,9 +137,12 @@ describe("settings condition rules builder", () => {
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole("button", { name: "New rule" }));
 
-    fireEvent.change(screen.getByLabelText("Rule key"), { target: { value: "new_rule_key" } });
-    fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "New Rule Name" } });
-    fireEvent.change(screen.getByLabelText("Metric key"), { target: { value: "wow_bounce_rate" } });
+    // The new guided builder pre-fills a valid metric (BUILTIN_METRICS[0])
+    // when "New rule" is clicked, so the draft is already savable. We just
+    // tweak the name and key text inputs (still rendered in the Rule details
+    // section) and submit.
+    fireEvent.change(screen.getByDisplayValue("new-rule"), { target: { value: "new_rule_key" } });
+    fireEvent.change(screen.getByDisplayValue("New rule"), { target: { value: "New Rule Name" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
     await waitFor(() => {

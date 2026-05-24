@@ -1,4 +1,4 @@
-export type AppRole = "super_admin" | "admin" | "manager" | "client";
+export type AppRole = "super_admin" | "admin" | "master_admin" | "manager" | "client";
 export type InviteRole = "admin" | "manager" | "client";
 export type InviteStatus = "pending" | "accepted" | "expired";
 export type ClientStatus = "Active" | "Abo" | "On hold" | "Offboarding" | "Inactive" | "Sales";
@@ -276,6 +276,40 @@ export interface InviteRecord {
   canRevoke: boolean;
 }
 
+export type ClientCustomFieldType = "text" | "checkbox" | "droplist";
+
+export interface ColumnOverrideRecord {
+  column_key: string;
+  label_override: string | null;
+  hidden: boolean;
+  /**
+   * Explicit position in the mega-table column order. `null` means
+   * "use MEGA_COLUMNS default order". Columns with explicit positions
+   * are rendered first (ascending), then the rest in default order.
+   */
+  position: number | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface ClientCustomFieldRecord {
+  id: string;
+  name: string;
+  field_type: ClientCustomFieldType;
+  options: string[] | null;
+  position: number;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ClientCustomFieldValueRecord {
+  client_id: string;
+  field_id: string;
+  value: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 export interface CoreSnapshot {
   users: UserRecord[];
   clients: ClientRecord[];
@@ -289,4 +323,7 @@ export interface CoreSnapshot {
   invoices: InvoiceRecord[];
   emailExcludeList: EmailExcludeRecord[];
   conditionRules: ConditionRuleRecord[];
+  columnOverrides: ColumnOverrideRecord[];
+  clientCustomFields: ClientCustomFieldRecord[];
+  clientCustomFieldValues: ClientCustomFieldValueRecord[];
 }

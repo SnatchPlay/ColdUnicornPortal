@@ -8,7 +8,7 @@ import { runtimeConfig } from "./lib/env";
 import { AppProviders } from "./providers";
 import { useAuth } from "./providers/auth";
 import { LoginPage } from "./pages/login-page";
-import { getRoleLabel } from "./lib/selectors";
+import { getRoleLabel, isInternalAdmin } from "./lib/selectors";
 import type { AppRole } from "./types/core";
 
 const DashboardPage = lazy(() => import("./pages/dashboard-page").then((module) => ({ default: module.DashboardPage })));
@@ -31,8 +31,8 @@ const ResetPasswordPage = lazy(() =>
   import("./pages/reset-password-page").then((module) => ({ default: module.ResetPasswordPage })),
 );
 
-function roleHomePath(role: "admin" | "manager" | "client" | "super_admin") {
-  if (role === "super_admin" || role === "admin") return "/admin/dashboard";
+function roleHomePath(role: AppRole) {
+  if (isInternalAdmin(role)) return "/admin/dashboard";
   if (role === "manager") return "/manager/dashboard";
   return "/client/dashboard";
 }
@@ -192,7 +192,7 @@ function ProtectedApp() {
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
 
-              <Route path="admin" element={<RequireRole allowed={["admin", "super_admin"]} />}>
+              <Route path="admin" element={<RequireRole allowed={["admin", "super_admin", "master_admin"]} />}>
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="users" element={<AdminUserManagementPage />} />
                 <Route path="clients" element={<ClientsPage />} />

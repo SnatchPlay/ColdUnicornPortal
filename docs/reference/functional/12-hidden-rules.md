@@ -39,6 +39,28 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 
 ## 2. Implicit business rules
 
+### `master_admin` role is seeded manually (no UI)
+
+There is no invitation flow for `master_admin`. The role is granted by a one-time SQL update against `public.users.role`:
+
+```sql
+update public.users set role = 'master_admin' where email = 'lukasz@coldunicorn.com';
+```
+
+Run this once after the `20260520_master_admin_role.sql` migration applies. Any future promotion (or demotion away from `master_admin`) follows the same manual path — the `Role` select in the invitations UI deliberately does not list `master_admin` or `super_admin`. See [ADR-0005](../../adr/0005-master-admin-role.md).
+
+### Custom-column condition metrics use `custom.<fieldId>` path and `cf:<fieldId>` column key
+
+Master-admin custom columns (`client_custom_fields`) are colourable by condition rules. The evaluation context exposes their per-client values as `context.custom[<fieldId>]` (raw text — checkbox stored as `"true"`/`"false"`). The mega-table column for a custom field carries `conditionKey: "cf:<fieldId>"` so a rule with `surface: 'clients_overview'`, `apply_to: 'cell'`, `column_key: 'cf:<fieldId>'` paints the cell. The metric catalog at [src/app/lib/conditions/metric-catalog.ts](../../../src/app/lib/conditions/metric-catalog.ts) generates these entries at runtime from `clientCustomFields` so they appear automatically in the visual rule builder.
+
+### Conditions Engine is open to master_admin (Raw mode stays super_admin-only)
+
+`canManageConditionRules` in [src/app/pages/settings-page.tsx](../../../src/app/pages/settings-page.tsx) now returns true for both `super_admin` and `master_admin`. The visual builder is identical for both; only super_admin sees the **Raw JSON** tab. Rules whose JSON shape cannot be represented in the visual builder open in the Raw tab automatically (for super_admin) or show read-only (for master_admin).
+
+### Blacklist is hidden from nav but routable
+
+`/admin/blacklist` and `/manager/blacklist` are still mounted in [App.tsx](../../../src/app/App.tsx), but the Blacklist entry is removed from `ADMIN_NAV` and the manager nav in [app-shell.tsx](../../../src/app/components/app-shell.tsx). Direct URLs still work for emergency edits; the surface is just not advertised.
+
 ### "Lead in progress"
 
 [manager-dashboard-page.tsx:50](../../../src/app/pages/manager-dashboard-page.tsx#L50) вЂ” Counts as "in progress" when both `won === false` AND `offer_sent === false`. Note: leads with `qualification = 'rejected'` or `'OOO'` still pass this test as long as those two booleans are false. This is intentional вЂ” they remain "in the funnel" until explicitly moved to a terminal state.

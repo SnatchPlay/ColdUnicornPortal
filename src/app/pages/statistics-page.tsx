@@ -15,7 +15,7 @@ import { DateRangeButton } from "../components/portal-ui";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
-import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads } from "../lib/selectors";
+import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads, sortClientsAlpha } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { useCoreData } from "../providers/core-data";
 import { useAuth } from "../providers/auth";
@@ -37,7 +37,10 @@ function InternalStatisticsPage() {
   const [clientFilterId, setClientFilterId] = useState(ALL_FILTER_VALUE);
   const [campaignFilterId, setCampaignFilterId] = useState(ALL_FILTER_VALUE);
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
+  const scopedClients = useMemo(
+    () => (identity ? sortClientsAlpha(scopeClients(identity, clients)) : []),
+    [clients, identity],
+  );
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],

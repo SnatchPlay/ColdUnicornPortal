@@ -3,7 +3,7 @@ import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { formatDate, formatMoney } from "../lib/format";
-import { scopeClients, scopeDomains } from "../lib/selectors";
+import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -110,7 +110,10 @@ export function DomainsPage() {
     [domainColumns.template],
   );
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
+  const scopedClients = useMemo(
+    () => (identity ? sortClientsAlpha(scopeClients(identity, clients)) : []),
+    [clients, identity],
+  );
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
 
   const filteredDomains = useMemo(() => {

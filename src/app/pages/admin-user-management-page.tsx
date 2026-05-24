@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Banner, EmptyState, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { Info } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { formatDate, formatNumber } from "../lib/format";
+import { isInternalAdmin } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { InviteRecord, InviteRole, InviteStatus } from "../types/core";
@@ -21,6 +25,12 @@ function statusBadgeClass(status: InviteStatus) {
   if (status === "accepted") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
   if (status === "expired") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
   return "border-sky-500/30 bg-sky-500/10 text-sky-200";
+}
+
+function inviteDisabledReason(status: InviteStatus): string | null {
+  if (status === "accepted") return "Already accepted — no action possible";
+  if (status === "expired") return "Invite expired — create a new one";
+  return null;
 }
 
 function formatInviteDate(value: string | null) {
@@ -49,7 +59,7 @@ export function AdminUserManagementPage() {
   const [message, setMessage] = useState<UiMessage | null>(null);
   const [pendingAction, setPendingAction] = useState<{ inviteId: string; action: "resend" | "revoke" } | null>(null);
 
-  const canAccess = identity?.role === "admin" || identity?.role === "super_admin";
+  const canAccess = identity ? isInternalAdmin(identity.role) : false;
 
   useEffect(() => {
     if (inviteRole !== "client") {
@@ -194,7 +204,32 @@ export function AdminUserManagementPage() {
           </label>
 
           <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Role</span>
+            <span className="flex items-center gap-1.5 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Role
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Role capabilities"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition hover:text-white"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-80 rounded-xl border border-[#242424] bg-[#050505] p-4 text-xs text-neutral-200"
+                >
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Role capabilities</p>
+                  <ul className="space-y-2 normal-case tracking-normal">
+                    <li><span className="font-medium text-white">Client</span> — sees only their own portal: dashboard, leads, campaigns, analytics. Read-mostly with a small set of editable lead fields.</li>
+                    <li><span className="font-medium text-white">CS Manager</span> — sees only clients assigned to them. Operational surface across leads, campaigns, domains, invoices for that subset.</li>
+                    <li><span className="font-medium text-white">Admin</span> — sees all clients. Full operational access plus user management. Cannot configure global Clients table columns or trigger thresholds.</li>
+                    <li><span className="font-medium text-white">Master admin</span> — admin plus exclusive access to Clients table customization (column overrides, custom fields) and Simple-triggers configuration. Configured manually; not invitable.</li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            </span>
             <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as InviteRole)}>
               <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
                 <SelectValue placeholder="Select role" />
@@ -312,24 +347,55 @@ export function AdminUserManagementPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap justify-end gap-2">
-                    <button
-                      onClick={() => {
-                        void handleResend(invite.id);
-                      }}
-                      disabled={!invite.canResend || isResending || isRevoking}
-                      className="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isResending ? "Resending..." : "Resend"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        void handleRevoke(invite.id);
-                      }}
-                      disabled={!invite.canRevoke || isResending || isRevoking}
-                      className="rounded-full border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isRevoking ? "Revoking..." : "Revoke"}
-                    </button>
+                    {(() => {
+                      const reason = inviteDisabledReason(invite.status);
+                      const resendButton = (
+                        <button
+                          onClick={() => {
+                            void handleResend(invite.id);
+                          }}
+                          disabled={!invite.canResend || isResending || isRevoking}
+                          className="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isResending ? "Resending..." : "Resend"}
+                        </button>
+                      );
+                      const revokeButton = (
+                        <button
+                          onClick={() => {
+                            void handleRevoke(invite.id);
+                          }}
+                          disabled={!invite.canRevoke || isResending || isRevoking}
+                          className="rounded-full border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isRevoking ? "Revoking..." : "Revoke"}
+                        </button>
+                      );
+                      if (!reason) {
+                        return (
+                          <>
+                            {resendButton}
+                            {revokeButton}
+                          </>
+                        );
+                      }
+                      return (
+                        <>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span tabIndex={0} className="inline-flex">{resendButton}</span>
+                            </TooltipTrigger>
+                            <TooltipContent>{reason}</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span tabIndex={0} className="inline-flex">{revokeButton}</span>
+                            </TooltipTrigger>
+                            <TooltipContent>{reason}</TooltipContent>
+                          </Tooltip>
+                        </>
+                      );
+                    })()}
                   </div>
                 </article>
               );

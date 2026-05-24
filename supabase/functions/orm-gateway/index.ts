@@ -569,6 +569,73 @@ function mapConditionRuleInsert(input: Record<string, unknown>) {
   };
 }
 
+// Raw-SQL helpers for tables not yet introspected into drizzle/schema.ts.
+// Phase 3 tables: client_table_column_overrides, client_custom_fields,
+// client_custom_field_values. Returns rows mapped to the client-side
+// snake_case TS record shape.
+
+function toColumnOverrideRecord(row: Record<string, unknown>) {
+  return {
+    column_key: String(row.column_key),
+    label_override: row.label_override === null ? null : (row.label_override as string),
+    hidden: Boolean(row.hidden),
+    position:
+      row.position === null || row.position === undefined
+        ? null
+        : Number(row.position),
+    updated_at:
+      row.updated_at instanceof Date
+        ? row.updated_at.toISOString()
+        : String(row.updated_at ?? ""),
+    updated_by: row.updated_by === null || row.updated_by === undefined ? null : String(row.updated_by),
+  };
+}
+
+function toClientCustomFieldRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    field_type: String(row.field_type) as "text" | "checkbox" | "droplist",
+    options: row.options === null || row.options === undefined ? null : (row.options as string[]),
+    position: Number(row.position ?? 0),
+    created_by: row.created_by === null || row.created_by === undefined ? null : String(row.created_by),
+    created_at:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at ?? ""),
+  };
+}
+
+function toClientCustomFieldValueRecord(row: Record<string, unknown>) {
+  return {
+    client_id: String(row.client_id),
+    field_id: String(row.field_id),
+    value: row.value === null || row.value === undefined ? null : String(row.value),
+    updated_at:
+      row.updated_at instanceof Date
+        ? row.updated_at.toISOString()
+        : String(row.updated_at ?? ""),
+    updated_by: row.updated_by === null || row.updated_by === undefined ? null : String(row.updated_by),
+  };
+}
+
+async function safeRawSelect(tx: any, query: any): Promise<any[]> {
+  // Returns [] if the underlying table does not exist yet (migration not applied),
+  // so the snapshot endpoint never hard-fails for new admins running against an
+  // older schema.
+  try {
+    const result = await tx.execute(query);
+    return Array.isArray(result) ? result : result.rows ?? [];
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    if (/does not exist|undefined_table|42P01/i.test(message)) {
+      console.warn(`[orm-gateway] customization table not present yet: ${message}`);
+      return [];
+    }
+    throw reason;
+  }
+}
+
 async function executeAsCaller(request: Request, operation: (tx: any) => Promise<unknown>) {
   if (!db) fail(500, "ORM gateway is missing DATABASE_URL.");
 
@@ -679,7 +746,22 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     const invoicesQuery = tx.select().from(schema.invoices).orderBy(desc(schema.invoices.issueDate));
     const emailExcludeQuery = tx.select().from(schema.emailExcludeList).orderBy(desc(schema.emailExcludeList.createdAt));
 
-    const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList] =
+    const columnOverridesQuery = safeRawSelect(
+      tx,
+      sql`select column_key, label_override, hidden, position, updated_at, updated_by from public.client_table_column_overrides`,
+    );
+    const clientCustomFieldsQuery = safeRawSelect(
+      tx,
+      sql`select id, name, field_type, options, position, created_by, created_at
+          from public.client_custom_fields
+          order by position asc, created_at asc`,
+    );
+    const clientCustomFieldValuesQuery = safeRawSelect(
+      tx,
+      sql`select client_id, field_id, value, updated_at, updated_by from public.client_custom_field_values`,
+    );
+
+    const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList, columnOverrides, clientCustomFields, clientCustomFieldValues] =
       // [TEMP PERF] wrap each query for per-table duration + row count
       await Promise.all([
         timedQuery("users", usersQuery),
@@ -693,6 +775,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
         timedQuery("domains", domainsQuery),
         timedQuery("invoices", invoicesQuery),
         timedQuery("emailExcludeList", emailExcludeQuery),
+        timedQuery("columnOverrides", columnOverridesQuery),
+        timedQuery("clientCustomFields", clientCustomFieldsQuery),
+        timedQuery("clientCustomFieldValues", clientCustomFieldValuesQuery),
       ]);
       // [TEMP PERF] /end
 
@@ -713,6 +798,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       invoices: invoices.map(toInvoiceRecord),
       emailExcludeList: emailExcludeList.map(toEmailExcludeRecord),
       conditionRules: [],
+      columnOverrides: (columnOverrides as Record<string, unknown>[]).map(toColumnOverrideRecord),
+      clientCustomFields: (clientCustomFields as Record<string, unknown>[]).map(toClientCustomFieldRecord),
+      clientCustomFieldValues: (clientCustomFieldValues as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
     };
   }
 
@@ -860,6 +948,131 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
   if (payload.action === "deleteEmailExcludeDomain") {
     await tx.delete(schema.emailExcludeList).where(eq(schema.emailExcludeList.domain, payload.domain.trim().toLowerCase()));
     return { ok: true };
+  }
+
+  if (payload.action === "upsertColumnOverride") {
+    const patch = payload.patch ?? {};
+    const labelProvided = "label_override" in patch;
+    const hiddenProvided = "hidden" in patch;
+    const positionProvided = "position" in patch;
+    const positionValue =
+      patch.position === null || patch.position === undefined
+        ? null
+        : Number(patch.position);
+    const rows = await tx.execute(sql`
+      insert into public.client_table_column_overrides (column_key, label_override, hidden, position, updated_at, updated_by)
+      values (
+        ${payload.columnKey},
+        ${labelProvided ? patch.label_override ?? null : null},
+        ${hiddenProvided ? Boolean(patch.hidden) : false},
+        ${positionProvided ? positionValue : null},
+        now(),
+        nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      )
+      on conflict (column_key) do update set
+        label_override = case when ${labelProvided} then excluded.label_override else public.client_table_column_overrides.label_override end,
+        hidden = case when ${hiddenProvided} then excluded.hidden else public.client_table_column_overrides.hidden end,
+        position = case when ${positionProvided} then excluded.position else public.client_table_column_overrides.position end,
+        updated_at = excluded.updated_at,
+        updated_by = excluded.updated_by
+      returning column_key, label_override, hidden, position, updated_at, updated_by
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(500, "Column override upsert failed.");
+    return toColumnOverrideRecord(result[0]);
+  }
+
+  if (payload.action === "setColumnOrder") {
+    // Bulk-assign sequential positions to all listed column keys. One row
+    // per key: insert if missing, else update the position only.
+    const all: Record<string, unknown>[] = [];
+    for (let i = 0; i < payload.orderedKeys.length; i++) {
+      const key = payload.orderedKeys[i];
+      const rows = await tx.execute(sql`
+        insert into public.client_table_column_overrides (column_key, label_override, hidden, position, updated_at, updated_by)
+        values (
+          ${key},
+          null,
+          false,
+          ${i},
+          now(),
+          nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+        )
+        on conflict (column_key) do update set
+          position = excluded.position,
+          updated_at = excluded.updated_at,
+          updated_by = excluded.updated_by
+        returning column_key, label_override, hidden, position, updated_at, updated_by
+      `);
+      const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+      if (result[0]) all.push(result[0]);
+    }
+    return all.map(toColumnOverrideRecord);
+  }
+
+  if (payload.action === "createClientCustomField") {
+    const input = payload.input;
+    const optionsJson = input.options ?? null;
+    const rows = await tx.execute(sql`
+      insert into public.client_custom_fields (name, field_type, options, position, created_by)
+      values (
+        ${input.name},
+        ${input.field_type},
+        ${optionsJson === null ? null : JSON.stringify(optionsJson)}::jsonb,
+        ${input.position ?? 0},
+        nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      )
+      returning id, name, field_type, options, position, created_by, created_at
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(500, "Client custom field could not be created.");
+    return toClientCustomFieldRecord(result[0]);
+  }
+
+  if (payload.action === "updateClientCustomField") {
+    const patch = payload.patch ?? {};
+    const setName = "name" in patch;
+    const setType = "field_type" in patch;
+    const setOptions = "options" in patch;
+    const setPosition = "position" in patch;
+    const rows = await tx.execute(sql`
+      update public.client_custom_fields set
+        name = case when ${setName} then ${patch.name ?? null} else name end,
+        field_type = case when ${setType} then ${patch.field_type ?? null} else field_type end,
+        options = case when ${setOptions} then ${patch.options === undefined || patch.options === null ? null : JSON.stringify(patch.options)}::jsonb else options end,
+        position = case when ${setPosition} then ${patch.position ?? 0} else position end
+      where id = ${payload.fieldId}
+      returning id, name, field_type, options, position, created_by, created_at
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(404, "Client custom field was not found.");
+    return toClientCustomFieldRecord(result[0]);
+  }
+
+  if (payload.action === "deleteClientCustomField") {
+    await tx.execute(sql`delete from public.client_custom_fields where id = ${payload.fieldId}`);
+    return { ok: true };
+  }
+
+  if (payload.action === "upsertClientCustomFieldValue") {
+    const rows = await tx.execute(sql`
+      insert into public.client_custom_field_values (client_id, field_id, value, updated_at, updated_by)
+      values (
+        ${payload.clientId},
+        ${payload.fieldId},
+        ${payload.value},
+        now(),
+        nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      )
+      on conflict (client_id, field_id) do update set
+        value = excluded.value,
+        updated_at = excluded.updated_at,
+        updated_by = excluded.updated_by
+      returning client_id, field_id, value, updated_at, updated_by
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(500, "Client custom field value upsert failed.");
+    return toClientCustomFieldValueRecord(result[0]);
   }
 
   if (payload.action === "loadIdentity") {

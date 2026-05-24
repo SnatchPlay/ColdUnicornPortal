@@ -11,7 +11,6 @@ import {
   ReceiptText,
   Rocket,
   Settings,
-  ShieldBan,
   UserCog,
   Users,
 } from "lucide-react";
@@ -36,7 +35,7 @@ import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 import type { AppRole } from "../types/core";
-import { getRoleLabel } from "../lib/selectors";
+import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
 import coldUnicornLogo from "../../imports/logo white with name.png";
 
 interface NavItem {
@@ -54,7 +53,6 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/statistics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/domains", label: "Domains", icon: Globe2 },
   { to: "/admin/invoices", label: "Invoices", icon: ReceiptText },
-  { to: "/admin/blacklist", label: "Blacklist", icon: ShieldBan },
   { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -74,11 +72,11 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { to: "/manager/statistics", label: "Analytics", icon: BarChart3 },
     { to: "/manager/domains", label: "Domains", icon: Globe2 },
     { to: "/manager/invoices", label: "Invoices", icon: ReceiptText },
-    { to: "/manager/blacklist", label: "Blacklist", icon: ShieldBan },
     { to: "/manager/settings", label: "Settings", icon: Settings },
   ],
   admin: ADMIN_NAV,
   super_admin: ADMIN_NAV,
+  master_admin: ADMIN_NAV,
 };
 
 const MOBILE_PRIMARY_BY_ROLE: Record<AppRole, string[]> = {
@@ -86,13 +84,14 @@ const MOBILE_PRIMARY_BY_ROLE: Record<AppRole, string[]> = {
   manager: ["/manager/dashboard", "/manager/clients", "/manager/leads", "/manager/campaigns"],
   admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
   super_admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
+  master_admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
 };
 
 const SIDEBAR_HIDDEN_STORAGE_KEY = "app_shell_sidebar_hidden";
 const SIDEBAR_MODE_STORAGE_KEY = "app_shell_sidebar_mode";
 
 function roleHomePath(role: AppRole) {
-  if (role === "super_admin" || role === "admin") return "/admin/dashboard";
+  if (isInternalAdmin(role)) return "/admin/dashboard";
   if (role === "manager") return "/manager/dashboard";
   return "/client/dashboard";
 }

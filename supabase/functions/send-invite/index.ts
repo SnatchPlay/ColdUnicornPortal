@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 type InviteRole = "admin" | "manager" | "client";
-type ActorRole = "super_admin" | "admin" | "manager" | "client";
+type ActorRole = "super_admin" | "admin" | "master_admin" | "manager" | "client";
 
 interface InvitePayload {
   email: string;
@@ -105,7 +105,8 @@ Deno.serve(async (request) => {
   if (!normalizedEmail || !isValidEmail(normalizedEmail)) return jsonResponse(400, { ok: false, error: "A valid email is required." });
   if (!inviteRole) return jsonResponse(400, { ok: false, error: "Invite role is invalid." });
 
-  const isAdminActor = actorRow.role === "admin" || actorRow.role === "super_admin";
+  const isAdminActor =
+    actorRow.role === "admin" || actorRow.role === "super_admin" || actorRow.role === "master_admin";
   const isManagerActor = actorRow.role === "manager";
   if (!isAdminActor && !isManagerActor) return jsonResponse(403, { ok: false, error: "Only internal roles can invite users." });
   if (isManagerActor && inviteRole !== "client") return jsonResponse(403, { ok: false, error: "Managers can invite client users only." });
