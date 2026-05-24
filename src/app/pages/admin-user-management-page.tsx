@@ -211,9 +211,10 @@ export function AdminUserManagementPage() {
                   <button
                     type="button"
                     aria-label="Role capabilities"
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition hover:text-white"
+                    title="Role capabilities"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-black/20 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white"
                   >
-                    <Info className="h-3.5 w-3.5" />
+                    <Info className="h-4 w-4" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent

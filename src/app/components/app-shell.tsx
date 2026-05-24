@@ -434,14 +434,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               <li key={item.to}>
                 <button
                   onClick={() => navigate(item.to)}
+                  aria-label={item.label}
                   className={cn(
-                    "flex w-full flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] transition",
+                    "flex min-h-[44px] w-full flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] transition",
                     active
                       ? "bg-[#232323] text-white"
                       : "text-neutral-400 hover:bg-[#111] hover:text-white",
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-5 w-5" />
                   <span className="truncate">{item.label}</span>
                 </button>
               </li>

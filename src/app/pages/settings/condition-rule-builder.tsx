@@ -12,6 +12,7 @@
 // super_admin gets a Raw JSON tab; other roles see the rule read-only.
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp, X as XIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import {
@@ -676,22 +677,26 @@ function BandEditor({ metric, branch, index, total, errors, customFields, onChan
             ))}
           </div>
         </div>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => onMove(-1)}
             disabled={index === 0}
-            className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+            aria-label={`Move band ${index + 1} up`}
+            title="Move up"
+            className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
           >
-            ↑
+            <ChevronUp className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => onMove(1)}
             disabled={index === total - 1}
-            className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+            aria-label={`Move band ${index + 1} down`}
+            title="Move down"
+            className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
           >
-            ↓
+            <ChevronDown className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -874,9 +879,11 @@ function ConditionRow({ metric, customFields, row, onChange, onRemove }: Conditi
         <button
           type="button"
           onClick={onRemove}
-          className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-white"
+          aria-label="Remove this condition"
+          title="Remove condition"
+          className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-200"
         >
-          ✕
+          <XIcon className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>
