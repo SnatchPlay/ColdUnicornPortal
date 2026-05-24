@@ -12,6 +12,13 @@ export interface BuildClientConditionContextInput {
   campaigns: CampaignRecord[];
   leads: LeadRecord[];
   dailyStats: DailyStatRecord[];
+  /**
+   * Per-client custom-field values keyed by `client_custom_fields.id`.
+   * Surfaces as `context.custom[<fieldId>]` so condition rules can read
+   * `custom.<fieldId>` as a metric path. Values are stored as text
+   * (checkbox → "true"/"false"; droplist → selected option; text → raw).
+   */
+  customFieldValues?: ReadonlyMap<string, string | null>;
 }
 
 export interface ClientConditionContext {
@@ -88,6 +95,14 @@ export interface ClientConditionContext {
   bi_setup: boolean | null;
   auto_li_api_key: string | null;
 
+  /**
+   * Master-admin custom-field values, keyed by field id. Rules reference
+   * via `custom.<fieldId>`. Stored as raw text; evaluator's `eq` string-
+   * coerces, so checkbox comparisons against "true"/"false" work without
+   * extra normalisation.
+   */
+  custom: Record<string, string | null>;
+
   value?: unknown;
 }
 
@@ -96,7 +111,7 @@ function rowByBucket<T extends { bucket: string }>(rows: T[], bucket: string): T
 }
 
 export function buildClientConditionContext(input: BuildClientConditionContextInput): ClientConditionContext {
-  const { client, manager, metricsOverview, threeDodRows, wowRows, momRows } = input;
+  const { client, manager, metricsOverview, threeDodRows, wowRows, momRows, customFieldValues } = input;
 
   const three0 = rowByBucket(threeDodRows, "0");
   const three1 = rowByBucket(threeDodRows, "-1");
@@ -106,6 +121,13 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
 
   const wow0 = rowByBucket(wowRows, "0");
   const mom0 = rowByBucket(momRows, "0");
+
+  const custom: Record<string, string | null> = {};
+  if (customFieldValues) {
+    for (const [fieldId, value] of customFieldValues) {
+      custom[fieldId] = value;
+    }
+  }
 
   return {
     target_id: client.id,
@@ -180,5 +202,7 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
     issues: null,
     bi_setup: client.bi_setup_done,
     auto_li_api_key: client.linkedin_api_key ?? null,
+
+    custom,
   };
 }

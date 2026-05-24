@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
@@ -27,60 +27,50 @@ import type {
 import { getRoleLabel } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
+import { MEGA_COLUMNS } from "./clients-page/mega-table";
+import { ConditionRuleBuilder } from "./settings/condition-rule-builder";
+import { BUILTIN_METRICS } from "../lib/conditions/metric-catalog";
+import type {
+  ClientCustomFieldRecord,
+  ClientCustomFieldType,
+  ClientRecord,
+  ColumnOverrideRecord,
+  ConditionRuleRecord,
+} from "../types/core";
 
 interface SettingsMessage {
   tone: "info" | "warning" | "danger";
   text: string;
 }
 
-interface NodeEditorProps {
-  node: ConditionNode;
-  onChange: (next: ConditionNode) => void;
-  onRemove?: () => void;
-  depth?: number;
-}
-
-const OPERATOR_OPTIONS: ConditionOperator[] = [
-  "eq",
-  "neq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "between",
-  "is_blank",
-  "not_blank",
-  "starts_with",
-  "not_starts_with",
-  "in",
-  "not_in",
-];
-
-const SEVERITY_OPTIONS: ConditionSeverity[] = ["good", "info", "warning", "danger", "critical_over"];
-const APPLY_TO_OPTIONS: ConditionApplyTo[] = ["cell", "row", "badge", "section"];
-const TARGET_OPTIONS: ConditionTargetEntity[] = ["client", "campaign", "lead"];
-const SCOPE_OPTIONS: ConditionScopeType[] = ["global", "manager", "client"];
-const TRANSFORM_OPTIONS: ConditionTransform[] = ["lower", "upper", "trim", "abs", "round"];
-const UNARY_OPERATORS: ConditionOperator[] = ["is_blank", "not_blank"];
-
 function emptyRule(createdBy: string | null): ConditionRule {
   const now = new Date().toISOString();
+  // Seed with the first built-in metric so a fresh rule is already valid
+  // (metric_key + surface + column_key all populated). The user can change
+  // the metric via the dropdown but never needs to "fix" an empty draft.
+  const seed = BUILTIN_METRICS[0];
+  const branch = createDefaultBranch();
+  branch.when = {
+    left: { metric: seed.path },
+    op: seed.operators[0] ?? "eq",
+    right: { value: 0 },
+  };
   return {
     id: "draft",
-    key: "",
-    name: "",
+    key: "new-rule",
+    name: "New rule",
     description: null,
     targetEntity: "client",
-    surface: "clients_overview",
-    metricKey: "",
+    surface: seed.surface,
+    metricKey: seed.path,
     sourceSheet: "CS PDCA",
     sourceRange: null,
     scopeType: "global",
     clientId: null,
     managerId: null,
     applyTo: "cell",
-    columnKey: null,
-    branches: [createDefaultBranch()],
+    columnKey: seed.columnKey,
+    branches: [branch],
     baseFilter: null,
     priority: 100,
     enabled: true,
@@ -148,282 +138,6 @@ function toUpdateRulePatch(rule: ConditionRule) {
   };
 }
 
-function ValueRefEditor({
-  label,
-  valueRef,
-  onChange,
-  allowValue = true,
-}: {
-  label: string;
-  valueRef: ConditionValueRef;
-  onChange: (next: ConditionValueRef) => void;
-  allowValue?: boolean;
-}) {
-  const mode = valueRef.metric ? "metric" : "value";
-  const setMode = (nextMode: "metric" | "value") => {
-    if (nextMode === "metric") {
-      onChange({ metric: valueRef.metric ?? "", multiplier: valueRef.multiplier, transform: valueRef.transform });
-      return;
-    }
-    onChange({ value: valueRef.value ?? "", multiplier: valueRef.multiplier, transform: valueRef.transform });
-  };
-
-  return (
-    <div className="space-y-2 rounded-xl border border-white/10 p-3">
-      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-      {allowValue && (
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode("metric")}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs",
-              mode === "metric" ? "border-sky-300/40 bg-sky-500/15 text-sky-100" : "border-border text-muted-foreground",
-            )}
-          >
-            Metric
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("value")}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs",
-              mode === "value" ? "border-sky-300/40 bg-sky-500/15 text-sky-100" : "border-border text-muted-foreground",
-            )}
-          >
-            Value
-          </button>
-        </div>
-      )}
-      {mode === "metric" ? (
-        <input
-          value={valueRef.metric ?? ""}
-          onChange={(event) => onChange({ ...valueRef, metric: event.target.value })}
-          placeholder="metric.path"
-          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-        />
-      ) : (
-        <input
-          value={typeof valueRef.value === "string" || typeof valueRef.value === "number" ? String(valueRef.value) : ""}
-          onChange={(event) => onChange({ ...valueRef, value: event.target.value })}
-          placeholder="static value"
-          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-        />
-      )}
-      <div className="grid gap-2 md:grid-cols-2">
-        <input
-          value={valueRef.multiplier ?? ""}
-          onChange={(event) => {
-            const parsed = Number(event.target.value);
-            onChange({ ...valueRef, multiplier: Number.isFinite(parsed) ? parsed : undefined });
-          }}
-          placeholder="multiplier (optional)"
-          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-        />
-        <select
-          value={valueRef.transform ?? ""}
-          onChange={(event) =>
-            onChange({
-              ...valueRef,
-              transform: event.target.value ? (event.target.value as ConditionTransform) : undefined,
-            })
-          }
-          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-        >
-          <option value="">no transform</option>
-          {TRANSFORM_OPTIONS.map((transform) => (
-            <option key={transform} value={transform}>
-              {transform}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
-}
-
-function ConditionNodeEditor({ node, onChange, onRemove, depth = 0 }: NodeEditorProps) {
-  const nodeType: "comparison" | "all" | "any" = "all" in node ? "all" : "any" in node ? "any" : "comparison";
-  const isComparison = nodeType === "comparison";
-  const comparison = isComparison ? node : null;
-
-  return (
-    <div className={cn("space-y-3 rounded-xl border border-white/10 p-3", depth > 0 ? "bg-black/20" : "bg-black/10")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={nodeType}
-          onChange={(event) => {
-            const next = event.target.value as "comparison" | "all" | "any";
-            if (next === "comparison") {
-              onChange(createDefaultComparisonNode());
-              return;
-            }
-            onChange(next === "all" ? { all: [createDefaultComparisonNode()] } : { any: [createDefaultComparisonNode()] });
-          }}
-          className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs uppercase tracking-[0.16em] text-muted-foreground outline-none"
-        >
-          <option value="comparison">comparison</option>
-          <option value="all">all</option>
-          <option value="any">any</option>
-        </select>
-        {onRemove && (
-          <button
-            type="button"
-            onClick={onRemove}
-            className="rounded-full border border-red-400/40 px-3 py-1 text-xs text-red-100"
-          >
-            Remove
-          </button>
-        )}
-      </div>
-
-      {isComparison && comparison ? (
-        <div className="space-y-3">
-          <ValueRefEditor
-            label="Left operand"
-            valueRef={comparison.left}
-            onChange={(left) => onChange({ ...comparison, left })}
-          />
-          <select
-            value={comparison.op}
-            onChange={(event) => {
-              const op = event.target.value as ConditionOperator;
-              const next = { ...comparison, op };
-              if (UNARY_OPERATORS.includes(op)) {
-                delete next.right;
-              } else if (!next.right) {
-                next.right = { value: "" };
-              }
-              onChange(next);
-            }}
-            className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-          >
-            {OPERATOR_OPTIONS.map((operator) => (
-              <option key={operator} value={operator}>
-                {operator}
-              </option>
-            ))}
-          </select>
-          {!UNARY_OPERATORS.includes(comparison.op) && (
-            <ValueRefEditor
-              label="Right operand"
-              valueRef={comparison.right ?? { value: "" }}
-              onChange={(right) => onChange({ ...comparison, right })}
-            />
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {("all" in node ? node.all : node.any).map((child, index) => (
-            <ConditionNodeEditor
-              key={index}
-              node={child}
-              depth={depth + 1}
-              onChange={(nextChild) => {
-                if ("all" in node) {
-                  const nextChildren = node.all.slice();
-                  nextChildren[index] = nextChild;
-                  onChange({ all: nextChildren });
-                } else {
-                  const nextChildren = node.any.slice();
-                  nextChildren[index] = nextChild;
-                  onChange({ any: nextChildren });
-                }
-              }}
-              onRemove={() => {
-                if ("all" in node) {
-                  const nextChildren = node.all.filter((_, currentIndex) => currentIndex !== index);
-                  onChange({ all: nextChildren.length > 0 ? nextChildren : [createDefaultComparisonNode()] });
-                } else {
-                  const nextChildren = node.any.filter((_, currentIndex) => currentIndex !== index);
-                  onChange({ any: nextChildren.length > 0 ? nextChildren : [createDefaultComparisonNode()] });
-                }
-              }}
-            />
-          ))}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                if ("all" in node) {
-                  onChange({ all: node.all.concat(createDefaultComparisonNode()) });
-                } else {
-                  onChange({ any: node.any.concat(createDefaultComparisonNode()) });
-                }
-              }}
-              className="rounded-full border border-white/15 px-3 py-1 text-xs text-muted-foreground"
-            >
-              Add comparison
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const groupNode: ConditionNode = { all: [createDefaultComparisonNode()] };
-                if ("all" in node) {
-                  onChange({ all: node.all.concat(groupNode) });
-                } else {
-                  onChange({ any: node.any.concat(groupNode) });
-                }
-              }}
-              className="rounded-full border border-white/15 px-3 py-1 text-xs text-muted-foreground"
-            >
-              Add group
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BranchEditor({
-  branch,
-  onChange,
-  onRemove,
-}: {
-  branch: ConditionBranch;
-  onChange: (next: ConditionBranch) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="space-y-3 rounded-2xl border border-border bg-black/20 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={branch.severity}
-          onChange={(event) => onChange({ ...branch, severity: event.target.value as ConditionSeverity })}
-          className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-        >
-          {SEVERITY_OPTIONS.map((severity) => (
-            <option key={severity} value={severity}>
-              {severity}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={onRemove} className="rounded-full border border-red-400/40 px-3 py-1 text-xs text-red-100">
-          Remove branch
-        </button>
-      </div>
-
-      <input
-        value={branch.label}
-        onChange={(event) => onChange({ ...branch, label: event.target.value })}
-        placeholder="Branch label"
-        className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-      />
-
-      <textarea
-        value={branch.message}
-        onChange={(event) => onChange({ ...branch, message: event.target.value })}
-        rows={2}
-        placeholder="Branch message"
-        className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-      />
-
-      <ConditionNodeEditor node={branch.when} onChange={(when) => onChange({ ...branch, when })} />
-    </div>
-  );
-}
-
 export function SettingsPage() {
   const {
     actorIdentity,
@@ -438,11 +152,24 @@ export function SettingsPage() {
   } = useAuth();
   const {
     clients,
+    users = [],
     conditionRules,
     createConditionRule,
     updateConditionRule,
     deleteConditionRule,
+    columnOverrides = [],
+    clientCustomFields = [],
+    upsertColumnOverride,
+    setColumnOrder,
+    createClientCustomField,
+    updateClientCustomField,
+    deleteClientCustomField,
   } = useCoreData();
+
+  const conditionManagers = useMemo(
+    () => users.filter((u) => u.role === "manager"),
+    [users],
+  );
   const activeClient = useMemo(
     () => clients.find((client) => client.id === identity?.clientId) ?? null,
     [clients, identity?.clientId],
@@ -482,7 +209,8 @@ export function SettingsPage() {
     return null;
   }, [confirmPassword, password]);
 
-  const canManageConditionRules = identity?.role === "admin" || identity?.role === "super_admin";
+  const canManageConditionRules = identity?.role === "super_admin" || identity?.role === "master_admin";
+  const isMasterAdmin = identity?.role === "master_admin";
   const normalizedRules = useMemo(() => conditionRules.map(toConditionRule), [conditionRules]);
   const availableSurfaces = useMemo(
     () => Array.from(new Set(normalizedRules.map((rule) => rule.surface))).sort(),
@@ -664,224 +392,16 @@ export function SettingsPage() {
 
     return (
       <div className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Rule key</span>
-            <input
-              value={ruleEditor.key}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, key: event.target.value })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Rule name</span>
-            <input
-              value={ruleEditor.name}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, name: event.target.value })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Surface</span>
-            <input
-              value={ruleEditor.surface}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, surface: event.target.value })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Metric key</span>
-            <input
-              value={ruleEditor.metricKey}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, metricKey: event.target.value })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Target entity</span>
-            <select
-              value={ruleEditor.targetEntity}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, targetEntity: event.target.value as ConditionTargetEntity })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            >
-              {TARGET_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Apply to</span>
-            <select
-              value={ruleEditor.applyTo}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, applyTo: event.target.value as ConditionApplyTo })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            >
-              {APPLY_TO_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Scope type</span>
-            <select
-              value={ruleEditor.scopeType}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, scopeType: event.target.value as ConditionScopeType })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            >
-              {SCOPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Priority</span>
-            <input
-              type="number"
-              value={ruleEditor.priority}
-              onChange={(event) =>
-                setRuleEditor({
-                  ...ruleEditor,
-                  priority: Number.isFinite(Number(event.target.value)) ? Number(event.target.value) : 100,
-                })
-              }
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Column key</span>
-            <input
-              value={ruleEditor.columnKey ?? ""}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, columnKey: event.target.value || null })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Source sheet</span>
-            <input
-              value={ruleEditor.sourceSheet ?? ""}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, sourceSheet: event.target.value || null })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-          <label className="space-y-2">
-            <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Source range</span>
-            <input
-              value={ruleEditor.sourceRange ?? ""}
-              onChange={(event) => setRuleEditor({ ...ruleEditor, sourceRange: event.target.value || null })}
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-            />
-          </label>
-        </div>
-
-        <label className="space-y-2 block">
-          <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Description</span>
-          <textarea
-            rows={2}
-            value={ruleEditor.description ?? ""}
-            onChange={(event) => setRuleEditor({ ...ruleEditor, description: event.target.value || null })}
-            className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-          />
-        </label>
-
-        <label className="space-y-2 block">
-          <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Notes</span>
-          <textarea
-            rows={2}
-            value={ruleEditor.notes ?? ""}
-            onChange={(event) => setRuleEditor({ ...ruleEditor, notes: event.target.value || null })}
-            className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-          />
-        </label>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={ruleEditor.enabled}
-            onChange={(event) => setRuleEditor({ ...ruleEditor, enabled: event.target.checked })}
-          />
-          Rule enabled
-        </label>
-
-        <div className="space-y-3 rounded-2xl border border-border bg-black/10 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm">Branches</p>
-            <button
-              type="button"
-              onClick={() => setRuleEditor({ ...ruleEditor, branches: ruleEditor.branches.concat(createDefaultBranch()) })}
-              className="rounded-full border border-white/15 px-3 py-1 text-xs text-muted-foreground"
-            >
-              Add branch
-            </button>
-          </div>
-          {ruleEditor.branches.map((branch, index) => (
-            <BranchEditor
-              key={index}
-              branch={branch}
-              onChange={(next) => {
-                const branches = ruleEditor.branches.slice();
-                branches[index] = next;
-                setRuleEditor({ ...ruleEditor, branches });
-              }}
-              onRemove={() => {
-                const branches = ruleEditor.branches.filter((_, currentIndex) => currentIndex !== index);
-                setRuleEditor({ ...ruleEditor, branches: branches.length > 0 ? branches : [createDefaultBranch()] });
-              }}
-            />
-          ))}
-        </div>
-
-        <div className="space-y-3 rounded-2xl border border-border bg-black/10 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm">Base filter</p>
-            <button
-              type="button"
-              onClick={() => setRuleEditor({ ...ruleEditor, baseFilter: ruleEditor.baseFilter ? null : createDefaultComparisonNode() })}
-              className="rounded-full border border-white/15 px-3 py-1 text-xs text-muted-foreground"
-            >
-              {ruleEditor.baseFilter ? "Remove base filter" : "Add base filter"}
-            </button>
-          </div>
-          {ruleEditor.baseFilter && (
-            <ConditionNodeEditor
-              node={ruleEditor.baseFilter}
-              onChange={(baseFilter) => setRuleEditor({ ...ruleEditor, baseFilter })}
-            />
-          )}
-        </div>
-
-        <div className="space-y-2 rounded-2xl border border-border bg-black/10 p-4">
-          <p className="text-sm">JSON preview</p>
-          <pre className="max-h-72 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-neutral-300">
-            {JSON.stringify(
-              {
-                key: ruleEditor.key,
-                name: ruleEditor.name,
-                surface: ruleEditor.surface,
-                metricKey: ruleEditor.metricKey,
-                branches: ruleEditor.branches,
-                baseFilter: ruleEditor.baseFilter,
-              },
-              null,
-              2,
-            )}
-          </pre>
-        </div>
-
-        {ruleErrors.length > 0 && (
-          <Banner tone="warning">
-            <div className="space-y-1 text-xs">
-              {ruleErrors.slice(0, 10).map((item) => (
-                <p key={item}>{item}</p>
-              ))}
-            </div>
-          </Banner>
-        )}
+        <ConditionRuleBuilder
+          rule={ruleEditor}
+          onChange={(next) => setRuleEditor(next)}
+          errors={ruleErrors}
+          clients={clients}
+          managers={conditionManagers}
+          customFields={clientCustomFields}
+          canSeeRaw={identity?.role === "super_admin"}
+          isNew={selectedRuleId === "new"}
+        />
 
         {ruleMessage && <Banner tone={ruleMessage.tone}>{ruleMessage.text}</Banner>}
 
@@ -1171,6 +691,305 @@ export function SettingsPage() {
           </div>
         </Surface>
       )}
+
+      {isMasterAdmin && (
+        <ClientsTableCustomization
+          columnOverrides={columnOverrides}
+          customFields={clientCustomFields}
+          onUpsertOverride={upsertColumnOverride}
+          onSetColumnOrder={setColumnOrder}
+          onCreateField={createClientCustomField}
+          onUpdateField={updateClientCustomField}
+          onDeleteField={deleteClientCustomField}
+        />
+      )}
+
     </div>
+  );
+}
+
+// ---------- Master_admin: Clients table customization ----------
+
+interface ClientsTableCustomizationProps {
+  columnOverrides: ColumnOverrideRecord[];
+  customFields: ClientCustomFieldRecord[];
+  onUpsertOverride: (
+    columnKey: string,
+    patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
+  ) => Promise<void>;
+  onSetColumnOrder: (orderedKeys: string[]) => Promise<void>;
+  onCreateField: (input: {
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+  }) => Promise<void>;
+  onUpdateField: (
+    fieldId: string,
+    patch: {
+      name?: string;
+      field_type?: ClientCustomFieldType;
+      options?: string[] | null;
+      position?: number;
+    },
+  ) => Promise<void>;
+  onDeleteField: (fieldId: string) => Promise<void>;
+}
+
+function ClientsTableCustomization({
+  columnOverrides,
+  customFields,
+  onUpsertOverride,
+  onSetColumnOrder,
+  onCreateField,
+  onUpdateField,
+  onDeleteField,
+}: ClientsTableCustomizationProps) {
+  const overrideMap = useMemo(() => {
+    const m = new Map<string, ColumnOverrideRecord>();
+    for (const o of columnOverrides) m.set(o.column_key, o);
+    return m;
+  }, [columnOverrides]);
+
+  // The list the user sees in this customization panel mirrors the mega-table
+  // order: columns with explicit positions come first (ascending), the rest
+  // in MEGA_COLUMNS default order. We do NOT filter hidden columns out here
+  // because the user needs to be able to UN-hide them.
+  const orderedColumns = useMemo(() => {
+    return MEGA_COLUMNS
+      .map((col, defaultIdx) => ({ col, defaultIdx, override: overrideMap.get(col.id) ?? null }))
+      .slice()
+      .sort((a, b) => {
+        const ap = a.override?.position ?? null;
+        const bp = b.override?.position ?? null;
+        if (ap !== null && bp !== null) return ap - bp;
+        if (ap !== null) return -1;
+        if (bp !== null) return 1;
+        return a.defaultIdx - b.defaultIdx;
+      })
+      .map((entry) => entry.col);
+  }, [overrideMap]);
+
+  function moveColumn(currentIdx: number, delta: -1 | 1) {
+    const target = currentIdx + delta;
+    if (target < 0 || target >= orderedColumns.length) return;
+    const next = orderedColumns.slice();
+    const [moved] = next.splice(currentIdx, 1);
+    next.splice(target, 0, moved);
+    void onSetColumnOrder(next.map((c) => c.id));
+  }
+
+  // Translate bucket-named columns (whose label is a relative-day token like
+  // "−1") to something a human can read at a glance: "Daily sent · −1 (yesterday)".
+  const describeBuiltInColumn = (col: { id: string; group: string; sub: string; label: string }) => {
+    const bucketMap: Record<string, Record<string, string>> = {
+      dodSched: { "+2": "day after tomorrow", "+1": "tomorrow", "0": "today" },
+      dodSent: { "0": "today", "-1": "yesterday", "-2": "2 days ago", "-3": "3 days ago", "-4": "4 days ago" },
+      td3: { "0": "today", "-1": "1 day ago", "-2": "2 days ago", "-3": "3 days ago", "-4": "4 days ago" },
+      wow: { "0": "this week", "-1": "last week", "-2": "2 weeks ago", "-3": "3 weeks ago" },
+      mom: { "0": "this month", "-1": "last month", "-2": "2 months ago", "-3": "3 months ago" },
+    };
+    const friendly = bucketMap[col.group]?.[col.label];
+    if (friendly) return `${col.sub} · ${col.label} (${friendly})`;
+    return col.sub && col.sub !== col.label ? `${col.sub} · ${col.label}` : col.label;
+  };
+
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldType, setNewFieldType] = useState<ClientCustomFieldType>("text");
+  const [newFieldOptions, setNewFieldOptions] = useState("");
+
+  async function handleCreateField() {
+    const name = newFieldName.trim();
+    if (!name) return;
+    let options: string[] | null = null;
+    if (newFieldType === "droplist") {
+      options = newFieldOptions.split(",").map((s) => s.trim()).filter(Boolean);
+      if (options.length === 0) return;
+    }
+    const position = customFields.length;
+    await onCreateField({ name, field_type: newFieldType, options, position });
+    setNewFieldName("");
+    setNewFieldOptions("");
+  }
+
+  return (
+    <Surface
+      title="Clients table customization"
+      subtitle="Master-admin only: rename or hide built-in columns; add text/checkbox/droplist columns."
+    >
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-border bg-black/10 p-4">
+          <p className="mb-1 text-sm">Built-in columns — labels & visibility</p>
+          <p className="mb-3 text-[10px] text-muted-foreground">
+            Type a custom label in the middle column to override how this column appears in the Clients table. Tick "Hidden" to remove the column entirely. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
+          </p>
+          {/* Table header */}
+          <div className="grid grid-cols-[auto_1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span>Reorder</span>
+            <span>Original column</span>
+            <span>Display label (override)</span>
+            <span>Visibility</span>
+          </div>
+          <div className="max-h-96 divide-y divide-white/5 overflow-auto pr-1">
+            {orderedColumns.map((col, idx) => {
+              const override = overrideMap.get(col.id);
+              const labelValue = override?.label_override ?? "";
+              const isHidden = Boolean(override?.hidden);
+              return (
+                <div
+                  key={col.id}
+                  className="grid grid-cols-[auto_1.4fr_2fr_auto] items-center gap-3 px-3 py-2"
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => moveColumn(idx, -1)}
+                      disabled={idx === 0}
+                      title="Move up"
+                      className="rounded border border-white/10 px-1 py-0 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveColumn(idx, 1)}
+                      disabled={idx === orderedColumns.length - 1}
+                      title="Move down"
+                      className="rounded border border-white/10 px-1 py-0 text-[10px] text-muted-foreground hover:text-white disabled:opacity-30"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                  <span className="truncate text-xs text-neutral-300">{describeBuiltInColumn(col)}</span>
+                  <input
+                    type="text"
+                    defaultValue={labelValue}
+                    placeholder={col.label}
+                    onBlur={(event) => {
+                      const next = event.target.value.trim();
+                      const nextValue = next || null;
+                      if (nextValue === (override?.label_override ?? null)) return;
+                      void onUpsertOverride(col.id, { label_override: nextValue });
+                    }}
+                    className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={isHidden}
+                      onChange={(event) => {
+                        void onUpsertOverride(col.id, { hidden: event.target.checked });
+                      }}
+                    />
+                    Hidden
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-black/10 p-4">
+          <p className="mb-3 text-sm">Custom columns</p>
+          <div className="space-y-2">
+            {customFields.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No custom columns yet.</p>
+            ) : (
+              customFields
+                .slice()
+                .sort((l, r) => l.position - r.position)
+                .map((field) => (
+                  <div
+                    key={field.id}
+                    className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 rounded-xl border border-white/5 bg-black/20 px-3 py-2"
+                  >
+                    <input
+                      type="text"
+                      defaultValue={field.name}
+                      onBlur={(event) => {
+                        const next = event.target.value.trim();
+                        if (!next || next === field.name) return;
+                        void onUpdateField(field.id, { name: next });
+                      }}
+                      className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                    />
+                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {field.field_type}
+                    </span>
+                    {field.field_type === "droplist" ? (
+                      <input
+                        type="text"
+                        defaultValue={(field.options ?? []).join(", ")}
+                        placeholder="comma-separated options"
+                        onBlur={(event) => {
+                          const next = event.target.value
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          if (next.length === 0) return;
+                          if (JSON.stringify(next) === JSON.stringify(field.options ?? [])) return;
+                          void onUpdateField(field.id, { options: next });
+                        }}
+                        className="w-48 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                      />
+                    ) : (
+                      <span />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Delete column "${field.name}"? Values will be lost.`)) {
+                          void onDeleteField(field.id);
+                        }
+                      }}
+                      className="rounded-full border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-red-100"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))
+            )}
+          </div>
+          <div className="mt-4 grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+            <input
+              type="text"
+              value={newFieldName}
+              onChange={(event) => setNewFieldName(event.target.value)}
+              placeholder="New column name"
+              className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+            />
+            <select
+              value={newFieldType}
+              onChange={(event) => setNewFieldType(event.target.value as ClientCustomFieldType)}
+              className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+            >
+              <option value="text">text</option>
+              <option value="checkbox">checkbox</option>
+              <option value="droplist">droplist</option>
+            </select>
+            {newFieldType === "droplist" ? (
+              <input
+                type="text"
+                value={newFieldOptions}
+                onChange={(event) => setNewFieldOptions(event.target.value)}
+                placeholder="comma-separated options"
+                className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+              />
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                void handleCreateField();
+              }}
+              className="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs uppercase tracking-[0.12em] text-sky-100"
+            >
+              Add column
+            </button>
+          </div>
+        </div>
+      </div>
+    </Surface>
   );
 }

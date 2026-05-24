@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber } from "../lib/format";
+import { isInternalAdmin } from "../lib/selectors";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
 
@@ -20,7 +21,7 @@ export function BlacklistPage() {
   const [newDomain, setNewDomain] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canManageBlacklist = identity?.role === "admin" || identity?.role === "super_admin";
+  const canManageBlacklist = identity ? isInternalAdmin(identity.role) : false;
 
   const filteredEntries = useMemo(() => {
     const search = query.trim().toLowerCase();

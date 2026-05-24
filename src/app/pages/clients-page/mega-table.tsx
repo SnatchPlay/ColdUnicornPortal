@@ -10,7 +10,11 @@ import { getCellCondition, getSeverityClassName } from "../../lib/conditions/eva
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatNumber } from "../../lib/format";
 import { useResizableColumns } from "../../lib/use-resizable-columns";
-import type { ClientRecord } from "../../types/core";
+import type {
+  ClientCustomFieldRecord,
+  ClientRecord,
+  ColumnOverrideRecord,
+} from "../../types/core";
 
 export type SortDirection = "asc" | "desc";
 
@@ -30,7 +34,7 @@ export interface MegaSortState {
 }
 
 type Align = "left" | "center" | "right";
-type Group = "cs" | "basic" | "dodSched" | "dodSent" | "td3" | "wow" | "mom";
+type Group = "cs" | "basic" | "dodSched" | "dodSent" | "td3" | "wow" | "mom" | "custom";
 
 interface MegaColumn {
   id: string;
@@ -61,6 +65,7 @@ const GROUP_META: Record<Group, { label: string }> = {
   td3: { label: "3-Day rolling" },
   wow: { label: "Week over Week" },
   mom: { label: "Month over Month" },
+  custom: { label: "Custom" },
 };
 
 const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
@@ -154,7 +159,7 @@ function buildColumns(): MegaColumn[] {
     width: 130,
     minWidth: 100,
     align: "left",
-    sticky: true,
+    sticky: false,
     defaultDirection: "asc",
     render: (row) => <span className="truncate text-xs text-muted-foreground">{row.managerName}</span>,
     sortValue: (row) => row.managerName.toLowerCase(),
@@ -538,6 +543,93 @@ export interface ClientsMegaTableProps {
   onRowClick: (clientId: string) => void;
   selectionStore: SelectionStore;
   storageKey?: string;
+  /** Master-admin label/visibility overrides keyed by column id. */
+  columnOverrides?: ColumnOverrideRecord[];
+  /** Master-admin custom columns (text / checkbox / droplist). */
+  customFields?: ClientCustomFieldRecord[];
+  /** Map<clientId, Map<fieldId, value>>. */
+  customFieldValuesByClient?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+  /** When true, custom-field cells are editable inline. Master_admin only. */
+  canEditCustomFields?: boolean;
+  /** Called when a custom-field cell value changes. */
+  onCustomFieldValueChange?: (clientId: string, fieldId: string, value: string | null) => void;
+}
+
+function customFieldColumn(
+  field: ClientCustomFieldRecord,
+  valuesByClient: ReadonlyMap<string, ReadonlyMap<string, string | null>>,
+  canEdit: boolean,
+  onChange?: (clientId: string, fieldId: string, value: string | null) => void,
+): MegaColumn {
+  const lookup = (row: ClientMegaRow): string | null =>
+    valuesByClient.get(row.client.id)?.get(field.id) ?? null;
+  return {
+    id: `cf:${field.id}`,
+    group: "custom",
+    sub: "Custom",
+    label: field.name,
+    width: field.field_type === "checkbox" ? 90 : 160,
+    minWidth: field.field_type === "checkbox" ? 70 : 120,
+    align: "left",
+    // Lets condition rules with `column_key: "cf:<id>"` and surface
+    // `clients_overview` colour this cell via cellCondition().
+    conditionKey: `cf:${field.id}`,
+    render: (row) => {
+      const value = lookup(row);
+      if (field.field_type === "checkbox") {
+        const checked = value === "true";
+        return (
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={!canEdit}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              onChange?.(row.client.id, field.id, event.target.checked ? "true" : "false");
+            }}
+            className="h-3.5 w-3.5 cursor-pointer accent-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        );
+      }
+      if (field.field_type === "droplist") {
+        const options = field.options ?? [];
+        if (!canEdit) {
+          return <span className="truncate text-xs text-neutral-300">{value ?? "—"}</span>;
+        }
+        return (
+          <select
+            value={value ?? ""}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onChange?.(row.client.id, field.id, event.target.value || null)}
+            className="w-full bg-transparent text-xs text-neutral-200 outline-none"
+          >
+            <option value="">—</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        );
+      }
+      if (!canEdit) {
+        return <span className="truncate text-xs text-neutral-300">{value ?? "—"}</span>;
+      }
+      return (
+        <input
+          type="text"
+          defaultValue={value ?? ""}
+          onClick={(event) => event.stopPropagation()}
+          onBlur={(event) => {
+            const next = event.target.value;
+            if (next === (value ?? "")) return;
+            onChange?.(row.client.id, field.id, next || null);
+          }}
+          className="w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500"
+          placeholder="—"
+        />
+      );
+    },
+    sortValue: (row) => lookup(row) ?? "",
+  };
 }
 
 interface MegaRowProps {
@@ -627,13 +719,65 @@ function ClientsMegaTableImpl({
   onRowClick,
   selectionStore,
   storageKey = "table:clients:mega-columns",
+  columnOverrides,
+  customFields,
+  customFieldValuesByClient,
+  canEditCustomFields,
+  onCustomFieldValueChange,
 }: ClientsMegaTableProps) {
-  const cols = MEGA_COLUMNS;
+  const cols = useMemo(() => {
+    const overrideMap = new Map<string, ColumnOverrideRecord>();
+    for (const override of columnOverrides ?? []) overrideMap.set(override.column_key, override);
+
+    // Apply label override + hidden filter while preserving the default index.
+    const visible = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
+      const override = overrideMap.get(col.id);
+      if (override?.hidden) return [];
+      const labelled = override?.label_override ? { ...col, label: override.label_override } : col;
+      return [{ col: labelled, defaultIdx, override: override ?? null }];
+    });
+
+    // Sort by explicit override position when set; otherwise keep the default
+    // order. Columns with a position float to the front in ascending order,
+    // unpositioned columns interleave in their original index slot.
+    const sorted = visible.slice().sort((a, b) => {
+      const ap = a.override?.position ?? null;
+      const bp = b.override?.position ?? null;
+      if (ap !== null && bp !== null) return ap - bp;
+      if (ap !== null) return -1;
+      if (bp !== null) return 1;
+      return a.defaultIdx - b.defaultIdx;
+    });
+    const base = sorted.map((entry) => entry.col);
+
+    if (!customFields || customFields.length === 0) return base;
+    const emptyValues = new Map<string, ReadonlyMap<string, string | null>>();
+    const valueMap = customFieldValuesByClient ?? emptyValues;
+    const customColumns = customFields
+      .slice()
+      .sort((l, r) => l.position - r.position)
+      .map((field) =>
+        customFieldColumn(field, valueMap, Boolean(canEditCustomFields), onCustomFieldValueChange),
+      );
+    return [...base, ...customColumns];
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomFields, onCustomFieldValueChange]);
+
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);
 
+  // Recompute sticky indices based on the derived `cols` (hidden columns may
+  // have removed some entries between MEGA_COLUMNS and `cols`).
+  const stickyIndicesDerived = useMemo(
+    () => cols.map((c, i) => (c.sticky ? i : -1)).filter((i) => i >= 0),
+    [cols],
+  );
+
+  // Bump the storage key when the column set changes so resize layouts from a
+  // different column count don't get re-used.
+  const dynamicStorageKey = `${storageKey}:${cols.length}`;
+
   const resizable = useResizableColumns({
-    storageKey,
+    storageKey: dynamicStorageKey,
     defaultWidths,
     minWidths,
   });
@@ -645,7 +789,15 @@ function ClientsMegaTableImpl({
       .map((seg) => Number.parseInt(seg.replace("px", ""), 10) || 0);
   }, [resizable.template]);
 
-  const stickyOffsets = useMemo(() => computeStickyOffsets(widths), [widths]);
+  const stickyOffsets = useMemo(() => {
+    const m = new Map<number, number>();
+    let cum = 0;
+    for (const i of stickyIndicesDerived) {
+      m.set(i, cum);
+      cum += widths[i] ?? 0;
+    }
+    return m;
+  }, [stickyIndicesDerived, widths]);
   const totalWidth = useMemo(() => widths.reduce((a, b) => a + b, 0), [widths]);
 
   // Indices of the last column within each group band — gets a thick separator border.

@@ -1,7 +1,11 @@
 ﻿import type {
   CampaignRecord,
+  ClientCustomFieldRecord,
+  ClientCustomFieldType,
+  ClientCustomFieldValueRecord,
   ClientRecord,
   ClientUserRecord,
+  ColumnOverrideRecord,
   ConditionRuleRecord,
   CoreSnapshot,
   DomainRecord,
@@ -148,6 +152,51 @@ export interface UpdateProfileNamePayload {
   fullName: string;
 }
 
+export interface UpsertColumnOverridePayload {
+  action: "upsertColumnOverride";
+  columnKey: string;
+  patch: { label_override?: string | null; hidden?: boolean; position?: number | null };
+}
+
+export interface SetColumnOrderPayload {
+  action: "setColumnOrder";
+  /** Ordered list of column ids. Index in this list becomes the row's `position`. */
+  orderedKeys: string[];
+}
+
+export interface CreateClientCustomFieldPayload {
+  action: "createClientCustomField";
+  input: {
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+  };
+}
+
+export interface UpdateClientCustomFieldPayload {
+  action: "updateClientCustomField";
+  fieldId: string;
+  patch: {
+    name?: string;
+    field_type?: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+  };
+}
+
+export interface DeleteClientCustomFieldPayload {
+  action: "deleteClientCustomField";
+  fieldId: string;
+}
+
+export interface UpsertClientCustomFieldValuePayload {
+  action: "upsertClientCustomFieldValue";
+  clientId: string;
+  fieldId: string;
+  value: string | null;
+}
+
 export type OrmGatewayRequest =
   | LoadSnapshotPayload
   | LoadConditionRulesPayload
@@ -168,7 +217,13 @@ export type OrmGatewayRequest =
   | UpsertEmailExcludeDomainPayload
   | DeleteEmailExcludeDomainPayload
   | LoadIdentityPayload
-  | UpdateProfileNamePayload;
+  | UpdateProfileNamePayload
+  | UpsertColumnOverridePayload
+  | SetColumnOrderPayload
+  | CreateClientCustomFieldPayload
+  | UpdateClientCustomFieldPayload
+  | DeleteClientCustomFieldPayload
+  | UpsertClientCustomFieldValuePayload;
 
 export type OrmGatewayAction = OrmGatewayRequest["action"];
 
@@ -203,6 +258,12 @@ export interface OrmGatewayResponseMap {
   deleteEmailExcludeDomain: { ok: true };
   loadIdentity: LoadIdentityResult;
   updateProfileName: UpdateProfileNameResult;
+  upsertColumnOverride: ColumnOverrideRecord;
+  setColumnOrder: ColumnOverrideRecord[];
+  createClientCustomField: ClientCustomFieldRecord;
+  updateClientCustomField: ClientCustomFieldRecord;
+  deleteClientCustomField: { ok: true };
+  upsertClientCustomFieldValue: ClientCustomFieldValueRecord;
 }
 
 interface ParseSuccess {
@@ -401,6 +462,75 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         action,
         sessionUserId: String(payload.sessionUserId),
         fullName: String(payload.fullName),
+      },
+    };
+  }
+
+  if (action === "upsertColumnOverride") {
+    if (!hasStringField(payload, "columnKey") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertColumnOverride requires columnKey and patch object." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        columnKey: String(payload.columnKey),
+        patch: payload.patch as UpsertColumnOverridePayload["patch"],
+      },
+    };
+  }
+
+  if (action === "setColumnOrder") {
+    if (!Array.isArray(payload.orderedKeys)) {
+      return { ok: false, error: "setColumnOrder requires orderedKeys array." };
+    }
+    const orderedKeys = payload.orderedKeys.filter((k): k is string => typeof k === "string");
+    return { ok: true, value: { action, orderedKeys } };
+  }
+
+  if (action === "createClientCustomField") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createClientCustomField requires input object." };
+    }
+    return { ok: true, value: { action, input: payload.input as CreateClientCustomFieldPayload["input"] } };
+  }
+
+  if (action === "updateClientCustomField") {
+    if (!hasStringField(payload, "fieldId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "updateClientCustomField requires fieldId and patch object." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        fieldId: String(payload.fieldId),
+        patch: payload.patch as UpdateClientCustomFieldPayload["patch"],
+      },
+    };
+  }
+
+  if (action === "deleteClientCustomField") {
+    if (!hasStringField(payload, "fieldId")) {
+      return { ok: false, error: "deleteClientCustomField requires fieldId." };
+    }
+    return { ok: true, value: { action, fieldId: String(payload.fieldId) } };
+  }
+
+  if (action === "upsertClientCustomFieldValue") {
+    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "fieldId")) {
+      return { ok: false, error: "upsertClientCustomFieldValue requires clientId and fieldId." };
+    }
+    const value = payload.value;
+    if (value !== null && typeof value !== "string") {
+      return { ok: false, error: "upsertClientCustomFieldValue.value must be a string or null." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        clientId: String(payload.clientId),
+        fieldId: String(payload.fieldId),
+        value: value as string | null,
       },
     };
   }

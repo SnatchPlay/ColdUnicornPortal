@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
 import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
-import { scopeClients } from "../lib/selectors";
+import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
 import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator";
@@ -89,6 +89,10 @@ export function ClientsPage() {
     clientUsers,
     metricsByClientId,
     conditionRules = [],
+    columnOverrides = [],
+    clientCustomFields = [],
+    clientCustomFieldValues = [],
+    upsertClientCustomFieldValue,
     createClient,
     updateClient,
     sendInvite,
@@ -98,6 +102,21 @@ export function ClientsPage() {
     error,
     refresh,
   } = useCoreData();
+
+  const customFieldValuesByClient = useMemo(() => {
+    const out = new Map<string, Map<string, string | null>>();
+    for (const value of clientCustomFieldValues) {
+      let inner = out.get(value.client_id);
+      if (!inner) {
+        inner = new Map();
+        out.set(value.client_id, inner);
+      }
+      inner.set(value.field_id, value.value);
+    }
+    return out;
+  }, [clientCustomFieldValues]);
+
+  const canEditCustomFields = identity?.role === "master_admin";
 
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [createClientDraft, setCreateClientDraft] = useState<CreateClientDraft | null>(null);
@@ -150,11 +169,12 @@ export function ClientsPage() {
         campaigns: [],
         leads: [],
         dailyStats: [],
+        customFieldValues: customFieldValuesByClient.get(client.id),
       });
       packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
     }
     return packs;
-  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById]);
+  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient]);
 
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return scopedClients.map((client) => {
@@ -236,7 +256,7 @@ export function ClientsPage() {
     return `${manager.first_name} ${manager.last_name}`.trim();
   }, [selectedClient, users]);
 
-  const canEditAssignments = identity?.role === "admin" || identity?.role === "super_admin";
+  const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
 
   function openCreateClient() {
     setCreateClientDraft({
@@ -290,7 +310,7 @@ export function ClientsPage() {
     }
   }
   const canInviteUsers =
-    identity?.role === "admin" || identity?.role === "super_admin" || identity?.role === "manager";
+    identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
 
   // External store that broadcasts the selected-client id to per-row
   // subscribers in the mega-table. Decouples the row highlight from React
@@ -577,6 +597,13 @@ export function ClientsPage() {
             onSortChange={setSort}
             onRowClick={handleRowClick}
             selectionStore={selectionStore}
+            columnOverrides={columnOverrides}
+            customFields={clientCustomFields}
+            customFieldValuesByClient={customFieldValuesByClient}
+            canEditCustomFields={canEditCustomFields}
+            onCustomFieldValueChange={(clientId, fieldId, value) => {
+              void upsertClientCustomFieldValue(clientId, fieldId, value);
+            }}
           />
 
           {hasMoreClients && (

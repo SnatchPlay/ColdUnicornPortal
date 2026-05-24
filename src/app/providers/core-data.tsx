@@ -18,9 +18,13 @@ import { scopeClients } from "../lib/selectors";
 import { useAuth } from "./auth";
 import type {
   CampaignRecord,
-  ConditionRuleRecord,
+  ClientCustomFieldRecord,
+  ClientCustomFieldType,
+  ClientCustomFieldValueRecord,
   ClientRecord,
   ClientUserRecord,
+  ColumnOverrideRecord,
+  ConditionRuleRecord,
   CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
@@ -60,6 +64,32 @@ interface CoreDataContextValue extends CoreSnapshot {
   deleteClientUserMapping: (mappingId: string) => Promise<void>;
   upsertEmailExcludeDomain: (domain: string) => Promise<void>;
   deleteEmailExcludeDomain: (domain: string) => Promise<void>;
+  upsertColumnOverride: (
+    columnKey: string,
+    patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
+  ) => Promise<void>;
+  setColumnOrder: (orderedKeys: string[]) => Promise<void>;
+  createClientCustomField: (input: {
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+  }) => Promise<void>;
+  updateClientCustomField: (
+    fieldId: string,
+    patch: {
+      name?: string;
+      field_type?: ClientCustomFieldType;
+      options?: string[] | null;
+      position?: number;
+    },
+  ) => Promise<void>;
+  deleteClientCustomField: (fieldId: string) => Promise<void>;
+  upsertClientCustomFieldValue: (
+    clientId: string,
+    fieldId: string,
+    value: string | null,
+  ) => Promise<void>;
 }
 
 const EMPTY_SNAPSHOT: CoreSnapshot = {
@@ -75,6 +105,9 @@ const EMPTY_SNAPSHOT: CoreSnapshot = {
   invoices: [],
   emailExcludeList: [],
   conditionRules: [],
+  columnOverrides: [],
+  clientCustomFields: [],
+  clientCustomFieldValues: [],
 };
 
 const CoreDataContext = createContext<CoreDataContextValue | null>(null);
@@ -720,6 +753,166 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
     }
   }, [snapshot.emailExcludeList]);
 
+  const upsertColumnOverride = useCallback(
+    async (
+      columnKey: string,
+      patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
+    ) => {
+      try {
+        const updated = await repository.upsertColumnOverride(columnKey, patch);
+        setSnapshot((current) => {
+          const existing = current.columnOverrides.some((item) => item.column_key === columnKey);
+          return {
+            ...current,
+            columnOverrides: existing
+              ? current.columnOverrides.map((item) => (item.column_key === columnKey ? updated : item))
+              : [...current.columnOverrides, updated],
+          };
+        });
+        setError(null);
+      } catch (reason) {
+        const message = mapCoreDataError(reason);
+        setError(message);
+        toast.error(message);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  const setColumnOrder = useCallback(async (orderedKeys: string[]) => {
+    const previous = snapshot.columnOverrides;
+    // Optimistic local update — keeps the table feeling instant on click.
+    const optimistic = orderedKeys.map<ColumnOverrideRecord>((key, idx) => {
+      const existing = previous.find((o) => o.column_key === key);
+      return {
+        column_key: key,
+        label_override: existing?.label_override ?? null,
+        hidden: existing?.hidden ?? false,
+        position: idx,
+        updated_at: new Date().toISOString(),
+        updated_by: existing?.updated_by ?? null,
+      };
+    });
+    setSnapshot((current) => ({ ...current, columnOverrides: optimistic }));
+    try {
+      const updated = await repository.setColumnOrder(orderedKeys);
+      setSnapshot((current) => ({ ...current, columnOverrides: updated }));
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setSnapshot((current) => ({ ...current, columnOverrides: previous }));
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, [snapshot.columnOverrides]);
+
+  const createClientCustomField = useCallback(
+    async (input: {
+      name: string;
+      field_type: ClientCustomFieldType;
+      options?: string[] | null;
+      position?: number;
+    }) => {
+      try {
+        const created = await repository.createClientCustomField(input);
+        setSnapshot((current) => ({
+          ...current,
+          clientCustomFields: [...current.clientCustomFields, created].sort((l, r) => l.position - r.position),
+        }));
+        setError(null);
+      } catch (reason) {
+        const message = mapCoreDataError(reason);
+        setError(message);
+        toast.error(message);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  const updateClientCustomField = useCallback(
+    async (
+      fieldId: string,
+      patch: {
+        name?: string;
+        field_type?: ClientCustomFieldType;
+        options?: string[] | null;
+        position?: number;
+      },
+    ) => {
+      try {
+        const updated = await repository.updateClientCustomField(fieldId, patch);
+        setSnapshot((current) => ({
+          ...current,
+          clientCustomFields: current.clientCustomFields
+            .map((item) => (item.id === fieldId ? updated : item))
+            .sort((l, r) => l.position - r.position),
+        }));
+        setError(null);
+      } catch (reason) {
+        const message = mapCoreDataError(reason);
+        setError(message);
+        toast.error(message);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  const deleteClientCustomField = useCallback(async (fieldId: string) => {
+    const previousFields = snapshot.clientCustomFields;
+    const previousValues = snapshot.clientCustomFieldValues;
+    setSnapshot((current) => ({
+      ...current,
+      clientCustomFields: current.clientCustomFields.filter((item) => item.id !== fieldId),
+      clientCustomFieldValues: current.clientCustomFieldValues.filter((item) => item.field_id !== fieldId),
+    }));
+    try {
+      await repository.deleteClientCustomField(fieldId);
+      setError(null);
+    } catch (reason) {
+      const message = mapCoreDataError(reason);
+      setSnapshot((current) => ({
+        ...current,
+        clientCustomFields: previousFields,
+        clientCustomFieldValues: previousValues,
+      }));
+      setError(message);
+      toast.error(message);
+      throw reason;
+    }
+  }, [snapshot.clientCustomFields, snapshot.clientCustomFieldValues]);
+
+  const upsertClientCustomFieldValue = useCallback(
+    async (clientId: string, fieldId: string, value: string | null) => {
+      try {
+        const updated = await repository.upsertClientCustomFieldValue(clientId, fieldId, value);
+        setSnapshot((current) => {
+          const exists = current.clientCustomFieldValues.some(
+            (item) => item.client_id === clientId && item.field_id === fieldId,
+          );
+          return {
+            ...current,
+            clientCustomFieldValues: exists
+              ? current.clientCustomFieldValues.map((item) =>
+                  item.client_id === clientId && item.field_id === fieldId ? updated : item,
+                )
+              : [...current.clientCustomFieldValues, updated],
+          };
+        });
+        setError(null);
+      } catch (reason) {
+        const message = mapCoreDataError(reason);
+        setError(message);
+        toast.error(message);
+        throw reason;
+      }
+    },
+    [],
+  );
+
   const deleteEmailExcludeDomain = useCallback(async (domain: string) => {
     const normalized = domain.trim().toLowerCase();
     const previous = snapshot.emailExcludeList;
@@ -806,6 +999,12 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       deleteClientUserMapping,
       upsertEmailExcludeDomain,
       deleteEmailExcludeDomain,
+      upsertColumnOverride,
+      setColumnOrder,
+      createClientCustomField,
+      updateClientCustomField,
+      deleteClientCustomField,
+      upsertClientCustomFieldValue,
     }),
     [
       deleteEmailExcludeDomain,
@@ -833,6 +1032,12 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
       deleteConditionRule,
       upsertEmailExcludeDomain,
       upsertClientUserMapping,
+      upsertColumnOverride,
+      setColumnOrder,
+      createClientCustomField,
+      updateClientCustomField,
+      deleteClientCustomField,
+      upsertClientCustomFieldValue,
     ],
   );
 

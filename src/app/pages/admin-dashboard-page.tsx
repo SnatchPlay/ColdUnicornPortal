@@ -11,6 +11,7 @@ import {
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber } from "../lib/format";
 import {
+  getLeadStage,
   scopeCampaignStats,
   scopeCampaigns,
   scopeClients,
@@ -153,6 +154,21 @@ export function AdminDashboardPage() {
     [scopedDailyStats],
   );
 
+  const pipelineCounts = useMemo(() => {
+    let mql = 0;
+    let preMql = 0;
+    let beyondMql = 0;
+    let unqualified = 0;
+    for (const lead of scopedLeads) {
+      const stage = getLeadStage(lead);
+      if (stage === "MQL") mql++;
+      else if (stage === "preMQL") preMql++;
+      else if (stage === "unqualified") unqualified++;
+      else beyondMql++;
+    }
+    return { mql, preMql, beyondMql, unqualified };
+  }, [scopedLeads]);
+
   const metrics = [
     {
       label: "Clients",
@@ -167,9 +183,15 @@ export function AdminDashboardPage() {
       tone: "success" as const,
     },
     {
-      label: "Lead pipeline",
-      value: formatNumber(scopedLeads.length),
-      hint: `${formatNumber(scopedLeads.filter((lead) => lead.won).length)} won leads`,
+      label: "MQLs (SQLs)",
+      value: formatNumber(pipelineCounts.mql),
+      hint: `${formatNumber(pipelineCounts.beyondMql)} moved beyond MQL`,
+      tone: "neutral" as const,
+    },
+    {
+      label: "preMQLs",
+      value: formatNumber(pipelineCounts.preMql),
+      hint: `${formatNumber(pipelineCounts.unqualified)} not yet qualified`,
       tone: "neutral" as const,
     },
   ];
@@ -203,7 +225,7 @@ export function AdminDashboardPage() {
         title="Admin Dashboard"
         subtitle="Global command surface: assignment health and campaign momentum."
       />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {metrics.map((item) => (
           <MetricCard key={item.label} {...item} />
         ))}

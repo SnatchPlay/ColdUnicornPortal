@@ -2,9 +2,13 @@
 import { supabase } from "../lib/supabase";
 import type {
   CampaignRecord,
-  ConditionRuleRecord,
-  ClientUserRecord,
+  ClientCustomFieldRecord,
+  ClientCustomFieldType,
+  ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientUserRecord,
+  ColumnOverrideRecord,
+  ConditionRuleRecord,
   CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
@@ -48,6 +52,12 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   deleteEmailExcludeDomain: { table: "email_exclude_list", operation: "delete" },
   loadIdentity: { table: "users", operation: "select" },
   updateProfileName: { table: "users", operation: "update" },
+  upsertColumnOverride: { table: "client_table_column_overrides", operation: "upsert" },
+  setColumnOrder: { table: "client_table_column_overrides", operation: "update" },
+  createClientCustomField: { table: "client_custom_fields", operation: "insert" },
+  updateClientCustomField: { table: "client_custom_fields", operation: "update" },
+  deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
+  upsertClientCustomFieldValue: { table: "client_custom_field_values", operation: "upsert" },
 };
 
 export class RepositoryError extends Error {
@@ -449,6 +459,32 @@ export interface Repository {
   deleteEmailExcludeDomain(domain: string): Promise<void>;
   loadIdentity(sessionUserId: string): Promise<LoadIdentityResult>;
   updateProfileName(sessionUserId: string, fullName: string): Promise<UserRecord>;
+  upsertColumnOverride(
+    columnKey: string,
+    patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
+  ): Promise<ColumnOverrideRecord>;
+  setColumnOrder(orderedKeys: string[]): Promise<ColumnOverrideRecord[]>;
+  createClientCustomField(input: {
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+  }): Promise<ClientCustomFieldRecord>;
+  updateClientCustomField(
+    fieldId: string,
+    patch: {
+      name?: string;
+      field_type?: ClientCustomFieldType;
+      options?: string[] | null;
+      position?: number;
+    },
+  ): Promise<ClientCustomFieldRecord>;
+  deleteClientCustomField(fieldId: string): Promise<void>;
+  upsertClientCustomFieldValue(
+    clientId: string,
+    fieldId: string,
+    value: string | null,
+  ): Promise<ClientCustomFieldValueRecord>;
 }
 
 export const repository: Repository = {
@@ -591,5 +627,29 @@ export const repository: Repository = {
   async updateProfileName(sessionUserId, fullName) {
     const { user } = await invokeOrmGatewayAction("updateProfileName", { sessionUserId, fullName });
     return user;
+  },
+
+  async upsertColumnOverride(columnKey, patch) {
+    return invokeOrmGatewayAction("upsertColumnOverride", { columnKey, patch });
+  },
+
+  async setColumnOrder(orderedKeys) {
+    return invokeOrmGatewayAction("setColumnOrder", { orderedKeys });
+  },
+
+  async createClientCustomField(input) {
+    return invokeOrmGatewayAction("createClientCustomField", { input });
+  },
+
+  async updateClientCustomField(fieldId, patch) {
+    return invokeOrmGatewayAction("updateClientCustomField", { fieldId, patch });
+  },
+
+  async deleteClientCustomField(fieldId) {
+    await invokeOrmGatewayAction("deleteClientCustomField", { fieldId });
+  },
+
+  async upsertClientCustomFieldValue(clientId, fieldId, value) {
+    return invokeOrmGatewayAction("upsertClientCustomFieldValue", { clientId, fieldId, value });
   },
 };

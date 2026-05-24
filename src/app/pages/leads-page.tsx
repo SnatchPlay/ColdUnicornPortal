@@ -24,7 +24,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { formatDate, getFullName } from "../lib/format";
-import { getLeadStage, scopeCampaigns, scopeClients, scopeLeads, scopeReplies } from "../lib/selectors";
+import { getLeadStage, isInternalAdmin, scopeCampaigns, scopeClients, scopeLeads, scopeReplies, sortClientsAlpha } from "../lib/selectors";
 import {
   TIMEFRAME_PRESETS,
   createDefaultTimeframe,
@@ -66,7 +66,7 @@ const MAX_PAGE_LINKS = 5;
 
 type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
-type LeadSortKey = "lead" | "company" | "status" | "updated";
+type LeadSortKey = "lead" | "client" | "company" | "status" | "updated";
 
 interface LeadDraft {
   qualification: LeadQualification | "";
@@ -331,10 +331,11 @@ function InternalLeadsPage() {
     return { key, direction };
   });
 
+  const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
   const leadColumns = useResizableColumns({
-    storageKey: "table:leads:columns",
-    defaultWidths: [380, 300, 220, 200],
-    minWidths: [240, 200, 150, 140],
+    storageKey: showClientColumn ? "table:leads:columns:v2:admin" : "table:leads:columns:v2",
+    defaultWidths: showClientColumn ? [340, 200, 280, 200, 180] : [380, 300, 220, 200],
+    minWidths: showClientColumn ? [220, 140, 180, 140, 120] : [240, 200, 150, 140],
   });
 
   const leadTableStyle = useMemo(
@@ -345,7 +346,10 @@ function InternalLeadsPage() {
     [leadColumns.template],
   );
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
+  const scopedClients = useMemo(
+    () => (identity ? sortClientsAlpha(scopeClients(identity, clients)) : []),
+    [clients, identity],
+  );
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],
@@ -397,11 +401,15 @@ function InternalLeadsPage() {
   );
 
   const campaignById = useMemo(() => new Map(scopedCampaigns.map((campaign) => [campaign.id, campaign])), [scopedCampaigns]);
+  const clientById = useMemo(() => new Map(scopedClients.map((client) => [client.id, client])), [scopedClients]);
 
   const sortedLeads = useMemo(() => {
     return filteredLeads.slice().sort((left, right) => {
       if (leadSort.key === "lead") {
         return compareText(getFullName(left.first_name, left.last_name), getFullName(right.first_name, right.last_name), leadSort.direction);
+      }
+      if (leadSort.key === "client") {
+        return compareText(clientById.get(left.client_id)?.name ?? "", clientById.get(right.client_id)?.name ?? "", leadSort.direction);
       }
       if (leadSort.key === "company") {
         return compareText(left.company_name, right.company_name, leadSort.direction);
@@ -411,7 +419,7 @@ function InternalLeadsPage() {
       }
       return compareText(left.updated_at, right.updated_at, leadSort.direction);
     });
-  }, [filteredLeads, leadSort.direction, leadSort.key]);
+  }, [filteredLeads, leadSort.direction, leadSort.key, clientById]);
 
   const totalPages = Math.max(1, Math.ceil(sortedLeads.length / PAGE_SIZE));
   const safeCurrentPage = clampPage(currentPage, totalPages);
@@ -768,13 +776,14 @@ function InternalLeadsPage() {
           <div className="overflow-hidden rounded-2xl border border-border">
             <div className="overflow-x-auto" style={leadTableStyle}>
               <div className="hidden min-w-[980px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:grid-cols-[1.2fr_1fr_auto] lg:[grid-template-columns:var(--leads-table-columns)]">
-                {[
-                  { key: "lead" as const, label: "Lead" },
-                  { key: "company" as const, label: "Company" },
-                  { key: "status" as const, label: "Status" },
-                  { key: "updated" as const, label: "Updated" },
-                ].map((column, index, collection) => (
-                  <div key={column.key} className={cn("relative min-w-0", column.key === "updated" ? "hidden lg:block" : "")}>
+                {([
+                  { key: "lead" as const, label: "Lead", lgOnly: false },
+                  ...(showClientColumn ? [{ key: "client" as const, label: "Client", lgOnly: true }] : []),
+                  { key: "company" as const, label: "Company", lgOnly: false },
+                  { key: "status" as const, label: "Status", lgOnly: false },
+                  { key: "updated" as const, label: "Updated", lgOnly: true },
+                ]).map((column, index, collection) => (
+                  <div key={column.key} className={cn("relative min-w-0", column.lgOnly ? "hidden lg:block" : "")}>
                     <button
                       onClick={() => {
                         setCurrentPage(1);
@@ -853,6 +862,11 @@ function InternalLeadsPage() {
                           <p className="text-sm">{getFullName(lead.first_name, lead.last_name)}</p>
                           <p className="mt-1 text-xs text-muted-foreground">{lead.email ?? "No email"}</p>
                         </div>
+                        {showClientColumn ? (
+                          <div className="hidden text-sm text-neutral-300 lg:block">
+                            {clientById.get(lead.client_id)?.name ?? "—"}
+                          </div>
+                        ) : null}
                         <div>
                           <p className="text-sm">{lead.company_name ?? "—"}</p>
                           <p className="mt-1 text-xs text-muted-foreground">{campaign?.name ?? "No campaign linked"}</p>

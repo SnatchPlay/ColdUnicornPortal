@@ -14,7 +14,7 @@ import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, P
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { formatDate, formatNumber } from "../lib/format";
-import { scopeCampaignStats, scopeCampaigns, scopeClients } from "../lib/selectors";
+import { scopeCampaignStats, scopeCampaigns, scopeClients, sortClientsAlpha } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
@@ -133,7 +133,10 @@ function InternalCampaignsPage() {
     [campaignColumns.template],
   );
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
+  const scopedClients = useMemo(
+    () => (identity ? sortClientsAlpha(scopeClients(identity, clients)) : []),
+    [clients, identity],
+  );
   const scopedCampaigns = useMemo(
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],

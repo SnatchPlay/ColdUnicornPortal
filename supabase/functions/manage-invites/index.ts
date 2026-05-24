@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 type InviteRole = "admin" | "manager" | "client";
 type InviteStatus = "pending" | "accepted" | "expired";
-type ActorRole = "super_admin" | "admin" | "manager" | "client";
+type ActorRole = "super_admin" | "admin" | "master_admin" | "manager" | "client";
 
 interface InviteMetadata {
   invited_role?: string;
@@ -188,7 +188,7 @@ function buildInviteRecord({
 }
 
 function isAdminActor(role: ActorRole) {
-  return role === "admin" || role === "super_admin";
+  return role === "admin" || role === "super_admin" || role === "master_admin";
 }
 
 function buildInviteRedirect(payloadRedirectTo?: string) {
