@@ -26,7 +26,7 @@ Shared configuration:
 
 Page: [`client-dashboard-page.tsx`](../../../src/app/pages/client-dashboard-page.tsx). All use `PORTAL_CHART_TOOLTIP`.
 
-### 1.1 Daily sent (last 30 days)
+### 1.1 Daily sent
 
 - **Type:** `BarChart`
 - **Data:** `getDailySentSeries(timeframeStats)` в†’ `Array<{ date, label, sent }>`
@@ -45,7 +45,7 @@ Page: [`client-dashboard-page.tsx`](../../../src/app/pages/client-dashboard-page
 ### 1.3 Leads Count per month
 
 - **Type:** `BarChart`
-- **Data:** inline вЂ” group sorted scoped `daily_stats` by month, sum `mql_count`.
+- **Data:** inline вЂ” group sorted timeframe-scoped `daily_stats` by month, sum `mql_count`.
 - **Series:** `<Bar dataKey="leadsCount" fill="#22c55e" />`
 - **Empty state:** "No monthly lead data".
 
@@ -56,17 +56,17 @@ Page: [`client-dashboard-page.tsx`](../../../src/app/pages/client-dashboard-page
 - **Series:** `<Bar dataKey="prospectsAdded" fill="#22c55e" />`
 - **Empty state:** "No prospects delta".
 
-### 1.5 Sent count for last three months
+### 1.5 Sent count by month
 
 - **Type:** `BarChart`
-- **Data:** inline вЂ” monthly sums of `campaign_daily_stats.sent_count`, last 3 calendar months.
+- **Data:** inline вЂ” monthly sums of timeframe-scoped `campaign_daily_stats.sent_count`.
 - **Series:** `<Bar dataKey="sent" fill="#22c55e" />`
 - **Empty state:** "No monthly sent data".
 
 ### 1.6 Prospects added by Month
 
 - **Type:** `BarChart`
-- **Data:** monthly aggregation of `daily_stats.prospects_count` в†’ month-over-month delta, last 12 months.
+- **Data:** consecutive `daily_stats.prospects_count` deltas, filtered to the selected timeframe, then grouped by month.
 - **Series:** `<Bar dataKey="prospectsAdded" fill="#22c55e" />`
 - **Empty state:** "No monthly prospect deltas".
 
@@ -162,19 +162,18 @@ Page: [`statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx). Uses 
 ### 5.1 Sent volume
 
 - **Type:** `LineChart` (1 line)
-- **Data:** inline aggregation of `filteredStats` by normalized `report_date` (`YYYY-MM-DD`) -> `{ date, label, sent, replies, opens, bounces }`. Multiple campaign rows on the same day are summed before rendering. Preset/custom ranges are rendered as calendar-day series with zero-filled days when no `campaign_daily_stats` row exists, so the chart axis reflects the selected timeframe even when ingestion only has activity for a few days. Timeframe presets are anchored to the latest visible analytics date in the snapshot.
-- **Coverage note:** an info banner above the KPIs states the selected calendar-day count, active campaign-stat day count, and activity date range. If 7-day and 30-day totals match, this usually means no extra stat rows exist outside the shorter range.
+- **Data:** inline aggregation by normalized `report_date` (`YYYY-MM-DD`) -> `{ date, label, sent, replies, bounces }`. With no campaign selected, `sent`/`replies`/`bounces` come from client-level `daily_stats` (`emails_sent`, `response_count`, `bounce_count`) so the aggregate charts use the wider 180-day daily-stat coverage. When a campaign is selected, the chart falls back to campaign-level `campaign_daily_stats` for all series.
+- **Coverage note:** preset/custom ranges are rendered as calendar-day series with zero-filled days when no source row exists, so the chart axis reflects the selected timeframe. The previous coverage banner is no longer rendered.
 - **Series:**
   - `<Line dataKey="sent"    stroke="#38bdf8" strokeWidth={2.5} dot={false} />`
 - **Empty state:** "No send data yet".
 
-### 5.2 Replies, opens & bounces
+### 5.2 Replies & bounces
 
-- **Type:** `LineChart` (3 lines)
+- **Type:** `LineChart` (2 lines)
 - **Data:** same zero-filled daily aggregate as [§5.1](#51-sent-volume).
 - **Series:**
   - `<Line dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} />`
-  - `<Line dataKey="opens"   stroke="#a78bfa" strokeWidth={2.5} dot={false} />`
   - `<Line dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />`
 - **Empty state:** "No signal data yet".
 
@@ -187,7 +186,7 @@ Page: [`statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx). Uses 
 
 ### 5.4 Manager breakdown
 
-Admin-only tabular/card surface grouped by manager, including `master_admin`. Not a recharts graph; listed here because it is an analytics visualization. Rows show clients, campaigns, sent, replies, leads, and reply rate in the current filter scope.
+Admin-only tabular/card surface grouped by manager, including `master_admin`. Not a recharts graph; listed here because it is an analytics visualization. Rows show clients, campaigns, sent, replies, leads, and reply rate in the current filter scope. Delivery totals use `daily_stats` when no campaign is selected, and `campaign_daily_stats` when a campaign filter is active.
 
 ### 5.5 Campaign portfolio grid
 

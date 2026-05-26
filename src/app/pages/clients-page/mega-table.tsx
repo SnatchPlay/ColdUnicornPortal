@@ -71,9 +71,9 @@ const GROUP_META: Record<Group, { label: string }> = {
 const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
 const DOD_SENT_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
 const TD3_TOTAL_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
-const TD3_SQL_BUCKETS = ["0", "-1", "-2"] as const;
-const WOW_BUCKETS = ["0", "-1", "-2", "-3"] as const;
-const MOM_BUCKETS = ["0", "-1", "-2", "-3"] as const;
+const TD3_SQL_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
+const WOW_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
+const MOM_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
 
 function formatNum(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
@@ -366,6 +366,20 @@ function buildColumns(): MegaColumn[] {
     pick: (row: WowRow) => number | null;
   }> = [
     {
+      key: "total",
+      label: "Total",
+      conditionKey: "wow_total_leads",
+      format: "num",
+      pick: (r) => r.totalLeads,
+    },
+    {
+      key: "sql",
+      label: "SQL",
+      conditionKey: "wow_sql",
+      format: "num",
+      pick: (r) => r.sqlLeads,
+    },
+    {
       key: "resp",
       label: "Resp",
       conditionKey: "wow_total_response_rate",
@@ -392,13 +406,6 @@ function buildColumns(): MegaColumn[] {
       conditionKey: "wow_ooo_rate",
       format: "rate",
       pick: (r) => r.oooRate,
-    },
-    {
-      key: "sql",
-      label: "SQL",
-      conditionKey: "wow_sql",
-      format: "num",
-      pick: (r) => r.sqlLeads,
     },
   ];
 
@@ -430,6 +437,7 @@ function buildColumns(): MegaColumn[] {
     conditionKey: string;
     pick: (row: MomRow) => number | null;
   }> = [
+    { key: "total", label: "Total", conditionKey: "mom_total_leads", pick: (r) => r.totalLeads },
     { key: "sql", label: "SQL", conditionKey: "mom_sql", pick: (r) => r.sqlLeads },
     { key: "mtg", label: "Mtg", conditionKey: "mom_meetings", pick: (r) => r.meetings },
     { key: "won", label: "Won", conditionKey: "mom_won", pick: (r) => r.won },
@@ -667,7 +675,7 @@ const MegaRow = memo(function MegaRow({
       onClick={() => onRowClick(row.client.id)}
       aria-label={`Open details for ${row.client.name}`}
       className={cn(
-        "flex h-9 w-full text-left transition focus:outline-none focus:ring-1 focus:ring-sky-400/50",
+        "flex h-9 w-full text-left focus:outline-none focus:ring-1 focus:ring-sky-400/50",
         rowTint,
         isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
       )}
@@ -877,7 +885,7 @@ function ClientsMegaTableImpl({
   }
 
   return (
-    <div className="isolate overflow-hidden rounded-2xl border border-white/20">
+    <div className="overflow-hidden rounded-2xl border border-white/20">
       <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 20rem)" }}>
         <div style={{ width: totalWidth, minWidth: totalWidth }}>
           {/* Sticky header — three rows stay pinned on vertical scroll */}

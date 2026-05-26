@@ -52,12 +52,12 @@ All use `recharts`; see [08-charts-catalog](./08-charts-catalog.md) for per-char
 
 | # | Title | Type | Data source | Metric ref |
 |---|-------|------|------------|------------|
-| 1 | Daily sent (last 30 days) | BarChart | `getDailySentSeries(timeframeStats)` | [§6.1](./04-metrics-catalog.md#61-daily-sent-series) |
+| 1 | Daily sent | BarChart | `getDailySentSeries(timeframeStats)` | [§6.1](./04-metrics-catalog.md#61-daily-sent-series) |
 | 2 | Leads Count per week | BarChart | inline: group timeframe leads by ISO week, count `qualification='MQL'` | [§6.3](./04-metrics-catalog.md#63-weekly-leads-count-mql--client-dashboard) |
-| 3 | Leads Count per month | BarChart | inline: group `daily_stats.mql_count` by month | [§6.4](./04-metrics-catalog.md#64-monthly-leads-count--client-dashboard) |
+| 3 | Leads Count per month | BarChart | inline: group timeframe-scoped `daily_stats.mql_count` by month | [§6.4](./04-metrics-catalog.md#64-monthly-leads-count--client-dashboard) |
 | 4 | Prospects added (10 days) | BarChart | inline: consecutive-day delta of `daily_stats.prospects_count` | [§6.5](./04-metrics-catalog.md#65-prospects-added-daily--client-dashboard) |
-| 5 | Sent count for last three months | BarChart | inline: monthly sum of `campaign_daily_stats.sent_count` | [§6.6](./04-metrics-catalog.md#66-sent-last-3-months--client-dashboard) |
-| 6 | Prospects added by Month | BarChart | inline: monthly sum of `daily_stats.prospects_count`, delta | [§6.7](./04-metrics-catalog.md#67-prospects-added-by-month--client-dashboard) |
+| 5 | Sent count by month | BarChart | inline: monthly sum of timeframe-scoped `campaign_daily_stats.sent_count` | [§6.6](./04-metrics-catalog.md#66-sent-by-month--client-dashboard) |
+| 6 | Prospects added by Month | BarChart | inline: consecutive `daily_stats.prospects_count` deltas grouped by month inside the selected timeframe | [§6.7](./04-metrics-catalog.md#67-prospects-added-by-month--client-dashboard) |
 | 7 | Velocity | ComposedChart (Bar + Line, dual-axis) | inline: per-week `emailsDelta` + weekly MQL count | [§6.8](./04-metrics-catalog.md#68-velocity--client-dashboard) |
 | 8 | Conversion Funnel + Campaign reply rates | Custom HTML bars | `getConversionRates(timeframeLeads, latestProspects)`, `getCampaignPerformance(scopedCampaigns, timeframeStats).slice(0,6)` | [§3](./04-metrics-catalog.md#3-conversion-funnel), [§5.1](./04-metrics-catalog.md#51-campaign-reply-rate) |
 

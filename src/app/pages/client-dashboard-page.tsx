@@ -175,6 +175,10 @@ function monthLabelFromKey(monthKey: string) {
   return formatDate(`${monthKey}-01`, { month: "short", year: "2-digit" });
 }
 
+function formatPointCount(value: number, singular: string, plural = `${singular}s`) {
+  return `${formatNumber(value)} ${value === 1 ? singular : plural}`;
+}
+
 export function ClientDashboardPage() {
   const { identity } = useAuth();
   const { clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
@@ -276,7 +280,7 @@ export function ClientDashboardPage() {
 
   const monthlyLeadsSeries = useMemo(() => {
     const byMonth = new Map<string, number>();
-    for (const item of sortedScopedDailyStats) {
+    for (const item of sortedTimeframeDailyStats) {
       const date = parseUnknownDate(item.report_date);
       if (!date) continue;
       const key = toMonthKey(date);
@@ -291,27 +295,29 @@ export function ClientDashboardPage() {
         label: monthLabelFromKey(month),
         leadsCount,
       }));
-  }, [sortedScopedDailyStats]);
+  }, [sortedTimeframeDailyStats]);
 
   const prospectsAddedDailySeries = useMemo(() => {
     let previous: number | null = null;
-    const points = sortedTimeframeDailyStats.map((item) => {
+    const points = sortedScopedDailyStats.map((item) => {
       const current = item.prospects_count ?? 0;
-      const delta = previous === null ? current : current - previous;
+      const delta = previous === null ? 0 : current - previous;
       previous = current;
       return {
         date: item.report_date,
         label: formatDate(item.report_date, { day: "numeric", month: "numeric" }),
-        prospectsAdded: delta,
+        prospectsAdded: Math.max(delta, 0),
       };
     });
 
-    return points.slice(-10);
-  }, [sortedTimeframeDailyStats]);
+    return filterByTimeframe(points, (item) => item.date, timeframe)
+      .filter((item) => item.prospectsAdded > 0)
+      .slice(-10);
+  }, [sortedScopedDailyStats, timeframe]);
 
-  const sentLastThreeMonthsSeries = useMemo(() => {
+  const sentByMonthSeries = useMemo(() => {
     const byMonth = new Map<string, number>();
-    for (const item of scopedStats) {
+    for (const item of timeframeStats) {
       const date = parseUnknownDate(item.report_date);
       if (!date) continue;
       const key = toMonthKey(date);
@@ -320,27 +326,29 @@ export function ClientDashboardPage() {
 
     return Array.from(byMonth.entries())
       .sort(([left], [right]) => left.localeCompare(right))
-      .slice(-3)
       .map(([month, sent]) => ({
         month,
         label: monthLabelFromKey(month),
         sent,
       }));
-  }, [scopedStats]);
+  }, [timeframeStats]);
 
   const prospectsAddedByMonthSeries = useMemo(() => {
     const byMonth = new Map<string, number>();
     let previous: number | null = null;
 
-    for (const item of sortedScopedDailyStats) {
+    const deltas = sortedScopedDailyStats.map((item) => {
       const current = item.prospects_count ?? 0;
-      const delta = previous === null ? current : current - previous;
+      const delta = previous === null ? 0 : current - previous;
       previous = current;
+      return { report_date: item.report_date, delta: Math.max(delta, 0) };
+    });
 
+    for (const item of filterByTimeframe(deltas, (point) => point.report_date, timeframe)) {
       const date = parseUnknownDate(item.report_date);
       if (!date) continue;
       const key = toMonthKey(date);
-      byMonth.set(key, (byMonth.get(key) ?? 0) + delta);
+      byMonth.set(key, (byMonth.get(key) ?? 0) + item.delta);
     }
 
     return Array.from(byMonth.entries())
@@ -351,7 +359,7 @@ export function ClientDashboardPage() {
         label: monthLabelFromKey(month),
         prospectsAdded,
       }));
-  }, [sortedScopedDailyStats]);
+  }, [sortedScopedDailyStats, timeframe]);
 
   const velocitySeries = useMemo(() => {
     const byWeek = new Map<string, { sent: number; mqls: number }>();
@@ -508,7 +516,7 @@ export function ClientDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Daily sent (last 30 days)" subtitle={`Email activity over time (${timeframeLabel})`}>
+        <ChartPanel title="Daily sent" subtitle={`Email activity over time (${timeframeLabel})`}>
           {dailySent.length === 0 ? (
             <EmptyPortalState title="No sent data" description="No email activity is available for this period." />
           ) : (
@@ -552,15 +560,18 @@ export function ClientDashboardPage() {
           {monthlyLeadsSeries.length === 0 ? (
             <EmptyPortalState title="No monthly lead data" description="Historical client snapshots are empty." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={monthlyLeadsSeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="leadsCount" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Monthly leads chart with ${formatPointCount(monthlyLeadsSeries.length, "month")} and total ${formatNumber(monthlyLeadsSeries.reduce((sum, item) => sum + item.leadsCount, 0))} leads.`} />
+              <ResponsiveChart>
+                <BarChart data={monthlyLeadsSeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="leadsCount" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
 
@@ -568,33 +579,39 @@ export function ClientDashboardPage() {
           {prospectsAddedDailySeries.length === 0 ? (
             <EmptyPortalState title="No prospects delta" description="Not enough daily snapshot data to calculate deltas." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={prospectsAddedDailySeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="prospectsAdded" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Daily prospects chart with ${formatPointCount(prospectsAddedDailySeries.length, "point")} and total ${formatNumber(prospectsAddedDailySeries.reduce((sum, item) => sum + item.prospectsAdded, 0))} prospects added.`} />
+              <ResponsiveChart>
+                <BarChart data={prospectsAddedDailySeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="prospectsAdded" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartPanel title="Sent count for last three months" subtitle="Email volume by month">
-          {sentLastThreeMonthsSeries.length === 0 ? (
+        <ChartPanel title="Sent count by month" subtitle={`Email volume by month (${timeframeLabel})`}>
+          {sentByMonthSeries.length === 0 ? (
             <EmptyPortalState title="No monthly sent data" description="No campaign stats in this client scope." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={sentLastThreeMonthsSeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Monthly sent chart with ${formatPointCount(sentByMonthSeries.length, "month")} and total ${formatCompact(sentByMonthSeries.reduce((sum, item) => sum + item.sent, 0))} emails.`} />
+              <ResponsiveChart>
+                <BarChart data={sentByMonthSeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="sent" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
 
@@ -602,15 +619,18 @@ export function ClientDashboardPage() {
           {prospectsAddedByMonthSeries.length === 0 ? (
             <EmptyPortalState title="No monthly prospect deltas" description="Daily snapshots are required for this view." />
           ) : (
-            <ResponsiveChart>
-              <BarChart data={prospectsAddedByMonthSeries}>
-                <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <ChartTooltip />
-                <Bar dataKey="prospectsAdded" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveChart>
+            <>
+              <ChartTextSummary summary={`Monthly prospects chart with ${formatPointCount(prospectsAddedByMonthSeries.length, "month")} and total ${formatNumber(prospectsAddedByMonthSeries.reduce((sum, item) => sum + item.prospectsAdded, 0))} prospects added.`} />
+              <ResponsiveChart>
+                <BarChart data={prospectsAddedByMonthSeries}>
+                  <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <ChartTooltip />
+                  <Bar dataKey="prospectsAdded" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveChart>
+            </>
           )}
         </ChartPanel>
       </div>
