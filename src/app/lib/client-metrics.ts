@@ -71,6 +71,8 @@ export interface ClientMetricsOverview {
   wowOooRate: number | null;
   wowSql: number;
   momSql: number;
+  /** Latest daily_stats.prospects_count by report_date; 0 when no daily_stats rows exist. */
+  latestProspectsCount: number;
 }
 
 export interface ClientMetricsPack {
@@ -312,6 +314,13 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
   const threeDodTotal = threeDodRows.slice(0, 3).reduce((total, row) => total + row.totalLeads, 0);
   const threeDodSql = threeDodRows.slice(0, 3).reduce((total, row) => total + row.sqlLeads, 0);
 
+  const latestDailyStat = dailyStats.reduce<DailyStatRecord | null>(
+    (best, s) =>
+      (s.prospects_count ?? 0) > 0 && (!best || (s.report_date ?? "") > (best.report_date ?? "")) ? s : best,
+    null,
+  );
+  const latestProspectsCount = latestDailyStat?.prospects_count ?? 0;
+
   const overview: ClientMetricsOverview = {
     scheduleToday: todayDaily.scheduleToday,
     scheduleTomorrow: todayDaily.scheduleTomorrow,
@@ -327,6 +336,7 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
     wowOooRate: wowRows[0]?.oooRate ?? null,
     wowSql: wowRows[0]?.sqlLeads ?? 0,
     momSql: momRows[0]?.sqlLeads ?? 0,
+    latestProspectsCount,
   };
 
   return {

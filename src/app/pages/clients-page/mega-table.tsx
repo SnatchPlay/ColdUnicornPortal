@@ -235,8 +235,8 @@ function buildColumns(): MegaColumn[] {
     align: "center",
     conditionKey: "prospects_added",
     defaultDirection: "desc",
-    render: (row) => formatNum(row.client.prospects_added),
-    sortValue: (row) => row.client.prospects_added ?? null,
+    render: (row) => formatNum(row.metrics.overview.latestProspectsCount || row.client.prospects_added),
+    sortValue: (row) => row.metrics.overview.latestProspectsCount || (row.client.prospects_added ?? null),
   });
   out.push({
     id: "min_sent",

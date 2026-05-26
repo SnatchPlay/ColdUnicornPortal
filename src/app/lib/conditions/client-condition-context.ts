@@ -141,7 +141,7 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
       kpi_meetings: client.kpi_meetings ?? null,
       kpi_won: null,
       prospects_signed: client.prospects_signed ?? null,
-      prospects_added: client.prospects_added ?? null,
+      prospects_added: metricsOverview.latestProspectsCount || (client.prospects_added ?? null),
       auto_ooo_enabled: client.auto_ooo_enabled,
       bi_setup_done: client.bi_setup_done,
       external_workspace_id: client.external_workspace_id ?? null,
@@ -153,7 +153,7 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
     manager_name: manager ? `${manager.first_name} ${manager.last_name}`.trim() : null,
 
     prospects_signed: client.prospects_signed ?? null,
-    prospects_added: client.prospects_added ?? null,
+    prospects_added: metricsOverview.latestProspectsCount || (client.prospects_added ?? null),
 
     inboxes: client.inboxes_count ?? null,
     min_sent: client.min_daily_sent ?? null,
