@@ -141,7 +141,11 @@ describe("settings condition rules builder", () => {
     // when "New rule" is clicked, so the draft is already savable. We just
     // tweak the name and key text inputs (still rendered in the Rule details
     // section) and submit.
-    fireEvent.change(screen.getByDisplayValue("new-rule"), { target: { value: "new_rule_key" } });
+    const keyInput = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
+      (input) => input.value.startsWith("new-rule-"),
+    );
+    if (!keyInput) throw new Error("Could not find rule key input");
+    fireEvent.change(keyInput, { target: { value: "new_rule_key" } });
     fireEvent.change(screen.getByDisplayValue("New rule"), { target: { value: "New Rule Name" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Create rule" }));

@@ -272,7 +272,7 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
   }));
 
   const currentWeekStart = startOfWeek(today);
-  const wowRows: WowRow[] = [0, 1, 2, 3].map((offset) => {
+  const wowRows: WowRow[] = [0, 1, 2, 3, 4].map((offset) => {
     const start = addDays(currentWeekStart, -7 * offset);
     const end = addDays(start, 6);
 
@@ -296,7 +296,7 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
   });
 
   const currentMonthStart = startOfMonth(today);
-  const momRows: MomRow[] = [0, 1, 2, 3].map((offset) => {
+  const momRows: MomRow[] = [0, 1, 2, 3, 4].map((offset) => {
     const start = shiftMonthStart(currentMonthStart, -offset);
     const end = endOfMonth(start);
 

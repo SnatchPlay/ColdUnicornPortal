@@ -18,12 +18,12 @@ import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, M
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
-import { isInternalAdmin, scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads, sortClientsAlpha } from "../lib/selectors";
+import { isInternalAdmin, scopeCampaignStats, scopeCampaigns, scopeClients, scopeDailyStats, scopeLeads, sortClientsAlpha } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel, resolveTimeframeBounds } from "../lib/timeframe";
 import { useCoreData } from "../providers/core-data";
 import { useAuth } from "../providers/auth";
 import { ClientStatisticsPage } from "./client-statistics-page";
-import type { UserRecord } from "../types/core";
+import type { CampaignDailyStatRecord, DailyStatRecord, UserRecord } from "../types/core";
 
 const PIE_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#f97316"];
 const PIE_COLOR_DOT_CLASSES = ["bg-sky-400", "bg-emerald-500", "bg-amber-500", "bg-orange-500"];
@@ -41,16 +41,28 @@ interface ManagerAnalyticsOption {
   role: UserRecord["role"] | "missing_manager";
 }
 
+interface AnalyticsTotals {
+  totalSent: number;
+  totalReplies: number;
+  totalBounces: number;
+  replyRate: number;
+  bounceRate: number;
+}
+
+interface DailySeriesPoint {
+  date: string;
+  label: string;
+  sent: number;
+  replies: number;
+  bounces: number;
+}
+
 function normalizeReportDate(value: string) {
   return value.slice(0, 10);
 }
 
 function formatDateKey(value: string) {
   return formatDate(`${value}T12:00:00`, { day: "2-digit", month: "short" });
-}
-
-function formatDateRangeKey(value: string) {
-  return formatDate(`${value}T12:00:00`, { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function toDateKey(value: Date) {
@@ -96,6 +108,36 @@ function parseAnalyticsDate(value: string | null | undefined) {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
+function getManagerDisplayName(manager: ManagerAnalyticsOption) {
+  return `${manager.first_name} ${manager.last_name}`.trim() || manager.email;
+}
+
+function aggregateCampaignStats(stats: CampaignDailyStatRecord[]): AnalyticsTotals {
+  const totalSent = stats.reduce((sum, item) => sum + (item.sent_count ?? 0), 0);
+  const totalReplies = stats.reduce((sum, item) => sum + (item.reply_count ?? 0), 0);
+  const totalBounces = stats.reduce((sum, item) => sum + (item.bounce_count ?? 0), 0);
+  return {
+    totalSent,
+    totalReplies,
+    totalBounces,
+    replyRate: totalSent > 0 ? (totalReplies / totalSent) * 100 : 0,
+    bounceRate: totalSent > 0 ? (totalBounces / totalSent) * 100 : 0,
+  };
+}
+
+function aggregateDailyStats(stats: DailyStatRecord[]): AnalyticsTotals {
+  const totalSent = stats.reduce((sum, item) => sum + item.emails_sent, 0);
+  const totalReplies = stats.reduce((sum, item) => sum + item.response_count, 0);
+  const totalBounces = stats.reduce((sum, item) => sum + item.bounce_count, 0);
+  return {
+    totalSent,
+    totalReplies,
+    totalBounces,
+    replyRate: totalSent > 0 ? (totalReplies / totalSent) * 100 : 0,
+    bounceRate: totalSent > 0 ? (totalBounces / totalSent) * 100 : 0,
+  };
+}
+
 export function StatisticsPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientStatisticsPage />;
@@ -104,7 +146,7 @@ export function StatisticsPage() {
 
 function InternalStatisticsPage() {
   const { identity } = useAuth();
-  const { users = [], clients, campaigns, leads, campaignDailyStats, loading, error, refresh } = useCoreData();
+  const { users = [], clients, campaigns, leads, campaignDailyStats, dailyStats = [], loading, error, refresh } = useCoreData();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [managerFilterId, setManagerFilterId] = useState(ALL_FILTER_VALUE);
   const [clientFilterId, setClientFilterId] = useState(ALL_FILTER_VALUE);
@@ -129,9 +171,14 @@ function InternalStatisticsPage() {
     () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
     [campaignDailyStats, campaigns, clients, identity],
   );
+  const scopedDailyStats = useMemo(
+    () => (identity ? scopeDailyStats(identity, clients, dailyStats) : []),
+    [clients, dailyStats, identity],
+  );
 
   const showManagerScope = identity ? isInternalAdmin(identity.role) : false;
   const managerUsers = useMemo<ManagerAnalyticsOption[]>(() => {
+    const userById = new Map(users.map((user) => [user.id, user] as const));
     const rows = users
       .filter((user) => user.role === "manager")
       .map((user) => ({
@@ -145,6 +192,17 @@ function InternalStatisticsPage() {
     for (const client of scopedClients) {
       if (!client.manager_id || knownIds.has(client.manager_id)) continue;
       knownIds.add(client.manager_id);
+      const user = userById.get(client.manager_id);
+      if (user) {
+        rows.push({
+          id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          role: user.role,
+        });
+        continue;
+      }
       rows.push({
         id: client.manager_id,
         first_name: "Unknown",
@@ -153,7 +211,7 @@ function InternalStatisticsPage() {
         role: "missing_manager",
       });
     }
-    return rows.sort((a, b) => `${a.first_name} ${a.last_name}`.trim().localeCompare(`${b.first_name} ${b.last_name}`.trim()));
+    return rows.sort((a, b) => getManagerDisplayName(a).localeCompare(getManagerDisplayName(b)));
   }, [scopedClients, users]);
 
   const managerFilteredClients = useMemo(
@@ -209,13 +267,18 @@ function InternalStatisticsPage() {
       if (!latest || parsed.getTime() > latest.getTime()) latest = parsed;
     };
     for (const item of scopedStats) consider(item.report_date);
+    for (const item of scopedDailyStats) consider(item.report_date);
     for (const item of scopedLeads) consider(item.updated_at || item.created_at);
     return latest ?? new Date();
-  }, [scopedLeads, scopedStats]);
+  }, [scopedDailyStats, scopedLeads, scopedStats]);
 
   const timeframeStats = useMemo(
     () => filterByTimeframe(scopedStats, (item) => item.report_date, timeframe, timeframeAnchor),
     [scopedStats, timeframe, timeframeAnchor],
+  );
+  const timeframeDailyStats = useMemo(
+    () => filterByTimeframe(scopedDailyStats, (item) => item.report_date, timeframe, timeframeAnchor),
+    [scopedDailyStats, timeframe, timeframeAnchor],
   );
   const timeframeLeads = useMemo(
     () => filterByTimeframe(scopedLeads, (item) => item.updated_at || item.created_at, timeframe, timeframeAnchor),
@@ -235,6 +298,16 @@ function InternalStatisticsPage() {
     [campaignById, campaignFilterId, clientFilterId, managerFilteredClientIds, timeframeStats],
   );
 
+  const filteredDailyStats = useMemo(
+    () =>
+      timeframeDailyStats.filter((item) => {
+        if (!managerFilteredClientIds.has(item.client_id)) return false;
+        if (clientFilterId !== ALL_FILTER_VALUE && item.client_id !== clientFilterId) return false;
+        return true;
+      }),
+    [clientFilterId, managerFilteredClientIds, timeframeDailyStats],
+  );
+
   const filteredLeads = useMemo(
     () =>
       timeframeLeads.filter((item) => {
@@ -250,28 +323,46 @@ function InternalStatisticsPage() {
     () => filteredStats.slice().sort((a, b) => a.report_date.localeCompare(b.report_date)),
     [filteredStats],
   );
+  const sortedFilteredDailyStats = useMemo(
+    () => filteredDailyStats.slice().sort((a, b) => a.report_date.localeCompare(b.report_date)),
+    [filteredDailyStats],
+  );
   const timeframeBounds = useMemo(
     () => resolveTimeframeBounds(timeframe, timeframeAnchor),
     [timeframe, timeframeAnchor],
   );
 
   const dailySeries = useMemo(() => {
-    const byDate = new Map<string, { date: string; label: string; sent: number; replies: number; opens: number; bounces: number }>();
-    for (const item of sortedFilteredStats) {
-      const date = normalizeReportDate(item.report_date);
+    const byDate = new Map<string, DailySeriesPoint>();
+    const useCampaignStats = campaignFilterId !== ALL_FILTER_VALUE || sortedFilteredDailyStats.length === 0;
+    const ensureDate = (date: string) => {
       const current = byDate.get(date) ?? {
         date,
         label: formatDateKey(date),
         sent: 0,
         replies: 0,
-        opens: 0,
         bounces: 0,
       };
-      current.sent += item.sent_count ?? 0;
-      current.replies += item.reply_count ?? 0;
-      current.opens += item.unique_open_count ?? 0;
-      current.bounces += item.bounce_count ?? 0;
       byDate.set(date, current);
+      return current;
+    };
+
+    if (useCampaignStats) {
+      for (const item of sortedFilteredStats) {
+        const date = normalizeReportDate(item.report_date);
+        const current = ensureDate(date);
+        current.sent += item.sent_count ?? 0;
+        current.replies += item.reply_count ?? 0;
+        current.bounces += item.bounce_count ?? 0;
+      }
+    } else {
+      for (const item of sortedFilteredDailyStats) {
+        const date = normalizeReportDate(item.report_date);
+        const current = ensureDate(date);
+        current.sent += item.emails_sent;
+        current.replies += item.response_count;
+        current.bounces += item.bounce_count;
+      }
     }
 
     if (timeframeBounds.start && timeframeBounds.end) {
@@ -281,49 +372,37 @@ function InternalStatisticsPage() {
           label: formatDateKey(date),
           sent: 0,
           replies: 0,
-          opens: 0,
           bounces: 0,
         }
       ));
     }
 
     return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [sortedFilteredStats, timeframeBounds]);
+  }, [campaignFilterId, sortedFilteredDailyStats, sortedFilteredStats, timeframeBounds]);
 
   const sentSeries = dailySeries;
   const signalsSeries = dailySeries;
 
   const activityCoverage = useMemo(() => {
-    const activeDates = Array.from(new Set(filteredStats.map((item) => normalizeReportDate(item.report_date)))).sort();
-    const firstDate = activeDates[0] ?? null;
-    const lastDate = activeDates[activeDates.length - 1] ?? null;
-    const rangeLabel =
-      firstDate && lastDate
-        ? firstDate === lastDate
-          ? formatDateRangeKey(firstDate)
-          : `${formatDateRangeKey(firstDate)} - ${formatDateRangeKey(lastDate)}`
-        : "no activity rows";
+    const sourceDates = campaignFilterId === ALL_FILTER_VALUE && filteredDailyStats.length > 0
+      ? filteredDailyStats.map((item) => normalizeReportDate(item.report_date))
+      : filteredStats.map((item) => normalizeReportDate(item.report_date));
+    const activeDates = Array.from(new Set(sourceDates)).sort();
 
     return {
       activeDays: activeDates.length,
       calendarDays: dailySeries.length,
-      rangeLabel,
     };
-  }, [dailySeries.length, filteredStats]);
+  }, [campaignFilterId, dailySeries.length, filteredDailyStats, filteredStats]);
 
   const timeframeLabel = getTimeframeLabel(timeframe);
-  const activeDaysVerb = activityCoverage.activeDays === 1 ? "contains" : "contain";
-  const activityCoverageMessage = `${timeframeLabel} shows ${formatDayCount(activityCoverage.calendarDays, "calendar day")}; ${formatDayCount(activityCoverage.activeDays, "active day")} ${activeDaysVerb} campaign activity (${activityCoverage.rangeLabel}). Days without campaign_daily_stats rows are rendered as 0, so 7 and 30 day totals can match when no older rows exist.`;
 
   const summaryMetrics = useMemo(() => {
-    const totalSent = filteredStats.reduce((sum, item) => sum + (item.sent_count ?? 0), 0);
-    const totalReplies = filteredStats.reduce((sum, item) => sum + (item.reply_count ?? 0), 0);
-    const totalOpens = filteredStats.reduce((sum, item) => sum + (item.unique_open_count ?? 0), 0);
-    const totalBounces = filteredStats.reduce((sum, item) => sum + (item.bounce_count ?? 0), 0);
-    const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
-    const bounceRate = totalSent > 0 ? (totalBounces / totalSent) * 100 : 0;
-    return { totalSent, totalReplies, totalOpens, totalBounces, replyRate, bounceRate };
-  }, [filteredStats]);
+    if (campaignFilterId !== ALL_FILTER_VALUE || filteredDailyStats.length === 0) {
+      return aggregateCampaignStats(filteredStats);
+    }
+    return aggregateDailyStats(filteredDailyStats);
+  }, [campaignFilterId, filteredDailyStats, filteredStats]);
 
   const byClientBreakdown = useMemo(() => {
     if (scopedClients.length <= 1) return [];
@@ -333,14 +412,22 @@ function InternalStatisticsPage() {
           scopedCampaigns.filter((c) => c.client_id === client.id).map((c) => c.id),
         );
         const clientStats = filteredStats.filter((item) => clientCampaignIds.has(item.campaign_id));
-        const totalSent = clientStats.reduce((sum, item) => sum + (item.sent_count ?? 0), 0);
-        const totalReplies = clientStats.reduce((sum, item) => sum + (item.reply_count ?? 0), 0);
+        const clientDaily = filteredDailyStats.filter((item) => item.client_id === client.id);
+        const totals =
+          campaignFilterId !== ALL_FILTER_VALUE || clientDaily.length === 0
+            ? aggregateCampaignStats(clientStats)
+            : aggregateDailyStats(clientDaily);
         const clientLeads = filteredLeads.filter((l) => l.client_id === client.id).length;
-        const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
-        return { client, totalSent, totalReplies, clientLeads, replyRate };
+        return {
+          client,
+          totalSent: totals.totalSent,
+          totalReplies: totals.totalReplies,
+          clientLeads,
+          replyRate: totals.replyRate,
+        };
       })
       .filter((item) => item.totalSent > 0 || item.clientLeads > 0);
-  }, [filteredLeads, filteredStats, managerFilteredClients, scopedCampaigns, scopedClients.length]);
+  }, [campaignFilterId, filteredDailyStats, filteredLeads, filteredStats, managerFilteredClients, scopedCampaigns, scopedClients.length]);
 
   const byManagerBreakdown = useMemo(() => {
     if (!showManagerScope || managerUsers.length === 0) return [];
@@ -351,23 +438,25 @@ function InternalStatisticsPage() {
         const managerCampaigns = clientFilteredCampaigns.filter((campaign) => managerClientIds.has(campaign.client_id));
         const managerCampaignIds = new Set(managerCampaigns.map((campaign) => campaign.id));
         const managerStats = filteredStats.filter((stat) => managerCampaignIds.has(stat.campaign_id));
-        const totalSent = managerStats.reduce((sum, item) => sum + (item.sent_count ?? 0), 0);
-        const totalReplies = managerStats.reduce((sum, item) => sum + (item.reply_count ?? 0), 0);
+        const managerDailyStats = filteredDailyStats.filter((stat) => managerClientIds.has(stat.client_id));
+        const totals =
+          campaignFilterId !== ALL_FILTER_VALUE || managerDailyStats.length === 0
+            ? aggregateCampaignStats(managerStats)
+            : aggregateDailyStats(managerDailyStats);
         const managerLeads = filteredLeads.filter((lead) => managerClientIds.has(lead.client_id)).length;
-        const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
         return {
           manager,
           clientsCount: managerClients.length,
           campaignsCount: managerCampaigns.length,
-          totalSent,
-          totalReplies,
+          totalSent: totals.totalSent,
+          totalReplies: totals.totalReplies,
           managerLeads,
-          replyRate,
+          replyRate: totals.replyRate,
         };
       })
       .filter((item) => item.clientsCount > 0 || item.campaignsCount > 0 || item.managerLeads > 0 || item.totalSent > 0 || item.totalReplies > 0);
     return rows.sort((a, b) => b.totalSent - a.totalSent || b.managerLeads - a.managerLeads);
-  }, [clientFilteredCampaigns, filteredLeads, filteredStats, managerFilteredClients, managerUsers, showManagerScope]);
+  }, [campaignFilterId, clientFilteredCampaigns, filteredDailyStats, filteredLeads, filteredStats, managerFilteredClients, managerUsers, showManagerScope]);
 
   const qualificationSeries = useMemo(() => {
     const counts = new Map<string, number>();
@@ -401,6 +490,10 @@ function InternalStatisticsPage() {
       .sort((a, b) => b.total - a.total || b.mql - a.mql);
   }, [filteredLeads, managerFilteredClients, managerUsers, showManagerScope]);
 
+  /*
+   * Campaign-specific sections stay on campaign_daily_stats because daily_stats
+   * is client-level and cannot answer per-campaign filters.
+   */
   const campaignTotals = useMemo(() => {
     const totals = new Map<string, { sent: number; replies: number; rows: number }>();
     for (const item of timeframeStats) {
@@ -453,7 +546,7 @@ function InternalStatisticsPage() {
   );
   const managerFilterOptions = useMemo(() => {
     const matches = managerUsers.filter((manager) =>
-      includesSearch(`${manager.first_name} ${manager.last_name} ${manager.email}`, managerSearch),
+      includesSearch(`${getManagerDisplayName(manager)} ${manager.email}`, managerSearch),
     );
     const selected = managerFilterId === ALL_FILTER_VALUE ? null : managerUsers.find((manager) => manager.id === managerFilterId);
     const limited = matches.slice(0, SELECT_OPTION_LIMIT);
@@ -584,7 +677,7 @@ function InternalStatisticsPage() {
                   </SelectItem>
                   {managerFilterOptions.map((manager) => (
                     <SelectItem key={manager.id} value={manager.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                      {`${manager.first_name} ${manager.last_name}`.trim() || manager.email}
+                      {getManagerDisplayName(manager)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -662,11 +755,7 @@ function InternalStatisticsPage() {
         </div>
       </Surface>
 
-      <Banner tone={activityCoverage.activeDays < activityCoverage.calendarDays ? "warning" : "info"}>
-        {activityCoverageMessage}
-      </Banner>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Sent"
           value={formatNumber(summaryMetrics.totalSent)}
@@ -678,11 +767,6 @@ function InternalStatisticsPage() {
           value={formatNumber(summaryMetrics.totalReplies)}
           hint={`Reply rate ${summaryMetrics.replyRate.toFixed(1)}%`}
           tone="success"
-        />
-        <MetricCard
-          label="Opens"
-          value={formatNumber(summaryMetrics.totalOpens)}
-          hint="Unique opens"
         />
         <MetricCard
           label="Bounces"
@@ -730,7 +814,7 @@ function InternalStatisticsPage() {
           )}
         </Surface>
 
-        <Surface title="Replies, opens & bounces" subtitle="Engagement and delivery signals over the selected period.">
+        <Surface title="Replies & bounces" subtitle="Engagement and delivery signals over the selected period.">
           {activityCoverage.activeDays === 0 ? (
             <EmptyState title="No signal data yet" description="No activity data is available for the selected filters." />
           ) : (
@@ -749,7 +833,6 @@ function InternalStatisticsPage() {
                       itemStyle={{ color: "#f8fafc" }}
                     />
                     <Line type="monotone" dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} name="Replies" />
-                    <Line type="monotone" dataKey="opens" stroke="#a78bfa" strokeWidth={2.5} dot={false} name="Opens" />
                     <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} name="Bounces" />
                     <Legend wrapperStyle={{ fontSize: 12, color: "rgba(148,163,184,0.8)" }} />
                   </LineChart>
@@ -814,7 +897,7 @@ function InternalStatisticsPage() {
                       {managerLeadBreakdown.map(({ manager, total, mql, preMql, unqualified }) => (
                         <div key={manager.id} className="px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="truncate text-sm text-white">{`${manager.first_name} ${manager.last_name}`.trim() || manager.email}</p>
+                            <p className="truncate text-sm text-white">{getManagerDisplayName(manager)}</p>
                             <span className="font-mono text-sm text-white">{formatNumber(total)}</span>
                           </div>
                           <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-neutral-400">
@@ -896,7 +979,7 @@ function InternalStatisticsPage() {
               <div key={manager.id} className="rounded-2xl border border-border bg-black/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-white">{`${manager.first_name} ${manager.last_name}`.trim() || manager.email}</p>
+                    <p className="truncate text-sm text-white">{getManagerDisplayName(manager)}</p>
                     <p className="mt-1 text-xs text-neutral-500">
                       {formatNumber(clientsCount)} clients, {formatNumber(campaignsCount)} campaigns
                     </p>

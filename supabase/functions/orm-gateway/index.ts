@@ -1,4 +1,5 @@
 ﻿import { and, asc, desc, eq, gte, sql } from "npm:drizzle-orm@0.45.2";
+import { inArray } from "npm:drizzle-orm@0.45.2";
 import { drizzle } from "npm:drizzle-orm@0.45.2/postgres-js";
 import postgres from "npm:postgres@3.4.9";
 import * as schema from "../../drizzle/schema.ts";
@@ -781,12 +782,31 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       ]);
       // [TEMP PERF] /end
 
+    const usersById = new Map(users.map((user) => [user.id, user] as const));
+    const missingManagerIds = Array.from(
+      new Set(
+        clients
+          .map((client) => client.managerId)
+          .filter((managerId): managerId is string => Boolean(managerId) && !usersById.has(managerId)),
+      ),
+    );
+    if (missingManagerIds.length > 0) {
+      const managerRows = await timedQuery(
+        "managerUsersFallback",
+        tx.select().from(schema.users).where(inArray(schema.users.id, missingManagerIds)),
+      );
+      for (const manager of managerRows) {
+        usersById.set(manager.id, manager);
+      }
+    }
+    const snapshotUsers = Array.from(usersById.values());
+
     // [TEMP PERF] log total handler duration (excludes auth + RLS setup)
     console.log(`[TEMP PERF][orm-gateway] loadSnapshot handler total: ${(performance.now() - tHandlerStart).toFixed(1)}ms`);
     // [TEMP PERF] /end
 
     return {
-      users: users.map(toUserRecord),
+      users: snapshotUsers.map(toUserRecord),
       clients: clients.map(toClientRecord),
       clientUsers: clientUsers.map(toClientUserRecord),
       campaigns: campaigns.map(toCampaignRecord),

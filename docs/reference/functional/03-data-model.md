@@ -432,10 +432,10 @@ All policies reference `private.*` helpers defined in `docs/reference/supabase-p
 | Helper | Signature | Predicate |
 |--------|-----------|-----------|
 | `private.current_app_role()` | `returns text` | `SELECT role FROM users WHERE id = auth.uid()` (or equivalent). Returns text so callers can compare to literals. |
-| `private.is_admin_user()` | `returns boolean` | `current_app_role() IN ('admin', 'super_admin')`. |
-| `private.is_internal_user()` | `returns boolean` | `current_app_role() <> 'client'` — admin, super_admin, manager. |
-| `private.can_access_client(client_id uuid)` | `returns boolean` | Admin > TRUE; manager > client is assigned (`manager_id = auth.uid()`); client > user is mapped via `client_users`. |
-| `private.can_manage_client(client_id uuid)` | `returns boolean` | Admin > TRUE; manager > client is assigned; client > FALSE. |
+| `private.is_admin_user()` | `returns boolean` | `current_app_role() IN ('super_admin', 'admin', 'master_admin')`. |
+| `private.is_internal_user()` | `returns boolean` | `current_app_role() IN ('super_admin', 'admin', 'manager', 'master_admin')` — anyone with internal staff access. Source of truth for `users_select_internal` and `email_exclude_list_select_internal` policies; `private.is_internal_user` and `public.is_internal_user` must stay in lockstep (see migration `20260526_master_admin_private_is_internal_user.sql`). |
+| `private.can_access_client(client_id uuid)` | `returns boolean` | Admin/super_admin/master_admin > TRUE; manager > client is assigned (`manager_id = auth.uid()`); client > user is mapped via `client_users`. |
+| `private.can_manage_client(client_id uuid)` | `returns boolean` | Admin/super_admin/master_admin > TRUE; manager > client is assigned; client > FALSE. |
 | `private.can_access_reply(client_id uuid, lead_id uuid)` | `returns boolean` | Checks `can_access_client(client_id)` OR — when `client_id IS NULL` — looks up the owning client via `lead_id` and applies `can_access_client`. Admin short-circuits. |
 
 Pattern: wherever possible the new policies use **set-based subqueries** rather than per-row function calls, because Postgres would otherwise fail to hoist the check past an index. See [§5](#5-migrations-of-note).

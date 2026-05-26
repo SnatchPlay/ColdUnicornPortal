@@ -88,7 +88,7 @@ export function getClientKpis(clients, campaigns, leads, stats) {
 
 ### 2.4 Emails Sent
 
-- **Where:** Client Dashboard KPI tile 4 (compact number), Client Dashboard "Daily sent (last 30 days)" chart, Statistics page trend lines, ClientsPage Overview "Sent" column (today).
+- **Where:** Client Dashboard KPI tile 4 (compact number), Client Dashboard "Daily sent" chart, Statistics page trend lines, ClientsPage Overview "Sent" column (today).
 - **Formula:** `sum(campaign_daily_stats.sent_count)` across timeframe-scoped stats.
 - **Source:** `campaign_daily_stats.sent_count`.
 - **File:line:** [client-view-models.ts:40](../../../src/app/lib/client-view-models.ts#L40).
@@ -235,7 +235,7 @@ return Array.from(byDate.entries())
   .map(([date, sent]) => ({ date, label: formatDate(date, {day:"numeric", month:"short"}), sent }));
 ```
 
-- **Where:** Client Dashboard "Daily sent (last 30 days)" bar chart; Client Statistics "Daily sent" area chart.
+- **Where:** Client Dashboard "Daily sent" bar chart; Client Statistics "Daily sent" area chart.
 - **Time window:** filter-timeframe-scoped `campaign_daily_stats`.
 - **Edge cases:** `report_date` is treated as an opaque ISO-date string вЂ” sorting is lexicographic, which matches date order for YYYY-MM-DD.
 
@@ -279,15 +279,15 @@ for (const lead of leads) {
 - **Source:** `daily_stats.prospects_count`.
 - **Edge cases:** first day has no previous в†’ delta = 0 (skipped).
 
-### 6.6 Sent last 3 months вЂ” Client Dashboard
+### 6.6 Sent by month вЂ” Client Dashboard
 
-- **Where:** "Sent count for last three months" bar.
-- **Formula:** `sum(campaign_daily_stats.sent_count)` grouped by calendar month, last 3 months.
+- **Where:** "Sent count by month" bar.
+- **Formula:** `sum(campaign_daily_stats.sent_count)` grouped by calendar month inside the selected dashboard timeframe.
 
 ### 6.7 Prospects added by month вЂ” Client Dashboard
 
-- **Where:** "Prospects added by Month" bar, last 12 months.
-- **Formula:** month-over-month delta of `sum(daily_stats.prospects_count) per month` (aggregate by month first, then delta).
+- **Where:** "Prospects added by Month" bar.
+- **Formula:** positive consecutive-row delta of `daily_stats.prospects_count`, grouped by calendar month inside the selected dashboard timeframe. The previous row can sit outside the selected timeframe so the first visible bucket is a true delta, not the current snapshot baseline.
 
 ### 6.8 Velocity вЂ” Client Dashboard
 
@@ -544,17 +544,16 @@ Inline in [`statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx).
 
 - **Where:** Manager/Admin Analytics (`/manager/statistics`, `/admin/statistics`).
 - **Formula:** after role scoping, timeframe filtering, and optional manager/client/campaign filters:
-  - `Sent` = `sum(campaign_daily_stats.sent_count)`.
-  - `Replies` = `sum(campaign_daily_stats.reply_count)`.
-  - `Opens` = `sum(campaign_daily_stats.unique_open_count)`.
-  - `Bounces` = `sum(campaign_daily_stats.bounce_count)`.
+  - `Sent` = `sum(daily_stats.emails_sent)` when no campaign is selected; `sum(campaign_daily_stats.sent_count)` when a campaign filter is active or no `daily_stats` rows are visible.
+  - `Replies` = `sum(daily_stats.response_count)` when no campaign is selected; `sum(campaign_daily_stats.reply_count)` when a campaign filter is active or no `daily_stats` rows are visible.
+  - `Bounces` = `sum(daily_stats.bounce_count)` when no campaign is selected; `sum(campaign_daily_stats.bounce_count)` when a campaign filter is active or no `daily_stats` rows are visible.
   - `Reply rate` = `Replies / Sent * 100`, or `0` when sent is zero.
   - `Bounce rate` = `Bounces / Sent * 100`, or `0` when sent is zero.
   - `Leads` = count of filtered `leads`.
   - `Campaigns` = count of filtered visible campaigns.
-- **Manager breakdown:** admin/super-admin/master-admin only, grouped by `clients.manager_id`; the standalone manager surface shows assigned clients, campaigns, sent, replies, leads, and reply rate in the current filter scope. The Lead qualification panel also shows a compact manager lead list with total leads plus MQL/preMQL/unqualified counts.
-- **Time window:** selected `DateRangeButton` timeframe; presets are anchored to the latest visible analytics date in the current snapshot instead of the browser clock, so stale or backfilled datasets still make "Last 7/30/90 Days" meaningful. `campaign_daily_stats` is still capped by the 90-day snapshot window.
-- **Edge cases:** chart buckets normalize `report_date` to `YYYY-MM-DD` and aggregate all campaign rows for the same day before rendering. For bounded presets/custom ranges, missing calendar days are rendered as zero-value points; the coverage banner reports calendar days, active stat days, and the activity date range. This prevents repeated X-axis labels when many campaigns have rows on the same date and makes it clear when 7-day and 30-day totals match because the snapshot has no older rows. The campaign count/list only includes campaigns with stat activity inside the selected timeframe unless a specific campaign is selected.
+- **Manager breakdown:** admin/super-admin/master-admin only, grouped by `clients.manager_id`; the standalone manager surface shows assigned clients, campaigns, sent, replies, leads, and reply rate in the current filter scope. Delivery totals use the same `daily_stats`-first rule as the KPI cards. The Lead qualification panel also shows a compact manager lead list with total leads plus MQL/preMQL/unqualified counts.
+- **Time window:** selected `DateRangeButton` timeframe; presets are anchored to the latest visible analytics date in the current snapshot instead of the browser clock, so stale or backfilled datasets still make "Last 7/30/90 Days" meaningful. `daily_stats` is capped by the 180-day snapshot window; `campaign_daily_stats` is capped by the 90-day snapshot window.
+- **Edge cases:** chart buckets normalize `report_date` to `YYYY-MM-DD`. For bounded presets/custom ranges, missing calendar days are rendered as zero-value points. This prevents repeated X-axis labels and avoids aggregate charts collapsing to a few days when `campaign_daily_stats` is sparse but `daily_stats` has full daily coverage. The UI no longer renders a coverage banner. The campaign count/list only includes campaigns with stat activity inside the selected timeframe unless a specific campaign is selected.
 - **Visible to:** manager sees own scoped summary; admin roles see global summary plus manager breakdown/filter.
 
 ---

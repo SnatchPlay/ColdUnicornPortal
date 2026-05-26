@@ -33,6 +33,8 @@ Rationale (comments in source): "the dashboard only renders the last 21 days, so
 
 `daily_stats` is fetched only for non-client roles (`includeDailyStats: identity?.role !== "client"`) to save bandwidth — clients compute their visible metrics from `campaign_daily_stats` and `leads` alone.
 
+The `orm-gateway` snapshot also performs a manager-user completion pass: after visible clients load, any `clients.manager_id` missing from the first `users` result is re-selected and merged into `users`. This keeps admin/master-admin analytics attribution stable when the general users snapshot is incomplete, while preserving RLS passthrough.
+
 ### 1.2 Retry policy
 
 Repository retries `orm-gateway` `select` actions with `kind ∈ {network, timeout}` up to twice (delays `250 ms` and `600 ms`). Mutations are **not** retried — see [09 §6.2](./09-mutations-rls.md#62-retry-behaviour).

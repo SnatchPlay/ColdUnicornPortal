@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { GripVertical } from "lucide-react";
 import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
@@ -58,7 +58,7 @@ function emptyRule(createdBy: string | null): ConditionRule {
   };
   return {
     id: "draft",
-    key: "new-rule",
+    key: `new-rule-${crypto.randomUUID().slice(0, 8)}`,
     name: "New rule",
     description: null,
     targetEntity: "client",
@@ -771,26 +771,59 @@ function ClientsTableCustomization({
       .map((entry) => entry.col);
   }, [overrideMap]);
 
-  function moveColumn(currentIdx: number, delta: -1 | 1) {
-    const target = currentIdx + delta;
-    if (target < 0 || target >= orderedColumns.length) return;
+  // Drag-and-drop state
+  const draggedIdxRef = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleDragStart(idx: number, event: React.DragEvent) {
+    draggedIdxRef.current = idx;
+    setIsDragging(true);
+    event.dataTransfer.effectAllowed = "move";
+    // ghost image: use the row element itself (browser default)
+  }
+
+  function handleDragOver(event: React.DragEvent, idx: number) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverIdx(idx);
+  }
+
+  function handleDrop(event: React.DragEvent, targetIdx: number) {
+    event.preventDefault();
+    const fromIdx = draggedIdxRef.current;
+    if (fromIdx === null || fromIdx === targetIdx) {
+      draggedIdxRef.current = null;
+      setDragOverIdx(null);
+      setIsDragging(false);
+      return;
+    }
     const next = orderedColumns.slice();
-    const [moved] = next.splice(currentIdx, 1);
-    next.splice(target, 0, moved);
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(targetIdx, 0, moved);
     void onSetColumnOrder(next.map((c) => c.id));
+    draggedIdxRef.current = null;
+    setDragOverIdx(null);
+    setIsDragging(false);
+  }
+
+  function handleDragEnd() {
+    draggedIdxRef.current = null;
+    setDragOverIdx(null);
+    setIsDragging(false);
   }
 
   // Translate bucket-named columns (whose label is a relative-day token like
   // "−1") to something a human can read at a glance: "Daily sent · −1 (yesterday)".
   const describeBuiltInColumn = (col: { id: string; group: string; sub: string; label: string }) => {
-    const bucketMap: Record<string, Record<string, string>> = {
+    const bucketLabels: Record<string, Record<string, string>> = {
       dodSched: { "+2": "day after tomorrow", "+1": "tomorrow", "0": "today" },
       dodSent: { "0": "today", "-1": "yesterday", "-2": "2 days ago", "-3": "3 days ago", "-4": "4 days ago" },
       td3: { "0": "today", "-1": "1 day ago", "-2": "2 days ago", "-3": "3 days ago", "-4": "4 days ago" },
-      wow: { "0": "this week", "-1": "last week", "-2": "2 weeks ago", "-3": "3 weeks ago" },
-      mom: { "0": "this month", "-1": "last month", "-2": "2 months ago", "-3": "3 months ago" },
+      wow: { "0": "this week", "-1": "last week", "-2": "2 weeks ago", "-3": "3 weeks ago", "-4": "4 weeks ago" },
+      mom: { "0": "this month", "-1": "last month", "-2": "2 months ago", "-3": "3 months ago", "-4": "4 months ago" },
     };
-    const friendly = bucketMap[col.group]?.[col.label];
+    const friendly = bucketLabels[col.group]?.[col.label];
     if (friendly) return `${col.sub} · ${col.label} (${friendly})`;
     return col.sub && col.sub !== col.label ? `${col.sub} · ${col.label}` : col.label;
   };
@@ -825,43 +858,46 @@ function ClientsTableCustomization({
             Type a custom label in the middle column to override how this column appears in the Clients table. Tick "Hidden" to remove the column entirely. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
           </p>
           {/* Table header */}
-          <div className="grid grid-cols-[auto_1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            <span>Reorder</span>
+          <div className="grid grid-cols-[24px_1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span />
             <span>Original column</span>
             <span>Display label (override)</span>
             <span>Visibility</span>
           </div>
-          <div className="max-h-96 divide-y divide-white/5 overflow-auto pr-1">
+          <div
+            className="max-h-96 divide-y divide-white/5 overflow-auto pr-1"
+            onDragLeave={(event) => {
+              // only clear when leaving the container entirely
+              if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                setDragOverIdx(null);
+              }
+            }}
+          >
             {orderedColumns.map((col, idx) => {
               const override = overrideMap.get(col.id);
               const labelValue = override?.label_override ?? "";
               const isHidden = Boolean(override?.hidden);
+              const isBeingDragged = isDragging && draggedIdxRef.current === idx;
+              const isDropTarget = dragOverIdx === idx && draggedIdxRef.current !== idx;
               return (
                 <div
                   key={col.id}
-                  className="grid grid-cols-[auto_1.4fr_2fr_auto] items-center gap-3 px-3 py-2"
+                  draggable
+                  onDragStart={(e) => handleDragStart(idx, e)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  className={cn(
+                    "grid grid-cols-[24px_1.4fr_2fr_auto] items-center gap-3 px-3 py-2 transition-colors",
+                    isBeingDragged ? "opacity-40" : "",
+                    isDropTarget ? "border-t-2 border-t-sky-400" : "",
+                  )}
                 >
-                  <div className="flex flex-col gap-1">
-                    <button
-                      type="button"
-                      onClick={() => moveColumn(idx, -1)}
-                      disabled={idx === 0}
-                      aria-label={`Move "${describeBuiltInColumn(col)}" up`}
-                      title="Move up"
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveColumn(idx, 1)}
-                      disabled={idx === orderedColumns.length - 1}
-                      aria-label={`Move "${describeBuiltInColumn(col)}" down`}
-                      title="Move down"
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-black/30 text-muted-foreground transition hover:border-white/30 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-black/30"
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
+                  <div
+                    className="flex cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
+                    title="Drag to reorder"
+                  >
+                    <GripVertical className="h-4 w-4" />
                   </div>
                   <span className="truncate text-xs text-neutral-300">{describeBuiltInColumn(col)}</span>
                   <input

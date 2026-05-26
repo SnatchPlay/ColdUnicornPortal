@@ -184,8 +184,104 @@ describe("statistics internal filters", () => {
 
     expect(screen.getByText("Sent volume chart with 30 calendar days and 1 active day.")).toBeInTheDocument();
     expect(screen.getByText("Signals chart with 30 calendar days and 1 active day.")).toBeInTheDocument();
-    expect(screen.getByText(/Last 30 Days shows 30 calendar days; 1 active day contains campaign activity/)).toBeInTheDocument();
+    expect(screen.queryByText(/Days without activity rows are rendered as 0/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Opens")).not.toBeInTheDocument();
     expect(screen.getAllByText("180").length).toBeGreaterThan(0);
+  });
+
+  it("uses client daily stats for aggregate analytics when no campaign is selected", () => {
+    const latest = "2026-05-20";
+    mockedUseCoreData.mockReturnValue({
+      users: [],
+      clients: [{ id: "client-a", name: "Client Alpha", manager_id: "manager-1" }],
+      campaigns: [
+        {
+          id: "camp-a",
+          client_id: "client-a",
+          type: "outreach",
+          status: "active",
+          name: "Campaign Alpha",
+          database_size: 120,
+          positive_responses: 12,
+          start_date: latest,
+          external_id: "ext-a",
+          gender_target: null,
+          updated_at: `${latest}T00:00:00.000Z`,
+        },
+      ],
+      leads: [],
+      campaignDailyStats: [
+        {
+          campaign_id: "camp-a",
+          report_date: latest,
+          sent_count: 10,
+          reply_count: 1,
+          bounce_count: 0,
+          unique_open_count: 3,
+          positive_replies_count: 1,
+        },
+      ],
+      dailyStats: [
+        {
+          client_id: "client-a",
+          report_date: "2026-05-18",
+          emails_sent: 100,
+          mql_count: 1,
+          response_count: 10,
+          bounce_count: 2,
+          negative_count: 0,
+          ooo_count: 0,
+          human_replies_count: 8,
+          prospects_count: 1000,
+          schedule_today: 0,
+          schedule_tomorrow: 0,
+          schedule_day_after: 0,
+        },
+        {
+          client_id: "client-a",
+          report_date: "2026-05-19",
+          emails_sent: 110,
+          mql_count: 2,
+          response_count: 11,
+          bounce_count: 3,
+          negative_count: 0,
+          ooo_count: 0,
+          human_replies_count: 9,
+          prospects_count: 1010,
+          schedule_today: 0,
+          schedule_tomorrow: 0,
+          schedule_day_after: 0,
+        },
+        {
+          client_id: "client-a",
+          report_date: latest,
+          emails_sent: 120,
+          mql_count: 3,
+          response_count: 12,
+          bounce_count: 4,
+          negative_count: 0,
+          ooo_count: 0,
+          human_replies_count: 10,
+          prospects_count: 1020,
+          schedule_today: 0,
+          schedule_tomorrow: 0,
+          schedule_day_after: 0,
+        },
+      ],
+      loading: false,
+      error: null,
+      refresh: vi.fn(async () => {}),
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <StatisticsPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Sent volume chart with 30 calendar days and 3 active days.")).toBeInTheDocument();
+    expect(screen.queryByText(/Days without activity rows are rendered as 0/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("330").length).toBeGreaterThan(0);
   });
 
   it("filters admin statistics by manager", async () => {
@@ -356,7 +452,7 @@ describe("statistics internal filters", () => {
     expect(screen.getByText("Recent Campaign")).toBeInTheDocument();
     expect(screen.queryByText("Older Campaign")).not.toBeInTheDocument();
     expect(screen.getByText("Sent volume chart with 7 calendar days and 1 active day.")).toBeInTheDocument();
-    expect(screen.getByText(/Last 7 Days shows 7 calendar days; 1 active day contains campaign activity/)).toBeInTheDocument();
+    expect(screen.queryByText(/Days without activity rows are rendered as 0/)).not.toBeInTheDocument();
     expect(screen.getAllByText("100").length).toBeGreaterThan(0);
   });
 

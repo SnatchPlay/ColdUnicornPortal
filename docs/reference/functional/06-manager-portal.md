@@ -340,13 +340,12 @@ Admin roles also get manager search + dropdown before the client filter; manager
 
 ### 5.2 Charts & widgets
 
-- **Coverage banner**: states how many calendar days are in the selected range, how many active days have `campaign_daily_stats`, and the actual activity date range. Days without stat rows render as 0, which explains cases where 7-day and 30-day totals match.
-- **Sent volume** LineChart: `sent` (cyan `#38bdf8`). Data: aggregate `campaign_daily_stats` in timeframe by normalized `report_date`; all campaign rows for the same date are summed into one chart point, then missing calendar days in the selected range are zero-filled.
-- **Replies, opens & bounces** LineChart (3 series): `replies` (green `#22c55e`), `opens` (violet `#a78bfa`), `bounces` (orange `#f97316`). Uses the same zero-filled daily aggregate as Sent volume.
+- **Sent volume** LineChart: `sent` (cyan `#38bdf8`). With no campaign selected, data comes from `daily_stats.emails_sent` grouped by normalized `report_date`; when a campaign is selected, it falls back to `campaign_daily_stats.sent_count`.
+- **Replies & bounces** LineChart (2 series): `replies` (green `#22c55e`), `bounces` (orange `#f97316`). Without a campaign filter, replies and bounces come from `daily_stats.response_count` / `daily_stats.bounce_count`.
 - **Lead qualification mix** compact donut + numeric breakdown list. Data: count filtered leads grouped by `qualification`. Admin roles also get a manager lead split in the same panel, stacked below the donut/breakdown so the manager rows have enough width. Colors cycle through `["#38bdf8","#22c55e","#f59e0b","#f97316"]`.
-- **Summary KPI cards**: sent, replies, opens, bounces, leads, campaigns for the current filter scope.
-- **By client** cards: sent, replies, leads, reply rate for each visible client with activity. The card list has its own search, renders 40 clients at a time with "Load more", and the visible list is height-constrained with internal scrolling so it does not stretch the adjacent lead-mix panel.
-- **By manager** cards: admin roles only, including `master_admin`; clients, campaigns, sent, replies, leads, reply rate per manager. Managers missing from the users snapshot are still grouped by `clients.manager_id`.
+- **Summary KPI cards**: sent, replies, bounces, leads, campaigns for the current filter scope; sent/replies/bounces use the same `daily_stats`-first rule as the charts.
+- **By client** cards: sent, replies, leads, reply rate for each visible client with activity. Delivery totals use `daily_stats` unless a campaign filter is active. The card list has its own search, renders 40 clients at a time with "Load more", and the visible list is height-constrained with internal scrolling so it does not stretch the adjacent lead-mix panel.
+- **By manager** cards: admin roles only, including `master_admin`; clients, campaigns, sent, replies, leads, reply rate per manager. Delivery totals use `daily_stats` unless a campaign filter is active. Managers missing from the users snapshot are still grouped by `clients.manager_id`.
 - **Campaign portfolio** grouped by client (interactive). Click any campaign card to set `campaignFilterId`. Each client group shows group-level campaign count, sent total, and reply rate; campaign cards show `name`, `database_size`, `positive_responses`, `sent`, reply rate. The list is limited to campaigns with activity in the selected timeframe, is searchable, renders 12 client groups at a time, shows up to 12 campaign cards per group, and selected card shows an extended metadata panel (status, type, start_date, database, positive, external_id, gender_target, daily stats count).
 
 ### 5.3 Scope
