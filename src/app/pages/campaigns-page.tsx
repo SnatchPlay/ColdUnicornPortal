@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeCampaignStats, scopeCampaigns, scopeClients, sortClientsAlpha } from "../lib/selectors";
-import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
+import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel, type TimeframeValue } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useAuth } from "../providers/auth";
 import { useCoreData } from "../providers/core-data";
@@ -47,6 +47,17 @@ interface CampaignDraft {
 
 type SortDirection = "asc" | "desc";
 type CampaignSortKey = "name" | "type" | "status" | "positive" | "start";
+
+function getCampaignStatusColor(status: CampaignRecord["status"]): string {
+  switch (status) {
+    case "active": return "#22c55e";
+    case "draft": return "#737373";
+    case "launching": return "#38bdf8";
+    case "stopped": return "#ef4444";
+    case "completed": return "#14b8a6";
+    default: return "#737373";
+  }
+}
 
 function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
   const safeLeft = (left ?? "").toLowerCase();
@@ -116,6 +127,7 @@ function InternalCampaignsPage() {
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [draft, setDraft] = useState<CampaignDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [drawerTimeframe, setDrawerTimeframe] = useState<TimeframeValue>(() => createDefaultTimeframe());
   const [campaignSort, setCampaignSort] = useState<{ key: CampaignSortKey; direction: SortDirection }>({
     key: "start",
     direction: "desc",
@@ -148,6 +160,10 @@ function InternalCampaignsPage() {
   const timeframeStats = useMemo(
     () => filterByTimeframe(scopedStats, (item) => item.report_date, timeframe),
     [scopedStats, timeframe],
+  );
+  const drawerStats = useMemo(
+    () => filterByTimeframe(scopedStats, (item) => item.report_date, drawerTimeframe),
+    [scopedStats, drawerTimeframe],
   );
   const filteredCampaigns = useMemo(() => {
     const normalizedQuery = deferredQuery.trim().toLowerCase();
@@ -205,6 +221,7 @@ function InternalCampaignsPage() {
     }
 
     setDraft(toCampaignDraft(selectedCampaign));
+    setDrawerTimeframe(createDefaultTimeframe());
   }, [selectedCampaign]);
 
   useEffect(() => {
@@ -227,15 +244,19 @@ function InternalCampaignsPage() {
 
   const isDraftDirty = Object.keys(draftPatch).length > 0;
 
-  const selectedCampaignStats = timeframeStats
-    .filter((item) => item.campaign_id === selectedCampaign?.id)
-    .sort((a, b) => a.report_date.localeCompare(b.report_date))
-    .map((item) => ({
-      label: formatDate(item.report_date, { day: "2-digit", month: "short" }),
-      sent: item.sent_count ?? 0,
-      replies: item.reply_count ?? 0,
-      bounces: item.bounce_count ?? 0,
-    }));
+  const selectedCampaignStats = useMemo(
+    () =>
+      drawerStats
+        .filter((item) => item.campaign_id === selectedCampaign?.id)
+        .sort((a, b) => a.report_date.localeCompare(b.report_date))
+        .map((item) => ({
+          label: formatDate(item.report_date, { day: "2-digit", month: "short" }),
+          sent: item.sent_count ?? 0,
+          replies: item.reply_count ?? 0,
+          bounces: item.bounce_count ?? 0,
+        })),
+    [drawerStats, selectedCampaign?.id],
+  );
   const timeframeLabel = getTimeframeLabel(timeframe);
 
   function openCreateCampaign() {
@@ -448,7 +469,18 @@ function InternalCampaignsPage() {
                       </div>
                       <p className="text-sm text-muted-foreground">{campaign.type}</p>
                       <div>
-                        <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs">{campaign.status}</span>
+                        {(() => {
+                          const color = getCampaignStatusColor(campaign.status);
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
+                              style={{ borderColor: `${color}55`, backgroundColor: `${color}18`, color }}
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                              {campaign.status}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <p className="text-sm text-muted-foreground">{formatNumber(campaign.positive_responses)}</p>
                       <p className="text-sm text-muted-foreground">{formatDate(campaign.start_date)}</p>
@@ -665,11 +697,17 @@ function InternalCampaignsPage() {
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                      {["draft", "launching", "active", "stopped", "completed"].map((status) => (
-                        <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                          {status}
-                        </SelectItem>
-                      ))}
+                      {(["draft", "launching", "active", "stopped", "completed"] as CampaignRecord["status"][]).map((status) => {
+                        const color = getCampaignStatusColor(status);
+                        return (
+                          <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                            <span className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                              {status}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </label>
@@ -732,8 +770,13 @@ function InternalCampaignsPage() {
                 </div>
               </div>
 
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Daily activity</p>
+                <DateRangeButton value={drawerTimeframe} onChange={setDrawerTimeframe} />
+              </div>
+
               {selectedCampaignStats.length === 0 ? (
-                <EmptyState title="No daily metrics yet" description="This chart will appear when campaign activity data becomes available." />
+                <EmptyState title="No daily metrics yet" description="Adjust the date range or wait for campaign activity data to appear." />
               ) : (
                 <div className="h-72 rounded-2xl border border-border bg-black/10 p-3">
                   <ChartTextSummary

@@ -221,7 +221,7 @@ For the pages shared with [the manager portal](./06-manager-portal.md), admin di
 | Clients | `manager_id = identity.id` subset | All clients |
 | Leads | `client_id в€€ assigned` | All leads |
 | Campaigns | Assigned | All |
-| Statistics | Scoped | All; client+campaign filters span the whole org |
+| Statistics | Scoped | All; manager+client+campaign filters span the whole org. Adds a manager breakdown surface with clients, campaigns, sent, replies, leads, and reply rate per manager; campaign portfolio is grouped by client. |
 | Domains | Assigned | All |
 | Invoices | Assigned | All |
 | Blacklist | Read-only | Write (add, remove) |

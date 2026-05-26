@@ -82,9 +82,9 @@ export function createDefaultTimeframe(): TimeframeValue {
   };
 }
 
-export function resolveTimeframeBounds(timeframe: TimeframeValue) {
+export function resolveTimeframeBounds(timeframe: TimeframeValue, now = new Date()) {
   if (timeframe.preset !== "custom") {
-    return getPresetBounds(timeframe.preset);
+    return getPresetBounds(timeframe.preset, now);
   }
 
   const startDate = parseUnknownDate(timeframe.customStart);
@@ -104,8 +104,9 @@ export function filterByTimeframe<T>(
   items: T[],
   getDate: (item: T) => string | null | undefined,
   timeframe: TimeframeValue,
+  now?: Date,
 ) {
-  const bounds = resolveTimeframeBounds(timeframe);
+  const bounds = resolveTimeframeBounds(timeframe, now);
   if (!bounds.start && !bounds.end) return items;
 
   return items.filter((item) => {
