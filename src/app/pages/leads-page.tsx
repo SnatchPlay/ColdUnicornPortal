@@ -309,6 +309,7 @@ function InternalLeadsPage() {
     if (PIPELINE_STAGES.some((item) => item.key === stage)) return stage as PipelineStage;
     return "all";
   });
+  const [clientFilter, setClientFilter] = useState(searchParams.get("client") ?? ALL_FILTER_VALUE);
   const [campaignFilter, setCampaignFilter] = useState(searchParams.get("campaign") ?? ALL_FILTER_VALUE);
   const [replyScope, setReplyScope] = useState<ReplyScope>(() => {
     const value = searchParams.get("replyScope");
@@ -354,6 +355,13 @@ function InternalLeadsPage() {
     () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
     [campaigns, clients, identity],
   );
+  const clientFilteredCampaigns = useMemo(
+    () =>
+      clientFilter === ALL_FILTER_VALUE
+        ? scopedCampaigns
+        : scopedCampaigns.filter((c) => c.client_id === clientFilter),
+    [clientFilter, scopedCampaigns],
+  );
   const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
   const scopedReplies = useMemo(() => (identity ? scopeReplies(identity, clients, replies) : []), [clients, identity, replies]);
   const timeframeLeads = useMemo(
@@ -375,12 +383,13 @@ function InternalLeadsPage() {
     const needle = deferredQuery.toLowerCase();
     return timeframeLeads.filter((lead, i) => {
       if (needle && !leadHaystacks[i].includes(needle)) return false;
+      if (clientFilter !== ALL_FILTER_VALUE && lead.client_id !== clientFilter) return false;
       if (campaignFilter !== ALL_FILTER_VALUE && lead.campaign_id !== campaignFilter) return false;
       if (replyScope === "ooo" && lead.qualification !== "OOO") return false;
       if (replyScope === "active" && lead.qualification === "OOO") return false;
       return true;
     });
-  }, [campaignFilter, deferredQuery, leadHaystacks, replyScope, timeframeLeads]);
+  }, [campaignFilter, clientFilter, deferredQuery, leadHaystacks, replyScope, timeframeLeads]);
 
   const stageCounts = useMemo(() => {
     const counts = new Map<PipelineStage, number>();
@@ -541,6 +550,13 @@ function InternalLeadsPage() {
   }, [selectedLeadId, sortedLeads]);
 
   useEffect(() => {
+    if (campaignFilter === ALL_FILTER_VALUE) return;
+    if (!clientFilteredCampaigns.some((c) => c.id === campaignFilter)) {
+      setCampaignFilter(ALL_FILTER_VALUE);
+    }
+  }, [campaignFilter, clientFilteredCampaigns]);
+
+  useEffect(() => {
     if (!selectedLead) return;
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -568,6 +584,12 @@ function InternalLeadsPage() {
       nextParams.delete("stage");
     }
 
+    if (clientFilter !== ALL_FILTER_VALUE) {
+      nextParams.set("client", clientFilter);
+    } else {
+      nextParams.delete("client");
+    }
+
     if (campaignFilter !== ALL_FILTER_VALUE) {
       nextParams.set("campaign", campaignFilter);
     } else {
@@ -590,6 +612,7 @@ function InternalLeadsPage() {
     }
   }, [
     campaignFilter,
+    clientFilter,
     leadSort.direction,
     leadSort.key,
     query,
@@ -627,6 +650,12 @@ function InternalLeadsPage() {
     const next =
       value === "all" || PIPELINE_STAGES.some((item) => item.key === value) ? (value as PipelineStage | "all") : "all";
     setStageFilter(next);
+    setCurrentPage(1);
+  }
+
+  function handleClientFilterChange(value: string) {
+    setClientFilter(value);
+    setCampaignFilter(ALL_FILTER_VALUE);
     setCurrentPage(1);
   }
 
@@ -693,7 +722,7 @@ function InternalLeadsPage() {
 
       <Surface title="Lead filters" subtitle={`Current timeframe: ${timeframeLabel}`}>
         <div className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[1fr_260px_220px]">
+          <div className={`grid gap-4 ${scopedClients.length > 1 ? "xl:grid-cols-[1fr_180px_220px_180px]" : "xl:grid-cols-[1fr_260px_220px]"}`}>
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
               <input
@@ -703,6 +732,26 @@ function InternalLeadsPage() {
                 className="w-full rounded-md border border-[#242424] bg-[#080808] px-11 py-3 text-sm text-white outline-none transition placeholder:text-neutral-400 focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15"
               />
             </div>
+            {scopedClients.length > 1 ? (
+              <Select value={clientFilter} onValueChange={handleClientFilterChange}>
+                <SelectTrigger
+                  aria-label="Filter leads by client"
+                  className="h-auto rounded-md border-[#242424] bg-[#080808] px-4 py-3 text-sm text-white"
+                >
+                  <SelectValue placeholder="All clients" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value={ALL_FILTER_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                    All clients
+                  </SelectItem>
+                  {scopedClients.map((client) => (
+                    <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Select value={campaignFilter} onValueChange={handleCampaignFilterChange}>
               <SelectTrigger
                 aria-label="Filter leads by campaign"
@@ -714,7 +763,7 @@ function InternalLeadsPage() {
                 <SelectItem value={ALL_FILTER_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
                   All campaigns
                 </SelectItem>
-                {scopedCampaigns.map((campaign) => (
+                {clientFilteredCampaigns.map((campaign) => (
                   <SelectItem key={campaign.id} value={campaign.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
                     {campaign.name}
                   </SelectItem>

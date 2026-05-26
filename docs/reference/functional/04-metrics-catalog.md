@@ -538,6 +538,25 @@ For each assigned client:
 
 Filtering logic in `manager-dashboard-page.tsx` selects campaigns that are either `stopped`/`launching` **or** have a low reply rate computed from the 14-day window of `campaign_daily_stats`.
 
+### 12.7 Internal Statistics summary and manager breakdown
+
+Inline in [`statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx).
+
+- **Where:** Manager/Admin Analytics (`/manager/statistics`, `/admin/statistics`).
+- **Formula:** after role scoping, timeframe filtering, and optional manager/client/campaign filters:
+  - `Sent` = `sum(campaign_daily_stats.sent_count)`.
+  - `Replies` = `sum(campaign_daily_stats.reply_count)`.
+  - `Opens` = `sum(campaign_daily_stats.unique_open_count)`.
+  - `Bounces` = `sum(campaign_daily_stats.bounce_count)`.
+  - `Reply rate` = `Replies / Sent * 100`, or `0` when sent is zero.
+  - `Bounce rate` = `Bounces / Sent * 100`, or `0` when sent is zero.
+  - `Leads` = count of filtered `leads`.
+  - `Campaigns` = count of filtered visible campaigns.
+- **Manager breakdown:** admin/super-admin/master-admin only, grouped by `clients.manager_id`; the standalone manager surface shows assigned clients, campaigns, sent, replies, leads, and reply rate in the current filter scope. The Lead qualification panel also shows a compact manager lead list with total leads plus MQL/preMQL/unqualified counts.
+- **Time window:** selected `DateRangeButton` timeframe; presets are anchored to the latest visible analytics date in the current snapshot instead of the browser clock, so stale or backfilled datasets still make "Last 7/30/90 Days" meaningful. `campaign_daily_stats` is still capped by the 90-day snapshot window.
+- **Edge cases:** chart buckets normalize `report_date` to `YYYY-MM-DD` and aggregate all campaign rows for the same day before rendering. For bounded presets/custom ranges, missing calendar days are rendered as zero-value points; the coverage banner reports calendar days, active stat days, and the activity date range. This prevents repeated X-axis labels when many campaigns have rows on the same date and makes it clear when 7-day and 30-day totals match because the snapshot has no older rows. The campaign count/list only includes campaigns with stat activity inside the selected timeframe unless a specific campaign is selected.
+- **Visible to:** manager sees own scoped summary; admin roles see global summary plus manager breakdown/filter.
+
 ---
 
 ## 13. Admin campaign momentum

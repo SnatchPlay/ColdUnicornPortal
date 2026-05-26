@@ -159,27 +159,39 @@ No charts to catalogue here beyond the HTML progress bars already described in [
 
 Page: [`statistics-page.tsx`](../../../src/app/pages/statistics-page.tsx). Uses the internal `TOOLTIP` style.
 
-### 5.1 Trend lines
+### 5.1 Sent volume
 
-- **Type:** `LineChart` (4 lines)
-- **Data:** inline aggregation of `filteredStats` by `report_date` в†’ `{ label, sent, replies, opens, bounces }`.
+- **Type:** `LineChart` (1 line)
+- **Data:** inline aggregation of `filteredStats` by normalized `report_date` (`YYYY-MM-DD`) -> `{ date, label, sent, replies, opens, bounces }`. Multiple campaign rows on the same day are summed before rendering. Preset/custom ranges are rendered as calendar-day series with zero-filled days when no `campaign_daily_stats` row exists, so the chart axis reflects the selected timeframe even when ingestion only has activity for a few days. Timeframe presets are anchored to the latest visible analytics date in the snapshot.
+- **Coverage note:** an info banner above the KPIs states the selected calendar-day count, active campaign-stat day count, and activity date range. If 7-day and 30-day totals match, this usually means no extra stat rows exist outside the shorter range.
 - **Series:**
   - `<Line dataKey="sent"    stroke="#38bdf8" strokeWidth={2.5} dot={false} />`
+- **Empty state:** "No send data yet".
+
+### 5.2 Replies, opens & bounces
+
+- **Type:** `LineChart` (3 lines)
+- **Data:** same zero-filled daily aggregate as [§5.1](#51-sent-volume).
+- **Series:**
   - `<Line dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} />`
   - `<Line dataKey="opens"   stroke="#a78bfa" strokeWidth={2.5} dot={false} />`
   - `<Line dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} />`
-- **Empty state:** "No trend data yet".
+- **Empty state:** "No signal data yet".
 
-### 5.2 Lead qualification mix
+### 5.3 Lead qualification mix
 
-- **Type:** `PieChart` (donut; `innerRadius={64}`, `outerRadius={110}`)
-- **Data:** inline вЂ” group `filteredLeads` by `qualification`, `{name, value}`.
+- **Type:** `PieChart` (compact donut; `innerRadius={54}`, `outerRadius={88}`) with a numeric breakdown list beside it. Admin roles also see a manager lead breakdown list inside the same panel.
+- **Data:** inline — group `filteredLeads` by `qualification`, `{name, value}`. Manager breakdown groups the same `filteredLeads` by `clients.manager_id` and shows total leads, MQL, preMQL, and unqualified counts.
 - **Colors:** cycle through `PIE_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#f97316"]`.
 - **Empty state:** "No leads available".
 
-### 5.3 Campaign portfolio grid
+### 5.4 Manager breakdown
 
-Interactive grid of clickable cards. Not a chart; listed here because it drives the other two panels (selecting a card sets `campaignFilterId`).
+Admin-only tabular/card surface grouped by manager, including `master_admin`. Not a recharts graph; listed here because it is an analytics visualization. Rows show clients, campaigns, sent, replies, leads, and reply rate in the current filter scope.
+
+### 5.5 Campaign portfolio grid
+
+Interactive grouped grid of clickable cards. Not a chart; listed here because it drives the campaign filter and selected campaign details. The grid is filtered to campaigns with activity in the selected timeframe, is searchable, grouped by client, renders 12 client groups at a time, and shows up to 12 campaign cards per client group before asking the user to narrow with search.
 
 ---
 
