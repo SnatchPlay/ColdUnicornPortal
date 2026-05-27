@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { cn } from "../../components/ui/utils";
 import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../../lib/client-metrics";
 import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
-import { dodCellKey } from "../../lib/conditions/client-condition-results";
+import { dodCellKey, momCellKey, threeDodCellKey, wowCellKey } from "../../lib/conditions/client-condition-results";
 import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatNumber } from "../../lib/format";
@@ -54,6 +54,15 @@ interface MegaColumn {
   /** Condition cell key for DoD per-bucket lookup (overrides conditionKey). */
   dodBucket?: string;
   dodKind?: "schedule" | "sent";
+  /** Condition cell key for WoW per-bucket lookup (overrides conditionKey). */
+  wowBucket?: string;
+  wowMetricKey?: string;
+  /** Condition cell key for 3-DoD per-bucket lookup (overrides conditionKey). */
+  td3Bucket?: string;
+  td3MetricKey?: string;
+  /** Condition cell key for MoM per-bucket lookup (overrides conditionKey). */
+  momBucket?: string;
+  momMetricKey?: string;
   defaultDirection?: SortDirection;
 }
 
@@ -335,7 +344,8 @@ function buildColumns(): MegaColumn[] {
       width: 42,
       minWidth: 36,
       align: "center",
-      conditionKey: "three_dod_total",
+      td3Bucket: b,
+      td3MetricKey: "three_dod_total",
       defaultDirection: "desc",
       render: (row) => formatNum(td3Lookup(row, b)?.totalLeads ?? null),
       sortValue: (row) => td3Lookup(row, b)?.totalLeads ?? null,
@@ -350,7 +360,8 @@ function buildColumns(): MegaColumn[] {
       width: 42,
       minWidth: 36,
       align: "center",
-      conditionKey: "three_dod_sql",
+      td3Bucket: b,
+      td3MetricKey: "three_dod_sql",
       defaultDirection: "desc",
       render: (row) => formatNum(td3Lookup(row, b)?.sqlLeads ?? null),
       sortValue: (row) => td3Lookup(row, b)?.sqlLeads ?? null,
@@ -419,7 +430,8 @@ function buildColumns(): MegaColumn[] {
         width: m.format === "rate" ? 50 : 42,
         minWidth: 38,
         align: "center",
-        conditionKey: m.conditionKey,
+        wowBucket: b,
+        wowMetricKey: m.conditionKey,
         defaultDirection: "desc",
         render: (row) => {
           const v = m.pick(wowLookup(row, b) as WowRow);
@@ -452,7 +464,8 @@ function buildColumns(): MegaColumn[] {
         width: 42,
         minWidth: 36,
         align: "center",
-        conditionKey: m.conditionKey,
+        momBucket: b,
+        momMetricKey: m.conditionKey,
         defaultDirection: "desc",
         render: (row) => formatNum(m.pick(momLookup(row, b) as MomRow) ?? null),
         sortValue: (row) => m.pick(momLookup(row, b) as MomRow) ?? null,
@@ -481,7 +494,19 @@ function cellCondition(row: ClientMegaRow, col: MegaColumn): ConditionEvaluation
   if (!row.conditionPack) return undefined;
   if (col.dodBucket && col.dodKind) {
     const key = dodCellKey(col.dodBucket, col.dodKind);
-    return getCellCondition(row.conditionPack.dodCellResults[key] ?? [], key);
+    return getCellCondition(row.conditionPack.dodCellResults[key] ?? [], key) ?? undefined;
+  }
+  if (col.td3Bucket && col.td3MetricKey) {
+    const key = threeDodCellKey(col.td3Bucket, col.td3MetricKey);
+    return getCellCondition(row.conditionPack.threeDodCellResults[key] ?? [], key) ?? undefined;
+  }
+  if (col.wowBucket && col.wowMetricKey) {
+    const key = wowCellKey(col.wowBucket, col.wowMetricKey);
+    return getCellCondition(row.conditionPack.wowCellResults[key] ?? [], key) ?? undefined;
+  }
+  if (col.momBucket && col.momMetricKey) {
+    const key = momCellKey(col.momBucket, col.momMetricKey);
+    return getCellCondition(row.conditionPack.momCellResults[key] ?? [], key) ?? undefined;
   }
   if (!col.conditionKey) return undefined;
   return (
