@@ -279,7 +279,6 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
     const end = addDays(start, 6);
 
     const sent = sumInRange(dailyByDate.values(), start, end, (item) => item.emailsSent);
-    const response = sumInRange(dailyByDate.values(), start, end, (item) => item.responseCount);
     const human = sumInRange(dailyByDate.values(), start, end, (item) => item.humanRepliesCount);
     const bounce = sumInRange(dailyByDate.values(), start, end, (item) => item.bounceCount);
     const ooo = sumInRange(dailyByDate.values(), start, end, (item) => item.oooCount);
@@ -289,7 +288,7 @@ export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRe
       bucket: offset === 0 ? "0" : `-${offset}`,
       totalLeads: sumInRange(leadByDate.values(), start, end, (item) => item.all),
       sqlLeads: sumInRange(leadByDate.values(), start, end, (item) => item.sql),
-      responseRate: toRate(response, sent),
+      responseRate: toRate(human + ooo, sent),
       humanRate: toRate(human, sent),
       bounceRate: toRate(bounce, sent),
       oooRate: toRate(ooo, sent),

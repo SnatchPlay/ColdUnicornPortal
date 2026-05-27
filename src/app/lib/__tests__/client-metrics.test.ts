@@ -109,7 +109,7 @@ describe("createClientMetrics", () => {
     expect(metrics.overview.threeDodTotal).toBe(4);
     expect(metrics.overview.threeDodSql).toBe(2);
 
-    expect(metrics.overview.wowResponseRate).toBeCloseTo(0.2, 4);
+    expect(metrics.overview.wowResponseRate).toBeCloseTo(61 / 490, 4); // (human+ooo)/sent
     expect(metrics.overview.wowHumanRate).toBeCloseTo(0.1, 4);
     expect(metrics.overview.wowBounceRate).toBeCloseTo(23 / 490, 4);
     expect(metrics.overview.wowOooRate).toBeCloseTo(12 / 490, 4);
