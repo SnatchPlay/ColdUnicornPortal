@@ -53,7 +53,7 @@ export function ClientStatisticsPage() {
     [campaignDailyStats, campaigns, clients, identity],
   );
   const timeframeLeads = useMemo(
-    () => filterByTimeframe(scopedLeads, (lead) => lead.updated_at || lead.created_at, timeframe),
+    () => filterByTimeframe(scopedLeads, (lead) => lead.created_at, timeframe),
     [scopedLeads, timeframe],
   );
   const timeframeStats = useMemo(

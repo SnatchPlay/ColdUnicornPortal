@@ -202,7 +202,7 @@ export function ClientDashboardPage() {
   const previousRange = useMemo(() => makePreviousRange(timeframe), [timeframe]);
 
   const timeframeLeads = useMemo(
-    () => filterByTimeframe(scopedLeads, (lead) => lead.updated_at || lead.created_at, timeframe),
+    () => filterByTimeframe(scopedLeads, (lead) => lead.created_at, timeframe),
     [scopedLeads, timeframe],
   );
   const timeframeStats = useMemo(
@@ -215,7 +215,7 @@ export function ClientDashboardPage() {
   );
 
   const previousLeads = useMemo(
-    () => filterByDateBounds(scopedLeads, (lead) => lead.updated_at || lead.created_at, previousRange),
+    () => filterByDateBounds(scopedLeads, (lead) => lead.created_at, previousRange),
     [previousRange, scopedLeads],
   );
   const previousCampaignStats = useMemo(
@@ -262,7 +262,7 @@ export function ClientDashboardPage() {
     const byWeek = new Map<string, number>();
     for (const lead of timeframeLeads) {
       if (lead.qualification !== "MQL") continue;
-      const date = parseUnknownDate(lead.updated_at || lead.created_at);
+      const date = parseUnknownDate(lead.created_at);
       if (!date) continue;
       const key = toWeekStartKey(date);
       byWeek.set(key, (byWeek.get(key) ?? 0) + 1);
@@ -375,7 +375,7 @@ export function ClientDashboardPage() {
 
     for (const lead of timeframeLeads) {
       if (lead.qualification !== "MQL") continue;
-      const date = parseUnknownDate(lead.updated_at || lead.created_at);
+      const date = parseUnknownDate(lead.created_at);
       if (!date) continue;
       const key = toWeekStartKey(date);
       const current = byWeek.get(key) ?? { sent: 0, mqls: 0 };
@@ -408,7 +408,7 @@ export function ClientDashboardPage() {
     const byWeek = new Map<string, number>();
     for (const lead of timeframeLeads) {
       if (!lead.meeting_booked) continue;
-      const date = parseUnknownDate(lead.updated_at || lead.created_at);
+      const date = parseUnknownDate(lead.created_at);
       if (!date) continue;
       const key = toWeekStartKey(date);
       byWeek.set(key, (byWeek.get(key) ?? 0) + 1);
@@ -422,7 +422,7 @@ export function ClientDashboardPage() {
     const byWeek = new Map<string, number>();
     for (const lead of timeframeLeads) {
       if (!lead.won) continue;
-      const date = parseUnknownDate(lead.updated_at || lead.created_at);
+      const date = parseUnknownDate(lead.created_at);
       if (!date) continue;
       const key = toWeekStartKey(date);
       byWeek.set(key, (byWeek.get(key) ?? 0) + 1);
