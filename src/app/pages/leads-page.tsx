@@ -66,7 +66,7 @@ const MAX_PAGE_LINKS = 5;
 
 type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
-type LeadSortKey = "lead" | "client" | "company" | "status" | "updated";
+type LeadSortKey = "lead" | "client" | "company" | "status" | "created";
 
 interface LeadDraft {
   qualification: LeadQualification | "";
@@ -325,9 +325,9 @@ function InternalLeadsPage() {
     const sortKey = searchParams.get("sort");
     const sortDirection = searchParams.get("dir");
     const key: LeadSortKey =
-      sortKey === "lead" || sortKey === "company" || sortKey === "status" || sortKey === "updated"
+      sortKey === "lead" || sortKey === "company" || sortKey === "status" || sortKey === "created"
         ? sortKey
-        : "updated";
+        : "created";
     const direction: SortDirection = sortDirection === "asc" || sortDirection === "desc" ? sortDirection : "desc";
     return { key, direction };
   });
@@ -426,7 +426,7 @@ function InternalLeadsPage() {
       if (leadSort.key === "status") {
         return compareText(getLeadStage(left), getLeadStage(right), leadSort.direction);
       }
-      return compareText(left.updated_at, right.updated_at, leadSort.direction);
+      return compareText(left.created_at, right.created_at, leadSort.direction);
     });
   }, [filteredLeads, leadSort.direction, leadSort.key, clientById]);
 
@@ -830,7 +830,7 @@ function InternalLeadsPage() {
                   ...(showClientColumn ? [{ key: "client" as const, label: "Client", lgOnly: true }] : []),
                   { key: "company" as const, label: "Company", lgOnly: false },
                   { key: "status" as const, label: "Status", lgOnly: false },
-                  { key: "updated" as const, label: "Updated", lgOnly: true },
+                  { key: "created" as const, label: "Created", lgOnly: true },
                 ]).map((column, index, collection) => (
                   <div key={column.key} className={cn("relative min-w-0", column.lgOnly ? "hidden lg:block" : "")}>
                     <button
@@ -839,14 +839,14 @@ function InternalLeadsPage() {
                         setLeadSort((current) =>
                           current.key === column.key
                             ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                            : { key: column.key, direction: column.key === "updated" ? "desc" : "asc" },
+                            : { key: column.key, direction: column.key === "created" ? "desc" : "asc" },
                         );
                       }}
                       className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
                     >
                       {column.label} ({sortIndicator(leadSort.key === column.key, leadSort.direction)})
                     </button>
-                    {column.key !== "updated" && index < collection.length - 1 ? (
+                    {column.key !== "created" && index < collection.length - 1 ? (
                       <div
                         onMouseDown={leadColumns.getResizeMouseDown(index)}
                         className="absolute -right-1 top-0 hidden h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20 lg:block"
@@ -885,7 +885,7 @@ function InternalLeadsPage() {
                         <p className="mt-3 truncate text-xs text-neutral-300">{lead.company_name ?? "—"}</p>
                         <p className="mt-1 truncate text-xs text-muted-foreground">{campaign?.name ?? "No campaign linked"}</p>
                         <p className="mt-3 text-xs text-muted-foreground">
-                          Updated {formatDate(lead.updated_at, { day: "2-digit", month: "short" })}
+                          Added {formatDate(lead.created_at, { day: "2-digit", month: "short" })}
                         </p>
                       </button>
                     );
@@ -920,7 +920,7 @@ function InternalLeadsPage() {
                           <p className="text-sm">{lead.company_name ?? "—"}</p>
                           <p className="mt-1 text-xs text-muted-foreground">{campaign?.name ?? "No campaign linked"}</p>
                           <p className="mt-1 text-xs text-muted-foreground lg:hidden">
-                            Updated {formatDate(lead.updated_at, { day: "2-digit", month: "short" })}
+                            Added {formatDate(lead.created_at, { day: "2-digit", month: "short" })}
                           </p>
                         </div>
                         <div>
@@ -933,7 +933,7 @@ function InternalLeadsPage() {
                           </span>
                         </div>
                         <div className="hidden text-sm text-muted-foreground lg:block">
-                          {formatDate(lead.updated_at, { day: "2-digit", month: "short" })}
+                          {formatDate(lead.created_at, { day: "2-digit", month: "short" })}
                         </div>
                       </button>
                     );
