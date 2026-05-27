@@ -599,6 +599,7 @@ function toClientCustomFieldRecord(row: Record<string, unknown>) {
     field_type: String(row.field_type) as "text" | "checkbox" | "droplist",
     options: row.options === null || row.options === undefined ? null : (row.options as string[]),
     position: Number(row.position ?? 0),
+    editable_by: Array.isArray(row.editable_by) ? (row.editable_by as string[]) : ["master_admin"],
     created_by: row.created_by === null || row.created_by === undefined ? null : String(row.created_by),
     created_at:
       row.created_at instanceof Date
@@ -753,7 +754,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     );
     const clientCustomFieldsQuery = safeRawSelect(
       tx,
-      sql`select id, name, field_type, options, position, created_by, created_at
+      sql`select id, name, field_type, options, position, editable_by, created_by, created_at
           from public.client_custom_fields
           order by position asc, created_at asc`,
     );
@@ -1033,16 +1034,18 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
   if (payload.action === "createClientCustomField") {
     const input = payload.input;
     const optionsJson = input.options ?? null;
+    const editableBy = JSON.stringify(input.editable_by ?? ["master_admin"]);
     const rows = await tx.execute(sql`
-      insert into public.client_custom_fields (name, field_type, options, position, created_by)
+      insert into public.client_custom_fields (name, field_type, options, position, editable_by, created_by)
       values (
         ${input.name},
         ${input.field_type},
         ${optionsJson === null ? null : JSON.stringify(optionsJson)}::jsonb,
         ${input.position ?? 0},
+        ${editableBy}::jsonb,
         nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
       )
-      returning id, name, field_type, options, position, created_by, created_at
+      returning id, name, field_type, options, position, editable_by, created_by, created_at
     `);
     const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
     if (!result[0]) fail(500, "Client custom field could not be created.");
@@ -1055,14 +1058,16 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     const setType = "field_type" in patch;
     const setOptions = "options" in patch;
     const setPosition = "position" in patch;
+    const setEditableBy = "editable_by" in patch;
     const rows = await tx.execute(sql`
       update public.client_custom_fields set
         name = case when ${setName} then ${patch.name ?? null} else name end,
         field_type = case when ${setType} then ${patch.field_type ?? null} else field_type end,
         options = case when ${setOptions} then ${patch.options === undefined || patch.options === null ? null : JSON.stringify(patch.options)}::jsonb else options end,
-        position = case when ${setPosition} then ${patch.position ?? 0} else position end
+        position = case when ${setPosition} then ${patch.position ?? 0} else position end,
+        editable_by = case when ${setEditableBy} then ${patch.editable_by === undefined ? JSON.stringify(["master_admin"]) : JSON.stringify(patch.editable_by)}::jsonb else editable_by end
       where id = ${payload.fieldId}
-      returning id, name, field_type, options, position, created_by, created_at
+      returning id, name, field_type, options, position, editable_by, created_by, created_at
     `);
     const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
     if (!result[0]) fail(404, "Client custom field was not found.");

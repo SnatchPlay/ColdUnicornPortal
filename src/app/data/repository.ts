@@ -469,6 +469,7 @@ export interface Repository {
     field_type: ClientCustomFieldType;
     options?: string[] | null;
     position?: number;
+    editable_by?: string[];
   }): Promise<ClientCustomFieldRecord>;
   updateClientCustomField(
     fieldId: string,
@@ -477,6 +478,7 @@ export interface Repository {
       field_type?: ClientCustomFieldType;
       options?: string[] | null;
       position?: number;
+      editable_by?: string[];
     },
   ): Promise<ClientCustomFieldRecord>;
   deleteClientCustomField(fieldId: string): Promise<void>;

@@ -298,6 +298,8 @@ export interface ClientCustomFieldRecord {
   field_type: ClientCustomFieldType;
   options: string[] | null;
   position: number;
+  /** Roles that may write values for this field (e.g. ['master_admin', 'manager']). */
+  editable_by: string[];
   created_by: string | null;
   created_at: string;
 }

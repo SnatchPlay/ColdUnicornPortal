@@ -557,8 +557,8 @@ export interface ClientsMegaTableProps {
   customFields?: ClientCustomFieldRecord[];
   /** Map<clientId, Map<fieldId, value>>. */
   customFieldValuesByClient?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
-  /** When true, custom-field cells are editable inline. Master_admin only. */
-  canEditCustomFields?: boolean;
+  /** Returns true when the current user may edit the given field's values. */
+  canEditCustomField?: (fieldId: string) => boolean;
   /** Called when a custom-field cell value changes. */
   onCustomFieldValueChange?: (clientId: string, fieldId: string, value: string | null) => void;
 }
@@ -730,45 +730,47 @@ function ClientsMegaTableImpl({
   columnOverrides,
   customFields,
   customFieldValuesByClient,
-  canEditCustomFields,
+  canEditCustomField,
   onCustomFieldValueChange,
 }: ClientsMegaTableProps) {
   const cols = useMemo(() => {
     const overrideMap = new Map<string, ColumnOverrideRecord>();
     for (const override of columnOverrides ?? []) overrideMap.set(override.column_key, override);
 
-    // Apply label override + hidden filter while preserving the default index.
-    const visible = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
+    const emptyValues = new Map<string, ReadonlyMap<string, string | null>>();
+    const valueMap = customFieldValuesByClient ?? emptyValues;
+
+    // Built-in entries: apply label override + hidden filter.
+    const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
       const labelled = override?.label_override ? { ...col, label: override.label_override } : col;
-      return [{ col: labelled, defaultIdx, override: override ?? null }];
+      return [{ col: labelled as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
     });
 
-    // Sort by explicit override position when set; otherwise keep the default
-    // order. Columns with a position float to the front in ascending order,
-    // unpositioned columns interleave in their original index slot.
-    const sorted = visible.slice().sort((a, b) => {
-      const ap = a.override?.position ?? null;
-      const bp = b.override?.position ?? null;
-      if (ap !== null && bp !== null) return ap - bp;
-      if (ap !== null) return -1;
-      if (bp !== null) return 1;
-      return a.defaultIdx - b.defaultIdx;
+    // Custom field entries: position from column_overrides (key "cf:{id}") when set,
+    // otherwise fall after all built-ins using field.position as tie-breaker.
+    const sortedCustom = (customFields ?? []).slice().sort((l, r) => l.position - r.position);
+    const customEntries = sortedCustom.map((field, i) => {
+      const cfOverride = overrideMap.get(`cf:${field.id}`);
+      return {
+        col: customFieldColumn(field, valueMap, Boolean(canEditCustomField?.(field.id)), onCustomFieldValueChange),
+        position: cfOverride?.position ?? null,
+        naturalOrder: MEGA_COLUMNS.length + i,
+      };
     });
-    const base = sorted.map((entry) => entry.col);
 
-    if (!customFields || customFields.length === 0) return base;
-    const emptyValues = new Map<string, ReadonlyMap<string, string | null>>();
-    const valueMap = customFieldValuesByClient ?? emptyValues;
-    const customColumns = customFields
-      .slice()
-      .sort((l, r) => l.position - r.position)
-      .map((field) =>
-        customFieldColumn(field, valueMap, Boolean(canEditCustomFields), onCustomFieldValueChange),
-      );
-    return [...base, ...customColumns];
-  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomFields, onCustomFieldValueChange]);
+    // Unified sort: explicit position first (ascending), then natural order.
+    return [...builtInEntries, ...customEntries]
+      .sort((a, b) => {
+        const ap = a.position, bp = b.position;
+        if (ap !== null && bp !== null) return ap - bp;
+        if (ap !== null) return -1;
+        if (bp !== null) return 1;
+        return a.naturalOrder - b.naturalOrder;
+      })
+      .map((e) => e.col);
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);

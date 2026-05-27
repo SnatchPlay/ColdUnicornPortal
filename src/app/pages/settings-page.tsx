@@ -724,6 +724,7 @@ interface ClientsTableCustomizationProps {
     field_type: ClientCustomFieldType;
     options?: string[] | null;
     position?: number;
+    editable_by?: string[];
   }) => Promise<void>;
   onUpdateField: (
     fieldId: string,
@@ -732,6 +733,7 @@ interface ClientsTableCustomizationProps {
       field_type?: ClientCustomFieldType;
       options?: string[] | null;
       position?: number;
+      editable_by?: string[];
     },
   ) => Promise<void>;
   onDeleteField: (fieldId: string) => Promise<void>;
@@ -752,26 +754,49 @@ function ClientsTableCustomization({
     return m;
   }, [columnOverrides]);
 
-  // The list the user sees in this customization panel mirrors the mega-table
-  // order: columns with explicit positions come first (ascending), the rest
-  // in MEGA_COLUMNS default order. We do NOT filter hidden columns out here
-  // because the user needs to be able to UN-hide them.
-  const orderedColumns = useMemo(() => {
-    return MEGA_COLUMNS
-      .map((col, defaultIdx) => ({ col, defaultIdx, override: overrideMap.get(col.id) ?? null }))
-      .slice()
-      .sort((a, b) => {
-        const ap = a.override?.position ?? null;
-        const bp = b.override?.position ?? null;
-        if (ap !== null && bp !== null) return ap - bp;
-        if (ap !== null) return -1;
-        if (bp !== null) return 1;
-        return a.defaultIdx - b.defaultIdx;
-      })
-      .map((entry) => entry.col);
-  }, [overrideMap]);
+  // Unified ordered list: built-in columns + custom fields sorted together.
+  // Mirrors mega-table logic: explicit override.position first, then natural order
+  // (built-ins keep MEGA_COLUMNS default index; custom fields come after all built-ins
+  // until the user drags them into a specific position).
+  // Hidden built-in columns are NOT filtered out so the user can unhide them.
+  type UnifiedEntry =
+    | { kind: "builtin"; id: string; group: string; sub: string; label: string; override: ColumnOverrideRecord | null; defaultIdx: number }
+    | { kind: "custom"; id: string; name: string; fieldType: ClientCustomFieldType; override: ColumnOverrideRecord | null; naturalOrder: number };
 
-  // Drag-and-drop state
+  const allOrderedEntries = useMemo((): UnifiedEntry[] => {
+    const builtIn: UnifiedEntry[] = MEGA_COLUMNS.map((col, defaultIdx) => ({
+      kind: "builtin",
+      id: col.id,
+      group: col.group,
+      sub: col.sub,
+      label: col.label,
+      override: overrideMap.get(col.id) ?? null,
+      defaultIdx,
+    }));
+    const custom: UnifiedEntry[] = customFields
+      .slice()
+      .sort((l, r) => l.position - r.position)
+      .map((field, i) => ({
+        kind: "custom",
+        id: `cf:${field.id}`,
+        name: field.name,
+        fieldType: field.field_type,
+        override: overrideMap.get(`cf:${field.id}`) ?? null,
+        naturalOrder: MEGA_COLUMNS.length + i,
+      }));
+    return [...builtIn, ...custom].sort((a, b) => {
+      const ap = a.override?.position ?? null;
+      const bp = b.override?.position ?? null;
+      if (ap !== null && bp !== null) return ap - bp;
+      if (ap !== null) return -1;
+      if (bp !== null) return 1;
+      const an = a.kind === "builtin" ? a.defaultIdx : a.naturalOrder;
+      const bn = b.kind === "builtin" ? b.defaultIdx : b.naturalOrder;
+      return an - bn;
+    });
+  }, [overrideMap, customFields]);
+
+  // Drag-and-drop state — unified column list
   const draggedIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -780,7 +805,6 @@ function ClientsTableCustomization({
     draggedIdxRef.current = idx;
     setIsDragging(true);
     event.dataTransfer.effectAllowed = "move";
-    // ghost image: use the row element itself (browser default)
   }
 
   function handleDragOver(event: React.DragEvent, idx: number) {
@@ -798,10 +822,10 @@ function ClientsTableCustomization({
       setIsDragging(false);
       return;
     }
-    const next = orderedColumns.slice();
+    const next = allOrderedEntries.slice();
     const [moved] = next.splice(fromIdx, 1);
     next.splice(targetIdx, 0, moved);
-    void onSetColumnOrder(next.map((c) => c.id));
+    void onSetColumnOrder(next.map((e) => e.id));
     draggedIdxRef.current = null;
     setDragOverIdx(null);
     setIsDragging(false);
@@ -831,6 +855,13 @@ function ClientsTableCustomization({
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<ClientCustomFieldType>("text");
   const [newFieldOptions, setNewFieldOptions] = useState("");
+  const [newFieldEditableBy, setNewFieldEditableBy] = useState<string[]>(["master_admin"]);
+
+  function toggleNewFieldRole(role: string) {
+    setNewFieldEditableBy((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
+    );
+  }
 
   async function handleCreateField() {
     const name = newFieldName.trim();
@@ -840,10 +871,12 @@ function ClientsTableCustomization({
       options = newFieldOptions.split(",").map((s) => s.trim()).filter(Boolean);
       if (options.length === 0) return;
     }
+    const editable_by = newFieldEditableBy.length > 0 ? newFieldEditableBy : ["master_admin"];
     const position = customFields.length;
-    await onCreateField({ name, field_type: newFieldType, options, position });
+    await onCreateField({ name, field_type: newFieldType, options, position, editable_by });
     setNewFieldName("");
     setNewFieldOptions("");
+    setNewFieldEditableBy(["master_admin"]);
   }
 
   return (
@@ -853,35 +886,31 @@ function ClientsTableCustomization({
     >
       <div className="space-y-6">
         <div className="rounded-2xl border border-border bg-black/10 p-4">
-          <p className="mb-1 text-sm">Built-in columns — labels & visibility</p>
+          <p className="mb-1 text-sm">Column order</p>
           <p className="mb-3 text-[10px] text-muted-foreground">
-            Type a custom label in the middle column to override how this column appears in the Clients table. Tick "Hidden" to remove the column entirely. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
+            Drag rows to reorder all columns — built-in and custom together. For built-in columns you can also override the display label or hide the column entirely. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
           </p>
           {/* Table header */}
           <div className="grid grid-cols-[24px_1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             <span />
-            <span>Original column</span>
+            <span>Column</span>
             <span>Display label (override)</span>
             <span>Visibility</span>
           </div>
           <div
             className="max-h-96 divide-y divide-white/5 overflow-auto pr-1"
             onDragLeave={(event) => {
-              // only clear when leaving the container entirely
               if (!event.currentTarget.contains(event.relatedTarget as Node)) {
                 setDragOverIdx(null);
               }
             }}
           >
-            {orderedColumns.map((col, idx) => {
-              const override = overrideMap.get(col.id);
-              const labelValue = override?.label_override ?? "";
-              const isHidden = Boolean(override?.hidden);
+            {allOrderedEntries.map((entry, idx) => {
               const isBeingDragged = isDragging && draggedIdxRef.current === idx;
               const isDropTarget = dragOverIdx === idx && draggedIdxRef.current !== idx;
               return (
                 <div
-                  key={col.id}
+                  key={entry.id}
                   draggable
                   onDragStart={(e) => handleDragStart(idx, e)}
                   onDragOver={(e) => handleDragOver(e, idx)}
@@ -899,29 +928,42 @@ function ClientsTableCustomization({
                   >
                     <GripVertical className="h-4 w-4" />
                   </div>
-                  <span className="truncate text-xs text-neutral-300">{describeBuiltInColumn(col)}</span>
-                  <input
-                    type="text"
-                    defaultValue={labelValue}
-                    placeholder={col.label}
-                    onBlur={(event) => {
-                      const next = event.target.value.trim();
-                      const nextValue = next || null;
-                      if (nextValue === (override?.label_override ?? null)) return;
-                      void onUpsertOverride(col.id, { label_override: nextValue });
-                    }}
-                    className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={isHidden}
-                      onChange={(event) => {
-                        void onUpsertOverride(col.id, { hidden: event.target.checked });
-                      }}
-                    />
-                    Hidden
-                  </label>
+                  {entry.kind === "builtin" ? (
+                    <>
+                      <span className="truncate text-xs text-neutral-300">{describeBuiltInColumn(entry)}</span>
+                      <input
+                        type="text"
+                        defaultValue={entry.override?.label_override ?? ""}
+                        placeholder={entry.label}
+                        onBlur={(event) => {
+                          const next = event.target.value.trim() || null;
+                          if (next === (entry.override?.label_override ?? null)) return;
+                          void onUpsertOverride(entry.id, { label_override: next });
+                        }}
+                        className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                      />
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(entry.override?.hidden)}
+                          onChange={(event) => {
+                            void onUpsertOverride(entry.id, { hidden: event.target.checked });
+                          }}
+                        />
+                        Hidden
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <span className="truncate text-xs text-neutral-300">{entry.name}</span>
+                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground w-fit">
+                        {entry.fieldType}
+                      </span>
+                      <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-sky-400/70">
+                        custom
+                      </span>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -940,92 +982,140 @@ function ClientsTableCustomization({
                 .map((field) => (
                   <div
                     key={field.id}
-                    className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 rounded-xl border border-white/5 bg-black/20 px-3 py-2"
+                    className="space-y-2 rounded-xl border border-white/5 bg-black/20 px-3 py-2"
                   >
-                    <input
-                      type="text"
-                      defaultValue={field.name}
-                      onBlur={(event) => {
-                        const next = event.target.value.trim();
-                        if (!next || next === field.name) return;
-                        void onUpdateField(field.id, { name: next });
-                      }}
-                      className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
-                    />
-                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {field.field_type}
-                    </span>
-                    {field.field_type === "droplist" ? (
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3">
                       <input
                         type="text"
-                        defaultValue={(field.options ?? []).join(", ")}
-                        placeholder="comma-separated options"
+                        defaultValue={field.name}
                         onBlur={(event) => {
-                          const next = event.target.value
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean);
-                          if (next.length === 0) return;
-                          if (JSON.stringify(next) === JSON.stringify(field.options ?? [])) return;
-                          void onUpdateField(field.id, { options: next });
+                          const next = event.target.value.trim();
+                          if (!next || next === field.name) return;
+                          void onUpdateField(field.id, { name: next });
                         }}
-                        className="w-48 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                        className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
                       />
-                    ) : (
-                      <span />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm(`Delete column "${field.name}"? Values will be lost.`)) {
-                          void onDeleteField(field.id);
-                        }
-                      }}
-                      className="rounded-full border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-red-100"
-                    >
-                      Delete
-                    </button>
+                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {field.field_type}
+                      </span>
+                      {field.field_type === "droplist" ? (
+                        <input
+                          type="text"
+                          defaultValue={(field.options ?? []).join(", ")}
+                          placeholder="comma-separated options"
+                          onBlur={(event) => {
+                            const next = event.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            if (next.length === 0) return;
+                            if (JSON.stringify(next) === JSON.stringify(field.options ?? [])) return;
+                            void onUpdateField(field.id, { options: next });
+                          }}
+                          className="w-48 rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                        />
+                      ) : (
+                        <span />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Delete column "${field.name}"? Values will be lost.`)) {
+                            void onDeleteField(field.id);
+                          }
+                        }}
+                        className="rounded-full border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-red-100"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3 pl-1">
+                      <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Editable by</span>
+                      {(["master_admin", "admin", "manager"] as const).map((role) => {
+                        const checked = (field.editable_by ?? ["master_admin"]).includes(role);
+                        const isLocked = role === "master_admin";
+                        return (
+                          <label key={role} className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isLocked}
+                              onChange={() => {
+                                if (isLocked) return;
+                                const current = field.editable_by ?? ["master_admin"];
+                                const next = checked
+                                  ? current.filter((r) => r !== role)
+                                  : [...current, role];
+                                const safe = next.includes("master_admin") ? next : ["master_admin", ...next];
+                                void onUpdateField(field.id, { editable_by: safe });
+                              }}
+                            />
+                            {role}
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))
             )}
           </div>
-          <div className="mt-4 grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
-            <input
-              type="text"
-              value={newFieldName}
-              onChange={(event) => setNewFieldName(event.target.value)}
-              placeholder="New column name"
-              className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
-            />
-            <select
-              value={newFieldType}
-              onChange={(event) => setNewFieldType(event.target.value as ClientCustomFieldType)}
-              className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
-            >
-              <option value="text">text</option>
-              <option value="checkbox">checkbox</option>
-              <option value="droplist">droplist</option>
-            </select>
-            {newFieldType === "droplist" ? (
+          <div className="mt-4 space-y-2">
+            <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
               <input
                 type="text"
-                value={newFieldOptions}
-                onChange={(event) => setNewFieldOptions(event.target.value)}
-                placeholder="comma-separated options"
+                value={newFieldName}
+                onChange={(event) => setNewFieldName(event.target.value)}
+                placeholder="New column name"
                 className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
               />
-            ) : (
-              <span />
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                void handleCreateField();
-              }}
-              className="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs uppercase tracking-[0.12em] text-sky-100"
-            >
-              Add column
-            </button>
+              <select
+                value={newFieldType}
+                onChange={(event) => setNewFieldType(event.target.value as ClientCustomFieldType)}
+                className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+              >
+                <option value="text">text</option>
+                <option value="checkbox">checkbox</option>
+                <option value="droplist">droplist</option>
+              </select>
+              {newFieldType === "droplist" ? (
+                <input
+                  type="text"
+                  value={newFieldOptions}
+                  onChange={(event) => setNewFieldOptions(event.target.value)}
+                  placeholder="comma-separated options"
+                  className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                />
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCreateField();
+                }}
+                className="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs uppercase tracking-[0.12em] text-sky-100"
+              >
+                Add column
+              </button>
+            </div>
+            <div className="flex items-center gap-3 pl-1">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Editable by</span>
+              {(["master_admin", "admin", "manager"] as const).map((role) => {
+                const isLocked = role === "master_admin";
+                const checked = newFieldEditableBy.includes(role);
+                return (
+                  <label key={role} className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isLocked}
+                      onChange={() => toggleNewFieldRole(role)}
+                    />
+                    {role}
+                  </label>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

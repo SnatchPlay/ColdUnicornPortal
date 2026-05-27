@@ -171,6 +171,7 @@ export interface CreateClientCustomFieldPayload {
     field_type: ClientCustomFieldType;
     options?: string[] | null;
     position?: number;
+    editable_by?: string[];
   };
 }
 
@@ -182,6 +183,7 @@ export interface UpdateClientCustomFieldPayload {
     field_type?: ClientCustomFieldType;
     options?: string[] | null;
     position?: number;
+    editable_by?: string[];
   };
 }
 

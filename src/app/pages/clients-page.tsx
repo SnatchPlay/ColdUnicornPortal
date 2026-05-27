@@ -116,7 +116,15 @@ export function ClientsPage() {
     return out;
   }, [clientCustomFieldValues]);
 
-  const canEditCustomFields = identity?.role === "master_admin";
+  const canEditCustomField = useMemo(() => {
+    const role = identity?.role;
+    if (!role) return (_fieldId: string) => false;
+    const fieldMap = new Map(clientCustomFields.map((f) => [f.id, f]));
+    return (fieldId: string) => {
+      const field = fieldMap.get(fieldId);
+      return field ? (field.editable_by ?? ["master_admin"]).includes(role) : false;
+    };
+  }, [identity?.role, clientCustomFields]);
 
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [createClientDraft, setCreateClientDraft] = useState<CreateClientDraft | null>(null);
@@ -600,7 +608,7 @@ export function ClientsPage() {
             columnOverrides={columnOverrides}
             customFields={clientCustomFields}
             customFieldValuesByClient={customFieldValuesByClient}
-            canEditCustomFields={canEditCustomFields}
+            canEditCustomField={canEditCustomField}
             onCustomFieldValueChange={(clientId, fieldId, value) => {
               void upsertClientCustomFieldValue(clientId, fieldId, value);
             }}
