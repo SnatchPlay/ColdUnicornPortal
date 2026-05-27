@@ -439,7 +439,7 @@ export function ClientDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`${client.name} details`}
-        className="flex h-full w-full max-w-[640px] flex-col border-l border-border bg-[#050505] shadow-2xl"
+        className="flex h-full w-full max-w-[640px] flex-col border-l border-border bg-[#050505] text-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Header */}
