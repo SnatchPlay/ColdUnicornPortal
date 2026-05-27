@@ -281,7 +281,7 @@ function InternalStatisticsPage() {
     [scopedDailyStats, timeframe, timeframeAnchor],
   );
   const timeframeLeads = useMemo(
-    () => filterByTimeframe(scopedLeads, (item) => item.updated_at || item.created_at, timeframe, timeframeAnchor),
+    () => filterByTimeframe(scopedLeads, (item) => item.created_at, timeframe, timeframeAnchor),
     [scopedLeads, timeframe, timeframeAnchor],
   );
 
