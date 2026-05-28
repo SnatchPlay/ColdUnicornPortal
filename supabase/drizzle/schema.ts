@@ -9,7 +9,7 @@ export const domainStatus = pgEnum("domain_status", ['active', 'warmup', 'blocke
 export const leadGender = pgEnum("lead_gender", ['male', 'female'])
 export const leadQualification = pgEnum("lead_qualification", ['preMQL', 'MQL', 'meeting_scheduled', 'meeting_held', 'offer_sent', 'won', 'rejected', 'OOO', 'NRR'])
 export const replyClassification = pgEnum("reply_classification", ['OOO', 'Interested', 'NRR', 'Left_Company', 'Spam_Inbound', 'other'])
-export const userRole = pgEnum("user_role", ['super_admin', 'admin', 'manager', 'client'])
+export const userRole = pgEnum("user_role", ['super_admin', 'admin', 'master_admin', 'manager', 'client'])
 
 
 export const leads = pgTable("leads", {
