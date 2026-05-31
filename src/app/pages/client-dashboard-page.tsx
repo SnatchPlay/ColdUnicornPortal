@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -37,10 +37,10 @@ import {
   resolveTimeframeBounds,
   type TimeframeValue,
 } from "../lib/timeframe";
-import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeDailyStats, scopeLeads } from "../lib/selectors";
 import { formatDate, formatNumber } from "../lib/format";
+import { repository, RepositoryError } from "../data/repository";
+import type { ClientDashboardPayload } from "../types/view-contracts";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -179,25 +179,60 @@ function formatPointCount(value: number, singular: string, plural = `${singular}
   return `${formatNumber(value)} ${value === 1 ? singular : plural}`;
 }
 
+function mapDashboardError(reason: unknown): string {
+  if (reason instanceof RepositoryError) {
+    if (reason.kind === "timeout") return `Loading timed out. A database performance issue may be affecting this view.`;
+    if (reason.kind === "permission") return `Access to dashboard data is blocked by your current permissions.`;
+    if (reason.kind === "network") return `Dashboard data could not be loaded due to a network error. Try again.`;
+    return reason.message;
+  }
+  if (reason instanceof Error) return reason.message;
+  return "Failed to load dashboard data.";
+}
+
+function useClientDashboard(clientId: string) {
+  const { identity, loading: authLoading } = useAuth();
+  const [data, setData] = useState<ClientDashboardPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!clientId) return;
+    setLoading(true);
+    try {
+      const result = await repository.loadClientDashboard(clientId);
+      setData(result);
+      setError(null);
+    } catch (reason) {
+      setError(mapDashboardError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (authLoading || !identity || !clientId) {
+      if (!authLoading) setLoading(false);
+      return;
+    }
+    void load();
+  }, [authLoading, identity, clientId, load]);
+
+  return { data, loading, error, refresh: load };
+}
+
 export function ClientDashboardPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
+  const clientId = identity?.clientId ?? "";
+  const { data, loading, error, refresh } = useClientDashboard(clientId);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
-  );
-  const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
-  const scopedStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
-  );
-  const scopedDailyStats = useMemo(
-    () => (identity ? scopeDailyStats(identity, clients, dailyStats) : []),
-    [clients, dailyStats, identity],
-  );
+  // Data extracted from the projection payload — server already scoped to this client.
+  const scopedClients = useMemo(() => (data?.client ? [data.client] : []), [data]);
+  const scopedCampaigns = useMemo(() => data?.campaigns ?? [], [data]);
+  const scopedLeads = useMemo(() => data?.leadProjections ?? [], [data]);
+  const scopedStats = useMemo(() => data?.campaignDailyStats ?? [], [data]);
+  const scopedDailyStats = useMemo(() => data?.dailyStats ?? [], [data]);
 
   const previousRange = useMemo(() => makePreviousRange(timeframe), [timeframe]);
 
@@ -447,6 +482,9 @@ export function ClientDashboardPage() {
   };
 
   const timeframeLabel = getTimeframeLabel(timeframe);
+
+  // suppress TS "declared but never used" for allTimeDailySent (kept for future phase)
+  void allTimeDailySent;
 
   if (loading) {
     return <PortalLoadingState title="Loading dashboard" description="Preparing KPI, funnel, and campaign trends." />;

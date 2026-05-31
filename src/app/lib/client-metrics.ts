@@ -1,4 +1,15 @@
-import type { DailyStatRecord, LeadRecord } from "../types/core";
+import type { DailyStatRecord } from "../types/core";
+
+/**
+ * Minimal lead field set read by createClientMetrics. Accepts full LeadRecord (backwards-compatible)
+ * and the LeadMetricProjection from per-page loaders (Phase 3+). Do NOT cast projections to LeadRecord.
+ */
+export interface LeadMetricInput {
+  created_at: string | null;
+  qualification: string | null;
+  meeting_booked: boolean | null;
+  won: boolean | null;
+}
 
 interface DailyAggregate {
   emailsSent: number;
@@ -177,7 +188,7 @@ function aggregateDailyStats(stats: DailyStatRecord[]) {
   return byDate;
 }
 
-function aggregateLeads(leads: LeadRecord[]) {
+function aggregateLeads(leads: LeadMetricInput[]) {
   const byDate = new Map<string, DatedEntry<LeadAggregate>>();
 
   for (const lead of leads) {
@@ -247,7 +258,7 @@ function valueByDayOffset<T>(
   return getValue(entry.value);
 }
 
-export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadRecord[], now = new Date()): ClientMetricsPack {
+export function createClientMetrics(dailyStats: DailyStatRecord[], leads: LeadMetricInput[], now = new Date()): ClientMetricsPack {
   const today = new Date(now);
   today.setHours(12, 0, 0, 0);
 

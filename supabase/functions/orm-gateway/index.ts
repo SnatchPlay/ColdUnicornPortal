@@ -621,6 +621,19 @@ function toClientCustomFieldValueRecord(row: Record<string, unknown>) {
   };
 }
 
+// Generic typed raw-SQL executor. Rows are returned as plain objects; caller is responsible for
+// typing the generic parameter to match the SELECT projection.
+async function rawQuery<T>(tx: any, query: any): Promise<T[]> {
+  const result = await tx.execute(query);
+  return (Array.isArray(result) ? result : result.rows ?? []) as T[];
+}
+
+function toIsoString(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 async function safeRawSelect(tx: any, query: any): Promise<any[]> {
   // Returns [] if the underlying table does not exist yet (migration not applied),
   // so the snapshot endpoint never hard-fails for new admins running against an
@@ -822,6 +835,497 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       columnOverrides: (columnOverrides as Record<string, unknown>[]).map(toColumnOverrideRecord),
       clientCustomFields: (clientCustomFields as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (clientCustomFieldValues as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
+    };
+  }
+
+  if (payload.action === "loadShellData") {
+    // Tiny global boot payload: projected lite columns only. No leads/replies/stats/etc.
+    const tShellStart = performance.now();
+    const [usersLite, clientsLite, clientUsers] = await Promise.all([
+      timedQuery(
+        "shell.usersLite",
+        tx
+          .select({
+            id: schema.users.id,
+            first_name: schema.users.firstName,
+            last_name: schema.users.lastName,
+            email: schema.users.email,
+            role: schema.users.role,
+          })
+          .from(schema.users)
+          .orderBy(desc(schema.users.createdAt)),
+      ),
+      timedQuery(
+        "shell.clientsLite",
+        tx
+          .select({
+            id: schema.clients.id,
+            name: schema.clients.name,
+            manager_id: schema.clients.managerId,
+            status: schema.clients.status,
+            kpi_leads: schema.clients.kpiLeads,
+            kpi_meetings: schema.clients.kpiMeetings,
+            notification_emails: schema.clients.notificationEmails,
+          })
+          .from(schema.clients)
+          .orderBy(desc(schema.clients.createdAt)),
+      ),
+      timedQuery(
+        "shell.clientUsers",
+        tx
+          .select({
+            id: schema.clientUsers.id,
+            client_id: schema.clientUsers.clientId,
+            user_id: schema.clientUsers.userId,
+          })
+          .from(schema.clientUsers),
+      ),
+    ]);
+    console.log(
+      `[PERF][orm-gateway] loadShellData total: ${(performance.now() - tShellStart).toFixed(1)}ms ` +
+        `(usersLite=${usersLite.length}, clientsLite=${clientsLite.length}, clientUsers=${clientUsers.length})`,
+    );
+    return { usersLite, clientsLite, clientUsers };
+  }
+
+  // ── Phase 2A: per-page dashboard loaders ────────────────────────────────────────────────────
+
+  if (payload.action === "loadAdminDashboardOverview") {
+    const t0 = performance.now();
+    const since21d = isoDaysAgo(21);
+
+    const [clientCountRows, activeCampaignCountRows, noManagerCountRows, pipelineGroupRows, momentumRows, managerCapacityRows, latestDateRows] =
+      await Promise.all([
+        rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM clients`),
+        rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM campaigns WHERE status = 'active'`),
+        rawQuery<{ count: number }>(tx, sql`
+          SELECT COUNT(*)::int AS count FROM clients
+          WHERE manager_id IS NULL
+          OR manager_id NOT IN (SELECT id FROM users WHERE role = 'manager')
+        `),
+        rawQuery<{
+          qualification: string | null;
+          meeting_booked: boolean | null;
+          meeting_held: boolean | null;
+          offer_sent: boolean | null;
+          won: boolean | null;
+          count: number;
+        }>(tx, sql`
+          SELECT qualification, meeting_booked, meeting_held, offer_sent, won, COUNT(*)::int AS count
+          FROM leads
+          GROUP BY qualification, meeting_booked, meeting_held, offer_sent, won
+        `),
+        rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
+          SELECT
+            report_date AS date,
+            COALESCE(SUM(sent_count), 0)::int AS sent,
+            COALESCE(SUM(reply_count), 0)::int AS replies,
+            COALESCE(SUM(positive_replies_count), 0)::int AS positive
+          FROM campaign_daily_stats
+          WHERE report_date >= ${since21d}
+          GROUP BY report_date
+          ORDER BY report_date ASC
+        `),
+        rawQuery<{ manager_id: string; manager_name: string; clients_count: number; active_campaigns_count: number; leads_count: number }>(tx, sql`
+          SELECT
+            u.id AS manager_id,
+            TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS manager_name,
+            COUNT(DISTINCT c.id)::int AS clients_count,
+            COUNT(DISTINCT CASE WHEN camp.status = 'active' THEN camp.id END)::int AS active_campaigns_count,
+            COUNT(DISTINCT l.id)::int AS leads_count
+          FROM users u
+          LEFT JOIN clients c ON c.manager_id = u.id
+          LEFT JOIN campaigns camp ON camp.client_id = c.id
+          LEFT JOIN leads l ON l.client_id = c.id
+          WHERE u.role = 'manager'
+          GROUP BY u.id, u.first_name, u.last_name
+          ORDER BY clients_count DESC
+          LIMIT 8
+        `),
+        rawQuery<{ latest: string | null }>(tx, sql`SELECT MAX(report_date) AS latest FROM daily_stats`),
+      ]);
+
+    console.log(`[PERF][orm-gateway] loadAdminDashboardOverview: ${(performance.now() - t0).toFixed(1)}ms`);
+
+    return {
+      metrics: {
+        clientsCount: clientCountRows[0]?.count ?? 0,
+        clientsWithoutManager: noManagerCountRows[0]?.count ?? 0,
+        activeCampaignsCount: activeCampaignCountRows[0]?.count ?? 0,
+      },
+      pipelineGroups: pipelineGroupRows,
+      campaignMomentum21d: momentumRows,
+      managerCapacity: managerCapacityRows.map((row) => ({
+        managerId: String(row.manager_id),
+        managerName: String(row.manager_name),
+        clientsCount: row.clients_count ?? 0,
+        activeCampaignsCount: row.active_campaigns_count ?? 0,
+        leadsCount: row.leads_count ?? 0,
+      })),
+      latestSnapshotDate: latestDateRows[0]?.latest ? String(latestDateRows[0].latest) : null,
+    };
+  }
+
+  if (payload.action === "loadManagerDashboardOverview") {
+    const managerId = payload.managerId;
+    const t0 = performance.now();
+    const since14d = isoDaysAgo(14);
+
+    const [metricsRows, portfolioRows, watchlistRows, queueRows] = await Promise.all([
+      rawQuery<{
+        assigned_clients_count: number;
+        active_campaigns_count: number;
+        leads_in_progress_count: number;
+        unclassified_replies_count: number;
+        recent_replies_count_14d: number;
+      }>(tx, sql`
+        SELECT
+          (SELECT COUNT(*)::int FROM clients WHERE manager_id = ${managerId}) AS assigned_clients_count,
+          (SELECT COUNT(*)::int FROM campaigns WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND status = 'active') AS active_campaigns_count,
+          (SELECT COUNT(*)::int FROM leads WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND NOT COALESCE(won, false) AND NOT COALESCE(offer_sent, false)) AS leads_in_progress_count,
+          (SELECT COUNT(*)::int FROM replies WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND classification IS NULL) AS unclassified_replies_count,
+          (SELECT COUNT(*)::int FROM replies WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND received_at >= ${since14d}) AS recent_replies_count_14d
+      `),
+      rawQuery<{
+        client_id: string;
+        client_name: string;
+        status: string | null;
+        kpi_leads: number | null;
+        kpi_meetings: number | null;
+        campaigns_count: number;
+        mql_count: number;
+        won_count: number;
+      }>(tx, sql`
+        SELECT
+          c.id AS client_id,
+          c.name AS client_name,
+          c.status,
+          c.kpi_leads,
+          c.kpi_meetings,
+          COUNT(DISTINCT camp.id)::int AS campaigns_count,
+          COUNT(DISTINCT CASE WHEN l.qualification = 'MQL' THEN l.id END)::int AS mql_count,
+          COUNT(DISTINCT CASE WHEN l.won = true THEN l.id END)::int AS won_count
+        FROM clients c
+        LEFT JOIN campaigns camp ON camp.client_id = c.id
+        LEFT JOIN leads l ON l.client_id = c.id
+        WHERE c.manager_id = ${managerId}
+        GROUP BY c.id, c.name, c.status, c.kpi_leads, c.kpi_meetings
+        ORDER BY c.name
+      `),
+      rawQuery<{ campaign_id: string; campaign_name: string; client_id: string; status: string | null; sent: number; replies: number }>(tx, sql`
+        SELECT
+          camp.id AS campaign_id,
+          camp.name AS campaign_name,
+          camp.client_id,
+          camp.status,
+          COALESCE(SUM(cds.sent_count), 0)::int AS sent,
+          COALESCE(SUM(cds.reply_count), 0)::int AS replies
+        FROM campaigns camp
+        LEFT JOIN campaign_daily_stats cds ON cds.campaign_id = camp.id
+        WHERE camp.client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId})
+        GROUP BY camp.id, camp.name, camp.client_id, camp.status
+      `),
+      rawQuery<{
+        lead_id: string;
+        client_id: string;
+        client_name: string;
+        campaign_id: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        qualification: string | null;
+        meeting_booked: boolean | null;
+        meeting_held: boolean | null;
+        offer_sent: boolean | null;
+        won: boolean | null;
+        updated_at: unknown;
+        created_at: unknown;
+      }>(tx, sql`
+        SELECT
+          l.id AS lead_id,
+          l.client_id,
+          c.name AS client_name,
+          l.campaign_id,
+          l.first_name,
+          l.last_name,
+          l.qualification,
+          l.meeting_booked,
+          l.meeting_held,
+          l.offer_sent,
+          l.won,
+          l.updated_at,
+          l.created_at
+        FROM leads l
+        JOIN clients c ON c.id = l.client_id
+        WHERE c.manager_id = ${managerId}
+        ORDER BY COALESCE(l.updated_at, l.created_at) DESC
+        LIMIT 10
+      `),
+    ]);
+
+    const m = metricsRows[0];
+    console.log(`[PERF][orm-gateway] loadManagerDashboardOverview: ${(performance.now() - t0).toFixed(1)}ms`);
+
+    return {
+      metrics: {
+        assignedClientsCount: m?.assigned_clients_count ?? 0,
+        activeCampaignsCount: m?.active_campaigns_count ?? 0,
+        leadsInProgressCount: m?.leads_in_progress_count ?? 0,
+        unclassifiedRepliesCount: m?.unclassified_replies_count ?? 0,
+        recentRepliesCount14d: m?.recent_replies_count_14d ?? 0,
+      },
+      clientPortfolio: portfolioRows.map((row) => ({
+        clientId: String(row.client_id),
+        clientName: String(row.client_name),
+        status: row.status ?? null,
+        campaignsCount: row.campaigns_count ?? 0,
+        mqlCount: row.mql_count ?? 0,
+        wonCount: row.won_count ?? 0,
+        kpiLeads: row.kpi_leads != null ? Number(row.kpi_leads) : null,
+        kpiMeetings: row.kpi_meetings != null ? Number(row.kpi_meetings) : null,
+      })),
+      campaignWatchlist: watchlistRows.map((row) => ({
+        campaignId: String(row.campaign_id),
+        campaignName: String(row.campaign_name),
+        clientId: String(row.client_id),
+        status: row.status ?? null,
+        sent: row.sent ?? 0,
+        replies: row.replies ?? 0,
+      })),
+      leadQueue: queueRows.map((row) => ({
+        leadId: String(row.lead_id),
+        clientId: String(row.client_id),
+        clientName: String(row.client_name),
+        campaignId: row.campaign_id ? String(row.campaign_id) : null,
+        firstName: row.first_name ? String(row.first_name) : null,
+        lastName: row.last_name ? String(row.last_name) : null,
+        qualification: row.qualification ? String(row.qualification) : null,
+        meeting_booked: row.meeting_booked ?? null,
+        meeting_held: row.meeting_held ?? null,
+        offer_sent: row.offer_sent ?? null,
+        won: row.won ?? null,
+        updatedAt: toIsoString(row.updated_at),
+        createdAt: toIsoString(row.created_at),
+      })),
+    };
+  }
+
+  if (payload.action === "loadClientDashboard") {
+    const clientId = payload.clientId;
+    const t0 = performance.now();
+    const campaignStatsSince = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
+    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
+
+    const [clientRows, campaignRows, leadRows, campaignStatRows, dailyStatRows] = await Promise.all([
+      tx.select({
+        id: schema.clients.id,
+        name: schema.clients.name,
+        status: schema.clients.status,
+        kpi_leads: schema.clients.kpiLeads,
+        kpi_meetings: schema.clients.kpiMeetings,
+        prospects_added: schema.clients.prospectsAdded,
+      }).from(schema.clients).where(eq(schema.clients.id, clientId)),
+
+      tx.select({
+        id: schema.campaigns.id,
+        name: schema.campaigns.name,
+        status: schema.campaigns.status,
+        database_size: schema.campaigns.databaseSize,
+      }).from(schema.campaigns).where(
+        and(eq(schema.campaigns.clientId, clientId), eq(schema.campaigns.type, "outreach"))
+      ).orderBy(desc(schema.campaigns.createdAt)),
+
+      tx.select({
+        id: schema.leads.id,
+        client_id: schema.leads.clientId,
+        campaign_id: schema.leads.campaignId,
+        created_at: schema.leads.createdAt,
+        qualification: schema.leads.qualification,
+        meeting_booked: schema.leads.meetingBooked,
+        meeting_held: schema.leads.meetingHeld,
+        offer_sent: schema.leads.offerSent,
+        won: schema.leads.won,
+      }).from(schema.leads).where(eq(schema.leads.clientId, clientId)).orderBy(desc(schema.leads.createdAt)),
+
+      rawQuery<{
+        campaign_id: string;
+        report_date: string;
+        sent_count: number | null;
+        reply_count: number | null;
+        bounce_count: number | null;
+        unique_open_count: number | null;
+        positive_replies_count: number | null;
+      }>(tx, sql`
+        SELECT cds.campaign_id, cds.report_date, cds.sent_count, cds.reply_count,
+               cds.bounce_count, cds.unique_open_count, cds.positive_replies_count
+        FROM campaign_daily_stats cds
+        JOIN campaigns c ON c.id = cds.campaign_id
+        WHERE c.client_id = ${clientId}
+        AND cds.report_date >= ${campaignStatsSince}
+        ORDER BY cds.report_date DESC
+      `),
+
+      tx.select({
+        client_id: schema.dailyStats.clientId,
+        report_date: schema.dailyStats.reportDate,
+        emails_sent: schema.dailyStats.emailsSent,
+        mql_count: schema.dailyStats.mqlCount,
+        response_count: schema.dailyStats.responseCount,
+        bounce_count: schema.dailyStats.bounceCount,
+        negative_count: schema.dailyStats.negativeCount,
+        ooo_count: schema.dailyStats.oooCount,
+        human_replies_count: schema.dailyStats.humanRepliesCount,
+        prospects_count: schema.dailyStats.prospectsCount,
+        schedule_today: schema.dailyStats.scheduleToday,
+        schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
+        schedule_day_after: schema.dailyStats.scheduleDayAfter,
+      }).from(schema.dailyStats).where(
+        and(eq(schema.dailyStats.clientId, clientId), gte(schema.dailyStats.reportDate, dailyStatsSince))
+      ).orderBy(desc(schema.dailyStats.reportDate)),
+    ]);
+
+    if (!clientRows[0]) fail(404, "Client not found or not accessible.");
+
+    const client = clientRows[0];
+    console.log(`[PERF][orm-gateway] loadClientDashboard: ${(performance.now() - t0).toFixed(1)}ms ` +
+      `(leads=${leadRows.length}, campaignStats=${campaignStatRows.length}, dailyStats=${dailyStatRows.length})`);
+
+    return {
+      client: {
+        id: client.id,
+        name: client.name,
+        status: client.status ?? null,
+        kpi_leads: client.kpi_leads != null ? Number(client.kpi_leads) : null,
+        kpi_meetings: client.kpi_meetings != null ? Number(client.kpi_meetings) : null,
+        prospects_added: client.prospects_added != null ? Number(client.prospects_added) : null,
+      },
+      campaigns: campaignRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: c.status ?? null,
+        database_size: c.database_size != null ? Number(c.database_size) : null,
+      })),
+      leadProjections: leadRows.map((l) => ({
+        id: l.id,
+        client_id: l.client_id,
+        campaign_id: l.campaign_id ?? null,
+        created_at: l.created_at ? toIsoString(l.created_at) : null,
+        qualification: l.qualification ?? null,
+        meeting_booked: l.meeting_booked ?? null,
+        meeting_held: l.meeting_held ?? null,
+        offer_sent: l.offer_sent ?? null,
+        won: l.won ?? null,
+      })),
+      campaignDailyStats: campaignStatRows,
+      dailyStats: dailyStatRows,
+    };
+  }
+
+  if (payload.action === "loadClientsOverview") {
+    // Phase 3: full clients page data contract. Replaces the universal snapshot for /clients routes.
+    // Returns: full client rows + users/mappings/conditions/overrides/customFields + lead projections
+    // + 180-day daily stats. No campaignDailyStats (not needed by createClientMetrics).
+    const t0 = performance.now();
+    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
+
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, leadProjectionRows, dailyStatRows] =
+      await Promise.all([
+        // Full client rows for the mega-table and drawer.
+        tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
+
+        // User lites — same projection as shell.
+        tx.select({
+          id: schema.users.id,
+          first_name: schema.users.firstName,
+          last_name: schema.users.lastName,
+          email: schema.users.email,
+          role: schema.users.role,
+        }).from(schema.users).orderBy(desc(schema.users.createdAt)),
+
+        // Client↔user mappings.
+        tx.select({
+          id: schema.clientUsers.id,
+          client_id: schema.clientUsers.clientId,
+          user_id: schema.clientUsers.userId,
+        }).from(schema.clientUsers),
+
+        // Condition rules for health evaluation.
+        tx.select().from(schema.conditionRules).orderBy(asc(schema.conditionRules.priority), asc(schema.conditionRules.createdAt)),
+
+        // Column overrides (raw SQL — table not in drizzle schema yet).
+        safeRawSelect(tx, sql`
+          SELECT column_key, label_override, hidden, position, updated_at, updated_by
+          FROM public.client_table_column_overrides
+        `),
+
+        // Custom field definitions.
+        safeRawSelect(tx, sql`
+          SELECT id, name, field_type, options, position, editable_by, created_by, created_at
+          FROM public.client_custom_fields
+          ORDER BY position ASC, created_at ASC
+        `),
+
+        // Custom field values.
+        safeRawSelect(tx, sql`
+          SELECT client_id, field_id, value, updated_at, updated_by
+          FROM public.client_custom_field_values
+        `),
+
+        // Lead projections — only the 5 fields createClientMetrics reads; no full rows.
+        tx.select({
+          id: schema.leads.id,
+          client_id: schema.leads.clientId,
+          campaign_id: schema.leads.campaignId,
+          created_at: schema.leads.createdAt,
+          qualification: schema.leads.qualification,
+          meeting_booked: schema.leads.meetingBooked,
+          meeting_held: schema.leads.meetingHeld,
+          offer_sent: schema.leads.offerSent,
+          won: schema.leads.won,
+        }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
+
+        // 180-day daily stats with client_id for per-client partitioning.
+        tx.select({
+          client_id: schema.dailyStats.clientId,
+          report_date: schema.dailyStats.reportDate,
+          emails_sent: schema.dailyStats.emailsSent,
+          mql_count: schema.dailyStats.mqlCount,
+          response_count: schema.dailyStats.responseCount,
+          bounce_count: schema.dailyStats.bounceCount,
+          negative_count: schema.dailyStats.negativeCount,
+          ooo_count: schema.dailyStats.oooCount,
+          human_replies_count: schema.dailyStats.humanRepliesCount,
+          prospects_count: schema.dailyStats.prospectsCount,
+          schedule_today: schema.dailyStats.scheduleToday,
+          schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
+          schedule_day_after: schema.dailyStats.scheduleDayAfter,
+        }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
+      ]);
+
+    console.log(
+      `[PERF][orm-gateway] loadClientsOverview: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length}, leads=${leadProjectionRows.length}, dailyStats=${dailyStatRows.length})`,
+    );
+
+    return {
+      clients: clientRows.map(toClientRecord),
+      usersLite: usersLiteRows,
+      clientUsers: clientUsersRows,
+      conditionRules: conditionRuleRows.map(toConditionRuleRecord),
+      columnOverrides: (columnOverrideRows as Record<string, unknown>[]).map(toColumnOverrideRecord),
+      clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
+      clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
+      leadProjections: leadProjectionRows.map((l) => ({
+        id: l.id,
+        client_id: l.client_id,
+        campaign_id: l.campaign_id ?? null,
+        created_at: l.created_at ? toIsoString(l.created_at) : null,
+        qualification: l.qualification ?? null,
+        meeting_booked: l.meeting_booked ?? null,
+        meeting_held: l.meeting_held ?? null,
+        offer_sent: l.offer_sent ?? null,
+        won: l.won ?? null,
+      })),
+      dailyStats: dailyStatRows,
     };
   }
 

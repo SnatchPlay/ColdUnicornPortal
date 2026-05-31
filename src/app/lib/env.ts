@@ -22,6 +22,12 @@ const isProduction = appEnv === "production";
 const appBaseUrl =
   configuredBaseUrl || (!isProduction && typeof window !== "undefined" ? trimTrailingSlash(window.location.origin) : "");
 
+// Which deployed edge function the data gateway calls. Defaults to the stable production function
+// `orm-gateway`. During the snapshot→per-page migration, set VITE_ORM_GATEWAY_FUNCTION (e.g.
+// `orm-gateway-next`) in dev to target a separately-deployed WIP function so production traffic
+// never hits unreviewed gateway changes. See docs/reference/snapshot-migration.md.
+const ormGatewayFunction = import.meta.env.VITE_ORM_GATEWAY_FUNCTION?.trim() || "orm-gateway";
+
 const authInviteOnly = parseBooleanFlag(import.meta.env.VITE_AUTH_INVITE_ONLY, true);
 const authAllowSelfSignup = parseBooleanFlag(import.meta.env.VITE_AUTH_ALLOW_SELF_SIGNUP, false) && !authInviteOnly;
 const authAllowMagicLink = parseBooleanFlag(import.meta.env.VITE_AUTH_ALLOW_MAGIC_LINK, true);
@@ -36,6 +42,7 @@ const missingVars = [
 export const runtimeConfig = {
   supabaseUrl,
   supabasePublishableKey,
+  ormGatewayFunction,
   legacyCrmSupabaseUrl,
   legacyCrmPublishableKey,
   legacyCrmConfigured: Boolean(legacyCrmSupabaseUrl && legacyCrmPublishableKey),

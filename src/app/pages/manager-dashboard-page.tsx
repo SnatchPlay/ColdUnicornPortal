@@ -1,165 +1,125 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { repository, RepositoryError } from "../data/repository";
 import { formatDate, formatNumber, getFullName } from "../lib/format";
-import {
-  getLeadStage,
-  scopeCampaignStats,
-  scopeCampaigns,
-  scopeClients,
-  scopeLeads,
-  scopeReplies,
-} from "../lib/selectors";
+import { getLeadStage } from "../lib/selectors";
+import type { ManagerDashboardOverview } from "../types/view-contracts";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+
+function mapDashboardError(reason: unknown): string {
+  if (reason instanceof RepositoryError) {
+    if (reason.kind === "timeout") return `Loading timed out. A database performance issue may be affecting this view.`;
+    if (reason.kind === "permission") return `Access to dashboard data is blocked by your current permissions.`;
+    if (reason.kind === "network") return `Dashboard data could not be loaded due to a network error. Try again.`;
+    return reason.message;
+  }
+  if (reason instanceof Error) return reason.message;
+  return "Failed to load dashboard data.";
+}
+
+function useManagerDashboard(managerId: string) {
+  const { identity, loading: authLoading } = useAuth();
+  const [data, setData] = useState<ManagerDashboardOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!managerId) return;
+    setLoading(true);
+    try {
+      const result = await repository.loadManagerDashboardOverview(managerId);
+      setData(result);
+      setError(null);
+    } catch (reason) {
+      setError(mapDashboardError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [managerId]);
+
+  useEffect(() => {
+    if (authLoading || !identity || !managerId) {
+      if (!authLoading) setLoading(false);
+      return;
+    }
+    void load();
+  }, [authLoading, identity, managerId, load]);
+
+  return { data, loading, error, refresh: load };
+}
 
 export function ManagerDashboardPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, replies, campaignDailyStats, loading, error, refresh } = useCoreData();
+  const managerId = identity?.id ?? "";
+  const { data, loading, error, refresh } = useManagerDashboard(managerId);
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
-  );
-  const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
-  const scopedReplies = useMemo(() => (identity ? scopeReplies(identity, clients, replies) : []), [clients, identity, replies]);
-  const scopedCampaignDailyStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
-  );
-
-  const recentThreshold = useMemo(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 14);
-    return date.toISOString();
-  }, []);
-
-  const campaignStatMap = useMemo(() => {
-    const map = new Map<string, { sent: number; replies: number }>();
-    for (const stat of scopedCampaignDailyStats) {
-      const current = map.get(stat.campaign_id) ?? { sent: 0, replies: 0 };
-      current.sent += stat.sent_count ?? 0;
-      current.replies += stat.reply_count ?? 0;
-      map.set(stat.campaign_id, current);
-    }
-    return map;
-  }, [scopedCampaignDailyStats]);
-
-  const leadsInProgress = useMemo(
-    () => scopedLeads.filter((lead) => !lead.won && !lead.offer_sent).length,
-    [scopedLeads],
-  );
-
-  const unclassifiedReplies = useMemo(
-    () => scopedReplies.filter((reply) => !reply.classification).length,
-    [scopedReplies],
-  );
-
-  const recentReplyCount = useMemo(
-    () => scopedReplies.filter((reply) => reply.received_at >= recentThreshold).length,
-    [recentThreshold, scopedReplies],
-  );
+  const metrics = useMemo(() => [
+    {
+      label: "Assigned clients",
+      value: formatNumber(data?.metrics.assignedClientsCount ?? 0),
+      hint: "Portfolio under manager ownership",
+      tone: "info" as const,
+    },
+    {
+      label: "Active campaigns",
+      value: formatNumber(data?.metrics.activeCampaignsCount ?? 0),
+      hint: "Campaigns currently running",
+      tone: "success" as const,
+    },
+    {
+      label: "Leads in progress",
+      value: formatNumber(data?.metrics.leadsInProgressCount ?? 0),
+      hint: "Not won and not offer-sent",
+      tone: "neutral" as const,
+    },
+    {
+      label: "Unclassified replies",
+      value: formatNumber(data?.metrics.unclassifiedRepliesCount ?? 0),
+      hint: `${formatNumber(data?.metrics.recentRepliesCount14d ?? 0)} replies in the last 14 days`,
+      tone: "warning" as const,
+    },
+  ], [data]);
 
   const clientPortfolio = useMemo(() => {
-    const campaignCountByClient = new Map<string, number>();
-    for (const c of scopedCampaigns) {
-      campaignCountByClient.set(c.client_id, (campaignCountByClient.get(c.client_id) ?? 0) + 1);
-    }
-    const mqlByClient = new Map<string, number>();
-    const wonByClient = new Map<string, number>();
-    for (const l of scopedLeads) {
-      if (l.qualification === "MQL") mqlByClient.set(l.client_id, (mqlByClient.get(l.client_id) ?? 0) + 1);
-      if (l.won) wonByClient.set(l.client_id, (wonByClient.get(l.client_id) ?? 0) + 1);
-    }
-    return scopedClients
-      .map((client) => {
-        const mqls = mqlByClient.get(client.id) ?? 0;
-        const won = wonByClient.get(client.id) ?? 0;
-        const kpiLeads = client.kpi_leads ?? 0;
-        const progress = kpiLeads > 0 ? (mqls / kpiLeads) * 100 : null;
-        return {
-          id: client.id,
-          name: client.name,
-          status: client.status,
-          campaigns: campaignCountByClient.get(client.id) ?? 0,
-          mqls,
-          won,
-          progress,
-        };
-      })
-      .sort((left, right) => left.name.localeCompare(right.name));
-  }, [scopedCampaigns, scopedClients, scopedLeads]);
+    return (data?.clientPortfolio ?? []).map((client) => {
+      const progress = client.kpiLeads ? (client.mqlCount / client.kpiLeads) * 100 : null;
+      return {
+        id: client.clientId,
+        name: client.clientName,
+        status: client.status,
+        campaigns: client.campaignsCount,
+        mqls: client.mqlCount,
+        won: client.wonCount,
+        progress,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [data]);
 
-  const leadQueue = useMemo(
-    () =>
-      scopedLeads
-        .slice()
-        .sort((left, right) => (right.updated_at || right.created_at).localeCompare(left.updated_at || left.created_at))
-        .slice(0, 10)
-        .map((lead) => {
-          const clientName = scopedClients.find((client) => client.id === lead.client_id)?.name ?? "Unknown client";
-          return {
-            id: lead.id,
-            name: getFullName(lead.first_name, lead.last_name),
-            stage: getLeadStage(lead),
-            clientName,
-            updatedAt: lead.updated_at || lead.created_at,
-          };
-        }),
-    [scopedClients, scopedLeads],
-  );
+  const campaignWatchlist = useMemo(() => {
+    return (data?.campaignWatchlist ?? [])
+      .map((row) => ({
+        id: row.campaignId,
+        name: row.campaignName,
+        status: row.status,
+        sent: row.sent,
+        replies: row.replies,
+        replyRate: row.sent > 0 ? (row.replies / row.sent) * 100 : 0,
+      }))
+      .filter((c) => c.status !== "active" || c.replyRate < 1)
+      .sort((a, b) => a.replyRate - b.replyRate)
+      .slice(0, 8);
+  }, [data]);
 
-  const campaignWatchlist = useMemo(
-    () =>
-      scopedCampaigns
-        .map((campaign) => {
-          const totals = campaignStatMap.get(campaign.id) ?? { sent: 0, replies: 0 };
-          const replyRate = totals.sent > 0 ? (totals.replies / totals.sent) * 100 : 0;
-          return {
-            id: campaign.id,
-            name: campaign.name,
-            status: campaign.status,
-            sent: totals.sent,
-            replies: totals.replies,
-            replyRate,
-          };
-        })
-        .filter((campaign) => campaign.status !== "active" || campaign.replyRate < 1)
-        .sort((left, right) => left.replyRate - right.replyRate)
-        .slice(0, 8),
-    [campaignStatMap, scopedCampaigns],
-  );
-
-  const metrics = useMemo(
-    () => [
-      {
-        label: "Assigned clients",
-        value: formatNumber(scopedClients.length),
-        hint: "Portfolio under manager ownership",
-        tone: "info" as const,
-      },
-      {
-        label: "Active campaigns",
-        value: formatNumber(scopedCampaigns.filter((campaign) => campaign.status === "active").length),
-        hint: "Campaigns currently running",
-        tone: "success" as const,
-      },
-      {
-        label: "Leads in progress",
-        value: formatNumber(leadsInProgress),
-        hint: "Not won and not offer-sent",
-        tone: "neutral" as const,
-      },
-      {
-        label: "Unclassified replies",
-        value: formatNumber(unclassifiedReplies),
-        hint: `${formatNumber(recentReplyCount)} replies in the last 14 days`,
-        tone: "warning" as const,
-      },
-    ],
-    [leadsInProgress, recentReplyCount, scopedCampaigns, scopedClients.length, unclassifiedReplies],
-  );
+  const leadQueue = useMemo(() => {
+    return (data?.leadQueue ?? []).map((lead) => ({
+      id: lead.leadId,
+      name: getFullName(lead.firstName, lead.lastName),
+      stage: getLeadStage(lead),
+      clientName: lead.clientName,
+      updatedAt: lead.updatedAt ?? lead.createdAt,
+    }));
+  }, [data]);
 
   if (loading) {
     return <LoadingState />;

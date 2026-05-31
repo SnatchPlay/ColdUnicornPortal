@@ -1,21 +1,33 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientsPage } from "../clients-page";
 import { useAuth } from "../../providers/auth";
-import { useCoreData } from "../../providers/core-data";
-import { createClientMetrics } from "../../lib/client-metrics";
+import { repository } from "../../data/repository";
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(),
+// ClientsPage (Phase 3) loads via repository.loadClientsOverview — mock the whole module.
+// Synchronous factory so RepositoryError is a stub class (instanceof works in page code).
+vi.mock("../../data/repository", () => ({
+  RepositoryError: class RepositoryError extends Error {
+    table = "clients"; operation = "select"; kind = "unknown";
+    constructor(args: { message: string }) { super(args.message); }
+  },
+  repository: {
+    loadClientsOverview: vi.fn(),
+    updateClient: vi.fn(),
+    sendInvite: vi.fn(),
+    upsertClientUserMapping: vi.fn(),
+    deleteClientUserMapping: vi.fn(),
+    upsertClientCustomFieldValue: vi.fn(),
+  },
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
-const mockedUseCoreData = vi.mocked(useCoreData);
+const mockedRepo = vi.mocked(repository);
 
 function makeAuth(role: "admin" | "manager" = "admin") {
   return {
@@ -28,7 +40,21 @@ function makeAuth(role: "admin" | "manager" = "admin") {
   };
 }
 
-function makeDailyStat(clientId: string, date: string, sent: number, scheduleToday = 0, scheduleTomorrow = 0, scheduleDayAfter = 0) {
+function getDateKey(daysOffset: number) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + daysOffset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function makeDailyStat(
+  clientId: string,
+  date: string,
+  sent: number,
+  scheduleToday = 0,
+  scheduleTomorrow = 0,
+  scheduleDayAfter = 0,
+) {
   return {
     client_id: clientId,
     report_date: date,
@@ -46,54 +72,62 @@ function makeDailyStat(clientId: string, date: string, sent: number, scheduleTod
   };
 }
 
-function makeLead(clientId: string, date: string, qualification: string | null, meetingBooked = false, won = false) {
+// Minimal lead projection — only the fields createClientMetrics reads.
+function makeLeadProjection(
+  clientId: string,
+  date: string,
+  qualification: string | null,
+  meetingBooked = false,
+  won = false,
+) {
   return {
-    id: `${clientId}-lead-${date}-${qualification ?? "none"}-${meetingBooked ? "meeting" : "nomeeting"}-${won ? "won" : "nowon"}`,
-    created_at: `${date}T10:00:00.000Z`,
-    updated_at: `${date}T10:00:00.000Z`,
+    id: `${clientId}-lead-${date}-${qualification ?? "none"}-${meetingBooked}-${won}`,
     client_id: clientId,
-    campaign_id: null,
-    email: `${date}@test.local`,
-    first_name: "Lead",
-    last_name: "User",
-    job_title: null,
-    company_name: null,
-    linkedin_url: null,
-    gender: null,
+    campaign_id: null as string | null,
+    created_at: `${date}T10:00:00.000Z`,
     qualification,
-    expected_return_date: null,
-    external_id: null,
-    phone_number: null,
-    phone_source: null,
-    industry: null,
-    headcount_range: null,
-    website: null,
-    country: null,
-    message_title: null,
-    message_number: null,
-    response_time_hours: null,
-    response_time_label: null,
     meeting_booked: meetingBooked,
     meeting_held: false,
     offer_sent: false,
     won,
-    added_to_ooo_campaign: false,
-    external_blacklist_id: null,
-    external_domain_blacklist_id: null,
-    source: "test",
-    reply_text: null,
-    comments: null,
   };
 }
 
-function getDateKey(daysOffset: number) {
-  const date = new Date();
-  date.setHours(12, 0, 0, 0);
-  date.setDate(date.getDate() + daysOffset);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+// Full client record shape needed by the mega-table and drawer.
+function makeClient(overrides?: Record<string, unknown>) {
+  const today = getDateKey(0);
+  return {
+    id: "client-1",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: today,
+    name: "Acme",
+    status: "Active",
+    manager_id: "manager-1",
+    kpi_leads: 10,
+    kpi_meetings: null,
+    contracted_amount: 1000,
+    contract_due_date: "2026-12-01",
+    external_workspace_id: null,
+    external_api_key: null,
+    min_daily_sent: 20,
+    inboxes_count: 3,
+    crm_config: null,
+    sms_phone_numbers: ["+48123456789"],
+    notification_emails: ["ops@acme.test"],
+    auto_ooo_enabled: true,
+    linkedin_api_key: null,
+    prospects_signed: 0,
+    prospects_added: 0,
+    setup_info: "Setup complete",
+    bi_setup_done: false,
+    lost_reason: null,
+    notes: null,
+    ...overrides,
+  };
 }
 
-function makeCoreData(overrides?: Record<string, unknown>) {
+// Build a ClientsOverviewPayload for the loadClientsOverview mock.
+function makeClientsOverview(overrides?: Record<string, unknown>) {
   const today = getDateKey(0);
   const minus1 = getDateKey(-1);
   const minus2 = getDateKey(-2);
@@ -103,59 +137,24 @@ function makeCoreData(overrides?: Record<string, unknown>) {
   const minus40 = getDateKey(-40);
 
   const base = {
-    users: [
-      {
-        id: "manager-1",
-        role: "manager",
-        first_name: "Mary",
-        last_name: "Manager",
-        email: "manager@test.local",
-      },
-      {
-        id: "client-user-1",
-        role: "client",
-        first_name: "Chris",
-        last_name: "Client",
-        email: "client@test.local",
-      },
+    clients: [makeClient()],
+    usersLite: [
+      { id: "manager-1", role: "manager", first_name: "Mary", last_name: "Manager", email: "manager@test.local" },
+      { id: "client-user-1", role: "client", first_name: "Chris", last_name: "Client", email: "client@test.local" },
     ],
-    clients: [
-      {
-        id: "client-1",
-        created_at: "2026-01-01T00:00:00.000Z",
-        name: "Acme",
-        status: "Active",
-        manager_id: "manager-1",
-        kpi_leads: 10,
-        min_daily_sent: 20,
-        inboxes_count: 3,
-        notification_emails: ["ops@acme.test"],
-        sms_phone_numbers: ["+48123456789"],
-        auto_ooo_enabled: true,
-        setup_info: "Setup complete",
-        contracted_amount: 1000,
-        contract_due_date: "2026-12-01",
-        updated_at: today,
-      },
+    clientUsers: [{ id: "mapping-1", client_id: "client-1", user_id: "client-user-1" }],
+    conditionRules: [],
+    columnOverrides: [],
+    clientCustomFields: [],
+    clientCustomFieldValues: [],
+    leadProjections: [
+      makeLeadProjection("client-1", today, "MQL"),
+      makeLeadProjection("client-1", today, "preMQL"),
+      makeLeadProjection("client-1", minus1, "MQL", true),
+      makeLeadProjection("client-1", minus2, "preMQL"),
+      makeLeadProjection("client-1", minus3, null),
+      makeLeadProjection("client-1", minus40, "MQL", false, true),
     ],
-    clientUsers: [
-      {
-        id: "mapping-1",
-        client_id: "client-1",
-        user_id: "client-user-1",
-      },
-    ],
-    campaigns: [],
-    leads: [
-      makeLead("client-1", today, "MQL"),
-      makeLead("client-1", today, "preMQL"),
-      makeLead("client-1", minus1, "MQL", true),
-      makeLead("client-1", minus2, "preMQL"),
-      makeLead("client-1", minus3, null),
-      makeLead("client-1", minus40, "MQL", false, true),
-    ],
-    replies: [],
-    campaignDailyStats: [],
     dailyStats: [
       makeDailyStat("client-1", today, 380, 380, 395, 410),
       makeDailyStat("client-1", minus1, 395),
@@ -164,44 +163,22 @@ function makeCoreData(overrides?: Record<string, unknown>) {
       makeDailyStat("client-1", minus4, 280),
       makeDailyStat("client-1", minus9, 250),
     ],
-    loading: false,
-    error: null,
-    refresh: vi.fn(async () => {}),
-    updateClient: vi.fn(async () => {}),
-    sendInvite: vi.fn(async () => ({ inviteId: "invite-1" })),
-    updateCampaign: vi.fn(async () => {}),
-    updateLead: vi.fn(async () => {}),
-    upsertClientUserMapping: vi.fn(async () => {}),
-    deleteClientUserMapping: vi.fn(async () => {}),
   };
 
-  const merged = { ...base, ...overrides };
-  const effectiveStats = merged.dailyStats as typeof base.dailyStats;
-  const effectiveLeads = merged.leads as typeof base.leads;
-  const effectiveClients = merged.clients as typeof base.clients;
-
-  const metricsByClientId = new Map(
-    effectiveClients.map((c) => [
-      c.id,
-      createClientMetrics(
-        effectiveStats.filter((s) => s.client_id === c.id),
-        effectiveLeads.filter((l) => l.client_id === c.id),
-      ),
-    ]),
-  );
-
-  return { ...merged, metricsByClientId };
+  return { ...base, ...overrides };
 }
 
-function renderPage() {
+async function renderPage() {
   render(
     <MemoryRouter>
       <ClientsPage />
     </MemoryRouter>,
   );
+  // Flush the async loadClientsOverview promise so the loaded state renders.
+  await act(async () => {});
 }
 
-function openClientDrawer(clientName = "Acme") {
+async function openClientDrawer(clientName = "Acme") {
   fireEvent.click(screen.getByRole("button", { name: `Open details for ${clientName}` }));
 }
 
@@ -215,14 +192,24 @@ describe("clients operational tooling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedUseAuth.mockReturnValue(makeAuth() as never);
+    // Default: all mutations succeed silently.
+    mockedRepo.updateClient.mockResolvedValue(makeClient() as never);
+    mockedRepo.sendInvite.mockResolvedValue({ inviteId: "invite-1" });
+    // Return same ID as the existing mapping so the optimistic state update doesn't change the ID.
+    mockedRepo.upsertClientUserMapping.mockResolvedValue({
+      id: "mapping-1", client_id: "client-1", user_id: "client-user-1", created_at: "2026-01-01",
+    } as never);
+    mockedRepo.deleteClientUserMapping.mockResolvedValue(undefined as never);
+    mockedRepo.upsertClientCustomFieldValue.mockResolvedValue({
+      client_id: "client-1", field_id: "f1", value: null, updated_at: "", updated_by: null,
+    } as never);
   });
 
-  it("opens and closes client drawer from table row click and Esc", () => {
-    const core = makeCoreData();
-    mockedUseCoreData.mockReturnValue(core as never);
+  it("opens and closes client drawer from table row click and Esc", async () => {
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
-    renderPage();
-    openClientDrawer();
+    await renderPage();
+    await openClientDrawer();
 
     expect(screen.getByRole("dialog", { name: "Acme details" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
@@ -230,17 +217,17 @@ describe("clients operational tooling", () => {
   });
 
   it("uses controlled save/cancel edit session in client drawer", async () => {
-    const core = makeCoreData();
-    mockedUseCoreData.mockReturnValue(core as never);
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
+    mockedRepo.updateClient.mockResolvedValue(makeClient({ name: "Acme Final" }) as never);
 
-    renderPage();
-    openClientDrawer();
+    await renderPage();
+    await openClientDrawer();
 
     const nameInput = screen.getByLabelText("Client display name") as HTMLInputElement;
     expect(nameInput.value).toBe("Acme");
 
     fireEvent.change(nameInput, { target: { value: "Acme Updated" } });
-    expect(core.updateClient).not.toHaveBeenCalled();
+    expect(mockedRepo.updateClient).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel changes" }));
     expect((screen.getByLabelText("Client display name") as HTMLInputElement).value).toBe("Acme");
@@ -249,17 +236,16 @@ describe("clients operational tooling", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(core.updateClient).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.updateClient).toHaveBeenCalledTimes(1);
     });
-    expect(core.updateClient).toHaveBeenCalledWith("client-1", expect.objectContaining({ name: "Acme Final" }));
+    expect(mockedRepo.updateClient).toHaveBeenCalledWith("client-1", expect.objectContaining({ name: "Acme Final" }));
   });
 
-  it("renders DoD/3DoD/WoW/MoM metric groups in the mega-table", () => {
-    const core = makeCoreData();
-    mockedUseCoreData.mockReturnValue(core as never);
+  it("renders DoD/3DoD/WoW/MoM metric groups in the mega-table", async () => {
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
-    renderPage();
-    // Group bands (top-level header tier) for each metric family
+    await renderPage();
+
     expect(screen.getByText("DoD Schedule")).toBeInTheDocument();
     expect(screen.getByText("DoD Daily sent")).toBeInTheDocument();
     expect(screen.getByText("3-Day rolling")).toBeInTheDocument();
@@ -272,62 +258,59 @@ describe("clients operational tooling", () => {
   });
 
   it("supports assigning and removing client-user mappings in drawer", async () => {
-    const core = makeCoreData();
-    mockedUseCoreData.mockReturnValue(core as never);
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
-    renderPage();
-    openClientDrawer();
+    await renderPage();
+    await openClientDrawer();
 
     await chooseOptionByLabel("Client user account", /Chris Client.*client@test.local/i);
     fireEvent.click(screen.getByRole("button", { name: "Assign user" }));
 
     await waitFor(() => {
-      expect(core.upsertClientUserMapping).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.upsertClientUserMapping).toHaveBeenCalledTimes(1);
     });
-    expect(core.upsertClientUserMapping).toHaveBeenCalledWith("client-user-1", "client-1");
+    expect(mockedRepo.upsertClientUserMapping).toHaveBeenCalledWith("client-user-1", "client-1");
 
     fireEvent.click(screen.getByRole("button", { name: "Remove mapping" }));
 
     await waitFor(() => {
-      expect(core.deleteClientUserMapping).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.deleteClientUserMapping).toHaveBeenCalledTimes(1);
     });
-    expect(core.deleteClientUserMapping).toHaveBeenCalledWith("mapping-1");
+    expect(mockedRepo.deleteClientUserMapping).toHaveBeenCalledWith("mapping-1");
   });
 
   it("forces admin client invite payload to role client with selected clientId", async () => {
-    const core = makeCoreData();
     mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
-    mockedUseCoreData.mockReturnValue(core as never);
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
-    renderPage();
-    openClientDrawer();
+    await renderPage();
+    await openClientDrawer();
 
     fireEvent.change(screen.getByLabelText("User email"), { target: { value: "manager.new@test.local" } });
     fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
 
     await waitFor(() => {
-      expect(core.sendInvite).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.sendInvite).toHaveBeenCalledTimes(1);
     });
-    expect(core.sendInvite).toHaveBeenCalledWith(
+    expect(mockedRepo.sendInvite).toHaveBeenCalledWith(
       expect.objectContaining({ email: "manager.new@test.local", role: "client", clientId: "client-1" }),
     );
   });
 
   it("keeps manager invites scoped to selected client user role", async () => {
-    const core = makeCoreData();
     mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
-    mockedUseCoreData.mockReturnValue(core as never);
+    mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
-    renderPage();
-    openClientDrawer();
+    await renderPage();
+    await openClientDrawer();
 
     fireEvent.change(screen.getByLabelText("User email"), { target: { value: "client.new@test.local" } });
     fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
 
     await waitFor(() => {
-      expect(core.sendInvite).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.sendInvite).toHaveBeenCalledTimes(1);
     });
-    expect(core.sendInvite).toHaveBeenCalledWith(
+    expect(mockedRepo.sendInvite).toHaveBeenCalledWith(
       expect.objectContaining({ email: "client.new@test.local", role: "client", clientId: "client-1" }),
     );
   });
@@ -337,58 +320,26 @@ describe("clients operational tooling", () => {
     const minus5 = getDateKey(-5);
     const minus8 = getDateKey(-8);
 
-    const core = makeCoreData({
-      clients: [
-        {
-          id: "client-1",
-          created_at: "2026-01-01T00:00:00.000Z",
-          name: "Acme",
-          status: "Active",
-          manager_id: "manager-1",
-          kpi_leads: 10,
-          min_daily_sent: 20,
-          inboxes_count: 3,
-          notification_emails: ["ops@acme.test"],
-          sms_phone_numbers: ["+48123456789"],
-          auto_ooo_enabled: true,
-          setup_info: "Setup complete",
-          contracted_amount: 1000,
-          contract_due_date: "2026-12-01",
-          updated_at: today,
-        },
-        {
-          id: "client-2",
-          created_at: "2026-01-01T00:00:00.000Z",
-          name: "Bravo",
-          status: "Active",
-          manager_id: "manager-1",
-          kpi_leads: 10,
-          min_daily_sent: 20,
-          inboxes_count: 3,
-          notification_emails: ["ops@bravo.test"],
-          sms_phone_numbers: ["+48123456789"],
-          auto_ooo_enabled: true,
-          setup_info: "Setup complete",
-          contracted_amount: 1000,
-          contract_due_date: "2026-12-01",
-          updated_at: minus5,
-        },
-      ],
-      dailyStats: [
-        makeDailyStat("client-1", today, 200, 100, 100, 100),
-        makeDailyStat("client-2", today, 200, 100, 100, 100),
-      ],
-      leads: [
-        makeLead("client-1", minus5, "MQL"),
-        makeLead("client-2", minus5, "MQL"),
-        makeLead("client-2", minus8, "MQL"),
-        makeLead("client-2", today, "MQL"),
-      ],
-      clientUsers: [],
-    });
-    mockedUseCoreData.mockReturnValue(core as never);
+    const client2 = makeClient({ id: "client-2", name: "Bravo", manager_id: "manager-1", updated_at: minus5, notification_emails: ["ops@bravo.test"] });
 
-    renderPage();
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({
+        clients: [makeClient(), client2],
+        clientUsers: [],
+        dailyStats: [
+          makeDailyStat("client-1", today, 200, 100, 100, 100),
+          makeDailyStat("client-2", today, 200, 100, 100, 100),
+        ],
+        leadProjections: [
+          makeLeadProjection("client-1", minus5, "MQL"),
+          makeLeadProjection("client-2", minus5, "MQL"),
+          makeLeadProjection("client-2", minus8, "MQL"),
+          makeLeadProjection("client-2", today, "MQL"),
+        ],
+      }) as never,
+    );
+
+    await renderPage();
 
     const momSqlHeader = screen.getByRole("button", { name: "Sort by MoM SQL 0" });
     fireEvent.click(momSqlHeader);

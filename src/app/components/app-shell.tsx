@@ -33,7 +33,7 @@ import {
 } from "./ui/breadcrumb";
 import { runtimeConfig } from "../lib/env";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import { useShellData } from "../providers/shell-data";
 import type { AppRole } from "../types/core";
 import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
 import coldUnicornLogo from "../../imports/logo white with name.png";
@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [, startNavTransition] = useTransition();
-  const { users, clients } = useCoreData();
+  const { usersLite: users, clientsLite: clients } = useShellData();
   const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
   const [managerTargetId, setManagerTargetId] = useState("");
   const [clientTargetId, setClientTargetId] = useState("");
