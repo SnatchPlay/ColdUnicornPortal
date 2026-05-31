@@ -22,6 +22,7 @@ import type {
   AdminDashboardOverview,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  AnalyticsOverviewPayload,
   CampaignStatsResponse,
   CampaignsListParams,
   CampaignsListResponse,
@@ -55,6 +56,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadLeadsList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
+  loadAnalyticsOverview: { table: "analytics", operation: "select" },
   loadCampaignsList: { table: "campaigns", operation: "select" },
   loadCampaignStats: { table: "campaign_daily_stats", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
@@ -350,6 +352,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadLeadsList" ||
     action === "loadLeadDetail" ||
     action === "loadLeadsFilterOptions" ||
+    action === "loadAnalyticsOverview" ||
     action === "loadCampaignsList" ||
     action === "loadCampaignStats";
   const isPerfTracked = isLoadSnapshot || isGatewayTracked;
@@ -371,18 +374,28 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
 
   if (isPerfTracked) {
     const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][gateway]";
+    const fetchMs = tFetchEnd - tFetchStart;
     // Parse _serverMs from the raw text before full JSON parse to get server-side breakdown.
     let serverMsStr = "";
+    let serverTotal = 0;
     try {
       const quick = JSON.parse(text) as Record<string, unknown>;
-      if (quick._serverMs) serverMsStr = ` server=${JSON.stringify(quick._serverMs)}`;
+      if (quick._serverMs) { serverMsStr = ` server=${JSON.stringify(quick._serverMs)}`; serverTotal = (quick._serverMs as Record<string, number>).total ?? 0; }
       if (quick._requestId) serverMsStr += ` requestId=${quick._requestId}`;
     } catch { /* non-fatal */ }
     console.log(
-      `${label} ${action}: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
+      `${label} ${action}: fetch=${fetchMs.toFixed(1)}ms ` +
         `readBody=${(tTextEnd - tFetchEnd).toFixed(1)}ms ` +
         `responseBytes=${text.length} (${(text.length / 1024).toFixed(1)} KB)${serverMsStr}`,
     );
+    // Log a warning when the gap between observed fetch time and server processing is abnormally
+    // large — indicates cold-start, connection-pool stall, or edge-function scheduling overhead.
+    if (serverTotal > 0 && fetchMs - serverTotal > 1500) {
+      console.warn(
+        `[GATEWAY_OVERHEAD] ${action}: fetchMs=${fetchMs.toFixed(0)} serverTotalMs=${serverTotal} ` +
+          `overhead=${(fetchMs - serverTotal).toFixed(0)}ms — likely cold-start or pooler stall`,
+      );
+    }
   }
 
   let envelope: OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]> | null = null;
@@ -489,6 +502,7 @@ export interface Repository {
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
+  loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
@@ -621,6 +635,10 @@ export const repository: Repository = {
 
   async loadLeadsFilterOptions() {
     return invokeOrmGatewaySelectWithRetry("loadLeadsFilterOptions", {});
+  },
+
+  async loadAnalyticsOverview() {
+    return invokeOrmGatewaySelectWithRetry("loadAnalyticsOverview", {});
   },
 
   async loadCampaignsList(params) {

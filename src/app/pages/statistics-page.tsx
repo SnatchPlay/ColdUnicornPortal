@@ -18,9 +18,10 @@ import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, M
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatNumber } from "../lib/format";
-import { isInternalAdmin, scopeCampaignStats, scopeCampaigns, scopeClients, scopeDailyStats, scopeLeads, sortClientsAlpha } from "../lib/selectors";
+import { isInternalAdmin, sortClientsAlpha } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel, resolveTimeframeBounds } from "../lib/timeframe";
-import { useCoreData } from "../providers/core-data";
+import { useAnalyticsOverview } from "../lib/use-analytics";
+import { useCampaignStats } from "../lib/use-campaigns";
 import { useAuth } from "../providers/auth";
 import { ClientStatisticsPage } from "./client-statistics-page";
 import type { CampaignDailyStatRecord, DailyStatRecord, UserRecord } from "../types/core";
@@ -146,7 +147,7 @@ export function StatisticsPage() {
 
 function InternalStatisticsPage() {
   const { identity } = useAuth();
-  const { users = [], clients, campaigns, leads, campaignDailyStats, dailyStats = [], loading, error, refresh } = useCoreData();
+  const { data, loading, error, refresh } = useAnalyticsOverview();
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
   const [managerFilterId, setManagerFilterId] = useState(ALL_FILTER_VALUE);
   const [clientFilterId, setClientFilterId] = useState(ALL_FILTER_VALUE);
@@ -158,23 +159,27 @@ function InternalStatisticsPage() {
   const [clientCardLimit, setClientCardLimit] = useState(CLIENT_CARD_PAGE_SIZE);
   const [campaignGroupLimit, setCampaignGroupLimit] = useState(CAMPAIGN_CLIENT_GROUP_PAGE_SIZE);
 
-  const scopedClients = useMemo(
-    () => (identity ? sortClientsAlpha(scopeClients(identity, clients)) : []),
-    [clients, identity],
+  // Lazy per-campaign stats — only fetched when a campaign filter is active
+  const { data: campaignStats } = useCampaignStats(
+    campaignFilterId !== ALL_FILTER_VALUE ? campaignFilterId : null,
   );
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
-  );
-  const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
+
+  // Data from overview — already RLS-scoped, no scopeX needed
+  const users = data?.users ?? [];
+  const clients = data?.clients ?? [];
+  const campaigns = data?.campaigns ?? [];
+  const scopedLeads = data?.leadProjections ?? [];
+  const scopedDailyStats = data?.dailyStats ?? [];
+
+  // Campaign daily stats come from the lazy hook when a campaign is selected;
+  // otherwise the daily_stats series is used for the time series (see dailySeries memo).
   const scopedStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
+    () => (campaignStats?.rows ?? []) as CampaignDailyStatRecord[],
+    [campaignStats],
   );
-  const scopedDailyStats = useMemo(
-    () => (identity ? scopeDailyStats(identity, clients, dailyStats) : []),
-    [clients, dailyStats, identity],
-  );
+
+  const scopedClients = useMemo(() => sortClientsAlpha(clients), [clients]);
+  const scopedCampaigns = campaigns;
 
   const showManagerScope = identity ? isInternalAdmin(identity.role) : false;
   const managerUsers = useMemo<ManagerAnalyticsOption[]>(() => {
@@ -285,6 +290,9 @@ function InternalStatisticsPage() {
     [scopedLeads, timeframe, timeframeAnchor],
   );
 
+  // When a campaign filter is active, scopedStats is the lazy campaign stats for that campaign —
+  // no additional campaign_id filter is needed on timeframeStats.
+  // When no campaign filter, filteredStats is empty (scopedStats is empty) and daily stats are used instead.
   const filteredStats = useMemo(
     () =>
       timeframeStats.filter((item) => {
@@ -292,10 +300,9 @@ function InternalStatisticsPage() {
         if (!campaign) return false;
         if (clientFilterId !== ALL_FILTER_VALUE && campaign.client_id !== clientFilterId) return false;
         if (!managerFilteredClientIds.has(campaign.client_id)) return false;
-        if (campaignFilterId !== ALL_FILTER_VALUE && campaign.id !== campaignFilterId) return false;
         return true;
       }),
-    [campaignById, campaignFilterId, clientFilterId, managerFilteredClientIds, timeframeStats],
+    [campaignById, clientFilterId, managerFilteredClientIds, timeframeStats],
   );
 
   const filteredDailyStats = useMemo(
@@ -334,7 +341,7 @@ function InternalStatisticsPage() {
 
   const dailySeries = useMemo(() => {
     const byDate = new Map<string, DailySeriesPoint>();
-    const useCampaignStats = campaignFilterId !== ALL_FILTER_VALUE || sortedFilteredDailyStats.length === 0;
+    const useCampaignStatsSeries = campaignFilterId !== ALL_FILTER_VALUE || sortedFilteredDailyStats.length === 0;
     const ensureDate = (date: string) => {
       const current = byDate.get(date) ?? {
         date,
@@ -347,7 +354,7 @@ function InternalStatisticsPage() {
       return current;
     };
 
-    if (useCampaignStats) {
+    if (useCampaignStatsSeries) {
       for (const item of sortedFilteredStats) {
         const date = normalizeReportDate(item.report_date);
         const current = ensureDate(date);
@@ -535,9 +542,16 @@ function InternalStatisticsPage() {
             genderTarget: campaign.gender_target ?? "-",
           };
         })
-        .filter((campaign) => campaignFilterId !== ALL_FILTER_VALUE || campaign.dailyRows > 0 || campaign.sent > 0 || campaign.replies > 0)
+        // Hide zero-activity campaigns in the fully-unfiltered global view.
+        // When any filter (campaign/client/manager) is active, show all campaigns in scope.
+        .filter((campaign) =>
+          campaignFilterId !== ALL_FILTER_VALUE ||
+          clientFilterId !== ALL_FILTER_VALUE ||
+          managerFilterId !== ALL_FILTER_VALUE ||
+          campaign.dailyRows > 0 || campaign.sent > 0 || campaign.replies > 0,
+        )
         .sort((a, b) => b.sent - a.sent || b.replies - a.replies || a.name.localeCompare(b.name)),
-    [campaignFilterId, campaignTotals, clientById, clientFilteredCampaigns],
+    [campaignFilterId, clientFilterId, managerFilterId, campaignTotals, clientById, clientFilteredCampaigns],
   );
 
   const selectedCampaign = useMemo(
@@ -619,7 +633,8 @@ function InternalStatisticsPage() {
     () => filteredClientBreakdown.slice(0, clientCardLimit),
     [clientCardLimit, filteredClientBreakdown],
   );
-  if (loading) {
+
+  if (loading && !data) {
     return <LoadingState />;
   }
 

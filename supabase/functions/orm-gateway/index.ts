@@ -1736,6 +1736,85 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     };
   }
 
+  // ── Phase 6: analytics overview ─────────────────────────────────────────────────────────────
+
+  if (payload.action === "loadAnalyticsOverview") {
+    const t0 = performance.now();
+    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS); // 180d
+
+    const [usersRows, clientRows, campaignRows, leadRows, dailyStatRows] = await Promise.all([
+      // User lites — same projection as shell.
+      tx.select({
+        id: schema.users.id,
+        first_name: schema.users.firstName,
+        last_name: schema.users.lastName,
+        email: schema.users.email,
+        role: schema.users.role,
+      }).from(schema.users).orderBy(desc(schema.users.createdAt)),
+
+      // Full client rows (needed for per-client breakdown + filter dropdown).
+      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+
+      // Full campaign rows (needed for per-campaign breakdown + filter dropdown).
+      tx.select().from(schema.campaigns).orderBy(asc(schema.campaigns.name)),
+
+      // Lead projections — only the 9 fields consumed by qualification/pipeline charts.
+      // Same as LeadMetricProjection, no full rows. RLS set-based predicate (20260601b) → fast.
+      tx.select({
+        id: schema.leads.id,
+        client_id: schema.leads.clientId,
+        campaign_id: schema.leads.campaignId,
+        created_at: schema.leads.createdAt,
+        qualification: schema.leads.qualification,
+        meeting_booked: schema.leads.meetingBooked,
+        meeting_held: schema.leads.meetingHeld,
+        offer_sent: schema.leads.offerSent,
+        won: schema.leads.won,
+      }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
+
+      // 180-day daily stats — DailyStatInput fields only (10 fields, no mql_count/prospects_count).
+      tx.select({
+        client_id: schema.dailyStats.clientId,
+        report_date: schema.dailyStats.reportDate,
+        emails_sent: schema.dailyStats.emailsSent,
+        response_count: schema.dailyStats.responseCount,
+        bounce_count: schema.dailyStats.bounceCount,
+        negative_count: schema.dailyStats.negativeCount,
+        ooo_count: schema.dailyStats.oooCount,
+        human_replies_count: schema.dailyStats.humanRepliesCount,
+        schedule_today: schema.dailyStats.scheduleToday,
+        schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
+        schedule_day_after: schema.dailyStats.scheduleDayAfter,
+      }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
+    ]);
+
+    const totalMs = performance.now() - t0;
+    if (perf) perf.queryMs.analyticsMs = totalMs;
+    console.log(
+      `[PERF][orm-gateway] loadAnalyticsOverview: ${totalMs.toFixed(1)}ms ` +
+        `(users=${usersRows.length} clients=${clientRows.length} campaigns=${campaignRows.length} ` +
+        `leads=${leadRows.length} dailyStats=${dailyStatRows.length})`,
+    );
+
+    return {
+      users: usersRows,
+      clients: clientRows.map(toClientRecord),
+      campaigns: campaignRows.map(toCampaignRecord),
+      leadProjections: leadRows.map((l) => ({
+        id: l.id,
+        client_id: l.client_id,
+        campaign_id: l.campaign_id ?? null,
+        created_at: l.created_at ? toIsoString(l.created_at) : null,
+        qualification: l.qualification ?? null,
+        meeting_booked: l.meeting_booked ?? null,
+        meeting_held: l.meeting_held ?? null,
+        offer_sent: l.offer_sent ?? null,
+        won: l.won ?? null,
+      })),
+      dailyStats: dailyStatRows,
+    };
+  }
+
   if (payload.action === "loadConditionRules") {
     const rows = await tx
       .select()

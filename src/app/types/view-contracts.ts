@@ -354,6 +354,38 @@ export interface LeadDetailResult {
   replies: ReplyRecord[];
 }
 
+// --- Analytics overview (Phase 6) ---------------------------------------------------------------
+// InternalStatisticsPage: server returns scoped daily_stats + lead projections + entity lists.
+// campaignDailyStats are NOT included — the page uses daily_stats for the default time series
+// (it already has a smart fallback: uses daily_stats when no campaign filter is active). When a
+// campaign filter IS applied, loadCampaignStats(campaignId) lazy-loads the campaign series.
+// ClientStatisticsPage reuses loadClientDashboard (same data, single-client scope).
+//
+// Payload estimate for admin (48 clients, 609 campaigns, 3972 leads):
+//   users(lite) ~1KB + clients(full) ~24KB + campaigns(full) ~183KB
+//   + dailyStats(180d) ~518KB + leadProjections ~238KB ≈ ~964KB < 1.5MB target.
+
+/** Complete data contract for the Internal Statistics page. */
+export interface AnalyticsOverviewPayload {
+  /** All accessible users (lite) — for the manager filter dropdown. */
+  users: UserLite[];
+  /** All accessible clients (full) — for filter dropdown + per-client breakdown. */
+  clients: ClientRecord[];
+  /** All accessible campaigns (full) — for campaign filter dropdown + per-campaign breakdown. */
+  campaigns: CampaignRecord[];
+  /**
+   * 180-day daily stats per-client. Used for the default time series charts.
+   * Only the 10 fields consumed by aggregateDailyStats are included (DailyStatInput shape).
+   * When a campaign filter is applied, loadCampaignStats(campaignId) provides the campaign series.
+   */
+  dailyStats: Array<DailyStatInput & { client_id: string }>;
+  /**
+   * Minimal lead projections for qualification mix and pipeline breakdown charts.
+   * Same shape as LeadMetricProjection (9 fields). Do NOT cast to LeadRecord.
+   */
+  leadProjections: LeadMetricProjection[];
+}
+
 // --- Campaigns list + stats (Phase 5) -----------------------------------------------------------
 // Server handles filter/sort/pagination for the campaigns table. Stats are lazy-loaded per campaign
 // (internal drawer) or all-at-once (client page). Frontend keeps getCampaignPerformance formula.
