@@ -26,7 +26,7 @@ const pgClient = databaseUrl
       prepare: false,
       ssl: "require",
       max: 3,
-      idle_timeout: 20,
+      idle_timeout: 60,  // keep connections alive longer — cold reconnect costs ~1s
       connect_timeout: 10,
     })
   : null;
@@ -652,7 +652,13 @@ async function safeRawSelect(tx: any, query: any): Promise<any[]> {
   }
 }
 
-async function executeAsCaller(request: Request, operation: (tx: any) => Promise<unknown>) {
+interface CallerResult {
+  data: unknown;
+  setupMs: number;
+  handlerMs: number;
+}
+
+async function executeAsCaller(request: Request, operation: (tx: any) => Promise<unknown>): Promise<CallerResult> {
   if (!db) fail(500, "ORM gateway is missing DATABASE_URL.");
 
   let claims: JwtClaims;
@@ -669,14 +675,22 @@ async function executeAsCaller(request: Request, operation: (tx: any) => Promise
   const role = resolvePassthroughRole(claims.role);
 
   return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT
-        set_config('request.jwt.claims', ${claimsJson}, true),
-        set_config('request.jwt.claim.sub', ${sub}, true),
-        set_config('request.jwt.claim.role', ${role}, true)`,
-    );
-    await tx.execute(sql.raw(`set local role ${role}`));
-    return operation(tx);
+    // Combined setup: set JWT context + switch role in ONE round-trip.
+    // set_config('role', ...) is equivalent to SET LOCAL ROLE — PostgreSQL docs §9.27.
+    // Previously two separate round-trips; eliminating one saves ~100ms of pooler latency.
+    const tSetup = performance.now();
+    await tx.execute(sql`SELECT
+      set_config('request.jwt.claims', ${claimsJson}, true),
+      set_config('request.jwt.claim.sub', ${sub}, true),
+      set_config('request.jwt.claim.role', ${role}, true),
+      set_config('role', ${role}, true)`);
+    const setupMs = performance.now() - tSetup;
+
+    const tHandler = performance.now();
+    const data = await operation(tx);
+    const handlerMs = performance.now() - tHandler;
+
+    return { data, setupMs, handlerMs };
   });
 }
 
@@ -1978,8 +1992,16 @@ Deno.serve(async (request) => {
       });
     }
 
-    const data = await executeAsCaller(request, (tx) => handleAction(tx, parsed.value));
-    return jsonResponse(200, { ok: true, data });
+    const tTotal = performance.now();
+    const { data, setupMs, handlerMs } = await executeAsCaller(request, (tx) => handleAction(tx, parsed.value));
+    const totalMs = performance.now() - tTotal;
+    console.log(
+      `[PERF][orm-gateway] ${parsed.value.action}: totalMs=${totalMs.toFixed(1)} ` +
+        `setupMs=${setupMs.toFixed(1)} handlerMs=${handlerMs.toFixed(1)}`,
+    );
+    // _serverMs is included in every response for latency diagnosis.
+    // setupMs = DB round-trip for JWT context setup; handlerMs = actual query time.
+    return jsonResponse(200, { ok: true, data, _serverMs: { total: Math.round(totalMs), setup: Math.round(setupMs), handler: Math.round(handlerMs) } });
   } catch (reason) {
     const mapped = toGatewayError(reason);
     return jsonResponse(mapped.status, {

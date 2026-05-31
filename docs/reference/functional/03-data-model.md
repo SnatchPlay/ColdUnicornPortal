@@ -194,7 +194,7 @@ RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not cur
 
 RLS:
 
-- `campaigns_select_scoped` — declared `to: ["authenticated"]`; production RLS SQL filters by `can_access_client(client_id)` and, for clients only, `type = 'outreach'`.
+- `campaigns_select_scoped` — **set-based** (since `20260601b`): `client_id IN (SELECT id FROM clients WHERE private.can_access_client(id)) AND (current_app_role() <> 'client' OR type = 'outreach')`. Preserves ADR-0003 (client role sees only outreach campaigns).
 - `campaigns_update_scoped` — `using/withCheck: private.can_manage_client(client_id)`. Manager or admin.
 
 #### `campaign_daily_stats` — [schema.ts:231-254](../../../supabase/drizzle/schema.ts#L231-L254)
@@ -258,7 +258,7 @@ Columns of note:
 
 RLS:
 
-- `leads_select_scoped` — `private.can_access_client(client_id)`.
+- `leads_select_scoped` — **set-based** (since `20260601b`): `client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`. The earlier per-row form called `can_access_client` 3972 times per query (once per lead row), costing ~400ms of RLS overhead measured 2026-06-01. The subquery reduces this to 48 calls (once per unique client).
 - `leads_update_scoped` — policy declared but predicate lives in the SQL migrations; effectively restricted to internal roles with `can_manage_client(client_id)`. **Clients are write-blocked at the RLS layer** (ADR-0004); the drawer also gates editability by `identity.role !== "client"` in the UI.
 
 #### `replies` — [schema.ts:142-168](../../../supabase/drizzle/schema.ts#L142-L168)
@@ -282,7 +282,7 @@ Append-only history. Populated by ingestion; the portal never writes.
 
 RLS:
 
-- `replies_select_scoped` — `private.can_access_reply(client_id, lead_id)`. This helper inspects both columns because orphan replies (no `lead_id` yet) must still be visible to the owning client when `client_id` resolves. The helper body lives in `docs/reference/supabase-production-rls.sql`.
+- `replies_select_scoped` — **set-based** (since `20260601b`): `client_id IS NOT NULL AND client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`. The earlier per-row form used `private.can_access_reply(client_id, lead_id)` which also handled orphan replies (null client_id, non-null lead_id). The new form requires `client_id IS NOT NULL`; n8n always sets `client_id` on ingestion so this is safe in practice.
 
 No write policies from the portal.
 
@@ -463,6 +463,29 @@ USING (
 ```
 
 Measured impact: **~10.48 s > 0.30 s** on a table of ~24k rows during seed testing.
+
+### `supabase/migrations/20260601_leads_perf_indexes.sql`
+
+Adds missing indexes identified via EXPLAIN ANALYZE during Phase 4B latency investigation:
+
+| Index | Reason |
+|---|---|
+| `leads(campaign_id)` | Campaign filter was seq-scanning 3972 rows |
+| `campaigns(client_id)` | Missing; needed for client-scoped campaign lookups |
+| `replies(lead_id)` | Missing; `loadLeadDetail` will seq scan when replies have data |
+| DROP `leads_updated_at_idx1` | Duplicate of `leads_updated_at_idx` |
+
+### `supabase/migrations/20260601b_leads_campaigns_replies_rls_set_based.sql`
+
+Extends the set-based predicate pattern from `20260421_fix_rls_performance.sql` to the three remaining hot tables.
+
+Root cause: `leads`, `campaigns`, and `replies` SELECT policies were calling `private.can_access_client(client_id)` per-row. With 3972 leads and 48 clients, each leads query called the function 4020 times at ~0.1ms each = ~400ms overhead per query. Measured impact:
+
+- loadLeadsList handler (two queries): **1340ms → 200ms** (~6.7×)
+- loadLeadsFilterOptions handler (two queries): **1297ms → 125ms** (~10×)
+- Total observed browser fetch: **~2600ms → ~860ms** (~3×)
+
+**Why:** `private.can_access_client(client_id)` is STABLE but takes a `client_id` argument, so PostgreSQL calls it once per unique `client_id` in a nested-loop join rather than hoisting it above the scan. Wrapping in a subquery forces a single set evaluation against the 48-row `clients` table.
 
 ### `supabase/migrations/20260421b_admin_dashboard_view.sql`
 
