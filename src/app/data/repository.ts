@@ -22,6 +22,9 @@ import type {
   AdminDashboardOverview,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  LeadDetailResult,
+  LeadsListParams,
+  LeadsListResponse,
   ManagerDashboardOverview,
   ShellData,
 } from "../types/view-contracts";
@@ -45,6 +48,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadManagerDashboardOverview: { table: "dashboard", operation: "select" },
   loadClientDashboard: { table: "dashboard", operation: "select" },
   loadClientsOverview: { table: "clients", operation: "select" },
+  loadLeadsList: { table: "leads", operation: "select" },
+  loadLeadDetail: { table: "leads", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
@@ -333,7 +338,9 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadAdminDashboardOverview" ||
     action === "loadManagerDashboardOverview" ||
     action === "loadClientDashboard" ||
-    action === "loadClientsOverview";
+    action === "loadClientsOverview" ||
+    action === "loadLeadsList" ||
+    action === "loadLeadDetail";
   const isPerfTracked = isLoadSnapshot || isGatewayTracked;
   const tFetchStart = isPerfTracked ? performance.now() : 0;
 
@@ -454,6 +461,8 @@ export interface Repository {
   loadManagerDashboardOverview(managerId: string): Promise<ManagerDashboardOverview>;
   loadClientDashboard(clientId: string): Promise<ClientDashboardPayload>;
   loadClientsOverview(): Promise<ClientsOverviewPayload>;
+  loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
+  loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
   createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
   createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
@@ -572,6 +581,14 @@ export const repository: Repository = {
       console.groupEnd();
     }
     return result;
+  },
+
+  async loadLeadsList(params) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadsList", { params });
+  },
+
+  async loadLeadDetail(leadId) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadDetail", { leadId });
   },
 
   async loadConditionRules() {

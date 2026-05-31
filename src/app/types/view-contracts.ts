@@ -16,6 +16,8 @@ import type {
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
+  LeadRecord,
+  ReplyRecord,
 } from "./core";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
@@ -286,4 +288,71 @@ export interface ClientDashboardPayload {
     schedule_tomorrow: number | null;
     schedule_day_after: number | null;
   }>;
+}
+
+// --- Leads list + detail (Phase 4) ---------------------------------------------------------------
+// Server handles all filtering, sorting, and pagination. Frontend keeps all form/edit logic and
+// stage computation (getLeadStage). The list row extends LeadRecord so the drawer can use it
+// directly without a separate full-lead fetch — only replies are loaded lazily.
+
+/** Stage keys produced by the SQL stage CASE expression (mirrors getLeadStage logic). */
+export type LeadStageKey =
+  | "preMQL"
+  | "MQL"
+  | "meeting_scheduled"
+  | "meeting_held"
+  | "offer_sent"
+  | "won"
+  | "rejected"
+  | "unqualified";
+
+/**
+ * A single row in the leads list. Extends LeadRecord so the drawer can use it directly for
+ * toLeadDraft / buildLeadPatch without a separate network request. JOINed display fields appended.
+ */
+export interface LeadsListRow extends LeadRecord {
+  clientName: string;
+  campaignName: string | null;
+  /** COUNT(replies) for this lead. Used in the client-leads table and sort. */
+  replyCount: number;
+  /** MAX(received_at) of replies. Used in client-leads table sort. */
+  lastReplyAt: string | null;
+}
+
+/** Server-side filter / sort / pagination params for loadLeadsList. */
+export interface LeadsListParams {
+  clientId?: string;
+  campaignId?: string;
+  /** PIPELINE_STAGES key, or undefined for "all" stages. */
+  stage?: string;
+  replyScope?: "all" | "active" | "ooo";
+  /** ISO date string (inclusive). Resolved from TimeframeValue on the frontend. */
+  dateFrom?: string;
+  dateTo?: string;
+  /** Free-text search across name, email, company, job title, country. */
+  search?: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  /** 1-indexed page number. */
+  page: number;
+  /** Default 50, max 100. */
+  pageSize: number;
+}
+
+/** Response from loadLeadsList. */
+export interface LeadsListResponse {
+  rows: LeadsListRow[];
+  /** Total matching rows across all stages (sum of all stageCounts values). */
+  totalCount: number;
+  /** Row counts per stage after applying all filters EXCEPT the stage filter. */
+  stageCounts: Partial<Record<LeadStageKey, number>>;
+  filterOptions: {
+    clientsLite: Array<{ id: string; name: string }>;
+    campaignsLite: Array<{ id: string; name: string; clientId: string }>;
+  };
+}
+
+/** Reply thread for a single lead, loaded lazily when the drawer opens. */
+export interface LeadDetailResult {
+  replies: ReplyRecord[];
 }

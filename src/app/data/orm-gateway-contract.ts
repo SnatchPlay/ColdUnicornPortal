@@ -19,6 +19,9 @@ import type {
   AdminDashboardOverview,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  LeadDetailResult,
+  LeadsListParams,
+  LeadsListResponse,
   ManagerDashboardOverview,
   ShellData,
 } from "../types/view-contracts";
@@ -83,6 +86,16 @@ export interface LoadClientDashboardPayload {
 
 export interface LoadClientsOverviewPayload {
   action: "loadClientsOverview";
+}
+
+export interface LoadLeadsListPayload {
+  action: "loadLeadsList";
+  params: LeadsListParams;
+}
+
+export interface LoadLeadDetailPayload {
+  action: "loadLeadDetail";
+  leadId: string;
 }
 
 export interface UpdateClientPayload {
@@ -238,6 +251,8 @@ export type OrmGatewayRequest =
   | LoadManagerDashboardPayload
   | LoadClientDashboardPayload
   | LoadClientsOverviewPayload
+  | LoadLeadsListPayload
+  | LoadLeadDetailPayload
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
@@ -282,6 +297,8 @@ export interface OrmGatewayResponseMap {
   loadManagerDashboardOverview: ManagerDashboardOverview;
   loadClientDashboard: ClientDashboardPayload;
   loadClientsOverview: ClientsOverviewPayload;
+  loadLeadsList: LeadsListResponse;
+  loadLeadDetail: LeadDetailResult;
   loadConditionRules: ConditionRuleRecord[];
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
@@ -400,6 +417,44 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
 
   if (action === "loadClientsOverview") {
     return { ok: true, value: { action } };
+  }
+
+  if (action === "loadLeadsList") {
+    if (!isObject(payload.params)) {
+      return { ok: false, error: "loadLeadsList requires a params object." };
+    }
+    const p = payload.params as Record<string, unknown>;
+    if (!isString(p.sortField) || !isString(p.sortDir)) {
+      return { ok: false, error: "loadLeadsList.params requires sortField and sortDir strings." };
+    }
+    const page = typeof p.page === "number" ? p.page : 1;
+    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 100) : 50;
+    return {
+      ok: true,
+      value: {
+        action,
+        params: {
+          clientId: isString(p.clientId) ? p.clientId : undefined,
+          campaignId: isString(p.campaignId) ? p.campaignId : undefined,
+          stage: isString(p.stage) ? p.stage : undefined,
+          replyScope: (p.replyScope === "active" || p.replyScope === "ooo") ? p.replyScope : "all",
+          dateFrom: isString(p.dateFrom) ? p.dateFrom : undefined,
+          dateTo: isString(p.dateTo) ? p.dateTo : undefined,
+          search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,
+          sortField: String(p.sortField),
+          sortDir: p.sortDir === "asc" ? "asc" : "desc",
+          page: Math.max(1, Math.trunc(page)),
+          pageSize,
+        } as LeadsListParams,
+      },
+    };
+  }
+
+  if (action === "loadLeadDetail") {
+    if (!hasStringField(payload, "leadId")) {
+      return { ok: false, error: "loadLeadDetail requires leadId." };
+    }
+    return { ok: true, value: { action, leadId: String(payload.leadId) } };
   }
 
   if (action === "updateClient") {
