@@ -346,13 +346,21 @@ export interface LeadsListResponse {
   totalCount: number;
   /** Row counts per stage after applying all filters EXCEPT the stage filter. */
   stageCounts: Partial<Record<LeadStageKey, number>>;
-  filterOptions: {
-    clientsLite: Array<{ id: string; name: string }>;
-    campaignsLite: Array<{ id: string; name: string; clientId: string }>;
-  };
 }
 
 /** Reply thread for a single lead, loaded lazily when the drawer opens. */
 export interface LeadDetailResult {
   replies: ReplyRecord[];
+}
+
+/**
+ * Static filter option lists for the leads page. Loaded once on mount via loadLeadsFilterOptions
+ * and cached for the session — not re-fetched on every paginate/filter change.
+ * Both lists are scoped by RLS to the caller's accessible leads.
+ */
+export interface LeadsFilterOptions {
+  /** Distinct clients that have at least one visible lead. Sorted by name. */
+  clientsLite: Array<{ id: string; name: string }>;
+  /** Distinct campaigns that have at least one visible lead. Sorted by name. */
+  campaignsLite: Array<{ id: string; name: string; clientId: string }>;
 }

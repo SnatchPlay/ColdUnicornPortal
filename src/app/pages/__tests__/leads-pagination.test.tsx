@@ -17,6 +17,7 @@ vi.mock("../../data/repository", () => ({
   repository: {
     loadLeadsList: vi.fn(),
     loadLeadDetail: vi.fn(),
+    loadLeadsFilterOptions: vi.fn(),
     createLead: vi.fn(),
     updateLead: vi.fn(),
   },
@@ -62,15 +63,7 @@ function makeRows(count: number, startIndex = 0) {
 }
 
 function makeResponse(rows: ReturnType<typeof makeRows>, totalCount: number) {
-  return {
-    rows,
-    totalCount,
-    stageCounts: {},
-    filterOptions: {
-      clientsLite: [{ id: "client-1", name: "Acme" }],
-      campaignsLite: [{ id: "camp-1", name: "Campaign 1", clientId: "client-1" }],
-    },
-  };
+  return { rows, totalCount, stageCounts: {} };
 }
 
 describe("leads pagination", () => {
@@ -78,6 +71,7 @@ describe("leads pagination", () => {
     vi.clearAllMocks();
     mockedUseAuth.mockReturnValue(makeAuth() as never);
     mockedRepo.loadLeadDetail.mockResolvedValue({ replies: [] });
+    mockedRepo.loadLeadsFilterOptions.mockResolvedValue({ clientsLite: [], campaignsLite: [] });
   });
 
   it("shows first page and moves to next page", async () => {

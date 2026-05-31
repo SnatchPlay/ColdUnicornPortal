@@ -20,6 +20,7 @@ import type {
   ClientDashboardPayload,
   ClientsOverviewPayload,
   LeadDetailResult,
+  LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
   ManagerDashboardOverview,
@@ -96,6 +97,10 @@ export interface LoadLeadsListPayload {
 export interface LoadLeadDetailPayload {
   action: "loadLeadDetail";
   leadId: string;
+}
+
+export interface LoadLeadsFilterOptionsPayload {
+  action: "loadLeadsFilterOptions";
 }
 
 export interface UpdateClientPayload {
@@ -253,6 +258,7 @@ export type OrmGatewayRequest =
   | LoadClientsOverviewPayload
   | LoadLeadsListPayload
   | LoadLeadDetailPayload
+  | LoadLeadsFilterOptionsPayload
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
@@ -299,6 +305,7 @@ export interface OrmGatewayResponseMap {
   loadClientsOverview: ClientsOverviewPayload;
   loadLeadsList: LeadsListResponse;
   loadLeadDetail: LeadDetailResult;
+  loadLeadsFilterOptions: LeadsFilterOptions;
   loadConditionRules: ConditionRuleRecord[];
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
@@ -455,6 +462,10 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "loadLeadDetail requires leadId." };
     }
     return { ok: true, value: { action, leadId: String(payload.leadId) } };
+  }
+
+  if (action === "loadLeadsFilterOptions") {
+    return { ok: true, value: { action } };
   }
 
   if (action === "updateClient") {

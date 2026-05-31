@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useDeferredValue, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Download, MessageSquare } from "lucide-react";
 import {
   DateRangeButton,
@@ -18,7 +18,7 @@ import { createDefaultTimeframe, getTimeframeLabel, resolveTimeframeBounds } fro
 import { formatDate, formatNumber, getFullName } from "../lib/format";
 import { getLeadStage } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
-import { useLeadsList, useLeadDetail } from "../lib/use-leads";
+import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { TimeframeValue } from "../lib/timeframe";
@@ -77,7 +77,12 @@ function toDrawerData(row: LeadsListRow, replies: ReturnType<typeof useLeadDetai
 export function ClientLeadsPage() {
   const { identity } = useAuth();
   const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query);
+  // Debounce search: send to server only after 400ms idle — LIKE scan has no trigram index.
+  const [committedSearch, setCommittedSearch] = useState(query);
+  useEffect(() => {
+    const timer = setTimeout(() => setCommittedSearch(query.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">("all");
   const [campaignFilter, setCampaignFilter] = useState("all");
   const [replyScope, setReplyScope] = useState<ReplyScope>("all");
@@ -105,17 +110,18 @@ export function ClientLeadsPage() {
     replyScope,
     dateFrom: timeframeFrom?.toISOString().slice(0, 10),
     dateTo: timeframeTo?.toISOString().slice(0, 10),
-    search: deferredQuery.trim() || undefined,
+    search: committedSearch || undefined,
     sortField: leadSort.key,
     sortDir: leadSort.direction,
     page: loadPage,
     pageSize: PAGE_SIZE,
-  }), [campaignFilter, replyScope, timeframeFrom, timeframeTo, deferredQuery, leadSort, loadPage]);
+  }), [campaignFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, loadPage]);
 
   const { data, loading, error, refresh } = useLeadsList(listParams);
+  const { data: filterOptions } = useLeadsFilterOptions();
 
   // Reset accumulation when any filter changes (loadPage goes back to 1).
-  const filterKey = JSON.stringify({ campaignFilter, replyScope, timeframeFrom, timeframeTo, deferredQuery, leadSort });
+  const filterKey = JSON.stringify({ campaignFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort });
   useEffect(() => {
     setLoadPage(1);
     setAccumulatedRows([]);
@@ -134,9 +140,8 @@ export function ClientLeadsPage() {
 
   const stageCounts = data?.stageCounts ?? {};
   const totalCount = data?.totalCount ?? 0;
-  const campaignsLite = data?.filterOptions.campaignsLite ?? [];
-  const clientsLite = data?.filterOptions.clientsLite ?? [];
-  const clientName = clientsLite[0]?.name ?? identity?.fullName ?? "Client";
+  const campaignsLite = useMemo(() => filterOptions?.campaignsLite ?? [], [filterOptions]);
+  const clientName = filterOptions?.clientsLite[0]?.name ?? identity?.fullName ?? "Client";
   const timeframeLabel = getTimeframeLabel(timeframe);
 
   // Stage filter applied client-side to accumulated rows.
