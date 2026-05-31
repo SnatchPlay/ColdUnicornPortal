@@ -1270,40 +1270,41 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
           FROM public.client_custom_field_values
         `),
 
-        // Lead projections — only the 5 fields createClientMetrics reads; no full rows.
+        // ClientsLeadInput — only the 5 fields createClientMetrics reads (client_id for grouping +
+        // created_at/qualification/meeting_booked/won for aggregateLeads). No id, campaign_id,
+        // meeting_held, or offer_sent — saves ~44% vs the full LeadMetricProjection shape.
         tx.select({
-          id: schema.leads.id,
           client_id: schema.leads.clientId,
-          campaign_id: schema.leads.campaignId,
           created_at: schema.leads.createdAt,
           qualification: schema.leads.qualification,
           meeting_booked: schema.leads.meetingBooked,
-          meeting_held: schema.leads.meetingHeld,
-          offer_sent: schema.leads.offerSent,
           won: schema.leads.won,
         }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
 
-        // 180-day daily stats with client_id for per-client partitioning.
+        // 180-day daily stats — only the 10 fields consumed by createClientMetrics (DailyStatInput).
+        // mql_count and prospects_count are omitted — they are not read by aggregateDailyStats.
         tx.select({
           client_id: schema.dailyStats.clientId,
           report_date: schema.dailyStats.reportDate,
           emails_sent: schema.dailyStats.emailsSent,
-          mql_count: schema.dailyStats.mqlCount,
           response_count: schema.dailyStats.responseCount,
           bounce_count: schema.dailyStats.bounceCount,
           negative_count: schema.dailyStats.negativeCount,
           ooo_count: schema.dailyStats.oooCount,
           human_replies_count: schema.dailyStats.humanRepliesCount,
-          prospects_count: schema.dailyStats.prospectsCount,
           schedule_today: schema.dailyStats.scheduleToday,
           schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
           schedule_day_after: schema.dailyStats.scheduleDayAfter,
         }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
       ]);
 
+    const durationMs = performance.now() - t0;
     console.log(
-      `[PERF][orm-gateway] loadClientsOverview: ${(performance.now() - t0).toFixed(1)}ms ` +
-        `(clients=${clientRows.length}, leads=${leadProjectionRows.length}, dailyStats=${dailyStatRows.length})`,
+      `[PERF][orm-gateway] loadClientsOverview: ${durationMs.toFixed(1)}ms ` +
+        `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
+        `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
+        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
+        `leadProjections=${leadProjectionRows.length}, dailyStats=${dailyStatRows.length})`,
     );
 
     return {
@@ -1315,14 +1316,10 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
       leadProjections: leadProjectionRows.map((l) => ({
-        id: l.id,
         client_id: l.client_id,
-        campaign_id: l.campaign_id ?? null,
         created_at: l.created_at ? toIsoString(l.created_at) : null,
         qualification: l.qualification ?? null,
         meeting_booked: l.meeting_booked ?? null,
-        meeting_held: l.meeting_held ?? null,
-        offer_sent: l.offer_sent ?? null,
         won: l.won ?? null,
       })),
       dailyStats: dailyStatRows,
