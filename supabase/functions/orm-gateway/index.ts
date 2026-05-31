@@ -1609,7 +1609,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
   if (payload.action === "loadCampaignsList") {
     const p = payload.params;
     const t0 = performance.now();
-    const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 200);
+    const pageSize = Math.min(Math.max(1, p.pageSize ?? 200), 500);
     const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
 
     console.log(
