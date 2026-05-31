@@ -42,8 +42,8 @@ the production function until reviewed:
 | `ManagerDashboardPage` | `clients`, `campaigns`, `leads`, `replies`, `campaignDailyStats` | — | `loadManagerDashboardOverview` / co-located `useManagerDashboard` | 2 | ✅ |
 | `ClientDashboardPage` | `clients`, `campaigns`, `leads`, `campaignDailyStats`, `dailyStats` | — | `loadClientDashboard` / co-located `useClientDashboard` | 2 | ✅ |
 | `ClientsPage` | `clients`, `users`, `clientUsers`, `metricsByClientId`, `conditionRules`, `columnOverrides`, `clientCustomFields`, `clientCustomFieldValues` | `upsertClientCustomFieldValue`, `createClient`, `updateClient`, `sendInvite`, `upsertClientUserMapping`, `deleteClientUserMapping` | `loadClientsOverview` / `useClientsOverview` | 3 | ✅ |
-| `InternalLeadsPage` (leads-page.tsx) | `clients`, `leads`, `replies`, `campaigns` | `createLead`, `updateLead` | `loadLeadsList` + `loadLeadDetail` / `useLeadsList` | 4 | ☐ |
-| `ClientLeadsPage` | `clients`, `leads`, `replies`, `campaigns` | — | `loadLeadsList` + `loadLeadDetail` | 4 | ☐ |
+| `InternalLeadsPage` (leads-page.tsx) | `clients`, `leads`, `replies`, `campaigns` | `createLead`, `updateLead` | `loadLeadsList` + `loadLeadDetail` / `useLeadsList` | 4 | ✅ |
+| `ClientLeadsPage` | `clients`, `leads`, `replies`, `campaigns` | — | `loadLeadsList` + `loadLeadDetail` | 4 | ✅ |
 | `InternalCampaignsPage` (campaigns-page.tsx) | `clients`, `campaigns`, `campaignDailyStats` | `createCampaign`, `updateCampaign` | `loadCampaignsList` + `loadCampaignStats` | 5 | ☐ |
 | `ClientCampaignsPage` | `clients`, `campaigns`, `campaignDailyStats` | — | `loadCampaignsList` + `loadCampaignStats` | 5 | ☐ |
 | `InternalStatisticsPage` (statistics-page.tsx) | `users`, `clients`, `campaigns`, `leads`, `campaignDailyStats`, `dailyStats` | — | `loadAnalyticsOverview` | 6 | ☐ |

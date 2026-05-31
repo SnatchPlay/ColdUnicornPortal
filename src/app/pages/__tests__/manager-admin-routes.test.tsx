@@ -34,6 +34,8 @@ vi.mock("../../data/repository", () => ({
     loadManagerDashboardOverview: vi.fn(),
     loadClientDashboard: vi.fn(),
     loadClientsOverview: vi.fn(),
+    loadLeadsList: vi.fn(),
+    loadLeadDetail: vi.fn(),
   },
 }));
 
@@ -46,15 +48,13 @@ type RouteCase = {
   Component: () => JSX.Element;
 };
 
-// Non-dashboard, non-clients routes still use CoreDataProvider (LegacySnapshotOutlet).
+// Non-dashboard, non-clients, non-leads routes still use CoreDataProvider (LegacySnapshotOutlet).
 const LEGACY_ROUTE_CASES: RouteCase[] = [
-  { name: "manager leads route", role: "manager", title: "Leads", Component: LeadsPage },
   { name: "manager campaigns route", role: "manager", title: "Campaigns", Component: CampaignsPage },
   { name: "manager statistics route", role: "manager", title: "Statistics", Component: StatisticsPage },
   { name: "manager domains route", role: "manager", title: "Domains", Component: DomainsPage },
   { name: "manager invoices route", role: "manager", title: "Invoices", Component: InvoicesPage },
   { name: "manager blacklist route", role: "manager", title: "Blacklist", Component: BlacklistPage },
-  { name: "admin leads route", role: "admin", title: "Leads", Component: LeadsPage },
   { name: "admin campaigns route", role: "admin", title: "Campaigns", Component: CampaignsPage },
   { name: "admin statistics route", role: "admin", title: "Statistics", Component: StatisticsPage },
   { name: "admin domains route", role: "admin", title: "Domains", Component: DomainsPage },
@@ -66,6 +66,12 @@ const LEGACY_ROUTE_CASES: RouteCase[] = [
 const CLIENTS_ROUTE_CASES: RouteCase[] = [
   { name: "manager clients route", role: "manager", title: "Clients", Component: ClientsPage },
   { name: "admin clients route", role: "admin", title: "Clients", Component: ClientsPage },
+];
+
+// Leads routes (Phase 4): per-page loaders, no CoreDataProvider.
+const LEADS_ROUTE_CASES: RouteCase[] = [
+  { name: "manager leads route", role: "manager", title: "Leads", Component: LeadsPage },
+  { name: "admin leads route", role: "admin", title: "Leads", Component: LeadsPage },
 ];
 
 // Dashboard routes (Phase 2A): per-page loaders, no CoreDataProvider.
@@ -122,6 +128,8 @@ describe("manager/admin route states", () => {
     mockedRepo.loadAdminDashboardOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadManagerDashboardOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadClientsOverview.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadLeadsList.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadLeadDetail.mockResolvedValue({ replies: [] });
   });
 
   // ── Legacy snapshot routes (still on CoreDataProvider) ──────────────────────────────────────
@@ -203,6 +211,15 @@ describe("manager/admin route states", () => {
     await act(async () => {});
 
     expect(mockedRepo.loadClientsOverview.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  // ── Leads routes (Phase 4: per-page loader, no CoreDataProvider) ─────────────────────────────
+
+  it.each(LEADS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
+    mockedUseAuth.mockReturnValue(makeAuth(role) as never);
+    // loadLeadsList hangs (set in beforeEach) → hook stays in loading:true.
+    renderRoute(Component);
+    expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
   });
 
   it("removes admin unclassified and at-risk surfaces and shows split momentum charts", async () => {

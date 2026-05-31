@@ -1326,6 +1326,227 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     };
   }
 
+  // ── Phase 4: server-side leads pagination ───────────────────────────────────────────────────
+
+  if (payload.action === "loadLeadsList") {
+    const p = payload.params;
+    const t0 = performance.now();
+    const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 100);
+    const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
+
+    // Shared SQL stage CASE expression — mirrors getLeadStage in selectors.ts.
+    const stageExpr = sql`
+      CASE
+        WHEN l.won = true THEN 'won'
+        WHEN l.offer_sent = true THEN 'offer_sent'
+        WHEN l.meeting_held = true THEN 'meeting_held'
+        WHEN l.meeting_booked = true THEN 'meeting_scheduled'
+        WHEN l.qualification IS NULL THEN 'unqualified'
+        ELSE l.qualification
+      END
+    `;
+
+    // Build dynamic WHERE fragments (applied in both count and data queries).
+    const baseWhereParts: ReturnType<typeof sql>[] = [];
+    if (p.clientId) baseWhereParts.push(sql`l.client_id = ${p.clientId}`);
+    if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
+    if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
+    if (p.dateTo) baseWhereParts.push(sql`l.created_at <= ${p.dateTo}`);
+    if (p.replyScope === "ooo") baseWhereParts.push(sql`l.qualification = 'OOO'`);
+    if (p.replyScope === "active") baseWhereParts.push(sql`l.qualification IS DISTINCT FROM 'OOO'`);
+    if (p.search) {
+      const needle = `%${p.search.toLowerCase()}%`;
+      baseWhereParts.push(sql`(
+        LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.email, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.company_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.job_title, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.country, '')) LIKE ${needle}
+      )`);
+    }
+
+    const baseWhereClause = baseWhereParts.length > 0
+      ? sql`WHERE ${sql.join(baseWhereParts, sql` AND `)}`
+      : sql``;
+
+    // Stage filter (only in data query, not count query).
+    const stageWhereClause = p.stage
+      ? sql`AND (${stageExpr}) = ${p.stage}`
+      : sql``;
+
+    // Sort ORDER BY clause.
+    const dirSql = p.sortDir === "asc" ? sql`ASC` : sql`DESC`;
+    const dirSqlTie = sql`ASC`; // tie-breaker always ASC for stability
+    let orderClause: ReturnType<typeof sql>;
+    if (p.sortField === "lead") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "client") {
+      orderClause = sql`ORDER BY LOWER(c.name) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "company") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.company_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "status") {
+      orderClause = sql`ORDER BY (${stageExpr}) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "campaign") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(camp.name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "step") {
+      orderClause = sql`ORDER BY l.message_number ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "replies") {
+      orderClause = sql`ORDER BY reply_count ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "lastReply") {
+      orderClause = sql`ORDER BY last_reply_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else {
+      // "created" and any unknown field defaults to created_at
+      orderClause = sql`ORDER BY l.created_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    }
+
+    // Run count query (all stages) and data query in parallel.
+    const [stageCountRows, dataRows, clientsLiteRows, campaignsLiteRows] = await Promise.all([
+      rawQuery<{ stage: string; count: number }>(tx, sql`
+        SELECT (${stageExpr}) AS stage, COUNT(*)::int AS count
+        FROM leads l
+        JOIN clients c ON c.id = l.client_id
+        LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+        ${baseWhereClause}
+        GROUP BY stage
+      `),
+      rawQuery<Record<string, unknown>>(tx, sql`
+        SELECT
+          l.id, l.created_at, l.updated_at, l.client_id,
+          l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
+          l.company_name, l.linkedin_url, l.gender, l.qualification,
+          l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+          l.industry, l.headcount_range, l.website, l.country,
+          l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
+          l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
+          l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+          l.source, l.reply_text, l.comments,
+          c.name AS client_name,
+          camp.name AS campaign_name,
+          COALESCE(r.reply_count, 0)::int AS reply_count,
+          r.last_reply_at
+        FROM leads l
+        JOIN clients c ON c.id = l.client_id
+        LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+        LEFT JOIN (
+          SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
+          FROM replies GROUP BY lead_id
+        ) r ON r.lead_id = l.id
+        ${baseWhereClause}
+        ${stageWhereClause}
+        ${orderClause}
+        LIMIT ${pageSize} OFFSET ${offset}
+      `),
+      rawQuery<{ id: string; name: string }>(tx, sql`
+        SELECT DISTINCT c.id, c.name FROM clients c
+        JOIN leads l ON l.client_id = c.id
+        ORDER BY c.name
+      `),
+      rawQuery<{ id: string; name: string; client_id: string }>(tx, sql`
+        SELECT DISTINCT camp.id, camp.name, camp.client_id FROM campaigns camp
+        JOIN leads l ON l.campaign_id = camp.id
+        ORDER BY camp.name
+      `),
+    ]);
+
+    const stageCounts: Record<string, number> = {};
+    let totalCount = 0;
+    for (const row of stageCountRows) {
+      stageCounts[String(row.stage)] = row.count ?? 0;
+      totalCount += row.count ?? 0;
+    }
+
+    const rows = dataRows.map((r) => ({
+      id: String(r.id),
+      created_at: r.created_at ? toIsoString(r.created_at) ?? "" : "",
+      updated_at: r.updated_at ? toIsoString(r.updated_at) ?? "" : "",
+      client_id: String(r.client_id),
+      campaign_id: r.campaign_id ? String(r.campaign_id) : null,
+      email: r.email ? String(r.email) : null,
+      first_name: r.first_name ? String(r.first_name) : null,
+      last_name: r.last_name ? String(r.last_name) : null,
+      job_title: r.job_title ? String(r.job_title) : null,
+      company_name: r.company_name ? String(r.company_name) : null,
+      linkedin_url: r.linkedin_url ? String(r.linkedin_url) : null,
+      gender: r.gender ? String(r.gender) : null,
+      qualification: r.qualification ? String(r.qualification) : null,
+      expected_return_date: r.expected_return_date ? String(r.expected_return_date) : null,
+      external_id: r.external_id ? String(r.external_id) : null,
+      phone_number: r.phone_number ? String(r.phone_number) : null,
+      phone_source: r.phone_source ? String(r.phone_source) : null,
+      industry: r.industry ? String(r.industry) : null,
+      headcount_range: r.headcount_range ? String(r.headcount_range) : null,
+      website: r.website ? String(r.website) : null,
+      country: r.country ? String(r.country) : null,
+      message_title: r.message_title ? String(r.message_title) : null,
+      message_number: r.message_number != null ? Number(r.message_number) : null,
+      response_time_hours: r.response_time_hours != null ? Number(r.response_time_hours) : null,
+      response_time_label: r.response_time_label ? String(r.response_time_label) : null,
+      meeting_booked: Boolean(r.meeting_booked),
+      meeting_held: Boolean(r.meeting_held),
+      offer_sent: Boolean(r.offer_sent),
+      won: Boolean(r.won),
+      added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
+      external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
+      external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
+      source: r.source ? String(r.source) : "smartlead",
+      reply_text: r.reply_text ? String(r.reply_text) : null,
+      comments: r.comments ? String(r.comments) : null,
+      // JOINed fields
+      clientName: String(r.client_name ?? ""),
+      campaignName: r.campaign_name ? String(r.campaign_name) : null,
+      replyCount: Number(r.reply_count ?? 0),
+      lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
+    }));
+
+    console.log(
+      `[PERF][orm-gateway] loadLeadsList: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(rows=${rows.length}, totalCount=${totalCount}, page=${p.page}, pageSize=${pageSize})`,
+    );
+
+    return {
+      rows,
+      totalCount,
+      stageCounts,
+      filterOptions: { clientsLite: clientsLiteRows, campaignsLite: campaignsLiteRows },
+    };
+  }
+
+  if (payload.action === "loadLeadDetail") {
+    const leadId = payload.leadId;
+    const t0 = performance.now();
+
+    const replyRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT id, lead_id, external_id, sequence_step, message_subject, message_text,
+             received_at, client_id, from_email_address, is_automated_reply,
+             classification, short_reason, language_detected, is_forwarded
+      FROM replies
+      WHERE lead_id = ${leadId}
+      ORDER BY received_at DESC
+    `);
+
+    console.log(`[PERF][orm-gateway] loadLeadDetail: ${(performance.now() - t0).toFixed(1)}ms (replies=${replyRows.length})`);
+
+    return {
+      replies: replyRows.map((r) => ({
+        id: String(r.id ?? ""),
+        created_at: r.received_at ? toIsoString(r.received_at) ?? "" : "",
+        lead_id: r.lead_id ? String(r.lead_id) : null,
+        external_id: r.external_id ? String(r.external_id) : "",
+        sequence_step: r.sequence_step != null ? Number(r.sequence_step) : null,
+        message_subject: r.message_subject ? String(r.message_subject) : null,
+        message_text: r.message_text ? String(r.message_text) : null,
+        received_at: r.received_at ? toIsoString(r.received_at) ?? "" : "",
+        client_id: r.client_id ? String(r.client_id) : null,
+        from_email_address: r.from_email_address ? String(r.from_email_address) : null,
+        is_automated_reply: Boolean(r.is_automated_reply),
+        classification: r.classification ? String(r.classification) : null,
+        short_reason: r.short_reason ? String(r.short_reason) : null,
+        language_detected: r.language_detected ? String(r.language_detected) : null,
+        is_forwarded: Boolean(r.is_forwarded),
+      })),
+    };
+  }
+
   if (payload.action === "loadConditionRules") {
     const rows = await tx
       .select()
