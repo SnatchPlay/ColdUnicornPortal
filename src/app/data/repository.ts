@@ -326,15 +326,15 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const body = { action, ...payload } as Record<string, unknown>;
   const meta = ORM_ACTION_META[action];
 
-  // Instrument loadSnapshot ([TEMP PERF]) and per-page dashboard/shell loaders ([PERF][dashboard]).
+  // Instrument loadSnapshot ([TEMP PERF]) and all per-page gateway loaders ([PERF][gateway]).
   const isLoadSnapshot = action === "loadSnapshot";
-  const isDashboardAction =
+  const isGatewayTracked =
     action === "loadShellData" ||
     action === "loadAdminDashboardOverview" ||
     action === "loadManagerDashboardOverview" ||
     action === "loadClientDashboard" ||
     action === "loadClientsOverview";
-  const isPerfTracked = isLoadSnapshot || isDashboardAction;
+  const isPerfTracked = isLoadSnapshot || isGatewayTracked;
   const tFetchStart = isPerfTracked ? performance.now() : 0;
 
   const gatewayFunction = runtimeConfig.ormGatewayFunction;
@@ -352,7 +352,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const tTextEnd = isPerfTracked ? performance.now() : 0;
 
   if (isPerfTracked) {
-    const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][dashboard]";
+    const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][gateway]";
     console.log(
       `${label} ${action}: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
         `readBody=${(tTextEnd - tFetchEnd).toFixed(1)}ms ` +
@@ -547,7 +547,31 @@ export const repository: Repository = {
   },
 
   async loadClientsOverview() {
-    return invokeOrmGatewaySelectWithRetry("loadClientsOverview", {});
+    const result = await invokeOrmGatewaySelectWithRetry("loadClientsOverview", {});
+    if (import.meta.env.DEV) {
+      const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
+      const sections: Record<string, { bytes: number; rows: number }> = {
+        clients:               { bytes: sizeOf(result.clients),               rows: result.clients.length },
+        usersLite:             { bytes: sizeOf(result.usersLite),             rows: result.usersLite.length },
+        clientUsers:           { bytes: sizeOf(result.clientUsers),           rows: result.clientUsers.length },
+        conditionRules:        { bytes: sizeOf(result.conditionRules),        rows: result.conditionRules.length },
+        columnOverrides:       { bytes: sizeOf(result.columnOverrides),       rows: result.columnOverrides.length },
+        clientCustomFields:    { bytes: sizeOf(result.clientCustomFields),    rows: result.clientCustomFields.length },
+        clientCustomFieldValues: { bytes: sizeOf(result.clientCustomFieldValues), rows: result.clientCustomFieldValues.length },
+        leadProjections:       { bytes: sizeOf(result.leadProjections),       rows: result.leadProjections.length },
+        dailyStats:            { bytes: sizeOf(result.dailyStats),            rows: result.dailyStats.length },
+      };
+      const total = Object.values(sections).reduce((sum, s) => sum + s.bytes, 0);
+      const sorted = Object.entries(sections).sort((a, b) => b[1].bytes - a[1].bytes);
+      console.group("[PERF][gateway] loadClientsOverview payload breakdown");
+      for (const [name, { bytes, rows }] of sorted) {
+        const pct = total > 0 ? ((bytes / total) * 100).toFixed(1) : "0.0";
+        console.log(`  ${name.padEnd(24)} ${(bytes / 1024).toFixed(1).padStart(8)} KB  (${pct.padStart(5)}%)  rows=${rows}`);
+      }
+      console.log(`  ${"TOTAL".padEnd(24)} ${(total / 1024).toFixed(1).padStart(8)} KB`);
+      console.groupEnd();
+    }
+    return result;
   },
 
   async loadConditionRules() {

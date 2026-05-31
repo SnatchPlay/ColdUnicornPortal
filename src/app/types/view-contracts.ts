@@ -17,6 +17,10 @@ import type {
   ColumnOverrideRecord,
   ConditionRuleRecord,
 } from "./core";
+// DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
+// dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
+// payload — only fields actually consumed by createClientMetrics are shipped).
+import type { DailyStatInput } from "../lib/client-metrics";
 
 // --- Lite shapes (navigation / filter options) ---------------------------------------------------
 
@@ -71,6 +75,20 @@ export interface LeadMetricProjection {
   meeting_booked: boolean | null;
   meeting_held: boolean | null;
   offer_sent: boolean | null;
+  won: boolean | null;
+}
+
+/**
+ * Minimal lead projection for the Clients page (Phase 3). Only the 5 fields that
+ * `createClientMetrics` and `useClientsOverview` actually consume — no id, campaign_id,
+ * meeting_held, or offer_sent. Reduces lead section payload by ~44% vs LeadMetricProjection.
+ * Do NOT cast to LeadRecord or LeadMetricProjection.
+ */
+export interface ClientsLeadInput {
+  client_id: string;
+  created_at: string | null;
+  qualification: string | null;
+  meeting_booked: boolean | null;
   won: boolean | null;
 }
 
@@ -208,30 +226,17 @@ export interface ClientsOverviewPayload {
   /** Per-client custom field values. */
   clientCustomFieldValues: ClientCustomFieldValueRecord[];
   /**
-   * Lead metric projections for ALL visible clients. createClientMetrics reads only created_at,
-   * qualification, meeting_booked, and won — shipping full LeadRecord rows would triple the payload.
-   * Do NOT cast these to LeadRecord; pass directly to createClientMetrics.
+   * Minimal lead projections for ALL visible clients. Only 5 fields — exactly what
+   * createClientMetrics consumes for DoD/WoW/MoM aggregates. Saves ~44% vs LeadMetricProjection.
+   * Do NOT cast to LeadRecord or LeadMetricProjection.
    */
-  leadProjections: LeadMetricProjection[];
+  leadProjections: ClientsLeadInput[];
   /**
    * 180-day daily stats for ALL visible clients. Includes client_id for per-client partitioning.
-   * Used by createClientMetrics (doD / WoW / MoM aggregates).
+   * Only the 10 fields consumed by createClientMetrics — mql_count and prospects_count are omitted.
+   * Use DailyStatInput (client-metrics.ts) as the consumer interface.
    */
-  dailyStats: Array<{
-    client_id: string;
-    report_date: string;
-    emails_sent: number | null;
-    mql_count: number | null;
-    response_count: number | null;
-    bounce_count: number | null;
-    negative_count: number | null;
-    ooo_count: number | null;
-    human_replies_count: number | null;
-    prospects_count: number | null;
-    schedule_today: number | null;
-    schedule_tomorrow: number | null;
-    schedule_day_after: number | null;
-  }>;
+  dailyStats: Array<DailyStatInput & { client_id: string }>;
 }
 
 /**
