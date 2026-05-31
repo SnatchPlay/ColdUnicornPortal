@@ -19,6 +19,13 @@ import type {
   UserRecord,
 } from "../types/core";
 import type {
+  AdminDashboardOverview,
+  ClientDashboardPayload,
+  ClientsOverviewPayload,
+  ManagerDashboardOverview,
+  ShellData,
+} from "../types/view-contracts";
+import type {
   LoadIdentityResult,
   OrmGatewayAction,
   OrmGatewayEnvelope,
@@ -33,6 +40,11 @@ const SNAPSHOT_RETRY_DELAYS_MS = [250, 600] as const;
 
 const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: RepositoryOperation }> = {
   loadSnapshot: { table: "snapshot", operation: "select" },
+  loadShellData: { table: "shell", operation: "select" },
+  loadAdminDashboardOverview: { table: "dashboard", operation: "select" },
+  loadManagerDashboardOverview: { table: "dashboard", operation: "select" },
+  loadClientDashboard: { table: "dashboard", operation: "select" },
+  loadClientsOverview: { table: "clients", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
@@ -246,7 +258,7 @@ async function getSessionAccessToken() {
 }
 
 async function performEdgeFunctionRequest(
-  functionName: "send-invite" | "manage-invites" | "orm-gateway",
+  functionName: "send-invite" | "manage-invites" | "orm-gateway" | (string & {}),
   accessToken: string,
   body: Record<string, unknown>,
 ) {
@@ -314,43 +326,49 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const body = { action, ...payload } as Record<string, unknown>;
   const meta = ORM_ACTION_META[action];
 
-  // [TEMP PERF] only instrument loadSnapshot — the dominant call
+  // Instrument loadSnapshot ([TEMP PERF]) and per-page dashboard/shell loaders ([PERF][dashboard]).
   const isLoadSnapshot = action === "loadSnapshot";
-  const tFetchStart = isLoadSnapshot ? performance.now() : 0;
-  // [TEMP PERF] /start
+  const isDashboardAction =
+    action === "loadShellData" ||
+    action === "loadAdminDashboardOverview" ||
+    action === "loadManagerDashboardOverview" ||
+    action === "loadClientDashboard" ||
+    action === "loadClientsOverview";
+  const isPerfTracked = isLoadSnapshot || isDashboardAction;
+  const tFetchStart = isPerfTracked ? performance.now() : 0;
 
-  let response = await performEdgeFunctionRequest("orm-gateway", firstToken, body);
+  const gatewayFunction = runtimeConfig.ormGatewayFunction;
+  let response = await performEdgeFunctionRequest(gatewayFunction, firstToken, body);
 
   if (response.status === 401) {
     const refresh = await client.auth.refreshSession();
     if (!refresh.error && refresh.data.session?.access_token) {
-      response = await performEdgeFunctionRequest("orm-gateway", refresh.data.session.access_token, body);
+      response = await performEdgeFunctionRequest(gatewayFunction, refresh.data.session.access_token, body);
     }
   }
 
-  // [TEMP PERF] measure fetch + text + parse for loadSnapshot
-  const tFetchEnd = isLoadSnapshot ? performance.now() : 0;
+  const tFetchEnd = isPerfTracked ? performance.now() : 0;
   const text = await response.text();
-  const tTextEnd = isLoadSnapshot ? performance.now() : 0;
-  if (isLoadSnapshot) {
+  const tTextEnd = isPerfTracked ? performance.now() : 0;
+
+  if (isPerfTracked) {
+    const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][dashboard]";
     console.log(
-      `[TEMP PERF] loadSnapshot HTTP: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
+      `${label} ${action}: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
         `readBody=${(tTextEnd - tFetchEnd).toFixed(1)}ms ` +
-        `bodySize=${text.length} bytes (${(text.length / 1024).toFixed(1)} KB)`,
+        `responseBytes=${text.length} (${(text.length / 1024).toFixed(1)} KB)`,
     );
   }
-  // [TEMP PERF] /end
+
   let envelope: OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]> | null = null;
 
   if (text) {
     try {
-      // [TEMP PERF] measure JSON.parse cost for loadSnapshot
       const tParseStart = isLoadSnapshot ? performance.now() : 0;
       envelope = JSON.parse(text) as OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]>;
       if (isLoadSnapshot) {
         console.log(`[TEMP PERF] loadSnapshot JSON.parse: ${(performance.now() - tParseStart).toFixed(1)}ms`);
       }
-      // [TEMP PERF] /end
     } catch {
       envelope = null;
     }
@@ -431,6 +449,11 @@ export interface Repository {
     includeDailyStats?: boolean;
     leadsLimit?: number;
   }): Promise<CoreSnapshot>;
+  loadShellData(): Promise<ShellData>;
+  loadAdminDashboardOverview(): Promise<AdminDashboardOverview>;
+  loadManagerDashboardOverview(managerId: string): Promise<ManagerDashboardOverview>;
+  loadClientDashboard(clientId: string): Promise<ClientDashboardPayload>;
+  loadClientsOverview(): Promise<ClientsOverviewPayload>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
   createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
   createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
@@ -491,6 +514,13 @@ export interface Repository {
 
 export const repository: Repository = {
   async loadSnapshot(options) {
+    // [SNAPSHOT_FORBIDDEN_AFTER_CUTOVER] The universal snapshot is being retired in favour of
+    // per-page data contracts (loadShellData + per-route loaders). Any call surfaced here after
+    // the no-snapshot cutover (Phase 8) is a regression. The stack trace pinpoints the caller.
+    console.warn(
+      "[SNAPSHOT_FORBIDDEN_AFTER_CUTOVER] repository.loadSnapshot called",
+      new Error("loadSnapshot call site").stack,
+    );
     const includeDailyStats = options?.includeDailyStats ?? true;
     const leadsLimit = options?.leadsLimit;
 
@@ -498,6 +528,26 @@ export const repository: Repository = {
       includeDailyStats,
       leadsLimit,
     });
+  },
+
+  async loadShellData() {
+    return invokeOrmGatewaySelectWithRetry("loadShellData", {});
+  },
+
+  async loadAdminDashboardOverview() {
+    return invokeOrmGatewaySelectWithRetry("loadAdminDashboardOverview", {});
+  },
+
+  async loadManagerDashboardOverview(managerId) {
+    return invokeOrmGatewaySelectWithRetry("loadManagerDashboardOverview", { managerId });
+  },
+
+  async loadClientDashboard(clientId) {
+    return invokeOrmGatewaySelectWithRetry("loadClientDashboard", { clientId });
+  },
+
+  async loadClientsOverview() {
+    return invokeOrmGatewaySelectWithRetry("loadClientsOverview", {});
   },
 
   async loadConditionRules() {

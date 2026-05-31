@@ -1,4 +1,4 @@
-﻿import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -9,17 +9,11 @@ import {
   YAxis,
 } from "recharts";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { repository, RepositoryError } from "../data/repository";
 import { formatDate, formatNumber } from "../lib/format";
-import {
-  getLeadStage,
-  scopeCampaignStats,
-  scopeCampaigns,
-  scopeClients,
-  scopeDailyStats,
-  scopeLeads,
-} from "../lib/selectors";
+import { getLeadStage } from "../lib/selectors";
+import type { AdminDashboardOverview } from "../types/view-contracts";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
 
 const TOOLTIP = {
   contentStyle: {
@@ -61,124 +55,88 @@ const MOMENTUM_CHARTS = [
   },
 ];
 
+function mapDashboardError(reason: unknown): string {
+  if (reason instanceof RepositoryError) {
+    if (reason.kind === "timeout") return `Loading timed out. A database performance issue may be affecting this view.`;
+    if (reason.kind === "permission") return `Access to dashboard data is blocked by your current permissions.`;
+    if (reason.kind === "network") return `Dashboard data could not be loaded due to a network error. Try again.`;
+    return reason.message;
+  }
+  if (reason instanceof Error) return reason.message;
+  return "Failed to load dashboard data.";
+}
+
+function useAdminDashboard() {
+  const { identity, loading: authLoading } = useAuth();
+  const [data, setData] = useState<AdminDashboardOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await repository.loadAdminDashboardOverview();
+      setData(result);
+      setError(null);
+    } catch (reason) {
+      setError(mapDashboardError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !identity) {
+      if (!authLoading) setLoading(false);
+      return;
+    }
+    void load();
+  }, [authLoading, identity, load]);
+
+  return { data, loading, error, refresh: load };
+}
+
 export function AdminDashboardPage() {
-  const { identity } = useAuth();
-  const { users, clients, campaigns, leads, campaignDailyStats, dailyStats, loading, error, refresh } = useCoreData();
-
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
-  );
-  const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
-  const scopedCampaignStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
-  );
-  const scopedDailyStats = useMemo(
-    () => (identity ? scopeDailyStats(identity, clients, dailyStats) : []),
-    [clients, dailyStats, identity],
-  );
-
-  const managerIds = useMemo(
-    () => new Set(users.filter((user) => user.role === "manager").map((user) => user.id)),
-    [users],
-  );
-
-  const clientsWithoutManager = useMemo(
-    () => scopedClients.filter((client) => !managerIds.has(client.manager_id)).length,
-    [managerIds, scopedClients],
-  );
-
-  const campaignSeries = useMemo(() => {
-    const grouped = new Map<string, { date: string; sent: number; replies: number; positive: number }>();
-
-    for (const item of scopedCampaignStats) {
-      const key = item.report_date;
-      const current = grouped.get(key) ?? { date: key, sent: 0, replies: 0, positive: 0 };
-      current.sent += item.sent_count ?? 0;
-      current.replies += item.reply_count ?? 0;
-      current.positive += item.positive_replies_count ?? 0;
-      grouped.set(key, current);
-    }
-
-    return Array.from(grouped.values())
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-21)
-      .map((item) => ({
-        ...item,
-        label: formatDate(item.date, { day: "2-digit", month: "short" }),
-      }));
-  }, [scopedCampaignStats]);
-
-  const managerCapacityRows = useMemo(() => {
-    const userMap = new Map(users.map((u) => [u.id, u]));
-    const activeCampaignCountByClient = new Map<string, number>();
-    for (const c of scopedCampaigns) {
-      if (c.status === "active") {
-        activeCampaignCountByClient.set(c.client_id, (activeCampaignCountByClient.get(c.client_id) ?? 0) + 1);
-      }
-    }
-    const leadCountByClient = new Map<string, number>();
-    for (const l of scopedLeads) {
-      leadCountByClient.set(l.client_id, (leadCountByClient.get(l.client_id) ?? 0) + 1);
-    }
-
-    const byManager = new Map<string, { managerName: string; clients: number; activeCampaigns: number; leads: number }>();
-
-    for (const client of scopedClients) {
-      const manager = userMap.get(client.manager_id);
-      const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
-      const key = manager?.id ?? `unknown:${client.manager_id}`;
-
-      const current = byManager.get(key) ?? {
-        managerName,
-        clients: 0,
-        activeCampaigns: 0,
-        leads: 0,
-      };
-
-      current.clients += 1;
-      current.activeCampaigns += activeCampaignCountByClient.get(client.id) ?? 0;
-      current.leads += leadCountByClient.get(client.id) ?? 0;
-      byManager.set(key, current);
-    }
-
-    return Array.from(byManager.values())
-      .sort((left, right) => right.clients - left.clients)
-      .slice(0, 8);
-  }, [scopedCampaigns, scopedClients, scopedLeads, users]);
-
-  const latestSnapshotDate = useMemo(
-    () => scopedDailyStats.map((item) => item.report_date).sort((a, b) => b.localeCompare(a))[0],
-    [scopedDailyStats],
-  );
+  const { data, loading, error, refresh } = useAdminDashboard();
 
   const pipelineCounts = useMemo(() => {
-    let mql = 0;
-    let preMql = 0;
-    let beyondMql = 0;
-    let unqualified = 0;
-    for (const lead of scopedLeads) {
-      const stage = getLeadStage(lead);
-      if (stage === "MQL") mql++;
-      else if (stage === "preMQL") preMql++;
-      else if (stage === "unqualified") unqualified++;
-      else beyondMql++;
+    let mql = 0, preMql = 0, beyondMql = 0, unqualified = 0;
+    for (const group of data?.pipelineGroups ?? []) {
+      const stage = getLeadStage(group);
+      if (stage === "MQL") mql += group.count;
+      else if (stage === "preMQL") preMql += group.count;
+      else if (stage === "unqualified") unqualified += group.count;
+      else beyondMql += group.count;
     }
     return { mql, preMql, beyondMql, unqualified };
-  }, [scopedLeads]);
+  }, [data]);
 
-  const metrics = [
+  const campaignSeries = useMemo(() => {
+    return (data?.campaignMomentum21d ?? []).map((item) => ({
+      ...item,
+      label: formatDate(item.date, { day: "2-digit", month: "short" }),
+    }));
+  }, [data]);
+
+  const managerCapacityRows = useMemo(() => {
+    return (data?.managerCapacity ?? []).map((row) => ({
+      managerName: row.managerName,
+      clients: row.clientsCount,
+      activeCampaigns: row.activeCampaignsCount,
+      leads: row.leadsCount,
+    }));
+  }, [data]);
+
+  const metrics = useMemo(() => [
     {
       label: "Clients",
-      value: formatNumber(scopedClients.length),
-      hint: `${formatNumber(clientsWithoutManager)} without valid manager assignment`,
+      value: formatNumber(data?.metrics.clientsCount ?? 0),
+      hint: `${formatNumber(data?.metrics.clientsWithoutManager ?? 0)} without valid manager assignment`,
       tone: "info" as const,
     },
     {
       label: "Active campaigns",
-      value: formatNumber(scopedCampaigns.filter((campaign) => campaign.status === "active").length),
+      value: formatNumber(data?.metrics.activeCampaignsCount ?? 0),
       hint: "Global operational volume",
       tone: "success" as const,
     },
@@ -194,7 +152,9 @@ export function AdminDashboardPage() {
       hint: `${formatNumber(pipelineCounts.unqualified)} not yet qualified`,
       tone: "neutral" as const,
     },
-  ];
+  ], [data, pipelineCounts]);
+
+  const latestSnapshotDate = data?.latestSnapshotDate ?? null;
 
   if (loading) {
     return <LoadingState />;

@@ -1,21 +1,32 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientsPage } from "../clients-page";
 import { useAuth } from "../../providers/auth";
-import { useCoreData } from "../../providers/core-data";
-import { createClientMetrics } from "../../lib/client-metrics";
+import { repository } from "../../data/repository";
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(),
+// ClientsPage (Phase 3) loads via repository.loadClientsOverview.
+vi.mock("../../data/repository", () => ({
+  RepositoryError: class RepositoryError extends Error {
+    table = "clients"; operation = "select"; kind = "unknown";
+    constructor(args: { message: string }) { super(args.message); }
+  },
+  repository: {
+    loadClientsOverview: vi.fn(),
+    updateClient: vi.fn(),
+    sendInvite: vi.fn(),
+    upsertClientUserMapping: vi.fn(),
+    deleteClientUserMapping: vi.fn(),
+    upsertClientCustomFieldValue: vi.fn(),
+  },
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
-const mockedUseCoreData = vi.mocked(useCoreData);
+const mockedRepo = vi.mocked(repository);
 
 function getDateKey(offset: number) {
   const now = new Date();
@@ -52,7 +63,8 @@ function makeConditionRule(overrides: Record<string, unknown>) {
   };
 }
 
-function makeCoreData({
+// Build a ClientsOverviewPayload for the condition evaluation tests.
+function makeClientsOverview({
   sentToday,
   scheduleToday,
   bounceCount,
@@ -70,15 +82,6 @@ function makeCoreData({
   const minus2 = getDateKey(-2);
 
   return {
-    users: [
-      {
-        id: "manager-1",
-        role: "manager",
-        first_name: "Mary",
-        last_name: "Manager",
-        email: "manager@test.local",
-      },
-    ],
     clients: [
       {
         id: "client-1",
@@ -108,11 +111,15 @@ function makeCoreData({
         notes: null,
       },
     ],
+    usersLite: [
+      { id: "manager-1", role: "manager", first_name: "Mary", last_name: "Manager", email: "manager@test.local" },
+    ],
     clientUsers: [],
-    campaigns: [],
-    leads: [],
-    replies: [],
-    campaignDailyStats: [],
+    conditionRules,
+    columnOverrides: [],
+    clientCustomFields: [],
+    clientCustomFieldValues: [],
+    leadProjections: [],
     dailyStats: [
       {
         client_id: "client-1",
@@ -160,93 +167,17 @@ function makeCoreData({
         schedule_day_after: 0,
       },
     ],
-    domains: [],
-    invoices: [],
-    emailExcludeList: [],
-    conditionRules,
-    metricsByClientId: new Map([
-      [
-        "client-1",
-        createClientMetrics(
-          [
-            {
-              client_id: "client-1",
-              report_date: today,
-              emails_sent: sentToday,
-              mql_count: 0,
-              response_count: 2,
-              bounce_count: bounceCount,
-              negative_count: 0,
-              ooo_count: 0,
-              human_replies_count: 1,
-              prospects_count: 0,
-              schedule_today: scheduleToday,
-              schedule_tomorrow: 0,
-              schedule_day_after: 0,
-            },
-            {
-              client_id: "client-1",
-              report_date: minus1,
-              emails_sent: 0,
-              mql_count: 0,
-              response_count: 0,
-              bounce_count: 0,
-              negative_count: 0,
-              ooo_count: 0,
-              human_replies_count: 0,
-              prospects_count: 0,
-              schedule_today: 0,
-              schedule_tomorrow: 0,
-              schedule_day_after: 0,
-            },
-            {
-              client_id: "client-1",
-              report_date: minus2,
-              emails_sent: 0,
-              mql_count: 0,
-              response_count: 0,
-              bounce_count: 0,
-              negative_count: 0,
-              ooo_count: 0,
-              human_replies_count: 0,
-              prospects_count: 0,
-              schedule_today: 0,
-              schedule_tomorrow: 0,
-              schedule_day_after: 0,
-            },
-          ],
-          [],
-        ),
-      ],
-    ]),
-    loading: false,
-    error: null,
-    refresh: vi.fn(async () => {}),
-    updateClient: vi.fn(async () => {}),
-    updateCampaign: vi.fn(async () => {}),
-    updateLead: vi.fn(async () => {}),
-    updateDomain: vi.fn(async () => {}),
-    updateInvoice: vi.fn(async () => {}),
-    createConditionRule: vi.fn(async () => {}),
-    updateConditionRule: vi.fn(async () => {}),
-    deleteConditionRule: vi.fn(async () => {}),
-    sendInvite: vi.fn(async () => {}),
-    listInvites: vi.fn(async () => []),
-    resendInvite: vi.fn(async () => {}),
-    revokeInvite: vi.fn(async () => {}),
-    upsertClientUserMapping: vi.fn(async () => {}),
-    deleteClientUserMapping: vi.fn(async () => {}),
-    upsertEmailExcludeDomain: vi.fn(async () => {}),
-    deleteEmailExcludeDomain: vi.fn(async () => {}),
   };
 }
 
-function renderPage() {
+async function renderPage() {
   render(
     <MemoryRouter>
       <ClientsPage />
     </MemoryRouter>,
   );
+  // Flush the async loadClientsOverview promise.
+  await act(async () => {});
 }
 
 describe("clients condition surfaces", () => {
@@ -260,6 +191,10 @@ describe("clients condition surfaces", () => {
         role: "manager",
       },
     } as never);
+    mockedRepo.updateClient.mockResolvedValue({} as never);
+    mockedRepo.sendInvite.mockResolvedValue({ inviteId: null });
+    mockedRepo.upsertClientUserMapping.mockResolvedValue({} as never);
+    mockedRepo.deleteClientUserMapping.mockResolvedValue(undefined as never);
   });
 
   it("shows danger highlight and explanation for bounce >= 2%", async () => {
@@ -275,18 +210,18 @@ describe("clients condition surfaces", () => {
         { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 0.02 } }, label: "Bounce danger", message: "Bounce rate is above 2%." },
       ],
     });
-    mockedUseCoreData.mockReturnValue(
-      makeCoreData({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
     );
 
-    renderPage();
+    await renderPage();
 
     const cell = screen.getByText("3.0%").closest("div");
     expect(cell?.className).toContain("border-red");
     expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
   });
 
-  it("shows DoD danger highlight when value is below 80% of min sent", () => {
+  it("shows DoD danger highlight when value is below 80% of min sent", async () => {
     const dodRule = makeConditionRule({
       key: "dod_sent_or_schedule_vs_min_sent",
       name: "DoD rule",
@@ -297,11 +232,11 @@ describe("clients condition surfaces", () => {
         { severity: "danger", when: { left: { metric: "value" }, op: "lt", right: { metric: "min_sent", multiplier: 0.8 } }, label: "Low", message: "Below 80%." },
       ],
     });
-    mockedUseCoreData.mockReturnValue(
-      makeCoreData({ sentToday: 70, scheduleToday: 70, bounceCount: 0, conditionRules: [dodRule], minDailySent: 100 }) as never,
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ sentToday: 70, scheduleToday: 70, bounceCount: 0, conditionRules: [dodRule], minDailySent: 100 }) as never,
     );
 
-    renderPage();
+    await renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Open details for Acme" }));
 
     const dangerCells = screen.getAllByText("70");
@@ -309,7 +244,7 @@ describe("clients condition surfaces", () => {
     expect(highlighted).toBeTruthy();
   });
 
-  it("supports healthy filter on segmented control", () => {
+  it("supports healthy filter on segmented control", async () => {
     const wowBounceRule = makeConditionRule({
       key: "wow_bounce_rate",
       name: "WoW Bounce Rate",
@@ -320,18 +255,18 @@ describe("clients condition surfaces", () => {
         { severity: "good", when: { left: { metric: "value" }, op: "lte", right: { value: 0.01 } }, label: "Healthy bounce", message: "Healthy." },
       ],
     });
-    mockedUseCoreData.mockReturnValue(
-      makeCoreData({ sentToday: 100, scheduleToday: 100, bounceCount: 0, conditionRules: [wowBounceRule] }) as never,
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 0, conditionRules: [wowBounceRule] }) as never,
     );
 
-    renderPage();
+    await renderPage();
     fireEvent.click(screen.getByRole("radio", { name: /Healthy \(1\)/i }));
 
     expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
   });
 
-  it("filters by danger severity", () => {
+  it("filters by danger severity", async () => {
     const wowBounceRule = makeConditionRule({
       key: "wow_bounce_rate",
       name: "WoW Bounce Rate",
@@ -342,11 +277,11 @@ describe("clients condition surfaces", () => {
         { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 0.02 } }, label: "Bounce danger", message: "Bounce rate is above 2%." },
       ],
     });
-    mockedUseCoreData.mockReturnValue(
-      makeCoreData({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
     );
 
-    renderPage();
+    await renderPage();
     expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: /Healthy \(0\)/i }));
     expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();

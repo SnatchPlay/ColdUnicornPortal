@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
+import { repository, RepositoryError } from "../data/repository";
 import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
@@ -12,7 +14,8 @@ import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator"
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import type { ClientRecord, InviteRequest } from "../types/core";
+import type { ClientsOverviewPayload, UserLite } from "../types/view-contracts";
 import {
   ClientDrawer,
   buildClientPatch,
@@ -32,11 +35,12 @@ const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as co
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
 const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
+type ClientStatus = (typeof CLIENT_STATUSES)[number];
 
 interface CreateClientDraft {
   name: string;
   managerId: string;
-  status: (typeof CLIENT_STATUSES)[number] | "";
+  status: ClientStatus | "";
   externalWorkspaceId: number | null;
   externalApiKey: string;
   kpiLeads: number | null;
@@ -81,27 +85,465 @@ function compareMega(left: ClientMegaRow, right: ClientMegaRow, sort: MegaSortSt
   return String(a).localeCompare(String(b)) * dir;
 }
 
-export function ClientsPage() {
-  const { identity } = useAuth();
-  const {
-    clients,
-    users,
-    clientUsers,
-    metricsByClientId,
-    conditionRules = [],
-    columnOverrides = [],
-    clientCustomFields = [],
-    clientCustomFieldValues = [],
-    upsertClientCustomFieldValue,
+function mapClientsError(reason: unknown): string {
+  if (reason instanceof RepositoryError) {
+    if (reason.kind === "timeout") return `Loading timed out. A database performance issue may be affecting this view.`;
+    if (reason.kind === "permission") return `Access to client data is blocked by your current permissions.`;
+    if (reason.kind === "network") return `Client data could not be loaded due to a network error. Try again.`;
+    return reason.message;
+  }
+  if (reason instanceof Error) return reason.message;
+  return "Failed to load client data.";
+}
+
+// ── Per-page data hook ─────────────────────────────────────────────────────────────────────────
+
+function useClientsOverview() {
+  const { identity, loading: authLoading } = useAuth();
+  const [data, setData] = useState<ClientsOverviewPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await repository.loadClientsOverview();
+      setData(result);
+      setError(null);
+    } catch (reason) {
+      setError(mapClientsError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !identity) {
+      if (!authLoading) setLoading(false);
+      return;
+    }
+    void load();
+  }, [authLoading, identity, load]);
+
+  // ── Mutations with optimistic update / rollback ──────────────────────────────────────────────
+
+  const createClient = useCallback(
+    async (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => {
+      try {
+        const created = await repository.createClient(input);
+        setData((prev) => {
+          if (!prev) return prev;
+          return { ...prev, clients: [created, ...prev.clients] };
+        });
+      } catch (reason) {
+        const msg = mapClientsError(reason);
+        toast.error(msg);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  const updateClient = useCallback(
+    async (clientId: string, patch: Partial<ClientRecord>) => {
+      // Optimistic update first.
+      setData((prev) => {
+        if (!prev) return prev;
+        return { ...prev, clients: prev.clients.map((c) => (c.id === clientId ? { ...c, ...patch } : c)) };
+      });
+      try {
+        const updated = await repository.updateClient(clientId, patch);
+        // Apply server-confirmed row (has server-generated updated_at etc.).
+        setData((prev) => {
+          if (!prev) return prev;
+          return { ...prev, clients: prev.clients.map((c) => (c.id === clientId ? updated : c)) };
+        });
+      } catch (reason) {
+        // Roll back optimistic update via re-fetch.
+        void load();
+        const msg = mapClientsError(reason);
+        toast.error(msg);
+        throw reason;
+      }
+    },
+    [load],
+  );
+
+  const sendInvite = useCallback(async (payload: InviteRequest) => {
+    try {
+      await repository.sendInvite(payload);
+    } catch (reason) {
+      const msg = mapClientsError(reason);
+      toast.error(msg);
+      throw reason;
+    }
+  }, []);
+
+  const upsertClientUserMapping = useCallback(
+    async (userId: string, clientId: string) => {
+      try {
+        const mapping = await repository.upsertClientUserMapping(userId, clientId);
+        setData((prev) => {
+          if (!prev) return prev;
+          const existing = prev.clientUsers.findIndex((m) => m.user_id === userId);
+          const lite = { id: mapping.id, client_id: mapping.client_id, user_id: mapping.user_id };
+          const updated =
+            existing >= 0
+              ? prev.clientUsers.map((m, i) => (i === existing ? lite : m))
+              : [...prev.clientUsers, lite];
+          return { ...prev, clientUsers: updated };
+        });
+      } catch (reason) {
+        const msg = mapClientsError(reason);
+        toast.error(msg);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  const deleteClientUserMapping = useCallback(async (mappingId: string) => {
+    try {
+      await repository.deleteClientUserMapping(mappingId);
+      setData((prev) => {
+        if (!prev) return prev;
+        return { ...prev, clientUsers: prev.clientUsers.filter((m) => m.id !== mappingId) };
+      });
+    } catch (reason) {
+      const msg = mapClientsError(reason);
+      toast.error(msg);
+      throw reason;
+    }
+  }, []);
+
+  const upsertClientCustomFieldValue = useCallback(
+    async (clientId: string, fieldId: string, value: string | null) => {
+      try {
+        const updated = await repository.upsertClientCustomFieldValue(clientId, fieldId, value);
+        setData((prev) => {
+          if (!prev) return prev;
+          const idx = prev.clientCustomFieldValues.findIndex(
+            (v) => v.client_id === clientId && v.field_id === fieldId,
+          );
+          const lite = {
+            client_id: updated.client_id,
+            field_id: updated.field_id,
+            value: updated.value,
+            updated_at: updated.updated_at,
+            updated_by: updated.updated_by,
+          };
+          const updated2 =
+            idx >= 0
+              ? prev.clientCustomFieldValues.map((v, i) => (i === idx ? lite : v))
+              : [...prev.clientCustomFieldValues, lite];
+          return { ...prev, clientCustomFieldValues: updated2 };
+        });
+      } catch (reason) {
+        const msg = mapClientsError(reason);
+        toast.error(msg);
+        throw reason;
+      }
+    },
+    [],
+  );
+
+  return {
+    data,
+    loading,
+    error,
+    refresh: load,
     createClient,
     updateClient,
     sendInvite,
     upsertClientUserMapping,
     deleteClientUserMapping,
+    upsertClientCustomFieldValue,
+  };
+}
+
+// ── CreateClientSheet — memoized so typing in the form does not re-render the mega-table ────────
+
+interface CreateClientSheetProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  managerUsers: UserLite[];
+  canEditAssignments: boolean;
+  onCreateClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  defaultManagerId: string;
+}
+
+const CreateClientSheet = memo(function CreateClientSheet({
+  open,
+  onOpenChange,
+  managerUsers,
+  canEditAssignments,
+  onCreateClient,
+  defaultManagerId,
+}: CreateClientSheetProps) {
+  const [draft, setDraft] = useState<CreateClientDraft | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Seed draft on open; clear on close.
+  useEffect(() => {
+    if (open) {
+      setDraft({
+        name: "",
+        managerId: defaultManagerId,
+        status: "Active",
+        externalWorkspaceId: null,
+        externalApiKey: "",
+        kpiLeads: null,
+        kpiMeetings: null,
+        contractedAmount: null,
+        contractDueDate: "",
+      });
+    } else {
+      setDraft(null);
+      setIsSubmitting(false);
+    }
+  }, [open, defaultManagerId]);
+
+  async function handleSubmit() {
+    if (!draft || !draft.name.trim() || !draft.managerId || !draft.status) return;
+    setIsSubmitting(true);
+    try {
+      await onCreateClient({
+        name: draft.name.trim(),
+        manager_id: draft.managerId,
+        status: draft.status as ClientStatus,
+        kpi_leads: draft.kpiLeads,
+        kpi_meetings: draft.kpiMeetings,
+        contracted_amount: draft.contractedAmount,
+        contract_due_date: draft.contractDueDate || null,
+        external_workspace_id: draft.externalWorkspaceId,
+        external_api_key: draft.externalApiKey.trim() || null,
+        min_daily_sent: 0,
+        inboxes_count: 0,
+        crm_config: null,
+        sms_phone_numbers: null,
+        notification_emails: null,
+        auto_ooo_enabled: false,
+        linkedin_api_key: null,
+        prospects_signed: 0,
+        prospects_added: 0,
+        setup_info: null,
+        bi_setup_done: false,
+        lost_reason: null,
+        notes: null,
+      });
+      onOpenChange(false);
+    } catch {
+      // error shown via toast from useClientsOverview
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
+        <SheetHeader className="p-6 pb-2">
+          <SheetTitle className="text-white">New client</SheetTitle>
+          <SheetDescription>Fill in the required fields to create a new client account.</SheetDescription>
+        </SheetHeader>
+        {draft && (
+          <div className="space-y-4 px-6 pb-6">
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+                placeholder="Client name"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+              />
+            </label>
+            {canEditAssignments && (
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager *</span>
+                <Select
+                  value={draft.managerId}
+                  onValueChange={(v) => setDraft((d) => (d ? { ...d, managerId: v } : d))}
+                >
+                  <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                    <SelectValue placeholder="Select manager" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                    {managerUsers.map((m) => (
+                      <SelectItem
+                        key={m.id}
+                        value={m.id}
+                        className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                      >
+                        {m.first_name} {m.last_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
+              <Select
+                value={draft.status}
+                onValueChange={(v) => setDraft((d) => (d ? { ...d, status: v as ClientStatus } : d))}
+              >
+                <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {CLIENT_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</span>
+              <input
+                type="number"
+                value={draft.externalWorkspaceId ?? ""}
+                onChange={(e) =>
+                  setDraft((d) =>
+                    d ? { ...d, externalWorkspaceId: e.target.value === "" ? null : Number(e.target.value) } : d,
+                  )
+                }
+                placeholder="Smartlead workspace ID"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+              />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace API key</span>
+              <input
+                value={draft.externalApiKey}
+                onChange={(e) => setDraft((d) => (d ? { ...d, externalApiKey: e.target.value } : d))}
+                placeholder="Smartlead API key"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>
+                <input
+                  type="number"
+                  value={draft.kpiLeads ?? ""}
+                  onChange={(e) =>
+                    setDraft((d) =>
+                      d ? { ...d, kpiLeads: e.target.value === "" ? null : Number(e.target.value) } : d,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI meetings</span>
+                <input
+                  type="number"
+                  value={draft.kpiMeetings ?? ""}
+                  onChange={(e) =>
+                    setDraft((d) =>
+                      d ? { ...d, kpiMeetings: e.target.value === "" ? null : Number(e.target.value) } : d,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contracted amount</span>
+                <input
+                  type="number"
+                  value={draft.contractedAmount ?? ""}
+                  onChange={(e) =>
+                    setDraft((d) =>
+                      d ? { ...d, contractedAmount: e.target.value === "" ? null : Number(e.target.value) } : d,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract due date</span>
+                <input
+                  type="date"
+                  value={draft.contractDueDate}
+                  onChange={(e) => setDraft((d) => (d ? { ...d, contractDueDate: e.target.value } : d))}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                />
+              </label>
+            </div>
+            <button
+              onClick={() => {
+                void handleSubmit();
+              }}
+              disabled={isSubmitting || !draft.name.trim() || !draft.managerId || !draft.status}
+              className="w-full rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create client"}
+            </button>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+});
+
+// ── Main page ──────────────────────────────────────────────────────────────────────────────────
+
+export function ClientsPage() {
+  const { identity } = useAuth();
+  const {
+    data,
     loading,
     error,
     refresh,
-  } = useCoreData();
+    createClient,
+    updateClient,
+    sendInvite,
+    upsertClientUserMapping,
+    deleteClientUserMapping,
+    upsertClientCustomFieldValue,
+  } = useClientsOverview();
+
+  // Stable derived arrays — memoized on data so downstream memos see stable references.
+  const clients = useMemo(() => data?.clients ?? [], [data]);
+  const users = useMemo(
+    () => (data?.usersLite ?? []) as Array<{ id: string; first_name: string | null; last_name: string | null; email: string; role: string }>,
+    [data],
+  );
+  const clientUsers = useMemo(() => data?.clientUsers ?? [], [data]);
+  const conditionRules = useMemo(() => data?.conditionRules ?? [], [data]);
+  const columnOverrides = useMemo(() => data?.columnOverrides ?? [], [data]);
+  const clientCustomFields = useMemo(() => data?.clientCustomFields ?? [], [data]);
+  const clientCustomFieldValues = useMemo(() => data?.clientCustomFieldValues ?? [], [data]);
+
+  // ── Derived per-client metrics (replaces metricsByClientId from useCoreData) ─────────────────
+
+  const metricsByClientId = useMemo<ReadonlyMap<string, ClientMetricsPack>>(() => {
+    if (!data) return new Map();
+    const statsByClient = new Map<string, typeof data.dailyStats>();
+    const leadsByClient = new Map<string, typeof data.leadProjections>();
+    for (const client of data.clients) {
+      statsByClient.set(client.id, []);
+      leadsByClient.set(client.id, []);
+    }
+    for (const stat of data.dailyStats) {
+      statsByClient.get(stat.client_id)?.push(stat);
+    }
+    for (const lead of data.leadProjections) {
+      leadsByClient.get(lead.client_id)?.push(lead);
+    }
+    const result = new Map<string, ClientMetricsPack>();
+    for (const client of data.clients) {
+      result.set(
+        client.id,
+        createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []),
+      );
+    }
+    return result;
+  }, [data]);
 
   const customFieldValuesByClient = useMemo(() => {
     const out = new Map<string, Map<string, string | null>>();
@@ -126,15 +568,9 @@ export function ClientsPage() {
     };
   }, [identity?.role, clientCustomFields]);
 
-  const [isCreatingClient, setIsCreatingClient] = useState(false);
-  const [createClientDraft, setCreateClientDraft] = useState<CreateClientDraft | null>(null);
-  const [isSubmittingCreateClient, setIsSubmittingCreateClient] = useState(false);
+  // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
 
-  // INVARIANT: `selectedClientId` (React state) and `selectionStore` (external
-  // store consumed per-row in the mega-table) must stay in sync. Mutate them
-  // ONLY through `openClient` / `closeClient` below — never call
-  // `setSelectedClientId` or `selectionStore.set` directly. Drift between the
-  // two will desynchronize the row-highlight from the drawer.
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [draft, setDraft] = useState<ClientDraft | null>(null);
@@ -155,7 +591,6 @@ export function ClientsPage() {
   const clientRoleUsers = useMemo(() => users.filter((u) => u.role === "client"), [users]);
   const managerById = useMemo(() => new Map(managerUsers.map((m) => [m.id, m] as const)), [managerUsers]);
 
-
   const normalizedConditionRules = useMemo(
     () => conditionRules.map(toConditionRule),
     [conditionRules],
@@ -168,7 +603,7 @@ export function ClientsPage() {
       const manager = managerById.get(client.manager_id) ?? null;
       const context = buildClientConditionContext({
         client,
-        manager,
+        manager: manager as Parameters<typeof buildClientConditionContext>[0]["manager"],
         metricsOverview: metrics.overview,
         dodRows: metrics.dodRows,
         threeDodRows: metrics.threeDodRows,
@@ -187,7 +622,9 @@ export function ClientsPage() {
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return scopedClients.map((client) => {
       const manager = managerById.get(client.manager_id);
-      const managerName = manager ? `${manager.first_name} ${manager.last_name}`.trim() : "Unassigned";
+      const managerName = manager
+        ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
+        : "Unassigned";
       const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
       const conditionPack = conditionPackByClientId.get(client.id) ?? null;
       const allResults = conditionPack?.allResults ?? [];
@@ -261,73 +698,17 @@ export function ClientsPage() {
     if (!selectedClient) return "—";
     const manager = users.find((u) => u.id === selectedClient.manager_id);
     if (!manager) return "—";
-    return `${manager.first_name} ${manager.last_name}`.trim();
+    return `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim();
   }, [selectedClient, users]);
 
   const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
-
-  function openCreateClient() {
-    setCreateClientDraft({
-      name: "",
-      managerId: identity?.role === "manager" ? (identity.userId ?? "") : "",
-      status: "Active",
-      externalWorkspaceId: null,
-      externalApiKey: "",
-      kpiLeads: null,
-      kpiMeetings: null,
-      contractedAmount: null,
-      contractDueDate: "",
-    });
-    setIsCreatingClient(true);
-  }
-
-  async function handleCreateClient() {
-    if (!createClientDraft || !createClientDraft.name.trim() || !createClientDraft.managerId || !createClientDraft.status) return;
-    setIsSubmittingCreateClient(true);
-    try {
-      await createClient({
-        name: createClientDraft.name.trim(),
-        manager_id: createClientDraft.managerId,
-        status: createClientDraft.status as (typeof CLIENT_STATUSES)[number],
-        kpi_leads: createClientDraft.kpiLeads,
-        kpi_meetings: createClientDraft.kpiMeetings,
-        contracted_amount: createClientDraft.contractedAmount,
-        contract_due_date: createClientDraft.contractDueDate || null,
-        external_workspace_id: createClientDraft.externalWorkspaceId,
-        external_api_key: createClientDraft.externalApiKey.trim() || null,
-        min_daily_sent: 0,
-        inboxes_count: 0,
-        crm_config: null,
-        sms_phone_numbers: null,
-        notification_emails: null,
-        auto_ooo_enabled: false,
-        linkedin_api_key: null,
-        prospects_signed: 0,
-        prospects_added: 0,
-        setup_info: null,
-        bi_setup_done: false,
-        lost_reason: null,
-        notes: null,
-      });
-      setIsCreatingClient(false);
-      setCreateClientDraft(null);
-    } catch {
-      // error shown via toast from core-data
-    } finally {
-      setIsSubmittingCreateClient(false);
-    }
-  }
-  const canInviteUsers =
-    identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
+  const canInviteUsers = identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
 
   // External store that broadcasts the selected-client id to per-row
   // subscribers in the mega-table. Decouples the row highlight from React
-  // props so `ClientsMegaTable` does not re-render on drawer open/close.
+  // props so ClientsMegaTable does not re-render on drawer open/close.
   const selectionStore = useMemo(createSelectionStore, []);
 
-  // Open the drawer: select the client AND seed the draft in the same React
-  // event. React batches the state updates into one render so the drawer
-  // mounts on the first render after the click.
   const openClient = useCallback(
     (id: string) => {
       const client = scopedClients.find((c) => c.id === id) ?? null;
@@ -350,10 +731,8 @@ export function ClientsPage() {
     setInviteMessage(null);
   }, [selectionStore]);
 
-  // Stable row-click handler passed to the memoized table.
   const handleRowClick = useCallback((id: string) => openClient(id), [openClient]);
 
-  // Reset visible rows when scope or filter changes; drop selection if scope no longer holds it
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
     if (selectedClientId && !scopedClients.some((c) => c.id === selectedClientId)) {
@@ -361,7 +740,6 @@ export function ClientsPage() {
     }
   }, [scopedClients, selectedClientId, healthFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
 
-  // Esc closes drawer
   useEffect(() => {
     if (!selectedClient) return;
     function handleKeyDown(event: KeyboardEvent) {
@@ -439,6 +817,15 @@ export function ClientsPage() {
     }
   }, [inviteEmail, selectedClient, sendInvite]);
 
+  // Stable callback for the create mutation passed into the memoized sheet.
+  const handleCreateClientStable = useCallback(
+    (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => createClient(input),
+    [createClient],
+  );
+
+  // Default manager ID pre-filled for manager role users.
+  const defaultManagerId = identity?.role === "manager" ? (identity.userId ?? "") : "";
+
   if (!identity || identity.role === "client") {
     return (
       <EmptyState
@@ -473,7 +860,7 @@ export function ClientsPage() {
         subtitle="Dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in a single horizontally-scrollable surface. Click any row to open the configuration drawer."
         actions={
           <button
-            onClick={openCreateClient}
+            onClick={() => setIsCreatingClient(true)}
             className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
           >
             New client
@@ -493,7 +880,6 @@ export function ClientsPage() {
         >
           {/* ── Filter bar ─────────────────────────────────────── */}
           <div className="mb-4 space-y-3">
-            {/* Row 1: Health */}
             <div className="flex items-center gap-2">
               <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
               <ToggleGroup
@@ -524,9 +910,7 @@ export function ClientsPage() {
               </ToggleGroup>
             </div>
 
-            {/* Row 2: Search + Status + Manager */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Name search */}
               <input
                 type="search"
                 value={nameSearch}
@@ -535,7 +919,6 @@ export function ClientsPage() {
                 className="h-8 min-w-[160px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
               />
 
-              {/* Status multi-select pills */}
               <div className="flex flex-wrap gap-1.5">
                 {CLIENT_STATUSES.map((s) => {
                   const active = statusFilter.has(s);
@@ -564,7 +947,6 @@ export function ClientsPage() {
                 })}
               </div>
 
-              {/* Manager filter — admin only */}
               {canEditAssignments && managerUsers.length > 0 && (
                 <Select value={managerFilter} onValueChange={setManagerFilter}>
                   <SelectTrigger className="h-8 min-w-[140px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
@@ -581,7 +963,6 @@ export function ClientsPage() {
                 </Select>
               )}
 
-              {/* Clear all */}
               {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || healthFilter !== "all") && (
                 <button
                   type="button"
@@ -627,123 +1008,15 @@ export function ClientsPage() {
         </Surface>
       )}
 
-      <Sheet open={isCreatingClient} onOpenChange={setIsCreatingClient}>
-        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
-          <SheetHeader className="p-6 pb-2">
-            <SheetTitle className="text-white">New client</SheetTitle>
-            <SheetDescription>Fill in the required fields to create a new client account.</SheetDescription>
-          </SheetHeader>
-          {createClientDraft && (
-            <div className="space-y-4 px-6 pb-6">
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
-                <input
-                  value={createClientDraft.name}
-                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, name: e.target.value } : d)}
-                  placeholder="Client name"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
-                />
-              </label>
-              {canEditAssignments && (
-                <label className="block space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager *</span>
-                  <Select value={createClientDraft.managerId} onValueChange={(v) => setCreateClientDraft((d) => d ? { ...d, managerId: v } : d)}>
-                    <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                      <SelectValue placeholder="Select manager" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-                      {managerUsers.map((m) => (
-                        <SelectItem key={m.id} value={m.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                          {m.first_name} {m.last_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-              )}
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
-                <Select value={createClientDraft.status} onValueChange={(v) => setCreateClientDraft((d) => d ? { ...d, status: v as (typeof CLIENT_STATUSES)[number] } : d)}>
-                  <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {CLIENT_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</span>
-                <input
-                  type="number"
-                  value={createClientDraft.externalWorkspaceId ?? ""}
-                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, externalWorkspaceId: e.target.value === "" ? null : Number(e.target.value) } : d)}
-                  placeholder="Smartlead workspace ID"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
-                />
-              </label>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace API key</span>
-                <input
-                  value={createClientDraft.externalApiKey}
-                  onChange={(e) => setCreateClientDraft((d) => d ? { ...d, externalApiKey: e.target.value } : d)}
-                  placeholder="Smartlead API key"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 font-mono text-xs"
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>
-                  <input
-                    type="number"
-                    value={createClientDraft.kpiLeads ?? ""}
-                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, kpiLeads: e.target.value === "" ? null : Number(e.target.value) } : d)}
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI meetings</span>
-                  <input
-                    type="number"
-                    value={createClientDraft.kpiMeetings ?? ""}
-                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, kpiMeetings: e.target.value === "" ? null : Number(e.target.value) } : d)}
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contracted amount</span>
-                  <input
-                    type="number"
-                    value={createClientDraft.contractedAmount ?? ""}
-                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, contractedAmount: e.target.value === "" ? null : Number(e.target.value) } : d)}
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contract due date</span>
-                  <input
-                    type="date"
-                    value={createClientDraft.contractDueDate}
-                    onChange={(e) => setCreateClientDraft((d) => d ? { ...d, contractDueDate: e.target.value } : d)}
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  />
-                </label>
-              </div>
-              <button
-                onClick={() => { void handleCreateClient(); }}
-                disabled={isSubmittingCreateClient || !createClientDraft.name.trim() || !createClientDraft.managerId || !createClientDraft.status}
-                className="w-full rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSubmittingCreateClient ? "Creating..." : "Create client"}
-              </button>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* CreateClientSheet is memoized — its draft state does not re-render the mega-table. */}
+      <CreateClientSheet
+        open={isCreatingClient}
+        onOpenChange={setIsCreatingClient}
+        managerUsers={managerUsers}
+        canEditAssignments={canEditAssignments}
+        onCreateClient={handleCreateClientStable}
+        defaultManagerId={defaultManagerId}
+      />
 
       {selectedClient && draft && (
         <ClientDrawer
@@ -752,10 +1025,10 @@ export function ClientsPage() {
           setDraft={setDraft}
           conditionPack={selectedConditionPack}
           managerName={selectedManagerName}
-          managerUsers={managerUsers}
-          clientRoleUsers={clientRoleUsers}
+          managerUsers={managerUsers as Parameters<typeof ClientDrawer>[0]["managerUsers"]}
+          clientRoleUsers={clientRoleUsers as Parameters<typeof ClientDrawer>[0]["clientRoleUsers"]}
           allClients={clients}
-          allUsers={users}
+          allUsers={users as Parameters<typeof ClientDrawer>[0]["allUsers"]}
           selectedClientMappings={selectedClientMappings}
           allClientUsers={clientUsers}
           mappingUserId={mappingUserId}

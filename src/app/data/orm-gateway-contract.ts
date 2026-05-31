@@ -15,6 +15,13 @@
   LeadRecord,
   UserRecord,
 } from "../types/core";
+import type {
+  AdminDashboardOverview,
+  ClientDashboardPayload,
+  ClientsOverviewPayload,
+  ManagerDashboardOverview,
+  ShellData,
+} from "../types/view-contracts";
 
 export type OrmGatewayAuthErrorCode =
   | "runtime_config"
@@ -52,6 +59,30 @@ export interface LoadSnapshotPayload {
 
 export interface LoadConditionRulesPayload {
   action: "loadConditionRules";
+}
+
+export interface LoadShellDataPayload {
+  action: "loadShellData";
+}
+
+export interface LoadAdminDashboardPayload {
+  action: "loadAdminDashboardOverview";
+}
+
+export interface LoadManagerDashboardPayload {
+  action: "loadManagerDashboardOverview";
+  /** Effective manager ID (post-impersonation from identity.id). */
+  managerId: string;
+}
+
+export interface LoadClientDashboardPayload {
+  action: "loadClientDashboard";
+  /** Effective client ID (post-impersonation from identity.clientId). */
+  clientId: string;
+}
+
+export interface LoadClientsOverviewPayload {
+  action: "loadClientsOverview";
 }
 
 export interface UpdateClientPayload {
@@ -202,6 +233,11 @@ export interface UpsertClientCustomFieldValuePayload {
 export type OrmGatewayRequest =
   | LoadSnapshotPayload
   | LoadConditionRulesPayload
+  | LoadShellDataPayload
+  | LoadAdminDashboardPayload
+  | LoadManagerDashboardPayload
+  | LoadClientDashboardPayload
+  | LoadClientsOverviewPayload
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
@@ -241,6 +277,11 @@ export interface UpdateProfileNameResult {
 
 export interface OrmGatewayResponseMap {
   loadSnapshot: CoreSnapshot;
+  loadShellData: ShellData;
+  loadAdminDashboardOverview: AdminDashboardOverview;
+  loadManagerDashboardOverview: ManagerDashboardOverview;
+  loadClientDashboard: ClientDashboardPayload;
+  loadClientsOverview: ClientsOverviewPayload;
   loadConditionRules: ConditionRuleRecord[];
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
@@ -332,6 +373,32 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadConditionRules") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadShellData") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadAdminDashboardOverview") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadManagerDashboardOverview") {
+    if (!hasStringField(payload, "managerId")) {
+      return { ok: false, error: "loadManagerDashboardOverview requires managerId." };
+    }
+    return { ok: true, value: { action, managerId: String(payload.managerId) } };
+  }
+
+  if (action === "loadClientDashboard") {
+    if (!hasStringField(payload, "clientId")) {
+      return { ok: false, error: "loadClientDashboard requires clientId." };
+    }
+    return { ok: true, value: { action, clientId: String(payload.clientId) } };
+  }
+
+  if (action === "loadClientsOverview") {
     return { ok: true, value: { action } };
   }
 

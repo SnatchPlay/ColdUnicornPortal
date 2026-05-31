@@ -1,5 +1,5 @@
-import { Suspense, lazy } from "react";
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Suspense, lazy, useEffect } from "react";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppErrorBoundary } from "./components/app-error-boundary";
 import { AppShell } from "./components/app-shell";
@@ -7,6 +7,7 @@ import { Banner, LoadingState, Surface } from "./components/app-ui";
 import { runtimeConfig } from "./lib/env";
 import { AppProviders } from "./providers";
 import { useAuth } from "./providers/auth";
+import { CoreDataProvider } from "./providers/core-data";
 import { LoginPage } from "./pages/login-page";
 import { getRoleLabel, isInternalAdmin } from "./lib/selectors";
 import type { AppRole } from "./types/core";
@@ -138,6 +139,38 @@ export function ClientAccessBlocker() {
   );
 }
 
+/**
+ * Route-level wrapper that supplies CoreDataProvider (the legacy snapshot) to routes that have
+ * not yet been migrated to per-page loaders. Dashboard routes are NOT inside this outlet —
+ * that is the proof that visiting /dashboard does not trigger loadSnapshot.
+ *
+ * Phase 8 cutover: delete this component and all LegacySnapshotOutlet usages in the route tree.
+ */
+function LegacySnapshotOutlet() {
+  const { pathname } = useLocation();
+
+  // Dev-only guard: if a /dashboard route is ever accidentally nested inside this outlet,
+  // loudly surface it — dashboard routes must be direct children of RequireRole.
+  if (import.meta.env.DEV && /\/dashboard(\/|$)/.test(pathname)) {
+    console.error(
+      `[LEGACY_SNAPSHOT_OUTLET] BUG: mounting on dashboard route "${pathname}". ` +
+        "Dashboard routes must be direct children of RequireRole — not inside LegacySnapshotOutlet.",
+    );
+  }
+
+  useEffect(() => {
+    console.log(`[LEGACY_SNAPSHOT_OUTLET] mounted pathname=${pathname}`);
+    // Only log on first mount; navigation within the outlet keeps this component alive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <CoreDataProvider>
+      <Outlet />
+    </CoreDataProvider>
+  );
+}
+
 export function HomeRedirect() {
   const { session, identity, loading } = useAuth();
   if (loading) return <LoadingState />;
@@ -170,9 +203,12 @@ function ProtectedApp() {
             <Routes>
               <Route index element={<HomeRedirect />} />
 
+              {/* ── client role ─────────────────────────────────────────────────────────────── */}
               <Route path="client" element={<RequireRole allowed={["client"]} />}>
-                <Route element={<Outlet />}>
-                  <Route path="dashboard" element={identity.clientId ? <DashboardPage /> : <ClientAccessBlocker />} />
+                {/* Phase 2A: dashboard uses per-page loader — no CoreDataProvider */}
+                <Route path="dashboard" element={identity.clientId ? <DashboardPage /> : <ClientAccessBlocker />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 4-7 */}
+                <Route element={<LegacySnapshotOutlet />}>
                   <Route path="leads" element={identity.clientId ? <LeadsPage /> : <ClientAccessBlocker />} />
                   <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
                   <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
@@ -180,29 +216,41 @@ function ProtectedApp() {
                 </Route>
               </Route>
 
+              {/* ── manager role ─────────────────────────────────────────────────────────── */}
               <Route path="manager" element={<RequireRole allowed={["manager"]} />}>
+                {/* Phase 2A: dashboard — no CoreDataProvider */}
                 <Route path="dashboard" element={<DashboardPage />} />
+                {/* Phase 3: clients — per-page loader, no CoreDataProvider */}
                 <Route path="clients" element={<ClientsPage />} />
-                <Route path="leads" element={<LeadsPage />} />
-                <Route path="campaigns" element={<CampaignsPage />} />
-                <Route path="statistics" element={<StatisticsPage />} />
-                <Route path="domains" element={<DomainsPage />} />
-                <Route path="invoices" element={<InvoicesPage />} />
-                <Route path="blacklist" element={<BlacklistPage />} />
-                <Route path="settings" element={<SettingsPage />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 4-7 */}
+                <Route element={<LegacySnapshotOutlet />}>
+                  <Route path="leads" element={<LeadsPage />} />
+                  <Route path="campaigns" element={<CampaignsPage />} />
+                  <Route path="statistics" element={<StatisticsPage />} />
+                  <Route path="domains" element={<DomainsPage />} />
+                  <Route path="invoices" element={<InvoicesPage />} />
+                  <Route path="blacklist" element={<BlacklistPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                </Route>
               </Route>
 
+              {/* ── admin / super_admin / master_admin ───────────────────────────────────── */}
               <Route path="admin" element={<RequireRole allowed={["admin", "super_admin", "master_admin"]} />}>
+                {/* Phase 2A: dashboard — no CoreDataProvider */}
                 <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="users" element={<AdminUserManagementPage />} />
+                {/* Phase 3: clients — per-page loader, no CoreDataProvider */}
                 <Route path="clients" element={<ClientsPage />} />
-                <Route path="leads" element={<LeadsPage />} />
-                <Route path="campaigns" element={<CampaignsPage />} />
-                <Route path="statistics" element={<StatisticsPage />} />
-                <Route path="domains" element={<DomainsPage />} />
-                <Route path="invoices" element={<InvoicesPage />} />
-                <Route path="blacklist" element={<BlacklistPage />} />
-                <Route path="settings" element={<SettingsPage />} />
+                {/* Legacy snapshot routes */}
+                <Route element={<LegacySnapshotOutlet />}>
+                  <Route path="users" element={<AdminUserManagementPage />} />
+                  <Route path="leads" element={<LeadsPage />} />
+                  <Route path="campaigns" element={<CampaignsPage />} />
+                  <Route path="statistics" element={<StatisticsPage />} />
+                  <Route path="domains" element={<DomainsPage />} />
+                  <Route path="invoices" element={<InvoicesPage />} />
+                  <Route path="blacklist" element={<BlacklistPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                </Route>
               </Route>
 
               <Route path="*" element={<HomeRedirect />} />

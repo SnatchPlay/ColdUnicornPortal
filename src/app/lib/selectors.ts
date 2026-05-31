@@ -77,11 +77,25 @@ export function scopeInvoices(identity: Identity, clients: ClientRecord[], invoi
   return invoices.filter((item) => clientIds.has(item.client_id));
 }
 
-export function getLeadStage(lead: LeadRecord): LeadQualification | "unqualified" {
+/**
+ * Minimal structural type accepted by `getLeadStage`. Both `LeadRecord` (full row) and
+ * `LeadMetricProjection` / `pipelineGroups` items (server aggregates) satisfy this shape,
+ * so formula callers never need to cast projections to full records.
+ */
+export interface LeadStageFields {
+  won?: boolean | null;
+  offer_sent?: boolean | null;
+  meeting_held?: boolean | null;
+  meeting_booked?: boolean | null;
+  qualification?: string | null;
+}
+
+export function getLeadStage(lead: LeadStageFields): LeadQualification | "unqualified" {
   if (lead.won) return "won";
   if (lead.offer_sent) return "offer_sent";
   if (lead.meeting_held) return "meeting_held";
   if (lead.meeting_booked) return "meeting_scheduled";
   if (!lead.qualification) return "unqualified";
-  return lead.qualification;
+  // qualification is non-null here and constrained to LeadQualification by the DB enum.
+  return lead.qualification as LeadQualification;
 }

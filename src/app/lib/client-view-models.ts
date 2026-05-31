@@ -25,10 +25,15 @@ function sum(values: Array<number | null | undefined>) {
   return values.reduce((total, value) => total + (value ?? 0), 0);
 }
 
+/**
+ * Widened to accept both full `ClientRecord[]`/`CampaignRecord[]`/`LeadRecord[]` and the
+ * minimal projection shapes returned by per-page loaders (Phase 2+). The function body only
+ * reads the listed fields, so no business logic changes — just TypeScript structural widening.
+ */
 export function getClientKpis(
-  clients: ClientRecord[],
-  campaigns: CampaignRecord[],
-  leads: LeadRecord[],
+  clients: Array<{ prospects_added?: number | null }>,
+  campaigns: Array<{ database_size?: number | null }>,
+  leads: Array<{ qualification?: string | null; meeting_booked?: boolean | null; won?: boolean | null }>,
   stats: CampaignDailyStatRecord[],
 ) {
   const prospectsFromCampaigns = sum(campaigns.map((item) => item.database_size));
@@ -93,7 +98,8 @@ export function getPipelineActivitySeries(leads: LeadRecord[]) {
     }));
 }
 
-export function getCampaignPerformance(campaigns: CampaignRecord[], stats: CampaignDailyStatRecord[]) {
+/** Widened: accepts both full `CampaignRecord[]` and lite `{ id, name, status }` projections. */
+export function getCampaignPerformance(campaigns: Array<{ id: string; name: string; status?: string | null }>, stats: CampaignDailyStatRecord[]) {
   return campaigns
     .map((campaign) => {
       const campaignStats = stats.filter((item) => item.campaign_id === campaign.id);
@@ -112,7 +118,8 @@ export function getCampaignPerformance(campaigns: CampaignRecord[], stats: Campa
     .sort((left, right) => right.replyRate - left.replyRate);
 }
 
-export function getConversionRates(leads: LeadRecord[], prospects: number) {
+/** Widened: accepts both full `LeadRecord[]` and minimal `{ qualification, meeting_booked, won }` projections. */
+export function getConversionRates(leads: Array<{ qualification?: string | null; meeting_booked?: boolean | null; won?: boolean | null }>, prospects: number) {
   const mqls = leads.filter((item) => item.qualification === "MQL").length;
   const meetings = leads.filter((item) => item.meeting_booked).length;
   const won = leads.filter((item) => item.won).length;
