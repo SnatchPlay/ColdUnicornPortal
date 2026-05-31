@@ -163,9 +163,27 @@ Formulas are documented in [04-metrics-catalog.md](docs/reference/functional/04-
 
 A change is incomplete if the docs were not touched.
 
-### 5.5 RLS changes require benchmarks
+### 5.5 RLS changes require EXPLAIN ANALYZE as the authenticated role (ADR-0006)
 
-If you touch a policy on `campaign_daily_stats`, `daily_stats`, `leads`, or `replies`, benchmark against realistic volumes. The set-based predicate pattern in `supabase/migrations/20260421_fix_rls_performance.sql` is the model: do not replace it with per-row helper calls.
+**Non-negotiable checklist for any new or modified SELECT policy on a table with >1 k rows:**
+
+1. Run `EXPLAIN (ANALYZE, BUFFERS)` **as the authenticated role** (not superuser). Superuser bypasses RLS and gives a false baseline. Use `scripts/db-diagnose-rls-explain.mjs`: open a transaction, `set_config` the real JWT sub, `set_config('role', 'authenticated', true)`, then EXPLAIN.
+2. Look for `Filter: private.*` inside a Seq/Index scan. This means per-row function call — a performance defect.
+3. Rewrite to the **set-based subquery** pattern before shipping:
+   ```sql
+   -- CORRECT: subquery evaluated once → hash semijoin
+   USING (client_id IN (SELECT id FROM clients WHERE private.can_access_client(id)))
+
+   -- FORBIDDEN on >1k rows: per-row call, O(n) overhead
+   USING (private.can_access_client(client_id))
+   ```
+4. Re-run EXPLAIN after rewrite — confirm SubPlan/InitPlan, not per-row Filter.
+5. Record before/after execution times in the migration comment.
+
+**Why it matters:** 0.1ms × 4020 rows = 400ms per query. Set-based reduces 3972 per-row calls to 48 (one per client). Measured 2026-06-01: 446ms → 22ms. Full analysis: [ADR-0006](docs/adr/0006-set-based-rls-predicates.md).
+
+Tables already fixed: `leads`, `campaigns`, `replies` (20260601b); `campaign_daily_stats`, `daily_stats` (20260421).
+Phase 7 audit pending: `domains`, `invoices`, `condition_rules`, `client_custom_field_values`.
 
 ---
 
@@ -302,12 +320,20 @@ For role-aware screenshots without a real account, copy the `seedSession` + `moc
 When touching a policy / helper function / hot table:
 
 ```
-1. supabase MCP → execute SQL: EXPLAIN ANALYZE <baseline query as the affected role>
-2. Apply the change (supabase MCP apply_migration or Studio).
-3. Re-run EXPLAIN ANALYZE — confirm a bitmap-scan / set-based predicate is preferred.
-4. Re-run the same SELECT as each role to confirm row counts match expectation.
-5. Update docs/reference/functional/03-data-model.md and 09-mutations-rls.md.
+1. EXPLAIN (ANALYZE, BUFFERS) as authenticated role — NOT superuser.
+   Use scripts/db-diagnose-rls-explain.mjs: sign in as real user, set JWT
+   claims in a transaction (set_config + set_config('role','authenticated',true)),
+   then run EXPLAIN on the affected query.
+2. Check the plan for: Filter: private.* inside Seq/Index scans (per-row defect).
+3. Apply the change (node scripts/db-apply-migrations.mjs).
+4. Re-run EXPLAIN — confirm SubPlan/InitPlan instead of per-row Filter.
+5. Run same SELECT as each role, check row counts.
+6. Update 03-data-model.md and 09-mutations-rls.md §5.3.
 ```
+
+**Canonical benchmark scripts:**
+- `scripts/db-diagnose-rls-explain.mjs` — EXPLAIN under real JWT context
+- `scripts/db-diagnose-leads.mjs` — EXPLAIN for leads query shapes
 
 The `supabase-postgres-best-practices` skill (§10.1) is the methodological partner here.
 

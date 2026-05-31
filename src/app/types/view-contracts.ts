@@ -10,6 +10,7 @@
 
 import type {
   AppRole,
+  CampaignRecord,
   ClientCustomFieldRecord,
   ClientCustomFieldValueRecord,
   ClientRecord,
@@ -351,6 +352,64 @@ export interface LeadsListResponse {
 /** Reply thread for a single lead, loaded lazily when the drawer opens. */
 export interface LeadDetailResult {
   replies: ReplyRecord[];
+}
+
+// --- Campaigns list + stats (Phase 5) -----------------------------------------------------------
+// Server handles filter/sort/pagination for the campaigns table. Stats are lazy-loaded per campaign
+// (internal drawer) or all-at-once (client page). Frontend keeps getCampaignPerformance formula.
+
+/** Sort keys matching the campaigns table columns. */
+export type CampaignSortKey = "name" | "type" | "status" | "positive" | "start";
+
+/**
+ * A single row in the campaigns list. Extends CampaignRecord so the drawer can use it directly.
+ * clientName is JOIN-resolved server-side.
+ */
+export interface CampaignListRow extends CampaignRecord {
+  clientName: string;
+}
+
+/** Server-side filter / sort / pagination params for loadCampaignsList. */
+export interface CampaignsListParams {
+  clientId?: string;
+  /** Campaign status value, or undefined for all. */
+  status?: string;
+  /** Free-text search over campaign name and external_id. */
+  search?: string;
+  sortField: CampaignSortKey;
+  sortDir: "asc" | "desc";
+  page: number;
+  pageSize: number;
+}
+
+/** Response from loadCampaignsList. */
+export interface CampaignsListResponse {
+  rows: CampaignListRow[];
+  totalCount: number;
+  /** Per-query DB timing in ms — included for latency diagnosis. */
+  _qms?: { countMs: number; rowsMs: number };
+}
+
+/** A single row in the campaign daily stats series. */
+export interface CampaignDailyStat {
+  campaign_id: string;
+  report_date: string;
+  sent_count: number | null;
+  reply_count: number | null;
+  bounce_count: number | null;
+  unique_open_count: number | null;
+  positive_replies_count: number | null;
+}
+
+/**
+ * Response from loadCampaignStats.
+ * - With campaignId: 90-day series for one campaign (internal page drawer).
+ * - Without campaignId: 90-day series for all accessible campaigns (client page, scoped by RLS).
+ */
+export interface CampaignStatsResponse {
+  rows: CampaignDailyStat[];
+  /** Per-query DB timing in ms — included for latency diagnosis. */
+  _qms?: { statsMs: number };
 }
 
 /**

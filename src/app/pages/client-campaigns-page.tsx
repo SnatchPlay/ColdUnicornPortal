@@ -23,27 +23,24 @@ import { ChartTextSummary } from "../components/app-ui";
 import { getCampaignPerformance } from "../lib/client-view-models";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
 import { formatDate, formatNumber } from "../lib/format";
-import { scopeCampaignStats, scopeCampaigns } from "../lib/selectors";
-import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import { useAllCampaignStats, useCampaignsList } from "../lib/use-campaigns";
 
 export function ClientCampaignsPage() {
-  const { identity } = useAuth();
-  const { clients, campaigns, campaignDailyStats, loading, error, refresh } = useCoreData();
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
-  );
-  const scopedStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
-  );
+  const { data, loading, error, refresh } = useCampaignsList({
+    sortField: "start",
+    sortDir: "desc",
+    page: 1,
+    pageSize: 200,
+  });
+  const { data: allStats } = useAllCampaignStats();
+
+  const scopedCampaigns = data?.rows ?? [];
   const timeframeStats = useMemo(
-    () => filterByTimeframe(scopedStats, (stat) => stat.report_date, timeframe),
-    [scopedStats, timeframe],
+    () => filterByTimeframe(allStats?.rows ?? [], (stat) => stat.report_date, timeframe),
+    [allStats?.rows, timeframe],
   );
   const performance = useMemo(() => getCampaignPerformance(scopedCampaigns, timeframeStats), [scopedCampaigns, timeframeStats]);
   const selectedCampaign =
@@ -64,7 +61,7 @@ export function ClientCampaignsPage() {
   );
   const timeframeLabel = getTimeframeLabel(timeframe);
 
-  if (loading) {
+  if (loading && !data) {
     return <PortalLoadingState title="Loading campaigns" description="Syncing outreach campaign performance." />;
   }
 

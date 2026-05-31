@@ -238,7 +238,67 @@ Clients do not write domain entities through the portal. Their account actions s
 
 ---
 
-## 5. Optimistic updates & rollback
+## 5. RLS performance rules (ADR-0006)
+
+### 5.1 Set-based SELECT policies — mandatory for high-volume tables
+
+SELECT policies on tables with >1 k rows **must** use the subquery (set-based) form, not a per-row helper function call.
+
+**Required pattern:**
+```sql
+CREATE POLICY "table_select_scoped" ON public.table FOR SELECT TO authenticated
+USING (
+  client_id IN (
+    SELECT id FROM public.clients WHERE private.can_access_client(id)
+  )
+);
+```
+
+**Forbidden on high-volume tables:**
+```sql
+USING (private.can_access_client(client_id))  -- called once per row → O(n) overhead
+```
+
+**Why:** `private.can_access_client(client_id)` takes a row-level argument. PostgreSQL cannot hoist it out of a scan even when the function is `STABLE`. At ~0.1ms per call × 4020 rows = 400ms of pure RLS overhead per query. The subquery form materialises a hash set once (48 clients) and the main scan becomes a semijoin.
+
+**Measured (2026-06-01, admin role, leads table 3972 rows):**
+- Per-row form: 446ms execution time
+- Set-based form: 22ms execution time (20×)
+
+Full analysis: [ADR-0006](../../../docs/adr/0006-set-based-rls-predicates.md).
+
+### 5.2 EXPLAIN ANALYZE checklist for new gateway actions
+
+Before any new SELECT action on a table with >1 k rows goes to production:
+
+1. Run `EXPLAIN (ANALYZE, BUFFERS)` **as the authenticated role** — not superuser. Use `scripts/db-diagnose-rls-explain.mjs` pattern: open a transaction, set JWT claims via `set_config`, `SET LOCAL ROLE authenticated`, then EXPLAIN.
+2. Scan the plan for `Filter: private.*` inside any Seq or Index scan. Those are per-row calls.
+3. If found, rewrite the policy to the set-based form **before shipping**.
+4. Record before/after execution times in the migration comment.
+
+### 5.3 Current policy status by table
+
+| Table | Policy form | Since |
+|---|---|---|
+| `leads` | Set-based: `client_id IN (SELECT ...)` | `20260601b` |
+| `campaigns` | Set-based: `client_id IN (SELECT ...) AND role/type` | `20260601b` |
+| `replies` | Set-based: `client_id IS NOT NULL AND client_id IN (SELECT ...)` | `20260601b` |
+| `campaign_daily_stats` | Set-based: `campaign_id IN (SELECT ...)` | `20260421` |
+| `daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260421` |
+| `clients` | Per-row: `can_access_client(id)` | — (48 rows — acceptable) |
+| `domains`, `invoices`, `condition_rules` | Per-row helper | Phase 7 audit pending |
+
+### 5.4 `_serverMs` response field
+
+Every `orm-gateway` response includes `_serverMs: { total, setup, handler }` (milliseconds). Use it to distinguish network overhead from DB overhead:
+- `setup`: time for the `set_config` setup round-trip
+- `handler`: time for the action's SQL queries
+- `total - setup - handler`: transaction/connection overhead (edge function → DB)
+- `observed - total`: one-way network latency × 2
+
+---
+
+## 6. Optimistic updates & rollback
 
 `CoreDataProvider` wraps each mutation roughly as:
 
