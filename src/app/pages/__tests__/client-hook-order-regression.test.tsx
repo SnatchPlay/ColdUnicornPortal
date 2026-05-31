@@ -80,16 +80,8 @@ type LegacyHookCase = {
   loadedTitle: string;
 };
 
-// Legacy client pages still served through CoreDataProvider (LegacySnapshotOutlet).
-const LEGACY_CASES: LegacyHookCase[] = [
-  {
-    name: "client statistics",
-    Component: ClientStatisticsPage,
-    loadingTitle: "Loading analytics",
-    errorTitle: "Analytics data is unavailable",
-    loadedTitle: "Analytics",
-  },
-];
+// All client pages are now per-page (Phases 2A/5/6). Legacy cases list is empty.
+const LEGACY_CASES: LegacyHookCase[] = [];
 
 describe("client page hook-order regression coverage", () => {
   beforeEach(() => {
@@ -174,6 +166,21 @@ describe("client page hook-order regression coverage", () => {
     renderPage(ClientCampaignsPage);
     await act(async () => {});
     expect(screen.getByText("Campaigns")).toBeInTheDocument();
+  });
+
+  // ── Client statistics (Phase 6: per-page loader, no CoreDataProvider) ─────────────────────
+
+  it("renders client statistics loading state", () => {
+    // loadClientDashboard hangs (set in beforeEach) → hook stays in loading:true state.
+    renderPage(ClientStatisticsPage);
+    expect(screen.getByText("Loading analytics")).toBeInTheDocument();
+  });
+
+  it("renders client statistics loaded state", async () => {
+    mockedRepo.loadClientDashboard.mockResolvedValue(emptyClientDashboard as never);
+    renderPage(ClientStatisticsPage);
+    await act(async () => {});
+    expect(screen.getByText("Analytics")).toBeInTheDocument();
   });
 
   it("applies the dashboard timeframe to client monthly charts", async () => {

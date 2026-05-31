@@ -46,8 +46,8 @@ the production function until reviewed:
 | `ClientLeadsPage` | `clients`, `leads`, `replies`, `campaigns` | — | `loadLeadsList` + `loadLeadDetail` | 4 | ✅ |
 | `InternalCampaignsPage` (campaigns-page.tsx) | `clients`, `campaigns`, `campaignDailyStats` | `createCampaign`, `updateCampaign` | `loadCampaignsList` + `loadCampaignStats` | 5 | ✅ |
 | `ClientCampaignsPage` | `clients`, `campaigns`, `campaignDailyStats` | — | `loadCampaignsList` + `useAllCampaignStats` | 5 | ✅ |
-| `InternalStatisticsPage` (statistics-page.tsx) | `users`, `clients`, `campaigns`, `leads`, `campaignDailyStats`, `dailyStats` | — | `loadAnalyticsOverview` | 6 | ☐ |
-| `ClientStatisticsPage` | `clients`, `campaigns`, `leads`, `campaignDailyStats` | — | `loadClientAnalytics` | 6 | ☐ |
+| `InternalStatisticsPage` (statistics-page.tsx) | `users`, `clients`, `campaigns`, `leads`, `campaignDailyStats`, `dailyStats` | — | `loadAnalyticsOverview` / `useAnalyticsOverview` | 6 | ✅ |
+| `ClientStatisticsPage` | `clients`, `campaigns`, `leads`, `campaignDailyStats` | — | `loadClientDashboard` / `useClientAnalytics` | 6 | ✅ |
 | `DomainsPage` | `clients`, `domains` | `createDomain`, `updateDomain` | `loadDomains` / `useDomainsPage` | 7 | ☐ |
 | `InvoicesPage` | `clients`, `invoices` | `updateInvoice` | `loadInvoices` / `useInvoicesPage` | 7 | ☐ |
 | `BlacklistPage` | `emailExcludeList` | `upsertEmailExcludeDomain`, `deleteEmailExcludeDomain` | `loadEmailBlacklist` / `useBlacklistPage` | 7 | ☐ |

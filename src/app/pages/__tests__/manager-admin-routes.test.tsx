@@ -45,6 +45,7 @@ vi.mock("../../data/repository", () => ({
     loadLeadsFilterOptions: vi.fn(),
     loadCampaignsList: vi.fn(),
     loadCampaignStats: vi.fn(),
+    loadAnalyticsOverview: vi.fn(),
   },
 }));
 
@@ -57,16 +58,20 @@ type RouteCase = {
   Component: () => JSX.Element;
 };
 
-// Non-dashboard, non-clients, non-leads, non-campaigns routes still use CoreDataProvider.
+// Non-dashboard, non-clients, non-leads, non-campaigns, non-statistics routes still use CoreDataProvider.
 const LEGACY_ROUTE_CASES: RouteCase[] = [
-  { name: "manager statistics route", role: "manager", title: "Statistics", Component: StatisticsPage },
   { name: "manager domains route", role: "manager", title: "Domains", Component: DomainsPage },
   { name: "manager invoices route", role: "manager", title: "Invoices", Component: InvoicesPage },
   { name: "manager blacklist route", role: "manager", title: "Blacklist", Component: BlacklistPage },
-  { name: "admin statistics route", role: "admin", title: "Statistics", Component: StatisticsPage },
   { name: "admin domains route", role: "admin", title: "Domains", Component: DomainsPage },
   { name: "admin invoices route", role: "admin", title: "Invoices", Component: InvoicesPage },
   { name: "admin blacklist route", role: "admin", title: "Blacklist", Component: BlacklistPage },
+];
+
+// Statistics routes (Phase 6): per-page loaders, no CoreDataProvider.
+const STATISTICS_ROUTE_CASES: RouteCase[] = [
+  { name: "manager statistics route", role: "manager", title: "Statistics", Component: StatisticsPage },
+  { name: "admin statistics route", role: "admin", title: "Statistics", Component: StatisticsPage },
 ];
 
 // Campaigns routes (Phase 5): per-page loaders, no CoreDataProvider.
@@ -146,6 +151,7 @@ describe("manager/admin route states", () => {
     mockedRepo.loadLeadsFilterOptions.mockResolvedValue({ clientsLite: [], campaignsLite: [] });
     mockedRepo.loadCampaignsList.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadCampaignStats.mockResolvedValue({ rows: [] });
+    mockedRepo.loadAnalyticsOverview.mockReturnValue(new Promise(() => {}));
   });
 
   // ── Legacy snapshot routes (still on CoreDataProvider) ──────────────────────────────────────
@@ -243,6 +249,15 @@ describe("manager/admin route states", () => {
   it.each(CAMPAIGNS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
     // loadCampaignsList hangs (set in beforeEach) → hook stays in loading:true.
+    renderRoute(Component);
+    expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
+  });
+
+  // ── Statistics routes (Phase 6: per-page loader, no CoreDataProvider) ───────────────────────
+
+  it.each(STATISTICS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
+    mockedUseAuth.mockReturnValue(makeAuth(role) as never);
+    // loadAnalyticsOverview hangs (set in beforeEach) → hook stays in loading:true.
     renderRoute(Component);
     expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
   });

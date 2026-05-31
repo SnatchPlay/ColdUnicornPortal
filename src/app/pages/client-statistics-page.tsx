@@ -32,26 +32,24 @@ import {
   formatCompact,
 } from "../lib/client-view-models";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel } from "../lib/timeframe";
-import { scopeCampaignStats, scopeCampaigns, scopeClients, scopeLeads } from "../lib/selectors";
 import { formatNumber } from "../lib/format";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import { useClientAnalytics } from "../lib/use-analytics";
 
 export function ClientStatisticsPage() {
   const { identity } = useAuth();
-  const { clients, campaigns, leads, campaignDailyStats, loading, error, refresh } = useCoreData();
+  const { data, loading, error, refresh } = useClientAnalytics(identity?.clientId ?? null);
   const [timeframe, setTimeframe] = useState(() => createDefaultTimeframe());
 
-  const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const scopedCampaigns = useMemo(
-    () => (identity ? scopeCampaigns(identity, clients, campaigns) : []),
-    [campaigns, clients, identity],
+  // Data from ClientDashboardPayload — already RLS-scoped to this client
+  const scopedClients = useMemo(
+    () => (data ? [data.client] : []),
+    [data],
   );
-  const scopedLeads = useMemo(() => (identity ? scopeLeads(identity, clients, leads) : []), [clients, identity, leads]);
-  const scopedStats = useMemo(
-    () => (identity ? scopeCampaignStats(identity, clients, campaigns, campaignDailyStats) : []),
-    [campaignDailyStats, campaigns, clients, identity],
-  );
+  const scopedCampaigns = data?.campaigns ?? [];
+  const scopedLeads = data?.leadProjections ?? [];
+  const scopedStats = data?.campaignDailyStats ?? [];
+
   const timeframeLeads = useMemo(
     () => filterByTimeframe(scopedLeads, (lead) => lead.created_at, timeframe),
     [scopedLeads, timeframe],

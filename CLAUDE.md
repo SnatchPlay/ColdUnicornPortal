@@ -66,6 +66,26 @@ If you need something that "feels like" one of the above but with one tweak, **a
 - **Resizable tables:** [`useResizableColumns(defaults, mins, storageKey)`](src/app/lib/use-resizable-columns.ts).
 - **Types:** [`src/app/types/core.ts`](src/app/types/core.ts) — `AppRole`, `Identity`, `LeadRecord`, all record types. Don't redeclare.
 
+### 2.3 Per-page hook pattern (mandatory for all migrated pages)
+
+Every page hook that calls a gateway select action **must** include a stale-response guard using a `loadIdRef` counter. This prevents an in-flight slow request from overwriting UI state set by a newer fast request (the 30s outlier pattern diagnosed in Phase 5B).
+
+```ts
+const loadIdRef = useRef(0);
+
+useEffect(() => {
+  const id = ++loadIdRef.current;
+  repository.loadSomething(params).then((result) => {
+    if (id !== loadIdRef.current) return; // stale — discard
+    setData(result);
+  });
+}, [paramsKey]);
+```
+
+Reference implementations: [`use-leads.ts`](src/app/lib/use-leads.ts), [`use-campaigns.ts`](src/app/lib/use-campaigns.ts).
+
+Additionally, when `fetchMs - server._serverMs.total > 1500ms`, the frontend logs `[GATEWAY_OVERHEAD]` — a cold-start / pooler stall warning. Do not add performance workarounds for this pattern; it resolves on warm instances.
+
 ### 2.3 Forbidden duplications
 
 - Do not introduce a second HTTP layer, second auth context, second snapshot loader, or second metric calculator.

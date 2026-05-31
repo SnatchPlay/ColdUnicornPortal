@@ -211,9 +211,10 @@ function ProtectedApp() {
                 <Route path="leads" element={identity.clientId ? <LeadsPage /> : <ClientAccessBlocker />} />
                 {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
                 <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 6-7 */}
+                {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
+                <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 */}
                 <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
               </Route>
@@ -228,9 +229,10 @@ function ProtectedApp() {
                 <Route path="leads" element={<LeadsPage />} />
                 {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
                 <Route path="campaigns" element={<CampaignsPage />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 6-7 */}
+                {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
+                <Route path="statistics" element={<StatisticsPage />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 */}
                 <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="statistics" element={<StatisticsPage />} />
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="blacklist" element={<BlacklistPage />} />
@@ -248,10 +250,11 @@ function ProtectedApp() {
                 <Route path="leads" element={<LeadsPage />} />
                 {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
                 <Route path="campaigns" element={<CampaignsPage />} />
+                {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
+                <Route path="statistics" element={<StatisticsPage />} />
                 {/* Legacy snapshot routes */}
                 <Route element={<LegacySnapshotOutlet />}>
                   <Route path="users" element={<AdminUserManagementPage />} />
-                  <Route path="statistics" element={<StatisticsPage />} />
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="blacklist" element={<BlacklistPage />} />
