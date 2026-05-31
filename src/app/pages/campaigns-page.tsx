@@ -119,7 +119,8 @@ function InternalCampaignsPage() {
   const [createCampaignDraft, setCreateCampaignDraft] = useState<CreateCampaignDraft | null>(null);
   const [isSubmittingCreateCampaign, setIsSubmittingCreateCampaign] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
-  const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
+  const [loadPage, setLoadPage] = useState(1);
+  const [accumulatedRows, setAccumulatedRows] = useState<CampaignListRow[]>([]);
   const [query, setQuery] = useState("");
   const [committedSearch, setCommittedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>(ALL_FILTER_VALUE);
@@ -145,9 +146,9 @@ function InternalCampaignsPage() {
     search: committedSearch || undefined,
     sortField: campaignSort.key,
     sortDir: campaignSort.direction,
-    page: 1,
-    pageSize: 1000,
-  }), [clientFilterId, statusFilter, committedSearch, campaignSort.key, campaignSort.direction]);
+    page: loadPage,
+    pageSize: 200,
+  }), [clientFilterId, statusFilter, committedSearch, campaignSort.key, campaignSort.direction, loadPage]);
 
   const { data, loading, error, refresh } = useCampaignsList(listParams);
   // clientsLite comes from ShellDataProvider (already loaded on app boot) — no extra request needed.
@@ -159,8 +160,8 @@ function InternalCampaignsPage() {
   const { data: statsData } = useCampaignStats(selectedCampaignId);
 
   const selectedCampaign = useMemo(
-    () => rows.find((item) => item.id === selectedCampaignId) ?? null,
-    [rows, selectedCampaignId],
+    () => accumulatedRows.find((item) => item.id === selectedCampaignId) ?? null,
+    [accumulatedRows, selectedCampaignId],
   );
 
   const campaignColumns = useResizableColumns({
@@ -176,8 +177,17 @@ function InternalCampaignsPage() {
     [campaignColumns.template],
   );
 
-  const visibleCampaigns = useMemo(() => rows.slice(0, visibleRowsCount), [rows, visibleRowsCount]);
-  const hasMoreCampaigns = visibleRowsCount < rows.length;
+  // Accumulate rows across pages; reset on filter/sort change.
+  const filterKey = JSON.stringify({ clientFilterId, statusFilter, committedSearch, campaignSort });
+  useEffect(() => {
+    if (!data) return;
+    if (loadPage === 1) setAccumulatedRows(data.rows);
+    else setAccumulatedRows((prev) => [...prev, ...data.rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const totalCount = data?.totalCount ?? 0;
+  const hasMoreCampaigns = data ? accumulatedRows.length < totalCount : false;
 
   const drawerStats = useMemo(
     () => filterByTimeframe(statsData?.rows ?? [], (item) => item.report_date, drawerTimeframe),
@@ -198,16 +208,20 @@ function InternalCampaignsPage() {
     [drawerStats, selectedCampaign?.id],
   );
 
+  // Reset to page 1 + clear accumulation when filter/sort changes.
   useEffect(() => {
-    setVisibleRowsCount(PAGE_SIZE);
-    if (selectedCampaignId && !rows.some((item) => item.id === selectedCampaignId)) {
+    setLoadPage(1);
+    setAccumulatedRows([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
+
+  // Close drawer if selected campaign is no longer in accumulated rows.
+  useEffect(() => {
+    if (selectedCampaignId && !accumulatedRows.some((item) => item.id === selectedCampaignId)) {
       setSelectedCampaignId(null);
     }
-  }, [rows, selectedCampaignId]);
-
-  useEffect(() => {
-    setVisibleRowsCount(PAGE_SIZE);
-  }, [clientFilterId, query, statusFilter, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accumulatedRows, selectedCampaignId]);
 
   useEffect(() => {
     if (!selectedCampaign) {
@@ -393,15 +407,15 @@ function InternalCampaignsPage() {
         </Surface>
       )}
 
-      {rows.length > 0 && visibleCampaigns.length === 0 ? (
+      {totalCount > 0 && accumulatedRows.length === 0 && !loading ? (
         <EmptyState
           title="No campaigns match the current filters"
           description="Try broadening status/client/search filters to reveal campaigns."
         />
       ) : null}
 
-      {rows.length > 0 ? (
-        <Surface title="Campaign portfolio" subtitle={`${visibleCampaigns.length} of ${rows.length} campaigns visible`}>
+      {accumulatedRows.length > 0 ? (
+        <Surface title="Campaign portfolio" subtitle={`${accumulatedRows.length} of ${totalCount} campaigns`}>
           <div className="overflow-hidden rounded-2xl border border-border">
             <div className="overflow-x-auto" style={campaignTableStyle}>
               <div className="hidden min-w-[1200px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--campaign-table-columns)]">
@@ -432,7 +446,7 @@ function InternalCampaignsPage() {
                 ))}
               </div>
               <div className="divide-y divide-border md:min-w-[1200px]">
-                {visibleCampaigns.map((campaign) => {
+                {accumulatedRows.map((campaign) => {
                   const isActive = selectedCampaign?.id === campaign.id;
                   return (
                     <button
@@ -474,7 +488,7 @@ function InternalCampaignsPage() {
           {hasMoreCampaigns && (
             <div className="mt-4 flex justify-center">
               <button
-                onClick={() => setVisibleRowsCount((current) => current + PAGE_SIZE)}
+                onClick={() => setLoadPage((p) => p + 1)}
                 className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30"
               >
                 Load more campaigns

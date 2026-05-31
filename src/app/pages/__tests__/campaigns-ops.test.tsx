@@ -153,10 +153,11 @@ describe("campaigns drawer operations", () => {
       created_at: `${yesterday}T00:00:00.000Z`, updated_at: `${today}T00:00:00.000Z`,
     });
 
-    // Default: both campaigns; after status=active filter: only A; after client=Bravo filter: only B
+    // Default: both; after status=active: only A; after status reset: both; after client=Bravo: only B
     mockedRepo.loadCampaignsList
       .mockResolvedValueOnce(makeListResponse([rowA, rowB]) as never)   // initial
       .mockResolvedValueOnce(makeListResponse([rowA]) as never)          // after status=active
+      .mockResolvedValueOnce(makeListResponse([rowA, rowB]) as never)   // after status reset
       .mockResolvedValue(makeListResponse([rowB]) as never);             // after client=Bravo
 
     renderPage();
@@ -172,9 +173,12 @@ describe("campaigns drawer operations", () => {
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Open details for Outreach A" })).toBeInTheDocument();
 
-    // Reset status, filter by client=Bravo → only Outreach B
+    // Reset status filter (one step at a time to avoid mid-flight race)
     fireEvent.click(screen.getByLabelText("Filter campaigns by status"));
     fireEvent.click(await screen.findByRole("option", { name: "All statuses" }));
+    await act(async () => {}); // wait for status-reset fetch to land
+
+    // Now filter by client=Bravo
     const clientTrigger = screen.getByLabelText("Filter campaigns by client");
     fireEvent.click(clientTrigger);
     fireEvent.click(await screen.findByRole("option", { name: "Bravo" }));

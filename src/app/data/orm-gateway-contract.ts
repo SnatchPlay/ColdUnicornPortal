@@ -495,7 +495,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "loadCampaignsList.params requires sortField and sortDir strings." };
     }
     const page = typeof p.page === "number" ? p.page : 1;
-    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 200) : 50;
+    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 500) : 200;
     return {
       ok: true,
       value: {
