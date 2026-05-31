@@ -25,6 +25,8 @@ vi.mock("../../data/repository", () => ({
   },
   repository: {
     loadClientDashboard: vi.fn(),
+    loadCampaignsList: vi.fn(),
+    loadCampaignStats: vi.fn(),
   },
 }));
 
@@ -81,13 +83,6 @@ type LegacyHookCase = {
 // Legacy client pages still served through CoreDataProvider (LegacySnapshotOutlet).
 const LEGACY_CASES: LegacyHookCase[] = [
   {
-    name: "client campaigns",
-    Component: ClientCampaignsPage,
-    loadingTitle: "Loading campaigns",
-    errorTitle: "Campaign data is unavailable",
-    loadedTitle: "Campaigns",
-  },
-  {
     name: "client statistics",
     Component: ClientStatisticsPage,
     loadingTitle: "Loading analytics",
@@ -102,6 +97,9 @@ describe("client page hook-order regression coverage", () => {
     mockedUseAuth.mockReturnValue(makeAuth() as never);
     // Dashboard repo hangs indefinitely — keeps loading state for sync loading checks.
     mockedRepo.loadClientDashboard.mockReturnValue(new Promise(() => {}));
+    // Campaigns per-page loaders hang by default; individual tests override as needed.
+    mockedRepo.loadCampaignsList.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadCampaignStats.mockResolvedValue({ rows: [] });
   });
 
   afterEach(() => {
@@ -159,6 +157,23 @@ describe("client page hook-order regression coverage", () => {
     renderPage(ClientDashboardPage);
     await act(async () => {});
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
+  // ── Client campaigns (Phase 5: per-page loader, no CoreDataProvider) ─────────────────────
+
+  it("renders client campaigns loading state", () => {
+    // loadCampaignsList hangs (set in beforeEach) → hook stays in loading:true state.
+    renderPage(ClientCampaignsPage);
+    expect(screen.getByText("Loading campaigns")).toBeInTheDocument();
+  });
+
+  it("renders client campaigns loaded state", async () => {
+    mockedRepo.loadCampaignsList.mockResolvedValue({
+      rows: [], totalCount: 0,
+    } as never);
+    renderPage(ClientCampaignsPage);
+    await act(async () => {});
+    expect(screen.getByText("Campaigns")).toBeInTheDocument();
   });
 
   it("applies the dashboard timeframe to client monthly charts", async () => {

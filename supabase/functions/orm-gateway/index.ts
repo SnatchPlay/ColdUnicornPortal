@@ -730,7 +730,12 @@ function timedQuery<T>(name: string, promise: Promise<T[]>): Promise<T[]> {
 }
 // [TEMP PERF] /end
 
-async function handleAction(tx: any, payload: OrmGatewayRequest) {
+/** Mutable perf context threaded from Deno.serve → handleAction for per-query timing. */
+interface PerfContext {
+  queryMs: Record<string, number>;
+}
+
+async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfContext) {
   if (payload.action === "loadSnapshot") {
     const includeDailyStats = payload.includeDailyStats ?? true;
     const leadsLimit = payload.leadsLimit;
@@ -1599,6 +1604,138 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     };
   }
 
+  // ── Phase 5: campaigns list + lazy stats ────────────────────────────────────────────────────
+
+  if (payload.action === "loadCampaignsList") {
+    const p = payload.params;
+    const t0 = performance.now();
+    const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 200);
+    const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
+
+    console.log(
+      `[PERF][orm-gateway] loadCampaignsList shape: ` +
+        `hasClientFilter=${!!p.clientId} hasStatus=${!!p.status} hasSearch=${!!p.search} ` +
+        `sortField=${p.sortField} sortDir=${p.sortDir} page=${p.page} pageSize=${pageSize}`,
+    );
+
+    const whereParts: ReturnType<typeof sql>[] = [];
+    if (p.clientId) whereParts.push(sql`camp.client_id = ${p.clientId}`);
+    if (p.status) whereParts.push(sql`camp.status = ${p.status}`);
+    if (p.search) {
+      const needle = `%${p.search.toLowerCase()}%`;
+      whereParts.push(sql`(LOWER(camp.name) LIKE ${needle} OR LOWER(COALESCE(camp.external_id, '')) LIKE ${needle})`);
+    }
+    const whereClause = whereParts.length > 0 ? sql`WHERE ${sql.join(whereParts, sql` AND `)}` : sql``;
+
+    const dirSql = p.sortDir === "asc" ? sql`ASC` : sql`DESC`;
+    const dirTie = sql`ASC`;
+    let orderClause: ReturnType<typeof sql>;
+    if (p.sortField === "name") orderClause = sql`ORDER BY LOWER(camp.name) ${dirSql}, camp.id ${dirTie}`;
+    else if (p.sortField === "type") orderClause = sql`ORDER BY camp.type ${dirSql}, camp.id ${dirTie}`;
+    else if (p.sortField === "status") orderClause = sql`ORDER BY camp.status ${dirSql}, camp.id ${dirTie}`;
+    else if (p.sortField === "positive") orderClause = sql`ORDER BY COALESCE(camp.positive_responses, 0) ${dirSql}, camp.id ${dirTie}`;
+    else orderClause = sql`ORDER BY camp.start_date ${dirSql} NULLS LAST, camp.id ${dirTie}`; // "start"
+
+    const tCount0 = performance.now();
+    const countRows = await rawQuery<{ n: number }>(tx, sql`
+      SELECT COUNT(*)::int AS n
+      FROM campaigns camp
+      ${whereClause}
+    `);
+    const countMs = performance.now() - tCount0;
+
+    const tData0 = performance.now();
+    const dataRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        camp.id, camp.created_at, camp.updated_at, camp.client_id,
+        camp.external_id, camp.type, camp.name, camp.status,
+        camp.database_size, camp.positive_responses, camp.start_date,
+        camp.gender_target,
+        c.name AS client_name
+      FROM campaigns camp
+      JOIN clients c ON c.id = camp.client_id
+      ${whereClause}
+      ${orderClause}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
+    const dataMs = performance.now() - tData0;
+    // filterOptions removed — caller uses ShellDataProvider.clientsLite for the client dropdown.
+
+    const totalCount = countRows[0]?.n ?? 0;
+    // Manual mapping from snake_case raw SQL result (rawQuery returns raw column names).
+    // toCampaignRecord expects drizzle camelCase and cannot be used here.
+    const rows = dataRows.map((r) => ({
+      id: String(r.id ?? ""),
+      created_at: r.created_at ? (toIsoString(r.created_at) ?? "") : "",
+      updated_at: r.updated_at ? (toIsoString(r.updated_at) ?? "") : "",
+      client_id: String(r.client_id ?? ""),
+      external_id: String(r.external_id ?? ""),
+      type: String(r.type ?? ""),
+      name: String(r.name ?? ""),
+      status: r.status ? String(r.status) : null,
+      database_size: r.database_size != null ? Number(r.database_size) : null,
+      positive_responses: r.positive_responses != null ? Number(r.positive_responses) : 0,
+      start_date: r.start_date ? String(r.start_date) : null,
+      gender_target: r.gender_target ? String(r.gender_target) : null,
+      clientName: String(r.client_name ?? ""),
+    }));
+
+    const totalHandlerMs = performance.now() - t0;
+    if (perf) { perf.queryMs.countMs = countMs; perf.queryMs.rowsMs = dataMs; }
+    console.log(
+      `[PERF][orm-gateway] loadCampaignsList: totalHandlerMs=${totalHandlerMs.toFixed(1)} ` +
+        `countMs=${countMs.toFixed(1)} dataMs=${dataMs.toFixed(1)} ` +
+        `rows=${rows.length} totalCount=${totalCount}`,
+    );
+
+    return { rows, totalCount, _qms: { countMs: Math.round(countMs), rowsMs: Math.round(dataMs) } };
+  }
+
+  if (payload.action === "loadCampaignStats") {
+    const t0 = performance.now();
+    const since90d = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
+
+    let statsRows: Record<string, unknown>[];
+    if (payload.campaignId) {
+      statsRows = await rawQuery<Record<string, unknown>>(tx, sql`
+        SELECT campaign_id, report_date, sent_count, reply_count, bounce_count,
+               unique_open_count, positive_replies_count
+        FROM campaign_daily_stats
+        WHERE campaign_id = ${payload.campaignId} AND report_date >= ${since90d}
+        ORDER BY report_date ASC
+      `);
+    } else {
+      // No campaignId: load all accessible campaign stats (client page — RLS scopes to their data).
+      statsRows = await rawQuery<Record<string, unknown>>(tx, sql`
+        SELECT campaign_id, report_date, sent_count, reply_count, bounce_count,
+               unique_open_count, positive_replies_count
+        FROM campaign_daily_stats
+        WHERE report_date >= ${since90d}
+        ORDER BY campaign_id, report_date ASC
+      `);
+    }
+
+    const statsMs = performance.now() - t0;
+    if (perf) perf.queryMs.statsMs = statsMs;
+    console.log(
+      `[PERF][orm-gateway] loadCampaignStats: ${statsMs.toFixed(1)}ms ` +
+        `(campaignId=${payload.campaignId ?? "all"} rows=${statsRows.length})`,
+    );
+
+    return {
+      rows: statsRows.map((r) => ({
+        campaign_id: String(r.campaign_id ?? ""),
+        report_date: String(r.report_date ?? ""),
+        sent_count: r.sent_count != null ? Number(r.sent_count) : null,
+        reply_count: r.reply_count != null ? Number(r.reply_count) : null,
+        bounce_count: r.bounce_count != null ? Number(r.bounce_count) : null,
+        unique_open_count: r.unique_open_count != null ? Number(r.unique_open_count) : null,
+        positive_replies_count: r.positive_replies_count != null ? Number(r.positive_replies_count) : null,
+      })),
+      _qms: { statsMs: Math.round(statsMs) },
+    };
+  }
+
   if (payload.action === "loadConditionRules") {
     const rows = await tx
       .select()
@@ -1982,26 +2119,39 @@ Deno.serve(async (request) => {
 
   try {
     const rawPayload = await request.json().catch(() => null);
+    // Extract requestId before parsing so it's available for diagnostics even on parse error.
+    const requestId = isRecord(rawPayload) && typeof rawPayload._requestId === "string"
+      ? rawPayload._requestId
+      : "no-id";
     const parsed = parseOrmGatewayRequest(rawPayload);
     if (!parsed.ok) {
       return jsonResponse(400, {
         ok: false,
-        error: {
-          message: parsed.error,
-        },
+        error: { message: parsed.error },
+        _requestId: requestId,
       });
     }
 
+    const perfCtx: PerfContext = { queryMs: {} };
     const tTotal = performance.now();
-    const { data, setupMs, handlerMs } = await executeAsCaller(request, (tx) => handleAction(tx, parsed.value));
+    const { data, setupMs, handlerMs } = await executeAsCaller(request, (tx) => handleAction(tx, parsed.value, perfCtx));
     const totalMs = performance.now() - tTotal;
     console.log(
-      `[PERF][orm-gateway] ${parsed.value.action}: totalMs=${totalMs.toFixed(1)} ` +
-        `setupMs=${setupMs.toFixed(1)} handlerMs=${handlerMs.toFixed(1)}`,
+      `[PERF][orm-gateway] ${parsed.value.action} requestId=${requestId}: totalMs=${totalMs.toFixed(1)} ` +
+        `setupMs=${setupMs.toFixed(1)} handlerMs=${handlerMs.toFixed(1)}` +
+        (Object.keys(perfCtx.queryMs).length > 0 ? ` ${JSON.stringify(perfCtx.queryMs)}` : ""),
     );
-    // _serverMs is included in every response for latency diagnosis.
-    // setupMs = DB round-trip for JWT context setup; handlerMs = actual query time.
-    return jsonResponse(200, { ok: true, data, _serverMs: { total: Math.round(totalMs), setup: Math.round(setupMs), handler: Math.round(handlerMs) } });
+    return jsonResponse(200, {
+      ok: true,
+      data,
+      _serverMs: {
+        total: Math.round(totalMs),
+        setup: Math.round(setupMs),
+        handler: Math.round(handlerMs),
+        ...Object.fromEntries(Object.entries(perfCtx.queryMs).map(([k, v]) => [k, Math.round(v)])),
+      },
+      _requestId: requestId,
+    });
   } catch (reason) {
     const mapped = toGatewayError(reason);
     return jsonResponse(mapped.status, {

@@ -17,6 +17,9 @@
 } from "../types/core";
 import type {
   AdminDashboardOverview,
+  CampaignStatsResponse,
+  CampaignsListParams,
+  CampaignsListResponse,
   ClientDashboardPayload,
   ClientsOverviewPayload,
   LeadDetailResult,
@@ -101,6 +104,17 @@ export interface LoadLeadDetailPayload {
 
 export interface LoadLeadsFilterOptionsPayload {
   action: "loadLeadsFilterOptions";
+}
+
+export interface LoadCampaignsListPayload {
+  action: "loadCampaignsList";
+  params: CampaignsListParams;
+}
+
+export interface LoadCampaignStatsPayload {
+  action: "loadCampaignStats";
+  /** If provided: 90-day series for this campaign. If absent: all accessible campaigns (client page). */
+  campaignId?: string;
 }
 
 export interface UpdateClientPayload {
@@ -259,6 +273,8 @@ export type OrmGatewayRequest =
   | LoadLeadsListPayload
   | LoadLeadDetailPayload
   | LoadLeadsFilterOptionsPayload
+  | LoadCampaignsListPayload
+  | LoadCampaignStatsPayload
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
@@ -306,6 +322,8 @@ export interface OrmGatewayResponseMap {
   loadLeadsList: LeadsListResponse;
   loadLeadDetail: LeadDetailResult;
   loadLeadsFilterOptions: LeadsFilterOptions;
+  loadCampaignsList: CampaignsListResponse;
+  loadCampaignStats: CampaignStatsResponse;
   loadConditionRules: ConditionRuleRecord[];
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
@@ -466,6 +484,40 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
 
   if (action === "loadLeadsFilterOptions") {
     return { ok: true, value: { action } };
+  }
+
+  if (action === "loadCampaignsList") {
+    if (!isObject(payload.params)) {
+      return { ok: false, error: "loadCampaignsList requires a params object." };
+    }
+    const p = payload.params as Record<string, unknown>;
+    if (!isString(p.sortField) || !isString(p.sortDir)) {
+      return { ok: false, error: "loadCampaignsList.params requires sortField and sortDir strings." };
+    }
+    const page = typeof p.page === "number" ? p.page : 1;
+    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 200) : 50;
+    return {
+      ok: true,
+      value: {
+        action,
+        params: {
+          clientId: isString(p.clientId) ? p.clientId : undefined,
+          status: isString(p.status) && p.status.trim().length > 0 ? p.status.trim() : undefined,
+          search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,
+          sortField: String(p.sortField) as CampaignsListParams["sortField"],
+          sortDir: p.sortDir === "asc" ? "asc" : "desc",
+          page: Math.max(1, Math.trunc(page)),
+          pageSize,
+        } as CampaignsListParams,
+      },
+    };
+  }
+
+  if (action === "loadCampaignStats") {
+    const campaignId = isString(payload.campaignId) && payload.campaignId.trim().length > 0
+      ? payload.campaignId.trim()
+      : undefined;
+    return { ok: true, value: { action, campaignId } };
   }
 
   if (action === "updateClient") {

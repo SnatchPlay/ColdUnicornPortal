@@ -22,6 +22,9 @@ import type {
   AdminDashboardOverview,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  CampaignStatsResponse,
+  CampaignsListParams,
+  CampaignsListResponse,
   LeadDetailResult,
   LeadsFilterOptions,
   LeadsListParams,
@@ -52,6 +55,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadLeadsList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
+  loadCampaignsList: { table: "campaigns", operation: "select" },
+  loadCampaignStats: { table: "campaign_daily_stats", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
@@ -330,7 +335,8 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
 ): Promise<OrmGatewayResponseMap[TAction]> {
   const client = ensureSupabase();
   const firstToken = await getSessionAccessToken();
-  const body = { action, ...payload } as Record<string, unknown>;
+  const requestId = crypto.randomUUID();
+  const body = { action, ...payload, _requestId: requestId } as Record<string, unknown>;
   const meta = ORM_ACTION_META[action];
 
   // Instrument loadSnapshot ([TEMP PERF]) and all per-page gateway loaders ([PERF][gateway]).
@@ -343,7 +349,9 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadClientsOverview" ||
     action === "loadLeadsList" ||
     action === "loadLeadDetail" ||
-    action === "loadLeadsFilterOptions";
+    action === "loadLeadsFilterOptions" ||
+    action === "loadCampaignsList" ||
+    action === "loadCampaignStats";
   const isPerfTracked = isLoadSnapshot || isGatewayTracked;
   const tFetchStart = isPerfTracked ? performance.now() : 0;
 
@@ -363,10 +371,17 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
 
   if (isPerfTracked) {
     const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][gateway]";
+    // Parse _serverMs from the raw text before full JSON parse to get server-side breakdown.
+    let serverMsStr = "";
+    try {
+      const quick = JSON.parse(text) as Record<string, unknown>;
+      if (quick._serverMs) serverMsStr = ` server=${JSON.stringify(quick._serverMs)}`;
+      if (quick._requestId) serverMsStr += ` requestId=${quick._requestId}`;
+    } catch { /* non-fatal */ }
     console.log(
       `${label} ${action}: fetch=${(tFetchEnd - tFetchStart).toFixed(1)}ms ` +
         `readBody=${(tTextEnd - tFetchEnd).toFixed(1)}ms ` +
-        `responseBytes=${text.length} (${(text.length / 1024).toFixed(1)} KB)`,
+        `responseBytes=${text.length} (${(text.length / 1024).toFixed(1)} KB)${serverMsStr}`,
     );
   }
 
@@ -474,6 +489,8 @@ export interface Repository {
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
+  loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
+  loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
   createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
   createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
@@ -604,6 +621,14 @@ export const repository: Repository = {
 
   async loadLeadsFilterOptions() {
     return invokeOrmGatewaySelectWithRetry("loadLeadsFilterOptions", {});
+  },
+
+  async loadCampaignsList(params) {
+    return invokeOrmGatewaySelectWithRetry("loadCampaignsList", { params });
+  },
+
+  async loadCampaignStats(campaignId) {
+    return invokeOrmGatewaySelectWithRetry("loadCampaignStats", { campaignId });
   },
 
   async loadConditionRules() {

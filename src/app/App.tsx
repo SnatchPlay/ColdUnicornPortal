@@ -209,9 +209,10 @@ function ProtectedApp() {
                 <Route path="dashboard" element={identity.clientId ? <DashboardPage /> : <ClientAccessBlocker />} />
                 {/* Phase 4: leads — per-page loader, no CoreDataProvider */}
                 <Route path="leads" element={identity.clientId ? <LeadsPage /> : <ClientAccessBlocker />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 5-7 */}
+                {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
+                <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 6-7 */}
                 <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
                   <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
@@ -225,9 +226,10 @@ function ProtectedApp() {
                 <Route path="clients" element={<ClientsPage />} />
                 {/* Phase 4: leads — per-page loader, no CoreDataProvider */}
                 <Route path="leads" element={<LeadsPage />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 5-7 */}
+                {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
+                <Route path="campaigns" element={<CampaignsPage />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 6-7 */}
                 <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="campaigns" element={<CampaignsPage />} />
                   <Route path="statistics" element={<StatisticsPage />} />
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
@@ -244,10 +246,11 @@ function ProtectedApp() {
                 <Route path="clients" element={<ClientsPage />} />
                 {/* Phase 4: leads — per-page loader, no CoreDataProvider */}
                 <Route path="leads" element={<LeadsPage />} />
+                {/* Phase 5: campaigns — per-page loader, no CoreDataProvider */}
+                <Route path="campaigns" element={<CampaignsPage />} />
                 {/* Legacy snapshot routes */}
                 <Route element={<LegacySnapshotOutlet />}>
                   <Route path="users" element={<AdminUserManagementPage />} />
-                  <Route path="campaigns" element={<CampaignsPage />} />
                   <Route path="statistics" element={<StatisticsPage />} />
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />

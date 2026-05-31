@@ -44,8 +44,8 @@ the production function until reviewed:
 | `ClientsPage` | `clients`, `users`, `clientUsers`, `metricsByClientId`, `conditionRules`, `columnOverrides`, `clientCustomFields`, `clientCustomFieldValues` | `upsertClientCustomFieldValue`, `createClient`, `updateClient`, `sendInvite`, `upsertClientUserMapping`, `deleteClientUserMapping` | `loadClientsOverview` / `useClientsOverview` | 3 | ✅ |
 | `InternalLeadsPage` (leads-page.tsx) | `clients`, `leads`, `replies`, `campaigns` | `createLead`, `updateLead` | `loadLeadsList` + `loadLeadDetail` / `useLeadsList` | 4 | ✅ |
 | `ClientLeadsPage` | `clients`, `leads`, `replies`, `campaigns` | — | `loadLeadsList` + `loadLeadDetail` | 4 | ✅ |
-| `InternalCampaignsPage` (campaigns-page.tsx) | `clients`, `campaigns`, `campaignDailyStats` | `createCampaign`, `updateCampaign` | `loadCampaignsList` + `loadCampaignStats` | 5 | ☐ |
-| `ClientCampaignsPage` | `clients`, `campaigns`, `campaignDailyStats` | — | `loadCampaignsList` + `loadCampaignStats` | 5 | ☐ |
+| `InternalCampaignsPage` (campaigns-page.tsx) | `clients`, `campaigns`, `campaignDailyStats` | `createCampaign`, `updateCampaign` | `loadCampaignsList` + `loadCampaignStats` | 5 | ✅ |
+| `ClientCampaignsPage` | `clients`, `campaigns`, `campaignDailyStats` | — | `loadCampaignsList` + `useAllCampaignStats` | 5 | ✅ |
 | `InternalStatisticsPage` (statistics-page.tsx) | `users`, `clients`, `campaigns`, `leads`, `campaignDailyStats`, `dailyStats` | — | `loadAnalyticsOverview` | 6 | ☐ |
 | `ClientStatisticsPage` | `clients`, `campaigns`, `leads`, `campaignDailyStats` | — | `loadClientAnalytics` | 6 | ☐ |
 | `DomainsPage` | `clients`, `domains` | `createDomain`, `updateDomain` | `loadDomains` / `useDomainsPage` | 7 | ☐ |
@@ -85,6 +85,21 @@ Key changes in Phase 3:
 - `[PERF][dashboard]` frontend logs now cover all per-page loaders: `loadShellData`,
   `loadAdminDashboardOverview`, `loadManagerDashboardOverview`, `loadClientDashboard`,
   `loadClientsOverview`.
+
+## Provider topology (Phase 4 + 4B)
+
+`InternalLeadsPage` and `ClientLeadsPage` are outside `LegacySnapshotOutlet` for all three internal roles (admin, manager) and the client role. Each page uses `useLeadsList(params)` (server-side filtered/sorted/paginated) and `useLeadsFilterOptions()` (loaded once on mount, cached for session).
+
+Phase 4B performance investigation identified that RLS SELECT policies on `leads`, `campaigns`, and `replies` were using per-row helper calls (`private.can_access_client(client_id)`), costing ~400ms per query. A set-based rewrite via migration `20260601b` reduced handler time from 1340ms to 200ms (6.7×). The pattern is now documented in ADR-0006 and CLAUDE.md §5.5 and is mandatory for all future gateway actions on tables >1k rows.
+
+Key changes in Phase 4 + 4B:
+- `loadLeadsList(params)` + `loadLeadDetail(leadId)` replace global leads list.
+- `loadLeadsFilterOptions()` is a separate cached action (not re-fetched on paginate/filter).
+- `executeAsCaller` combines set_config + SET LOCAL ROLE into a single round-trip.
+- `_serverMs: { total, setup, handler }` is included in every gateway response for latency diagnosis.
+- `idle_timeout` on the postgres.js pool raised from 20s to 60s.
+- Search debounced 400ms in both leads pages (LIKE scan has no pg_trgm index).
+- RLS migration: `leads`, `campaigns`, `replies` SELECT policies rewritten to set-based form.
 
 ## Notes
 
