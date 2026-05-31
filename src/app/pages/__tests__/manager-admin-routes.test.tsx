@@ -36,6 +36,7 @@ vi.mock("../../data/repository", () => ({
     loadClientsOverview: vi.fn(),
     loadLeadsList: vi.fn(),
     loadLeadDetail: vi.fn(),
+    loadLeadsFilterOptions: vi.fn(),
   },
 }));
 
@@ -130,6 +131,7 @@ describe("manager/admin route states", () => {
     mockedRepo.loadClientsOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadLeadsList.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadLeadDetail.mockResolvedValue({ replies: [] });
+    mockedRepo.loadLeadsFilterOptions.mockResolvedValue({ clientsLite: [], campaignsLite: [] });
   });
 
   // ── Legacy snapshot routes (still on CoreDataProvider) ──────────────────────────────────────

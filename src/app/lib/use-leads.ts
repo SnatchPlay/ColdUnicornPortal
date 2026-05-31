@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { repository, RepositoryError } from "../data/repository";
-import type { LeadsListParams, LeadsListResponse, LeadDetailResult } from "../types/view-contracts";
+import type { LeadDetailResult, LeadsFilterOptions, LeadsListParams, LeadsListResponse } from "../types/view-contracts";
 import type { ReplyRecord } from "../types/core";
 
 export function mapLeadsError(reason: unknown): string {
@@ -42,6 +42,26 @@ export function useLeadsList(params: LeadsListParams) {
   const refresh = useCallback(() => { void load(params); }, [load, paramsKey]);
 
   return { data, loading, error, refresh };
+}
+
+/**
+ * Loads filter option lists (clients + campaigns with leads) once on mount.
+ * Not re-fetched on filter/paginate changes — the lists are stable per session.
+ */
+export function useLeadsFilterOptions(): { data: LeadsFilterOptions | null; loading: boolean } {
+  const [data, setData] = useState<LeadsFilterOptions | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    repository.loadLeadsFilterOptions()
+      .then((result) => { if (!cancelled) setData(result); })
+      .catch(() => { /* non-fatal — dropdowns stay empty */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  return { data, loading };
 }
 
 /** Lazily fetches the reply thread for a single lead when the drawer opens. */

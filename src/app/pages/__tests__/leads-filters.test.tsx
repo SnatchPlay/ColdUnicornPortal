@@ -18,6 +18,7 @@ vi.mock("../../data/repository", () => ({
   repository: {
     loadLeadsList: vi.fn(),
     loadLeadDetail: vi.fn(),
+    loadLeadsFilterOptions: vi.fn(),
     createLead: vi.fn(),
     updateLead: vi.fn(),
   },
@@ -66,13 +67,6 @@ function makeResponse(rows: ReturnType<typeof makeRow>[], extras?: { stageCounts
     rows,
     totalCount: extras?.totalCount ?? rows.length,
     stageCounts: extras?.stageCounts ?? {},
-    filterOptions: {
-      clientsLite: [{ id: "client-1", name: "Acme" }],
-      campaignsLite: [
-        { id: "camp-a", name: "Campaign Alpha", clientId: "client-1" },
-        { id: "camp-b", name: "Campaign Beta", clientId: "client-1" },
-      ],
-    },
   };
 }
 
@@ -88,6 +82,13 @@ describe("internal leads filters", () => {
       identity: { id: "manager-1", fullName: "Manager User", email: "manager@test.local", role: "manager" },
     } as never);
     mockedRepo.loadLeadDetail.mockResolvedValue({ replies: [] });
+    mockedRepo.loadLeadsFilterOptions.mockResolvedValue({
+      clientsLite: [{ id: "client-1", name: "Acme" }],
+      campaignsLite: [
+        { id: "camp-a", name: "Campaign Alpha", clientId: "client-1" },
+        { id: "camp-b", name: "Campaign Beta", clientId: "client-1" },
+      ],
+    });
   });
 
   it("supports combined reply/campaign/stage filters", async () => {

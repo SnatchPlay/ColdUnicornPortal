@@ -23,6 +23,7 @@ import type {
   ClientDashboardPayload,
   ClientsOverviewPayload,
   LeadDetailResult,
+  LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
   ManagerDashboardOverview,
@@ -50,6 +51,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadClientsOverview: { table: "clients", operation: "select" },
   loadLeadsList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
+  loadLeadsFilterOptions: { table: "leads", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
@@ -340,7 +342,8 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadClientDashboard" ||
     action === "loadClientsOverview" ||
     action === "loadLeadsList" ||
-    action === "loadLeadDetail";
+    action === "loadLeadDetail" ||
+    action === "loadLeadsFilterOptions";
   const isPerfTracked = isLoadSnapshot || isGatewayTracked;
   const tFetchStart = isPerfTracked ? performance.now() : 0;
 
@@ -384,6 +387,13 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const fallbackMessage = `ORM gateway request failed with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`;
 
   if (!response.ok) {
+    if (import.meta.env.DEV) {
+      console.error(
+        `[PERF][gateway] ${action}: non-2xx status=${response.status} ` +
+          `responseBytes=${text.length} pathname=${window.location.pathname}`,
+        text.slice(0, 2000),
+      );
+    }
     const errorMessage = envelope && !envelope.ok ? envelope.error.message : fallbackMessage;
     const errorCode = envelope && !envelope.ok ? envelope.error.code : undefined;
     const errorDetails = envelope && !envelope.ok ? envelope.error.details : undefined;
@@ -463,6 +473,7 @@ export interface Repository {
   loadClientsOverview(): Promise<ClientsOverviewPayload>;
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
+  loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
   createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
   createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
@@ -589,6 +600,10 @@ export const repository: Repository = {
 
   async loadLeadDetail(leadId) {
     return invokeOrmGatewaySelectWithRetry("loadLeadDetail", { leadId });
+  },
+
+  async loadLeadsFilterOptions() {
+    return invokeOrmGatewaySelectWithRetry("loadLeadsFilterOptions", {});
   },
 
   async loadConditionRules() {

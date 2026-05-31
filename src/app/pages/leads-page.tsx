@@ -1,4 +1,4 @@
-import { useEffect, useDeferredValue, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
-import { useLeadsList, useLeadDetail } from "../lib/use-leads";
+import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
 import { formatDate, getFullName } from "../lib/format";
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
 import {
@@ -256,7 +256,12 @@ function InternalLeadsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
-  const deferredQuery = useDeferredValue(query);
+  // Debounce search: send to server only after 400ms idle — LIKE scan has no trigram index.
+  const [committedSearch, setCommittedSearch] = useState(query);
+  useEffect(() => {
+    const timer = setTimeout(() => setCommittedSearch(query.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">(() => {
     const stage = searchParams.get("stage");
     if (stage === "all") return "all";
@@ -296,14 +301,15 @@ function InternalLeadsPage() {
     replyScope,
     dateFrom: timeframeFrom?.toISOString().slice(0, 10),
     dateTo: timeframeTo?.toISOString().slice(0, 10),
-    search: deferredQuery.trim() || undefined,
+    search: committedSearch || undefined,
     sortField: leadSort.key,
     sortDir: leadSort.direction,
     page: currentPage,
     pageSize: PAGE_SIZE,
-  }), [clientFilter, campaignFilter, stageFilter, replyScope, timeframeFrom, timeframeTo, deferredQuery, leadSort, currentPage]);
+  }), [clientFilter, campaignFilter, stageFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
 
   const { data, loading, error, refresh } = useLeadsList(listParams);
+  const { data: filterOptions } = useLeadsFilterOptions();
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
 
   const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
@@ -317,8 +323,8 @@ function InternalLeadsPage() {
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const totalCount = data?.totalCount ?? 0;
   const stageCounts = data?.stageCounts ?? {};
-  const clientsLite = useMemo(() => data?.filterOptions.clientsLite ?? [], [data]);
-  const campaignsLite = useMemo(() => data?.filterOptions.campaignsLite ?? [], [data]);
+  const clientsLite = useMemo(() => filterOptions?.clientsLite ?? [], [filterOptions]);
+  const campaignsLite = useMemo(() => filterOptions?.campaignsLite ?? [], [filterOptions]);
 
   const clientFilteredCampaigns = useMemo(
     () => clientFilter === ALL_FILTER_VALUE

@@ -62,18 +62,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toGatewayError(reason: unknown, fallbackStatus = 500, fallbackMessage = "ORM gateway request failed."): GatewayError {
   if (isRecord(reason)) {
-    const message = typeof reason.message === "string" ? reason.message : fallbackMessage;
-    const code = typeof reason.code === "string" ? reason.code : undefined;
-    const details = typeof reason.details === "string" ? reason.details : undefined;
-    const hint = typeof reason.hint === "string" ? reason.hint : undefined;
+    // Drizzle-orm wraps the postgres.js error in `cause`; prefer that message so the
+    // real Postgres error code (e.g. 42703 undefined_column) surfaces to the client.
+    const causeRecord = isRecord(reason.cause) ? reason.cause : null;
+    const causeMessage = causeRecord && typeof causeRecord.message === "string" ? causeRecord.message : null;
+    const message = causeMessage ?? (typeof reason.message === "string" ? reason.message : fallbackMessage);
+    const code = (causeRecord && typeof causeRecord.code === "string" ? causeRecord.code : null)
+      ?? (typeof reason.code === "string" ? reason.code : undefined);
+    const details = (causeRecord && typeof causeRecord.detail === "string" ? causeRecord.detail : null)
+      ?? (typeof reason.details === "string" ? reason.details : undefined);
+    const hint = (causeRecord && typeof causeRecord.hint === "string" ? causeRecord.hint : null)
+      ?? (typeof reason.hint === "string" ? reason.hint : undefined);
     const status = typeof reason.status === "number" ? reason.status : fallbackStatus;
-    return {
-      status,
-      message,
-      code,
-      details,
-      hint,
-    };
+    return { status, message, code, details, hint };
   }
 
   if (reason instanceof Error) {
@@ -1334,7 +1335,18 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
     const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 100);
     const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
 
+    // Log SQL shape for per-query profiling in edge function logs.
+    console.log(
+      `[PERF][orm-gateway] loadLeadsList shape: ` +
+        `hasSearch=${!!p.search} hasClientFilter=${!!p.clientId} hasCampaignFilter=${!!p.campaignId} ` +
+        `hasStageFilter=${!!p.stage} replyScope=${p.replyScope ?? "all"} ` +
+        `sortField=${p.sortField} page=${p.page} pageSize=${pageSize}`,
+    );
+
     // Shared SQL stage CASE expression — mirrors getLeadStage in selectors.ts.
+    // ::text cast on the ELSE branch forces the whole expression to resolve as text,
+    // preventing Postgres from inferring the return type as lead_qualification enum
+    // (which would reject 'unqualified' and 'meeting_scheduled' as invalid members).
     const stageExpr = sql`
       CASE
         WHEN l.won = true THEN 'won'
@@ -1342,7 +1354,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
         WHEN l.meeting_held = true THEN 'meeting_held'
         WHEN l.meeting_booked = true THEN 'meeting_scheduled'
         WHEN l.qualification IS NULL THEN 'unqualified'
-        ELSE l.qualification
+        ELSE l.qualification::text
       END
     `;
 
@@ -1369,7 +1381,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       ? sql`WHERE ${sql.join(baseWhereParts, sql` AND `)}`
       : sql``;
 
-    // Stage filter (only in data query, not count query).
+    // Stage filter applied to data query only (not stage count — counts reflect all stages).
     const stageWhereClause = p.stage
       ? sql`AND (${stageExpr}) = ${p.stage}`
       : sql``;
@@ -1399,54 +1411,49 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       orderClause = sql`ORDER BY l.created_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
     }
 
-    // Run count query (all stages) and data query in parallel.
-    const [stageCountRows, dataRows, clientsLiteRows, campaignsLiteRows] = await Promise.all([
-      rawQuery<{ stage: string; count: number }>(tx, sql`
-        SELECT (${stageExpr}) AS stage, COUNT(*)::int AS count
-        FROM leads l
-        JOIN clients c ON c.id = l.client_id
-        LEFT JOIN campaigns camp ON camp.id = l.campaign_id
-        ${baseWhereClause}
-        GROUP BY stage
-      `),
-      rawQuery<Record<string, unknown>>(tx, sql`
-        SELECT
-          l.id, l.created_at, l.updated_at, l.client_id,
-          l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
-          l.company_name, l.linkedin_url, l.gender, l.qualification,
-          l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
-          l.industry, l.headcount_range, l.website, l.country,
-          l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
-          l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
-          l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
-          l.source, l.reply_text, l.comments,
-          c.name AS client_name,
-          camp.name AS campaign_name,
-          COALESCE(r.reply_count, 0)::int AS reply_count,
-          r.last_reply_at
-        FROM leads l
-        JOIN clients c ON c.id = l.client_id
-        LEFT JOIN campaigns camp ON camp.id = l.campaign_id
-        LEFT JOIN (
-          SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
-          FROM replies GROUP BY lead_id
-        ) r ON r.lead_id = l.id
-        ${baseWhereClause}
-        ${stageWhereClause}
-        ${orderClause}
-        LIMIT ${pageSize} OFFSET ${offset}
-      `),
-      rawQuery<{ id: string; name: string }>(tx, sql`
-        SELECT DISTINCT c.id, c.name FROM clients c
-        JOIN leads l ON l.client_id = c.id
-        ORDER BY c.name
-      `),
-      rawQuery<{ id: string; name: string; client_id: string }>(tx, sql`
-        SELECT DISTINCT camp.id, camp.name, camp.client_id FROM campaigns camp
-        JOIN leads l ON l.campaign_id = camp.id
-        ORDER BY camp.name
-      `),
-    ]);
+    // Stage count — clients JOIN for RLS; campaigns JOIN removed (unused in stage CASE).
+    // GROUP BY 1 references the first SELECT column by ordinal — avoids the non-portable
+    // "GROUP BY <alias>" form rejected by the Supabase Postgres version.
+    const tStage0 = performance.now();
+    const stageCountRows = await rawQuery<{ stage: string; count: number }>(tx, sql`
+      SELECT (${stageExpr}) AS stage, COUNT(*)::int AS count
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      ${baseWhereClause}
+      GROUP BY 1
+    `);
+    const stageCountMs = performance.now() - tStage0;
+
+    // Data page — set-based reply aggregation via lateral subquery avoids per-row correlation.
+    const tData0 = performance.now();
+    const dataRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        l.id, l.created_at, l.updated_at, l.client_id,
+        l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
+        l.company_name, l.linkedin_url, l.gender, l.qualification,
+        l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+        l.industry, l.headcount_range, l.website, l.country,
+        l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
+        l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
+        l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+        l.source, l.reply_text, l.comments,
+        c.name AS client_name,
+        camp.name AS campaign_name,
+        COALESCE(r.reply_count, 0)::int AS reply_count,
+        r.last_reply_at
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+      LEFT JOIN (
+        SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
+        FROM replies GROUP BY lead_id
+      ) r ON r.lead_id = l.id
+      ${baseWhereClause}
+      ${stageWhereClause}
+      ${orderClause}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
+    const dataMs = performance.now() - tData0;
 
     const stageCounts: Record<string, number> = {};
     let totalCount = 0;
@@ -1498,16 +1505,47 @@ async function handleAction(tx: any, payload: OrmGatewayRequest) {
       lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
     }));
 
+    const totalHandlerMs = performance.now() - t0;
     console.log(
-      `[PERF][orm-gateway] loadLeadsList: ${(performance.now() - t0).toFixed(1)}ms ` +
-        `(rows=${rows.length}, totalCount=${totalCount}, page=${p.page}, pageSize=${pageSize})`,
+      `[PERF][orm-gateway] loadLeadsList: totalHandlerMs=${totalHandlerMs.toFixed(1)} ` +
+        `stageCountsQueryMs=${stageCountMs.toFixed(1)} dataPageQueryMs=${dataMs.toFixed(1)} ` +
+        `rows=${rows.length} totalCount=${totalCount} stageBuckets=${stageCountRows.length} ` +
+        `page=${p.page} pageSize=${pageSize}`,
+    );
+
+    return { rows, totalCount, stageCounts };
+  }
+
+  if (payload.action === "loadLeadsFilterOptions") {
+    // Static filter option lists — loaded once on leads page mount, not on every filter/paginate.
+    // Both lists are scoped by RLS via the JOIN through leads (only accessible leads are visible).
+    const t0 = performance.now();
+
+    const tClients0 = performance.now();
+    const clientsLiteRows = await rawQuery<{ id: string; name: string }>(tx, sql`
+      SELECT DISTINCT c.id, c.name FROM clients c
+      JOIN leads l ON l.client_id = c.id
+      ORDER BY c.name
+    `);
+    const clientsMs = performance.now() - tClients0;
+
+    const tCampaigns0 = performance.now();
+    const campaignsLiteRows = await rawQuery<{ id: string; name: string; client_id: string }>(tx, sql`
+      SELECT DISTINCT camp.id, camp.name, camp.client_id FROM campaigns camp
+      JOIN leads l ON l.campaign_id = camp.id
+      ORDER BY camp.name
+    `);
+    const campaignsMs = performance.now() - tCampaigns0;
+
+    console.log(
+      `[PERF][orm-gateway] loadLeadsFilterOptions: totalMs=${(performance.now() - t0).toFixed(1)} ` +
+        `clientsMs=${clientsMs.toFixed(1)} campaignsMs=${campaignsMs.toFixed(1)} ` +
+        `(clients=${clientsLiteRows.length}, campaigns=${campaignsLiteRows.length})`,
     );
 
     return {
-      rows,
-      totalCount,
-      stageCounts,
-      filterOptions: { clientsLite: clientsLiteRows, campaignsLite: campaignsLiteRows },
+      clientsLite: clientsLiteRows,
+      campaignsLite: campaignsLiteRows.map((r) => ({ id: r.id, name: r.name, clientId: r.client_id })),
     };
   }
 
