@@ -2,12 +2,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
+import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
 import { repository, RepositoryError } from "../data/repository";
-import { markInteractionStart, markPoint, measureAfterRaf2, measureBetween, timeSyncOp } from "../lib/perf-mark";
+import { logAfterRaf2, markInteractionStart, markPoint, measureAfterRaf2, measureBetween, timeSyncOp } from "../lib/perf-mark";
 import { createClientMetricsFromSummary, type ClientMetricsPack } from "../lib/client-metrics";
+import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
@@ -367,6 +368,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
   onCreateClient,
   defaultManagerId,
 }: CreateClientSheetProps) {
+  useDevRenderCount("CreateClientSheet", () => `open=${open}`);
   const [draft, setDraft] = useState<CreateClientDraft | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -375,6 +377,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
   useEffect(() => {
     if (open && !prevOpenRef.current) {
       measureAfterRaf2("new-client-sheet:click", "[perf][sheet] new-client shell click→raf2");
+      logAfterRaf2("[perf][sheet] lightweight-new-client open state→raf2");
     }
     prevOpenRef.current = open;
   }, [open]);
@@ -436,12 +439,13 @@ const CreateClientSheet = memo(function CreateClientSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
-        <SheetHeader className="p-6 pb-2">
-          <SheetTitle className="text-white">New client</SheetTitle>
-          <SheetDescription>Fill in the required fields to create a new client account.</SheetDescription>
-        </SheetHeader>
+    <LightweightSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={<span className="text-white">New client</span>}
+      description="Fill in the required fields to create a new client account."
+      className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md"
+    >
         {draft && (
           <div className="space-y-4 px-6 pb-6">
             <label className="block space-y-2">
@@ -581,14 +585,59 @@ const CreateClientSheet = memo(function CreateClientSheet({
             </button>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+    </LightweightSheet>
+  );
+});
+
+// ── CreateClientSheetHost ─────────────────────────────────────────────────────────────────────
+// Owns the "is sheet open" boolean so that toggling the sheet does NOT cause ClientsPage (or
+// ClientsMegaTable) to re-render. Receives only stable props from ClientsPage.
+
+interface CreateClientSheetHostProps {
+  managerUsers: UserLite[];
+  canEditAssignments: boolean;
+  onCreateClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  defaultManagerId: string;
+}
+
+const CreateClientSheetHost = memo(function CreateClientSheetHost({
+  managerUsers,
+  canEditAssignments,
+  onCreateClient,
+  defaultManagerId,
+}: CreateClientSheetHostProps) {
+  useDevRenderCount("CreateClientSheetHost");
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        onClick={() => {
+          markInteractionStart("new-client-sheet:click");
+          setIsOpen(true);
+        }}
+        className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
+      >
+        New client
+      </button>
+      <DevProfiler id="CreateClientSheet">
+        <CreateClientSheet
+          open={isOpen}
+          onOpenChange={setIsOpen}
+          managerUsers={managerUsers}
+          canEditAssignments={canEditAssignments}
+          onCreateClient={onCreateClient}
+          defaultManagerId={defaultManagerId}
+        />
+      </DevProfiler>
+    </>
   );
 });
 
 // ── Main page ──────────────────────────────────────────────────────────────────────────────────
 
 export function ClientsPage() {
+  useDevRenderCount("ClientsPage");
   const { identity } = useAuth();
   const {
     data,
@@ -658,9 +707,17 @@ export function ClientsPage() {
     };
   }, [identity?.role, clientCustomFields]);
 
+  // Stable callback for onCustomFieldValueChange — must be stable so ClientsMegaTable.memo
+  // does not see a new function reference on every ClientsPage render.
+  const handleCustomFieldValueChange = useCallback(
+    (clientId: string, fieldId: string, value: string | null) => {
+      void upsertClientCustomFieldValue(clientId, fieldId, value);
+    },
+    [upsertClientCustomFieldValue],
+  );
+
   // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
 
-  const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [visibleRowsCount, setVisibleRowsCount] = useState(PAGE_SIZE);
   const [draft, setDraft] = useState<ClientDraft | null>(null);
@@ -955,15 +1012,12 @@ export function ClientsPage() {
         title="Clients"
         subtitle="Dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in a single horizontally-scrollable surface. Click any row to open the configuration drawer."
         actions={
-          <button
-            onClick={() => {
-              markInteractionStart("new-client-sheet:click");
-              setIsCreatingClient(true);
-            }}
-            className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
-          >
-            New client
-          </button>
+          <CreateClientSheetHost
+            managerUsers={managerUsers}
+            canEditAssignments={canEditAssignments}
+            onCreateClient={handleCreateClientStable}
+            defaultManagerId={defaultManagerId}
+          />
         }
       />
 
@@ -1079,20 +1133,20 @@ export function ClientsPage() {
             </div>
           </div>
 
-          <ClientsMegaTable
-            rows={visibleMegaRows}
-            sort={sort}
-            onSortChange={setSort}
-            onRowClick={handleRowClick}
-            selectionStore={selectionStore}
-            columnOverrides={columnOverrides}
-            customFields={clientCustomFields}
-            customFieldValuesByClient={customFieldValuesByClient}
-            canEditCustomField={canEditCustomField}
-            onCustomFieldValueChange={(clientId, fieldId, value) => {
-              void upsertClientCustomFieldValue(clientId, fieldId, value);
-            }}
-          />
+          <DevProfiler id="ClientsMegaTable">
+            <ClientsMegaTable
+              rows={visibleMegaRows}
+              sort={sort}
+              onSortChange={setSort}
+              onRowClick={handleRowClick}
+              selectionStore={selectionStore}
+              columnOverrides={columnOverrides}
+              customFields={clientCustomFields}
+              customFieldValuesByClient={customFieldValuesByClient}
+              canEditCustomField={canEditCustomField}
+              onCustomFieldValueChange={handleCustomFieldValueChange}
+            />
+          </DevProfiler>
 
           {hasMoreClients && (
             <div className="mt-4 flex justify-center">
@@ -1107,17 +1161,11 @@ export function ClientsPage() {
         </Surface>
       )}
 
-      {/* CreateClientSheet is memoized — its draft state does not re-render the mega-table. */}
-      <CreateClientSheet
-        open={isCreatingClient}
-        onOpenChange={setIsCreatingClient}
-        managerUsers={managerUsers}
-        canEditAssignments={canEditAssignments}
-        onCreateClient={handleCreateClientStable}
-        defaultManagerId={defaultManagerId}
-      />
+      {/* CreateClientSheetHost owns the open state — sheet open/close does not re-render ClientsPage
+          or ClientsMegaTable. Trigger button and sheet live together inside the host. */}
 
       {selectedClient && draft && (
+        <DevProfiler id="ClientDrawer">
         <ClientDrawer
           client={selectedClient}
           draft={draft}
@@ -1156,6 +1204,7 @@ export function ClientsPage() {
             void handleInviteUser();
           }}
         />
+        </DevProfiler>
       )}
     </div>
   );

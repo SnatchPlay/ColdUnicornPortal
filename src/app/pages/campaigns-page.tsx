@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { X } from "lucide-react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
 import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import {
   Bar,
   BarChart,
@@ -112,10 +113,15 @@ function buildCampaignPatch(campaign: CampaignRecord, draft: CampaignDraft): Par
 export function CampaignsPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientCampaignsPage />;
-  return <InternalCampaignsPage />;
+  return (
+    <DevProfiler id="InternalCampaignsPage">
+      <InternalCampaignsPage />
+    </DevProfiler>
+  );
 }
 
 function InternalCampaignsPage() {
+  useDevRenderCount("InternalCampaignsPage");
   const { identity } = useAuth();
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [createCampaignDraft, setCreateCampaignDraft] = useState<CreateCampaignDraft | null>(null);

@@ -1,4 +1,5 @@
 import { memo, useMemo, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
@@ -745,19 +746,22 @@ const MegaRow = memo(function MegaRow({
   );
 });
 
-function ClientsMegaTableImpl({
-  rows,
-  sort,
-  onSortChange,
-  onRowClick,
-  selectionStore,
-  storageKey = "table:clients:mega-columns",
-  columnOverrides,
-  customFields,
-  customFieldValuesByClient,
-  canEditCustomField,
-  onCustomFieldValueChange,
-}: ClientsMegaTableProps) {
+function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
+  const {
+    rows,
+    sort,
+    onSortChange,
+    onRowClick,
+    selectionStore,
+    storageKey = "table:clients:mega-columns",
+    columnOverrides,
+    customFields,
+    customFieldValuesByClient,
+    canEditCustomField,
+    onCustomFieldValueChange,
+  } = props;
+  useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
+  useDevRenderCount("ClientsMegaTable", () => `rows=${rows.length}`);
   const cols = useMemo(() => {
     const overrideMap = new Map<string, ColumnOverrideRecord>();
     for (const override of columnOverrides ?? []) overrideMap.set(override.column_key, override);

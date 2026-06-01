@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
 import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -246,10 +247,15 @@ function writeTimeframeToParams(params: URLSearchParams, timeframe: TimeframeVal
 export function LeadsPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientLeadsPage />;
-  return <InternalLeadsPage />;
+  return (
+    <DevProfiler id="InternalLeadsPage">
+      <InternalLeadsPage />
+    </DevProfiler>
+  );
 }
 
 function InternalLeadsPage() {
+  useDevRenderCount("InternalLeadsPage");
   const { identity } = useAuth();
   const [isCreatingLead, setIsCreatingLead] = useState(false);
   const [createLeadDraft, setCreateLeadDraft] = useState<CreateLeadDraft | null>(null);

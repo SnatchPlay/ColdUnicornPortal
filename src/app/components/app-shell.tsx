@@ -33,6 +33,7 @@ import {
 } from "./ui/breadcrumb";
 import { runtimeConfig } from "../lib/env";
 import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { useAuth } from "../providers/auth";
 import { useShellData } from "../providers/shell-data";
 import type { AppRole, Identity } from "../types/core";
@@ -354,6 +355,7 @@ const StablePageContent = memo(function StablePageContent({ children }: { childr
 // ── AppShell ────────────────────────────────────────────────────────────────────────────────────
 
 export function AppShell({ children }: { children: ReactNode }) {
+  useDevRenderCount("AppShell");
   const navigate = useNavigate();
   const location = useLocation();
   const { usersLite: users, clientsLite: clients } = useShellData();
@@ -496,7 +498,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           {/* StablePageContent prevents heavy route pages from re-rendering when AppShell
               toggles isMobileMenuOpen or isDesktopSidebarHidden. */}
-          <StablePageContent>{children}</StablePageContent>
+          <DevProfiler id="StablePageContent">
+            <StablePageContent>{children}</StablePageContent>
+          </DevProfiler>
         </main>
       </div>
 
