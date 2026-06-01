@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDeferredMount } from "../../lib/use-deferred-mount";
+import { measureAfterRaf2 } from "../../lib/perf-mark";
 import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { Badge } from "../../components/ui/badge";
@@ -430,6 +432,21 @@ export function ClientDrawer({
     ? clientById.get(selectedMapping.client_id) ?? "Unknown client"
     : null;
 
+  // Two-phase mount: overlay + header + action buttons paint immediately;
+  // the heavy form sections are deferred until after 2 rAFs.
+  const bodyReady = useDeferredMount(true);
+
+  // Shell timing: component mounts = overlay + header visible.
+  useEffect(() => {
+    measureAfterRaf2("client-drawer:click", "[perf][drawer] client shell click→raf2");
+  }, []);
+
+  // Content timing: deferred sections visible.
+  useEffect(() => {
+    if (!bodyReady) return;
+    measureAfterRaf2("client-drawer:click", "[perf][drawer] client content deferred→raf2");
+  }, [bodyReady]);
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex justify-end bg-black/55"
@@ -485,7 +502,8 @@ export function ClientDrawer({
             </button>
           </div>
 
-          {/* Operational issues timeline */}
+          {/* Phase 2: deferred sections — mount after overlay has painted */}
+          {bodyReady ? (<>
           <section className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <div className="border-l-2 border-white/25 pl-3">
               <p className="text-sm font-medium text-white">Operational issues</p>
@@ -1078,6 +1096,13 @@ export function ClientDrawer({
               </div>
             )}
           </section>
+          </>) : (
+            <div className="mt-2 space-y-4" aria-hidden="true">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-24 animate-pulse rounded-2xl bg-white/[0.04]" />
+              ))}
+            </div>
+          )}
         </div>
       </aside>
     </div>,

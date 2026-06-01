@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useDeferredMount } from "../lib/use-deferred-mount";
+import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -339,6 +341,24 @@ function InternalLeadsPage() {
   const timeframeLabel = getTimeframeLabel(timeframe);
 
   const selectedLead = useMemo(() => rows.find((r) => r.id === selectedLeadId) ?? null, [rows, selectedLeadId]);
+  // Two-phase drawer: overlay + header paint first, heavy form/conversation deferred.
+  const leadBodyReady = useDeferredMount(!!selectedLead && !!draft);
+
+  // Shell timing: measure on false→true transition of drawerOpen.
+  const leadDrawerWasOpenRef = useRef(false);
+  const leadDrawerOpen = !!selectedLead && !!draft;
+  useEffect(() => {
+    if (leadDrawerOpen && !leadDrawerWasOpenRef.current) {
+      measureAfterRaf2("lead-drawer:click", "[perf][drawer] lead shell click→raf2");
+    }
+    leadDrawerWasOpenRef.current = leadDrawerOpen;
+  }, [leadDrawerOpen]);
+
+  // Content timing: deferred form + conversation visible.
+  useEffect(() => {
+    if (!leadBodyReady) return;
+    measureAfterRaf2("lead-drawer:click", "[perf][drawer] lead content deferred→raf2");
+  }, [leadBodyReady]);
 
   const selectedLeadView = useMemo<LeadDrawerData | null>(() => {
     if (!selectedLead) return null;
@@ -640,7 +660,7 @@ function InternalLeadsPage() {
                     return (
                       <button
                         key={lead.id}
-                        onClick={() => setSelectedLeadId(lead.id)}
+                        onClick={() => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
                         aria-label={`Open details for ${getFullName(lead.first_name, lead.last_name)}`}
                         className="w-full rounded-2xl border border-border bg-black/20 p-4 text-left transition hover:border-[#3a3a3a]"
                       >
@@ -670,7 +690,7 @@ function InternalLeadsPage() {
                     return (
                       <button
                         key={lead.id}
-                        onClick={() => setSelectedLeadId(lead.id)}
+                        onClick={() => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
                         aria-label={`Open details for ${getFullName(lead.first_name, lead.last_name)}`}
                         className={`grid w-full gap-3 px-4 py-4 text-left transition md:grid-cols-[1.2fr_1fr_auto] lg:[grid-template-columns:var(--leads-table-columns)] ${active ? "bg-sky-500/10" : "hover:bg-white/5"}`}
                       >
@@ -825,23 +845,34 @@ function InternalLeadsPage() {
                 </button>
               </div>
 
-              <LeadEditForm
-                draft={draft}
-                updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
-                readOnly={identity?.role === "client"}
-              />
+              {/* Phase 2: deferred heavy content */}
+              {leadBodyReady ? (
+                <>
+                  <LeadEditForm
+                    draft={draft}
+                    updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
+                    readOnly={identity?.role === "client"}
+                  />
 
-              {loadingDetail ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                  Loading reply history…
+                  {loadingDetail ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                      Loading reply history…
+                    </div>
+                  ) : selectedLeadView ? (
+                    <div className="-mx-6 border-t border-border">
+                      <LeadConversation lead={selectedLeadView} />
+                      <LeadMetaSection lead={selectedLead} />
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="mt-2 space-y-4" aria-hidden="true">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-28 animate-pulse rounded-2xl bg-white/[0.04]" />
+                  ))}
                 </div>
-              ) : selectedLeadView ? (
-                <div className="-mx-6 border-t border-border">
-                  <LeadConversation lead={selectedLeadView} />
-                  <LeadMetaSection lead={selectedLead} />
-                </div>
-              ) : null}
+              )}
             </div>
           </aside>
         </div>
