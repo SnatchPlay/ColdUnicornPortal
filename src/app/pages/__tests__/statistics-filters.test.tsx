@@ -40,14 +40,14 @@ function makeOverview(overrides: Partial<{
   clients: { id: string; name: string; manager_id: string }[];
   campaigns: { id: string; client_id: string; type: string; status: string; name: string; database_size: number; positive_responses: number; start_date: string; external_id: string; gender_target: null; updated_at: string; created_at?: string }[];
   dailyStats: { client_id: string; report_date: string; emails_sent: number; response_count: number; bounce_count: number; negative_count: number; ooo_count: number; human_replies_count: number; schedule_today: number; schedule_tomorrow: number; schedule_day_after: number }[];
-  leadProjections: { id: string; client_id: string; campaign_id: string | null; created_at: string; qualification: string | null; meeting_booked: boolean | null; meeting_held: boolean | null; offer_sent: boolean | null; won: boolean | null }[];
+  leadGroups: { client_id: string; campaign_id: string | null; qualification: string | null; date: string; count: number }[];
 }> = {}) {
   return {
     users: overrides.users ?? [],
     clients: overrides.clients ?? [],
     campaigns: overrides.campaigns ?? [],
     dailyStats: overrides.dailyStats ?? [],
-    leadProjections: overrides.leadProjections ?? [],
+    leadGroups: overrides.leadGroups ?? [],
   };
 }
 
@@ -222,10 +222,10 @@ describe("statistics internal filters", () => {
       campaigns: [
         { id: "camp-a", client_id: "client-a", type: "outreach", status: "active", name: "Campaign Alpha", database_size: 120, positive_responses: 12, start_date: today, external_id: "ext-a", gender_target: null, updated_at: `${today}T00:00:00.000Z` },
       ],
-      leadProjections: [
-        { id: "lead-1", client_id: "client-a", campaign_id: "camp-a", created_at: `${today}T00:00:00.000Z`, qualification: "MQL", meeting_booked: null, meeting_held: null, offer_sent: null, won: null },
-        { id: "lead-2", client_id: "client-a", campaign_id: "camp-a", created_at: `${today}T00:00:00.000Z`, qualification: "preMQL", meeting_booked: null, meeting_held: null, offer_sent: null, won: null },
-        { id: "lead-3", client_id: "client-a", campaign_id: "camp-a", created_at: `${today}T00:00:00.000Z`, qualification: null, meeting_booked: null, meeting_held: null, offer_sent: null, won: null },
+      leadGroups: [
+        { client_id: "client-a", campaign_id: "camp-a", qualification: "MQL",    date: today, count: 1 },
+        { client_id: "client-a", campaign_id: "camp-a", qualification: "preMQL", date: today, count: 1 },
+        { client_id: "client-a", campaign_id: "camp-a", qualification: null,     date: today, count: 1 },
       ],
     }) as never);
 

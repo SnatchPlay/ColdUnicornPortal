@@ -17,6 +17,7 @@
 } from "../types/core";
 import type {
   AdminDashboardOverview,
+  AdminSettingsPayload,
   AnalyticsOverviewPayload,
   CampaignStatsResponse,
   CampaignsListParams,
@@ -109,6 +110,10 @@ export interface LoadLeadsFilterOptionsPayload {
 
 export interface LoadAnalyticsOverviewPayload {
   action: "loadAnalyticsOverview";
+}
+
+export interface LoadAdminSettingsPayload {
+  action: "loadAdminSettings";
 }
 
 export interface LoadCampaignsListPayload {
@@ -279,6 +284,7 @@ export type OrmGatewayRequest =
   | LoadLeadDetailPayload
   | LoadLeadsFilterOptionsPayload
   | LoadAnalyticsOverviewPayload
+  | LoadAdminSettingsPayload
   | LoadCampaignsListPayload
   | LoadCampaignStatsPayload
   | UpdateClientPayload
@@ -329,6 +335,7 @@ export interface OrmGatewayResponseMap {
   loadLeadDetail: LeadDetailResult;
   loadLeadsFilterOptions: LeadsFilterOptions;
   loadAnalyticsOverview: AnalyticsOverviewPayload;
+  loadAdminSettings: AdminSettingsPayload;
   loadCampaignsList: CampaignsListResponse;
   loadCampaignStats: CampaignStatsResponse;
   loadConditionRules: ConditionRuleRecord[];
@@ -494,6 +501,10 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadAnalyticsOverview") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadAdminSettings") {
     return { ok: true, value: { action } };
   }
 

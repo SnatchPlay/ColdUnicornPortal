@@ -19,12 +19,13 @@ export interface DailyStatInput {
   emails_sent: number | null;
   response_count: number | null;
   bounce_count: number | null;
-  human_replies_count: number | null;
-  ooo_count: number | null;
-  negative_count: number | null;
-  schedule_today: number | null;
-  schedule_tomorrow: number | null;
-  schedule_day_after: number | null;
+  // Optional — present in clients-overview and daily_stats full loads but omitted in analytics overview.
+  human_replies_count?: number | null;
+  ooo_count?: number | null;
+  negative_count?: number | null;
+  schedule_today?: number | null;
+  schedule_tomorrow?: number | null;
+  schedule_day_after?: number | null;
 }
 
 interface DailyAggregate {

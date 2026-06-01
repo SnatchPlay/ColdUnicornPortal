@@ -46,6 +46,7 @@ vi.mock("../../data/repository", () => ({
     loadCampaignsList: vi.fn(),
     loadCampaignStats: vi.fn(),
     loadAnalyticsOverview: vi.fn(),
+    loadAdminSettings: vi.fn(),
   },
 }));
 
@@ -58,7 +59,7 @@ type RouteCase = {
   Component: () => JSX.Element;
 };
 
-// Non-dashboard, non-clients, non-leads, non-campaigns, non-statistics routes still use CoreDataProvider.
+// Non-dashboard, non-clients, non-leads, non-campaigns, non-statistics, non-settings routes.
 const LEGACY_ROUTE_CASES: RouteCase[] = [
   { name: "manager domains route", role: "manager", title: "Domains", Component: DomainsPage },
   { name: "manager invoices route", role: "manager", title: "Invoices", Component: InvoicesPage },
@@ -152,6 +153,7 @@ describe("manager/admin route states", () => {
     mockedRepo.loadCampaignsList.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadCampaignStats.mockResolvedValue({ rows: [] });
     mockedRepo.loadAnalyticsOverview.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadAdminSettings.mockReturnValue(new Promise(() => {}));
   });
 
   // ── Legacy snapshot routes (still on CoreDataProvider) ──────────────────────────────────────

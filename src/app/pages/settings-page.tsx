@@ -1,6 +1,6 @@
-﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GripVertical } from "lucide-react";
-import { Banner, EmptyState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../components/ui/utils";
@@ -26,8 +26,10 @@ import type {
   ConditionValueRef,
 } from "../lib/conditions/types";
 import { getRoleLabel } from "../lib/selectors";
+import { useAdminSettings } from "../lib/use-settings";
+import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import { useShellData } from "../providers/shell-data";
 import { MEGA_COLUMNS } from "./clients-page/mega-table";
 import { ConditionRuleBuilder } from "./settings/condition-rule-builder";
 import { BUILTIN_METRICS } from "../lib/conditions/metric-catalog";
@@ -43,6 +45,16 @@ interface SettingsMessage {
   tone: "info" | "warning" | "danger";
   text: string;
 }
+
+// Stable empty-array fallbacks. Using a fresh `[]` literal for the `data?.x ?? []`
+// fallbacks makes `conditionRules` (and the `normalizedRules` memo derived from it)
+// a new reference on every render while the admin-settings payload is still loading.
+// That invalidated the rule-sync effect every render and spun a setState→render loop
+// until the async load resolved — a churn that also hit the live app on each load.
+const EMPTY_CLIENTS: ClientRecord[] = [];
+const EMPTY_CONDITION_RULES: ConditionRuleRecord[] = [];
+const EMPTY_COLUMN_OVERRIDES: ColumnOverrideRecord[] = [];
+const EMPTY_CUSTOM_FIELDS: ClientCustomFieldRecord[] = [];
 
 function emptyRule(createdBy: string | null): ConditionRule {
   const now = new Date().toISOString();
@@ -151,25 +163,18 @@ export function SettingsPage() {
     requestPasswordReset,
     signOut,
   } = useAuth();
-  const {
-    clients,
-    users = [],
-    conditionRules,
-    createConditionRule,
-    updateConditionRule,
-    deleteConditionRule,
-    columnOverrides = [],
-    clientCustomFields = [],
-    upsertColumnOverride,
-    setColumnOrder,
-    createClientCustomField,
-    updateClientCustomField,
-    deleteClientCustomField,
-  } = useCoreData();
+
+  const { data, loading, error: settingsError, refresh } = useAdminSettings();
+  const { usersLite } = useShellData();
+
+  const clients = data?.clients ?? EMPTY_CLIENTS;
+  const conditionRules = data?.conditionRules ?? EMPTY_CONDITION_RULES;
+  const columnOverrides = data?.columnOverrides ?? EMPTY_COLUMN_OVERRIDES;
+  const clientCustomFields = data?.clientCustomFields ?? EMPTY_CUSTOM_FIELDS;
 
   const conditionManagers = useMemo(
-    () => users.filter((u) => u.role === "manager"),
-    [users],
+    () => usersLite.filter((u) => u.role === "manager"),
+    [usersLite],
   );
   const activeClient = useMemo(
     () => clients.find((client) => client.id === identity?.clientId) ?? null,
@@ -264,6 +269,10 @@ export function SettingsPage() {
     setRuleErrors(validateConditionRule(ruleEditor));
   }, [ruleEditor]);
 
+  if (loading && !data) {
+    return <LoadingState />;
+  }
+
   if (!identity) {
     return (
       <EmptyState
@@ -332,12 +341,14 @@ export function SettingsPage() {
   }
 
   async function handleQuickToggle(rule: ConditionRule) {
-    await updateConditionRule(rule.id, { enabled: !rule.enabled });
+    await repository.updateConditionRule(rule.id, { enabled: !rule.enabled });
+    refresh();
   }
 
   async function handleQuickPriority(rule: ConditionRule, nextPriority: number) {
     if (!Number.isFinite(nextPriority)) return;
-    await updateConditionRule(rule.id, { priority: nextPriority });
+    await repository.updateConditionRule(rule.id, { priority: nextPriority });
+    refresh();
   }
 
   async function handleSaveRule() {
@@ -353,10 +364,12 @@ export function SettingsPage() {
     setRuleMessage(null);
     try {
       if (selectedRuleId === "new") {
-        await createConditionRule(toCreateRulePayload(ruleEditor));
+        await repository.createConditionRule(toCreateRulePayload(ruleEditor));
+        refresh();
         setRuleMessage({ tone: "info", text: "Condition rule created." });
       } else {
-        await updateConditionRule(ruleEditor.id, toUpdateRulePatch(ruleEditor));
+        await repository.updateConditionRule(ruleEditor.id, toUpdateRulePatch(ruleEditor));
+        refresh();
         setRuleMessage({ tone: "info", text: "Condition rule updated." });
       }
     } catch {
@@ -370,7 +383,8 @@ export function SettingsPage() {
     if (!ruleEditor || selectedRuleId === "new") return;
     setIsSavingRule(true);
     try {
-      await deleteConditionRule(ruleEditor.id);
+      await repository.deleteConditionRule(ruleEditor.id);
+      refresh();
       setRuleMessage({ tone: "info", text: "Condition rule deleted." });
       setSelectedRuleId(null);
       setRuleEditor(null);
@@ -490,6 +504,12 @@ export function SettingsPage() {
       />
 
       {error && <Banner tone="warning">{error}</Banner>}
+      {settingsError && (
+        <Banner tone="warning">
+          {settingsError}{" "}
+          <InlineLinkButton onClick={() => refresh()}>Retry data sync</InlineLinkButton>
+        </Banner>
+      )}
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
 
       <div className={`grid gap-5 ${showIdentityCard ? "xl:grid-cols-[0.95fr_1.05fr]" : "grid-cols-1"}`}>
@@ -697,11 +717,26 @@ export function SettingsPage() {
         <ClientsTableCustomization
           columnOverrides={columnOverrides}
           customFields={clientCustomFields}
-          onUpsertOverride={upsertColumnOverride}
-          onSetColumnOrder={setColumnOrder}
-          onCreateField={createClientCustomField}
-          onUpdateField={updateClientCustomField}
-          onDeleteField={deleteClientCustomField}
+          onUpsertOverride={async (key, patch) => {
+            await repository.upsertColumnOverride(key, patch);
+            refresh();
+          }}
+          onSetColumnOrder={async (keys) => {
+            await repository.setColumnOrder(keys);
+            refresh();
+          }}
+          onCreateField={async (input) => {
+            await repository.createClientCustomField(input);
+            refresh();
+          }}
+          onUpdateField={async (fieldId, patch) => {
+            await repository.updateClientCustomField(fieldId, patch);
+            refresh();
+          }}
+          onDeleteField={async (fieldId) => {
+            await repository.deleteClientCustomField(fieldId);
+            refresh();
+          }}
         />
       )}
 
