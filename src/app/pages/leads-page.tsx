@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
-import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -13,7 +13,7 @@ import {
 } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Checkbox } from "../components/ui/checkbox";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
+import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
   PaginationContent,
@@ -242,6 +242,145 @@ function writeTimeframeToParams(params: URLSearchParams, timeframe: TimeframeVal
 }
 
 
+// ── CreateLeadSheetHost ────────────────────────────────────────────────────────────────────────
+// Owns the "is sheet open" boolean so that opening/closing New Lead does NOT re-render
+// InternalLeadsPage or the lead list. Receives only stable props.
+
+interface CreateLeadSheetHostProps {
+  clientsLite: Array<{ id: string; name: string }>;
+  campaignsLite: Array<{ id: string; name: string; clientId: string }>;
+  onCreateLead: (draft: CreateLeadDraft) => Promise<void>;
+}
+
+const CreateLeadSheetHost = memo(function CreateLeadSheetHost({
+  clientsLite,
+  campaignsLite,
+  onCreateLead,
+}: CreateLeadSheetHostProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<CreateLeadDraft | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Shell timing: measure from click mark to 2 rAFs after open state commits.
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      measureAfterRaf2("new-lead:click", "[perf][sheet] new-lead shell click→raf2");
+      logAfterRaf2("[perf][sheet] lightweight-new-lead open state→raf2");
+    }
+    prevOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  function handleOpenChange(open: boolean) {
+    if (!open) {
+      setDraft(null);
+      setIsSubmitting(false);
+    }
+    setIsOpen(open);
+  }
+
+  function openSheet() {
+    markInteractionStart("new-lead:click");
+    setDraft({
+      clientId: clientsLite[0]?.id ?? "",
+      campaignId: "",
+      firstName: "",
+      lastName: "",
+      email: "",
+      companyName: "",
+      jobTitle: "",
+    });
+    setIsOpen(true);
+  }
+
+  async function handleSubmit() {
+    if (!draft || !draft.clientId) return;
+    setIsSubmitting(true);
+    try {
+      await onCreateLead(draft);
+      handleOpenChange(false);
+    } catch {
+      toast.error("Failed to create lead. Check permissions and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={openSheet}
+        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+      >
+        New lead
+      </button>
+      <LightweightSheet
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        title={<span className="text-white">New lead</span>}
+        description="Fill in the required fields to create a new lead manually."
+        className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md"
+      >
+        {draft && (
+          <div className="space-y-4 px-6 pb-6">
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
+              <Select value={draft.clientId} onValueChange={(v) => setDraft((d) => d ? { ...d, clientId: v, campaignId: "" } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><SelectValue placeholder="Select client" /></SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {clientsLite.map((client) => <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{client.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Campaign</span>
+              <Select value={draft.campaignId || "__none__"} onValueChange={(v) => setDraft((d) => d ? { ...d, campaignId: v === "__none__" ? "" : v } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><SelectValue placeholder="No campaign" /></SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value="__none__" className="text-white focus:bg-[#1a1a1a] focus:text-white">No campaign</SelectItem>
+                  {campaignsLite.filter((c) => c.clientId === draft.clientId).map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">First name</span>
+                <input value={draft.firstName} onChange={(e) => setDraft((d) => d ? { ...d, firstName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last name</span>
+                <input value={draft.lastName} onChange={(e) => setDraft((d) => d ? { ...d, lastName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
+              </label>
+            </div>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email</span>
+              <input type="email" value={draft.email} onChange={(e) => setDraft((d) => d ? { ...d, email: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Company</span>
+              <input value={draft.companyName} onChange={(e) => setDraft((d) => d ? { ...d, companyName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Job title</span>
+              <input value={draft.jobTitle} onChange={(e) => setDraft((d) => d ? { ...d, jobTitle: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
+            </label>
+            <p className="text-xs text-muted-foreground">Source will be set to <span className="text-white">manual</span>.</p>
+            <button
+              onClick={() => { void handleSubmit(); }}
+              disabled={isSubmitting || !draft.clientId}
+              className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create lead"}
+            </button>
+          </div>
+        )}
+      </LightweightSheet>
+    </>
+  );
+});
+
 // ── Page dispatcher ────────────────────────────────────────────────────────────────────────────
 
 export function LeadsPage() {
@@ -257,9 +396,6 @@ export function LeadsPage() {
 function InternalLeadsPage() {
   useDevRenderCount("InternalLeadsPage");
   const { identity } = useAuth();
-  const [isCreatingLead, setIsCreatingLead] = useState(false);
-  const [createLeadDraft, setCreateLeadDraft] = useState<CreateLeadDraft | null>(null);
-  const [isSubmittingCreateLead, setIsSubmittingCreateLead] = useState(false);
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -389,31 +525,17 @@ function InternalLeadsPage() {
     };
   }, [selectedLead, selectedReplies]);
 
-  function openCreateLead() {
-    setCreateLeadDraft({
-      clientId: clientsLite[0]?.id ?? "",
-      campaignId: "",
-      firstName: "",
-      lastName: "",
-      email: "",
-      companyName: "",
-      jobTitle: "",
-    });
-    setIsCreatingLead(true);
-  }
-
-  async function handleCreateLead() {
-    if (!createLeadDraft || !createLeadDraft.clientId) return;
-    setIsSubmittingCreateLead(true);
-    try {
+  // Stable callback for CreateLeadSheetHost — only recreates when refresh changes.
+  const handleCreateLeadStable = useCallback(
+    async (d: CreateLeadDraft) => {
       await repository.createLead({
-        client_id: createLeadDraft.clientId,
-        campaign_id: createLeadDraft.campaignId || null,
-        first_name: createLeadDraft.firstName.trim() || null,
-        last_name: createLeadDraft.lastName.trim() || null,
-        email: createLeadDraft.email.trim() || null,
-        company_name: createLeadDraft.companyName.trim() || null,
-        job_title: createLeadDraft.jobTitle.trim() || null,
+        client_id: d.clientId,
+        campaign_id: d.campaignId || null,
+        first_name: d.firstName.trim() || null,
+        last_name: d.lastName.trim() || null,
+        email: d.email.trim() || null,
+        company_name: d.companyName.trim() || null,
+        job_title: d.jobTitle.trim() || null,
         source: "manual",
         qualification: null,
         comments: null,
@@ -427,15 +549,10 @@ function InternalLeadsPage() {
         response_time_label: null,
         gender: null,
       });
-      setIsCreatingLead(false);
-      setCreateLeadDraft(null);
       refresh();
-    } catch {
-      toast.error("Failed to create lead. Check permissions and try again.");
-    } finally {
-      setIsSubmittingCreateLead(false);
-    }
-  }
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     if (!selectedLead) { setDraft(null); return; }
@@ -531,12 +648,11 @@ function InternalLeadsPage() {
         actions={
           <div className="flex items-center gap-3">
             <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
-            <button
-              onClick={openCreateLead}
-              className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
-            >
-              New lead
-            </button>
+            <CreateLeadSheetHost
+              clientsLite={clientsLite}
+              campaignsLite={campaignsLite}
+              onCreateLead={handleCreateLeadStable}
+            />
           </div>
         }
       />
@@ -761,67 +877,6 @@ function InternalLeadsPage() {
           </div>
         </Surface>
       )}
-
-      {/* New lead sheet */}
-      <Sheet open={isCreatingLead} onOpenChange={setIsCreatingLead}>
-        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
-          <SheetHeader className="p-6 pb-2">
-            <SheetTitle className="text-white">New lead</SheetTitle>
-            <SheetDescription>Fill in the required fields to create a new lead manually.</SheetDescription>
-          </SheetHeader>
-          {createLeadDraft && (
-            <div className="space-y-4 px-6 pb-6">
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
-                <Select value={createLeadDraft.clientId} onValueChange={(v) => setCreateLeadDraft((d) => d ? { ...d, clientId: v, campaignId: "" } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><SelectValue placeholder="Select client" /></SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {clientsLite.map((client) => <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{client.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Campaign</span>
-                <Select value={createLeadDraft.campaignId || "__none__"} onValueChange={(v) => setCreateLeadDraft((d) => d ? { ...d, campaignId: v === "__none__" ? "" : v } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><SelectValue placeholder="No campaign" /></SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    <SelectItem value="__none__" className="text-white focus:bg-[#1a1a1a] focus:text-white">No campaign</SelectItem>
-                    {campaignsLite.filter((c) => c.clientId === createLeadDraft.clientId).map((c) => (
-                      <SelectItem key={c.id} value={c.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">First name</span>
-                  <input value={createLeadDraft.firstName} onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, firstName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
-                </label>
-                <label className="block space-y-2">
-                  <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last name</span>
-                  <input value={createLeadDraft.lastName} onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, lastName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
-                </label>
-              </div>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email</span>
-                <input type="email" value={createLeadDraft.email} onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, email: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
-              </label>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Company</span>
-                <input value={createLeadDraft.companyName} onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, companyName: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
-              </label>
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Job title</span>
-                <input value={createLeadDraft.jobTitle} onChange={(e) => setCreateLeadDraft((d) => d ? { ...d, jobTitle: e.target.value } : d)} placeholder="Optional" className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40" />
-              </label>
-              <p className="text-xs text-muted-foreground">Source will be set to <span className="text-white">manual</span>.</p>
-              <button onClick={() => { void handleCreateLead(); }} disabled={isSubmittingCreateLead || !createLeadDraft.clientId} className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50">
-                {isSubmittingCreateLead ? "Creating..." : "Create lead"}
-              </button>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
 
       {/* Lead detail drawer */}
       {selectedLead && draft && (

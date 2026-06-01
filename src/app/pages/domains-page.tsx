@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
+import { LightweightSheet } from "../components/ui/lightweight-sheet";
+import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { formatDate, formatMoney } from "../lib/format";
 import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -86,15 +87,208 @@ function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<Dom
 const EMPTY_CLIENTS: ClientRecord[] = [];
 const EMPTY_DOMAINS: DomainRecord[] = [];
 
+// ── CreateDomainSheetHost ──────────────────────────────────────────────────────────────────────
+// Owns the "is sheet open" boolean so that opening/closing New Domain does NOT re-render
+// DomainsPage or the domain list. Receives only stable props.
+
+interface CreateDomainSheetHostProps {
+  scopedClients: Array<{ id: string; name: string }>;
+  onCreateDomain: (draft: CreateDomainDraft) => Promise<void>;
+}
+
+const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
+  scopedClients,
+  onCreateDomain,
+}: CreateDomainSheetHostProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<CreateDomainDraft | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Shell timing: measure from click mark to 2 rAFs after open state commits.
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      measureAfterRaf2("new-domain:click", "[perf][sheet] new-domain shell click→raf2");
+      logAfterRaf2("[perf][sheet] lightweight-new-domain open state→raf2");
+    }
+    prevOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  function handleOpenChange(open: boolean) {
+    if (!open) {
+      setDraft(null);
+      setIsSubmitting(false);
+    }
+    setIsOpen(open);
+  }
+
+  function openSheet() {
+    markInteractionStart("new-domain:click");
+    setDraft({
+      clientId: scopedClients[0]?.id ?? "",
+      domainName: "",
+      setupEmail: "",
+      purchaseDate: "",
+      exchangeDate: "",
+      exchangeCost: null,
+      status: "",
+    });
+    setIsOpen(true);
+  }
+
+  async function handleSubmit() {
+    if (
+      !draft ||
+      !draft.clientId ||
+      !draft.domainName.trim() ||
+      !draft.setupEmail.trim() ||
+      !draft.purchaseDate ||
+      !draft.exchangeDate
+    ) return;
+    setIsSubmitting(true);
+    try {
+      await onCreateDomain(draft);
+      handleOpenChange(false);
+    } catch {
+      // mutations throw RepositoryError on failure; error propagated to onCreateDomain caller
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={openSheet}
+        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+      >
+        New domain
+      </button>
+      <LightweightSheet
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        title={<span className="text-white">New domain</span>}
+        description="Fill in the required fields to register a new domain."
+        className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md"
+      >
+        {draft && (
+          <div className="space-y-4 px-6 pb-6">
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
+              <Select value={draft.clientId} onValueChange={(v) => setDraft((d) => d ? { ...d, clientId: v } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {scopedClients.map((client) => (
+                    <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Domain name *</span>
+              <input
+                value={draft.domainName}
+                onChange={(e) => setDraft((d) => d ? { ...d, domainName: e.target.value } : d)}
+                placeholder="e.g. example.com"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup email *</span>
+              <input
+                type="email"
+                value={draft.setupEmail}
+                onChange={(e) => setDraft((d) => d ? { ...d, setupEmail: e.target.value } : d)}
+                placeholder="e.g. info@example.com"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Purchase date *</span>
+              <input
+                type="date"
+                value={draft.purchaseDate}
+                onChange={(e) => setDraft((d) => d ? { ...d, purchaseDate: e.target.value } : d)}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange date *</span>
+              <input
+                type="date"
+                value={draft.exchangeDate}
+                onChange={(e) => setDraft((d) => d ? { ...d, exchangeDate: e.target.value } : d)}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange cost</span>
+              <input
+                type="number"
+                min={0}
+                value={draft.exchangeCost ?? ""}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setDraft((d) => d ? { ...d, exchangeCost: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
+                }}
+                placeholder="Optional"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
+              <Select
+                value={draft.status || DOMAIN_UNSET_VALUE}
+                onValueChange={(v) => setDraft((d) => d ? { ...d, status: v === DOMAIN_UNSET_VALUE ? "" : (v as DomainStatus) } : d)}
+              >
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select status (optional)" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">unset</SelectItem>
+                  {DOMAIN_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <button
+              onClick={() => { void handleSubmit(); }}
+              disabled={
+                isSubmitting ||
+                !draft.clientId ||
+                !draft.domainName.trim() ||
+                !draft.setupEmail.trim() ||
+                !draft.purchaseDate ||
+                !draft.exchangeDate
+              }
+              className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create domain"}
+            </button>
+          </div>
+        )}
+      </LightweightSheet>
+    </>
+  );
+});
+
 export function DomainsPage() {
   const { identity } = useAuth();
   const { data, loading, error, refresh } = useDomainsPage();
   const clients = data?.clients ?? EMPTY_CLIENTS;
   const domains = data?.domains ?? EMPTY_DOMAINS;
-  const [isCreatingDomain, setIsCreatingDomain] = useState(false);
-  const [createDomainDraft, setCreateDomainDraft] = useState<CreateDomainDraft | null>(null);
-  const [isSubmittingCreateDomain, setIsSubmittingCreateDomain] = useState(false);
-
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
@@ -175,51 +369,25 @@ export function DomainsPage() {
 
   const isDraftDirty = Object.keys(draftPatch).length > 0;
 
-  function openCreateDomain() {
-    setCreateDomainDraft({
-      clientId: scopedClients[0]?.id ?? "",
-      domainName: "",
-      setupEmail: "",
-      purchaseDate: "",
-      exchangeDate: "",
-      exchangeCost: null,
-      status: "",
-    });
-    setIsCreatingDomain(true);
-  }
-
-  async function handleCreateDomain() {
-    if (
-      !createDomainDraft ||
-      !createDomainDraft.clientId ||
-      !createDomainDraft.domainName.trim() ||
-      !createDomainDraft.setupEmail.trim() ||
-      !createDomainDraft.purchaseDate ||
-      !createDomainDraft.exchangeDate
-    ) return;
-    setIsSubmittingCreateDomain(true);
-    try {
+  // Stable callback for CreateDomainSheetHost — only recreates when refresh changes.
+  const handleCreateDomainStable = useCallback(
+    async (d: CreateDomainDraft) => {
       await repository.createDomain({
-        client_id: createDomainDraft.clientId,
-        domain_name: createDomainDraft.domainName.trim(),
-        setup_email: createDomainDraft.setupEmail.trim(),
-        purchase_date: createDomainDraft.purchaseDate,
-        exchange_date: createDomainDraft.exchangeDate,
-        exchange_cost: createDomainDraft.exchangeCost,
-        status: (createDomainDraft.status as DomainStatus) || null,
+        client_id: d.clientId,
+        domain_name: d.domainName.trim(),
+        setup_email: d.setupEmail.trim(),
+        purchase_date: d.purchaseDate,
+        exchange_date: d.exchangeDate,
+        exchange_cost: d.exchangeCost,
+        status: (d.status as DomainStatus) || null,
         reputation: null,
         campaign_verified_at: null,
         warmup_verified_at: null,
       });
       refresh();
-      setIsCreatingDomain(false);
-      setCreateDomainDraft(null);
-    } catch {
-      // mutations throw RepositoryError on failure; toast handled by caller
-    } finally {
-      setIsSubmittingCreateDomain(false);
-    }
-  }
+    },
+    [refresh],
+  );
 
   async function saveDraft() {
     if (!selectedDomain || !isDraftDirty) return;
@@ -278,131 +446,12 @@ export function DomainsPage() {
         title="Domains"
         subtitle="Domain inventory with warmup and campaign verification controls for scoped clients."
         actions={
-          <button
-            onClick={openCreateDomain}
-            className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
-          >
-            New domain
-          </button>
+          <CreateDomainSheetHost
+            scopedClients={scopedClients}
+            onCreateDomain={handleCreateDomainStable}
+          />
         }
       />
-
-      <Sheet open={isCreatingDomain} onOpenChange={setIsCreatingDomain}>
-        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
-          <SheetHeader className="p-6 pb-2">
-            <SheetTitle className="text-white">New domain</SheetTitle>
-            <SheetDescription>Fill in the required fields to register a new domain.</SheetDescription>
-          </SheetHeader>
-          {createDomainDraft && (
-            <div className="space-y-4 px-6 pb-6">
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
-                <Select value={createDomainDraft.clientId} onValueChange={(v) => setCreateDomainDraft((d) => d ? { ...d, clientId: v } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {scopedClients.map((client) => (
-                      <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                        {client.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Domain name *</span>
-                <input
-                  value={createDomainDraft.domainName}
-                  onChange={(e) => setCreateDomainDraft((d) => d ? { ...d, domainName: e.target.value } : d)}
-                  placeholder="e.g. example.com"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup email *</span>
-                <input
-                  type="email"
-                  value={createDomainDraft.setupEmail}
-                  onChange={(e) => setCreateDomainDraft((d) => d ? { ...d, setupEmail: e.target.value } : d)}
-                  placeholder="e.g. info@example.com"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Purchase date *</span>
-                <input
-                  type="date"
-                  value={createDomainDraft.purchaseDate}
-                  onChange={(e) => setCreateDomainDraft((d) => d ? { ...d, purchaseDate: e.target.value } : d)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange date *</span>
-                <input
-                  type="date"
-                  value={createDomainDraft.exchangeDate}
-                  onChange={(e) => setCreateDomainDraft((d) => d ? { ...d, exchangeDate: e.target.value } : d)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange cost</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={createDomainDraft.exchangeCost ?? ""}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setCreateDomainDraft((d) => d ? { ...d, exchangeCost: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
-                  }}
-                  placeholder="Optional"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                <Select
-                  value={createDomainDraft.status || DOMAIN_UNSET_VALUE}
-                  onValueChange={(v) => setCreateDomainDraft((d) => d ? { ...d, status: v === DOMAIN_UNSET_VALUE ? "" : (v as DomainStatus) } : d)}
-                >
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select status (optional)" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">unset</SelectItem>
-                    {DOMAIN_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <button
-                onClick={() => { void handleCreateDomain(); }}
-                disabled={
-                  isSubmittingCreateDomain ||
-                  !createDomainDraft.clientId ||
-                  !createDomainDraft.domainName.trim() ||
-                  !createDomainDraft.setupEmail.trim() ||
-                  !createDomainDraft.purchaseDate ||
-                  !createDomainDraft.exchangeDate
-                }
-                className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSubmittingCreateDomain ? "Creating..." : "Create domain"}
-              </button>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
 
       {sortedDomains.length === 0 ? (
         <EmptyState

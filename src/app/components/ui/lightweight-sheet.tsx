@@ -16,7 +16,7 @@
  *   • Backdrop click closes.
  *   • Close button with aria-label="Close".
  *
- * Animation: tw-animate-css `animate-in slide-in-from-right duration-200` on the panel.
+ * Animation: tw-animate-css `animate-in slide-in-from-{side} duration-200` on the panel.
  * No exit animation — the panel unmounts immediately on close (renders null).
  * The 200 ms entry matches the existing Radix Sheet open duration.
  */
@@ -32,10 +32,12 @@ export interface LightweightSheetProps {
   description?: ReactNode;
   children: ReactNode;
   /**
-   * Panel edge. Defaults to "right" (slide in from right, full height, max-w-md).
-   * "bottom" slides in from the bottom (full width, auto height).
+   * Panel edge. Defaults to "right".
+   *   "right"  — slides in from the right edge; full height, max-w-sm default.
+   *   "left"   — slides in from the left edge;  full height, max-w-sm default, border-r.
+   *   "bottom" — slides in from the bottom edge; full width, auto height.
    */
-  side?: "right" | "bottom";
+  side?: "right" | "left" | "bottom";
   /**
    * Override the generated aria-labelledby id. Useful when the caller renders
    * its own heading inside `children` and wants to reference it directly.
@@ -98,7 +100,8 @@ export function LightweightSheet({
       <div
         className={cn(
           "animate-in absolute z-10 flex flex-col shadow-lg duration-200",
-          side === "right" && "slide-in-from-right inset-y-0 right-0 h-full w-3/4 sm:max-w-sm",
+          side === "right"  && "slide-in-from-right  inset-y-0 right-0 h-full w-3/4 sm:max-w-sm",
+          side === "left"   && "slide-in-from-left   inset-y-0 left-0  h-full w-3/4 sm:max-w-sm",
           side === "bottom" && "slide-in-from-bottom inset-x-0 bottom-0 h-auto",
           className,
         )}

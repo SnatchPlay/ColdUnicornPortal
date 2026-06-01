@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { X } from "lucide-react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
-import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import {
   Bar,
@@ -15,7 +15,7 @@ import {
 import { DateRangeButton } from "../components/portal-ui";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet";
+import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { repository } from "../data/repository";
 import { formatDate, formatNumber } from "../lib/format";
 import { useCampaignsList, useCampaignStats } from "../lib/use-campaigns";
@@ -110,6 +110,202 @@ function buildCampaignPatch(campaign: CampaignRecord, draft: CampaignDraft): Par
   return patch;
 }
 
+// ── CreateCampaignSheetHost ────────────────────────────────────────────────────────────────────
+// Owns the "is sheet open" boolean so that opening/closing New Campaign does NOT re-render
+// InternalCampaignsPage or the campaign list. Receives only stable props.
+
+interface CreateCampaignSheetHostProps {
+  clientsLite: Array<{ id: string; name: string }>;
+  onCreateCampaign: (draft: CreateCampaignDraft) => Promise<void>;
+}
+
+const CreateCampaignSheetHost = memo(function CreateCampaignSheetHost({
+  clientsLite,
+  onCreateCampaign,
+}: CreateCampaignSheetHostProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<CreateCampaignDraft | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Shell timing: measure from click mark to 2 rAFs after open state commits.
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      measureAfterRaf2("new-campaign:click", "[perf][sheet] new-campaign shell click→raf2");
+      logAfterRaf2("[perf][sheet] lightweight-new-campaign open state→raf2");
+    }
+    prevOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  function handleOpenChange(open: boolean) {
+    if (!open) {
+      setDraft(null);
+      setIsSubmitting(false);
+    }
+    setIsOpen(open);
+  }
+
+  function openSheet() {
+    markInteractionStart("new-campaign:click");
+    setDraft({
+      clientId: clientsLite[0]?.id ?? "",
+      externalId: "",
+      name: "",
+      type: "",
+      status: "draft",
+      databaseSize: null,
+      startDate: "",
+    });
+    setIsOpen(true);
+  }
+
+  async function handleSubmit() {
+    if (
+      !draft ||
+      !draft.clientId ||
+      !draft.externalId.trim() ||
+      !draft.name.trim() ||
+      !draft.type ||
+      !draft.status
+    ) return;
+    setIsSubmitting(true);
+    try {
+      await onCreateCampaign(draft);
+      handleOpenChange(false);
+    } catch {
+      // error propagated / shown via toast in onCreateCampaign
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={openSheet}
+        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+      >
+        New campaign
+      </button>
+      <LightweightSheet
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        title={<span className="text-white">New campaign</span>}
+        description="Fill in the required fields to create a new campaign."
+        className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md"
+      >
+        {draft && (
+          <div className="space-y-4 px-6 pb-6">
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
+              <Select value={draft.clientId} onValueChange={(v) => setDraft((d) => d ? { ...d, clientId: v } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {clientsLite.map((client) => (
+                    <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                      {client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">External ID (Smartlead/Bison) *</span>
+              <input
+                value={draft.externalId}
+                onChange={(e) => setDraft((d) => d ? { ...d, externalId: e.target.value } : d)}
+                placeholder="e.g. 12345"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft((d) => d ? { ...d, name: e.target.value } : d)}
+                placeholder="Campaign name"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Type *</span>
+              <Select value={draft.type} onValueChange={(v) => setDraft((d) => d ? { ...d, type: v as CampaignRecord["type"] } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {CAMPAIGN_TYPES.map((t) => (
+                    <SelectItem key={t} value={t} className="text-white focus:bg-[#1a1a1a] focus:text-white">{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
+              <Select value={draft.status} onValueChange={(v) => setDraft((d) => d ? { ...d, status: v as CampaignRecord["status"] } : d)}>
+                <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                  {CAMPAIGN_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Database size</span>
+              <input
+                type="number"
+                min={0}
+                value={draft.databaseSize ?? ""}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setDraft((d) => d ? { ...d, databaseSize: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
+                }}
+                placeholder="Optional"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Start date</span>
+              <input
+                type="date"
+                value={draft.startDate}
+                onChange={(e) => setDraft((d) => d ? { ...d, startDate: e.target.value } : d)}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
+              />
+            </label>
+
+            <button
+              onClick={() => { void handleSubmit(); }}
+              disabled={
+                isSubmitting ||
+                !draft.clientId ||
+                !draft.externalId.trim() ||
+                !draft.name.trim() ||
+                !draft.type ||
+                !draft.status
+              }
+              className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create campaign"}
+            </button>
+          </div>
+        )}
+      </LightweightSheet>
+    </>
+  );
+});
+
 export function CampaignsPage() {
   const { identity } = useAuth();
   if (identity?.role === "client") return <ClientCampaignsPage />;
@@ -123,9 +319,6 @@ export function CampaignsPage() {
 function InternalCampaignsPage() {
   useDevRenderCount("InternalCampaignsPage");
   const { identity } = useAuth();
-  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
-  const [createCampaignDraft, setCreateCampaignDraft] = useState<CreateCampaignDraft | null>(null);
-  const [isSubmittingCreateCampaign, setIsSubmittingCreateCampaign] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [loadPage, setLoadPage] = useState(1);
   const [accumulatedRows, setAccumulatedRows] = useState<CampaignListRow[]>([]);
@@ -281,43 +474,24 @@ function InternalCampaignsPage() {
 
   const timeframeLabel = getTimeframeLabel(timeframe);
 
-  function openCreateCampaign() {
-    setCreateCampaignDraft({
-      clientId: clientsLite[0]?.id ?? "",
-      externalId: "",
-      name: "",
-      type: "",
-      status: "draft",
-      databaseSize: null,
-      startDate: "",
-    });
-    setIsCreatingCampaign(true);
-  }
-
-  async function handleCreateCampaign() {
-    if (!createCampaignDraft || !createCampaignDraft.clientId || !createCampaignDraft.externalId.trim() || !createCampaignDraft.name.trim() || !createCampaignDraft.type || !createCampaignDraft.status) return;
-    setIsSubmittingCreateCampaign(true);
-    try {
+  // Stable callback passed to CreateCampaignSheetHost — only recreates when refresh changes.
+  const handleCreateCampaignStable = useCallback(
+    async (d: CreateCampaignDraft) => {
       await repository.createCampaign({
-        client_id: createCampaignDraft.clientId,
-        external_id: createCampaignDraft.externalId.trim(),
-        name: createCampaignDraft.name.trim(),
-        type: createCampaignDraft.type as CampaignRecord["type"],
-        status: createCampaignDraft.status as CampaignRecord["status"],
-        database_size: createCampaignDraft.databaseSize,
-        start_date: createCampaignDraft.startDate || null,
+        client_id: d.clientId,
+        external_id: d.externalId.trim(),
+        name: d.name.trim(),
+        type: d.type as CampaignRecord["type"],
+        status: d.status as CampaignRecord["status"],
+        database_size: d.databaseSize,
+        start_date: d.startDate || null,
         positive_responses: 0,
         gender_target: null,
       });
       refresh();
-      setIsCreatingCampaign(false);
-      setCreateCampaignDraft(null);
-    } catch {
-      // error shown via toast from repository
-    } finally {
-      setIsSubmittingCreateCampaign(false);
-    }
-  }
+    },
+    [refresh],
+  );
 
   async function saveDraft() {
     if (!selectedCampaign || !isDraftDirty) return;
@@ -366,12 +540,10 @@ function InternalCampaignsPage() {
         actions={
           <div className="flex items-center gap-3">
             <DateRangeButton value={timeframe} onChange={setTimeframe} />
-            <button
-              onClick={openCreateCampaign}
-              className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
-            >
-              New campaign
-            </button>
+            <CreateCampaignSheetHost
+              clientsLite={clientsLite}
+              onCreateCampaign={handleCreateCampaignStable}
+            />
           </div>
         }
       />
@@ -523,122 +695,6 @@ function InternalCampaignsPage() {
           )}
         </Surface>
       ) : null}
-
-      <Sheet open={isCreatingCampaign} onOpenChange={setIsCreatingCampaign}>
-        <SheetContent className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-md">
-          <SheetHeader className="p-6 pb-2">
-            <SheetTitle className="text-white">New campaign</SheetTitle>
-            <SheetDescription>Fill in the required fields to create a new campaign.</SheetDescription>
-          </SheetHeader>
-          {createCampaignDraft && (
-            <div className="space-y-4 px-6 pb-6">
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client *</span>
-                <Select value={createCampaignDraft.clientId} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, clientId: v } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {clientsLite.map((client) => (
-                      <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                        {client.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">External ID (Smartlead/Bison) *</span>
-                <input
-                  value={createCampaignDraft.externalId}
-                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, externalId: e.target.value } : d)}
-                  placeholder="e.g. 12345"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name *</span>
-                <input
-                  value={createCampaignDraft.name}
-                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, name: e.target.value } : d)}
-                  placeholder="Campaign name"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Type *</span>
-                <Select value={createCampaignDraft.type} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, type: v as CampaignRecord["type"] } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {CAMPAIGN_TYPES.map((t) => (
-                      <SelectItem key={t} value={t} className="text-white focus:bg-[#1a1a1a] focus:text-white">{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status *</span>
-                <Select value={createCampaignDraft.status} onValueChange={(v) => setCreateCampaignDraft((d) => d ? { ...d, status: v as CampaignRecord["status"] } : d)}>
-                  <SelectTrigger className="h-auto w-full rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                    {CAMPAIGN_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Database size</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={createCampaignDraft.databaseSize ?? ""}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setCreateCampaignDraft((d) => d ? { ...d, databaseSize: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
-                  }}
-                  placeholder="Optional"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Start date</span>
-                <input
-                  type="date"
-                  value={createCampaignDraft.startDate}
-                  onChange={(e) => setCreateCampaignDraft((d) => d ? { ...d, startDate: e.target.value } : d)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
-                />
-              </label>
-
-              <button
-                onClick={() => { void handleCreateCampaign(); }}
-                disabled={
-                  isSubmittingCreateCampaign ||
-                  !createCampaignDraft.clientId ||
-                  !createCampaignDraft.externalId.trim() ||
-                  !createCampaignDraft.name.trim() ||
-                  !createCampaignDraft.type ||
-                  !createCampaignDraft.status
-                }
-                className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSubmittingCreateCampaign ? "Creating..." : "Create campaign"}
-              </button>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
 
       {selectedCampaign && draft && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/55" onClick={() => setSelectedCampaignId(null)}>
