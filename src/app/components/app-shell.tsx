@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -32,9 +32,11 @@ import {
   BreadcrumbSeparator,
 } from "./ui/breadcrumb";
 import { runtimeConfig } from "../lib/env";
+import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { useAuth } from "../providers/auth";
 import { useShellData } from "../providers/shell-data";
-import type { AppRole } from "../types/core";
+import type { AppRole, Identity } from "../types/core";
+import type { ClientLite, UserLite } from "../types/view-contracts";
 import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
 import coldUnicornLogo from "../../imports/logo white with name.png";
 
@@ -111,64 +113,79 @@ function isPathActive(currentPath: string, itemPath: string) {
   return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+// ── SidebarPanel ────────────────────────────────────────────────────────────────────────────────
+// Memoised so that state changes inside AppShell (isMobileMenuOpen, isDesktopSidebarHidden)
+// don't re-render the sidebar content unnecessarily.
+
+interface SidebarPanelProps {
+  homePath: string;
+  navItems: NavItem[];
+  identity: Identity;
+  activeClient: ClientLite | null;
+  actorIdentity: Identity | null;
+  managerOptions: UserLite[];
+  clientOptions: ClientLite[];
+  isImpersonating: boolean;
+  impersonate: (identity: Identity) => void;
+  stopImpersonation: () => void;
+  signOut: () => void;
+  onNavigate: () => void;
+}
+
+const SidebarPanel = memo(function SidebarPanel({
+  homePath,
+  navItems,
+  identity,
+  activeClient,
+  actorIdentity,
+  managerOptions,
+  clientOptions,
+  isImpersonating,
+  impersonate,
+  stopImpersonation,
+  signOut,
+  onNavigate,
+}: SidebarPanelProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [, startNavTransition] = useTransition();
-  const { usersLite: users, clientsLite: clients } = useShellData();
-  const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
   const [managerTargetId, setManagerTargetId] = useState("");
   const [clientTargetId, setClientTargetId] = useState("");
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDesktopSidebarHidden, setIsDesktopSidebarHidden] = useState(() => readInitialSidebarHidden());
 
-  const managerOptions = useMemo(
-    () =>
-      users
-        .filter((item) => item.role === "manager")
-        .sort((left, right) =>
-          `${left.first_name} ${left.last_name}`.localeCompare(`${right.first_name} ${right.last_name}`),
-        ),
-    [users],
-  );
-  const clientOptions = useMemo(
-    () => clients.slice().sort((left, right) => left.name.localeCompare(right.name)),
-    [clients],
-  );
-  const activeClient = useMemo(
-    () => clients.find((client) => client.id === identity?.clientId) ?? null,
-    [clients, identity?.clientId],
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_HIDDEN_STORAGE_KEY, isDesktopSidebarHidden ? "1" : "0");
-  }, [isDesktopSidebarHidden]);
-
-  useEffect(() => {
-    setIsMobileMenuOpen(false);
-  }, [location.pathname]);
-
-  if (!identity) {
-    return <>{children}</>;
+  function handleImpersonateAdmin() {
+    if (!actorIdentity) return;
+    impersonate({ ...actorIdentity, role: "admin" });
+    navigate(roleHomePath("admin"));
   }
 
-  const navItems = NAV_BY_ROLE[identity.role];
-  const homePath = navItems[0]?.to ?? "/";
-  const hasDesktopSidebar = !isDesktopSidebarHidden;
-  const mobilePrimary = navItems.filter((item) => MOBILE_PRIMARY_BY_ROLE[identity.role].includes(item.to));
-  const currentRolePrefix = identity.role === "super_admin" ? "admin" : identity.role;
-  const rootPath = `/${currentRolePrefix}`;
-  const crumbHomePath = roleHomePath(identity.role);
-  const pathParts = location.pathname.split("/").filter(Boolean);
-  const pageLabel =
-    navItems.find((item) => isPathActive(location.pathname, item.to))?.label ??
-    pathParts[pathParts.length - 1]?.replace(/-/g, " ") ??
-    "Page";
+  function handleImpersonateManager() {
+    const manager = managerOptions.find((item) => item.id === managerTargetId);
+    if (!manager) return;
+    impersonate({
+      id: manager.id,
+      fullName: `${manager.first_name} ${manager.last_name}`.trim(),
+      email: manager.email,
+      role: "manager",
+    });
+    navigate(roleHomePath("manager"));
+  }
 
-  const sidebarPanel = () => (
+  function handleImpersonateClient() {
+    const client = clientOptions.find((item) => item.id === clientTargetId);
+    if (!client) return;
+    impersonate({
+      id: client.id,
+      fullName: `${client.name} client view`,
+      email: client.notification_emails?.[0] ?? `client-view:${client.id}`,
+      role: "client",
+      clientId: client.id,
+    });
+    navigate(roleHomePath("client"));
+  }
+
+  return (
     <>
-      <Link to={homePath} onClick={() => setIsMobileMenuOpen(false)} className="border-b border-[#1f1f1f] px-6 py-6">
+      <Link to={homePath} onClick={onNavigate} className="border-b border-[#1f1f1f] px-6 py-6">
         <div className="flex items-center">
           <img src={coldUnicornLogo} alt="ColdUnicorn" className="h-10 w-auto object-contain" />
         </div>
@@ -192,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               href={item.to}
               onClick={(e) => {
                 e.preventDefault();
-                setIsMobileMenuOpen(false);
+                onNavigate();
                 startNavTransition(() => navigate(item.to));
               }}
               className={cn(
@@ -288,7 +305,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <button
                 onClick={() => {
                   stopImpersonation();
-                  navigate(roleHomePath(actorIdentity.role));
+                  if (actorIdentity) navigate(roleHomePath(actorIdentity.role));
                 }}
                 className="w-full rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-100"
               >
@@ -313,7 +330,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <button
             onClick={() => {
-              setIsMobileMenuOpen(false);
+              onNavigate();
               void signOut();
             }}
             className="rounded-lg p-2 text-neutral-400 transition hover:bg-[#111] hover:text-white"
@@ -324,44 +341,96 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     </>
   );
+});
 
-  function handleImpersonateAdmin() {
-    if (!actorIdentity) return;
-    impersonate({ ...actorIdentity, role: "admin" });
-    navigate(roleHomePath("admin"));
+// ── StablePageContent ───────────────────────────────────────────────────────────────────────────
+// Memoised wrapper so that AppShell state changes (isMobileMenuOpen, isDesktopSidebarHidden)
+// don't cause the active route page — and its heavy tables — to re-render.
+
+const StablePageContent = memo(function StablePageContent({ children }: { children: ReactNode }) {
+  return <>{children}</>;
+});
+
+// ── AppShell ────────────────────────────────────────────────────────────────────────────────────
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { usersLite: users, clientsLite: clients } = useShellData();
+  const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isDesktopSidebarHidden, setIsDesktopSidebarHidden] = useState(() => readInitialSidebarHidden());
+
+  const managerOptions = useMemo(
+    () =>
+      users
+        .filter((item) => item.role === "manager")
+        .sort((left, right) =>
+          `${left.first_name} ${left.last_name}`.localeCompare(`${right.first_name} ${right.last_name}`),
+        ),
+    [users],
+  );
+  const clientOptions = useMemo(
+    () => clients.slice().sort((left, right) => left.name.localeCompare(right.name)),
+    [clients],
+  );
+  const activeClient = useMemo(
+    () => clients.find((client) => client.id === identity?.clientId) ?? null,
+    [clients, identity?.clientId],
+  );
+
+  // Stable callback — setIsMobileMenuOpen setter identity is guaranteed stable by React.
+  const closeMenu = useCallback(() => setIsMobileMenuOpen(false), []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_HIDDEN_STORAGE_KEY, isDesktopSidebarHidden ? "1" : "0");
+  }, [isDesktopSidebarHidden]);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  if (!identity) {
+    return <>{children}</>;
   }
 
-  function handleImpersonateManager() {
-    const manager = managerOptions.find((item) => item.id === managerTargetId);
-    if (!manager) return;
-    impersonate({
-      id: manager.id,
-      fullName: `${manager.first_name} ${manager.last_name}`.trim(),
-      email: manager.email,
-      role: "manager",
-    });
-    navigate(roleHomePath("manager"));
-  }
+  const navItems = NAV_BY_ROLE[identity.role];
+  const homePath = navItems[0]?.to ?? "/";
+  const hasDesktopSidebar = !isDesktopSidebarHidden;
+  const mobilePrimary = navItems.filter((item) => MOBILE_PRIMARY_BY_ROLE[identity.role].includes(item.to));
+  const currentRolePrefix = identity.role === "super_admin" ? "admin" : identity.role;
+  const rootPath = `/${currentRolePrefix}`;
+  const crumbHomePath = roleHomePath(identity.role);
+  const pathParts = location.pathname.split("/").filter(Boolean);
+  const pageLabel =
+    navItems.find((item) => isPathActive(location.pathname, item.to))?.label ??
+    pathParts[pathParts.length - 1]?.replace(/-/g, " ") ??
+    "Page";
 
-  function handleImpersonateClient() {
-    const client = clientOptions.find((item) => item.id === clientTargetId);
-    if (!client) return;
-    impersonate({
-      id: client.id,
-      fullName: `${client.name} client view`,
-      email: client.notification_emails?.[0] ?? `client-view:${client.id}`,
-      role: "client",
-      clientId: client.id,
-    });
-    navigate(roleHomePath("client"));
-  }
+  const sidebarPanelNode = (
+    <SidebarPanel
+      homePath={homePath}
+      navItems={navItems}
+      identity={identity}
+      activeClient={activeClient}
+      actorIdentity={actorIdentity}
+      managerOptions={managerOptions}
+      clientOptions={clientOptions}
+      isImpersonating={isImpersonating}
+      impersonate={impersonate}
+      stopImpersonation={stopImpersonation}
+      signOut={signOut}
+      onNavigate={closeMenu}
+    />
+  );
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
       <div className="flex min-h-screen">
         {hasDesktopSidebar && (
           <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col overflow-y-auto border-r border-[#1f1f1f] bg-[#050505] lg:flex">
-            {sidebarPanel()}
+            {sidebarPanelNode}
           </aside>
         )}
 
@@ -374,14 +443,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               <SheetTitle>Navigation</SheetTitle>
               <SheetDescription>Open workspace navigation and account controls.</SheetDescription>
             </SheetHeader>
-            <div className="flex h-full flex-col overflow-y-auto">{sidebarPanel()}</div>
+            <div className="flex h-full flex-col overflow-y-auto">{sidebarPanelNode}</div>
           </SheetContent>
         </Sheet>
 
         <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4 lg:hidden">
             <button
-              onClick={() => setIsMobileMenuOpen(true)}
+              onClick={() => {
+                markInteractionStart("menu:click");
+                measureAfterRaf2("menu:click", "[perf][menu] mobile click→raf2");
+                setIsMobileMenuOpen(true);
+              }}
               className="inline-flex items-center gap-2 rounded-lg border border-[#242424] bg-[#080808] px-3 py-2 text-sm text-neutral-300 transition hover:bg-[#111] hover:text-white"
               aria-label="Open sidebar menu"
             >
@@ -421,7 +494,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           </div>
 
-          {children}
+          {/* StablePageContent prevents heavy route pages from re-rendering when AppShell
+              toggles isMobileMenuOpen or isDesktopSidebarHidden. */}
+          <StablePageContent>{children}</StablePageContent>
         </main>
       </div>
 

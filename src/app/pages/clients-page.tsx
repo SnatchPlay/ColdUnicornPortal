@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
 import { repository, RepositoryError } from "../data/repository";
+import { markInteractionStart, markPoint, measureAfterRaf2, measureBetween, timeSyncOp } from "../lib/perf-mark";
 import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
@@ -106,9 +107,13 @@ function useClientsOverview() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    markPoint("clients:fetch:start");
     try {
       const result = await repository.loadClientsOverview();
+      markPoint("clients:fetch:end");
+      measureBetween("clients:fetch:start", "clients:fetch:end", "[perf][clients] fetch round-trip");
       setData(result);
+      markPoint("clients:state:set");
       setError(null);
     } catch (reason) {
       setError(mapClientsError(reason));
@@ -282,6 +287,15 @@ const CreateClientSheet = memo(function CreateClientSheet({
 }: CreateClientSheetProps) {
   const [draft, setDraft] = useState<CreateClientDraft | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Shell timing: measure from "new-client-sheet:click" mark on false→true transition.
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
+      measureAfterRaf2("new-client-sheet:click", "[perf][sheet] new-client shell click→raf2");
+    }
+    prevOpenRef.current = open;
+  }, [open]);
 
   // Seed draft on open; clear on close.
   useEffect(() => {
@@ -523,26 +537,28 @@ export function ClientsPage() {
 
   const metricsByClientId = useMemo<ReadonlyMap<string, ClientMetricsPack>>(() => {
     if (!data) return new Map();
-    const statsByClient = new Map<string, typeof data.dailyStats>();
-    const leadsByClient = new Map<string, typeof data.leadProjections>();
-    for (const client of data.clients) {
-      statsByClient.set(client.id, []);
-      leadsByClient.set(client.id, []);
-    }
-    for (const stat of data.dailyStats) {
-      statsByClient.get(stat.client_id)?.push(stat);
-    }
-    for (const lead of data.leadProjections) {
-      leadsByClient.get(lead.client_id)?.push(lead);
-    }
-    const result = new Map<string, ClientMetricsPack>();
-    for (const client of data.clients) {
-      result.set(
-        client.id,
-        createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []),
-      );
-    }
-    return result;
+    return timeSyncOp(`[perf][clients] metrics-derivation (${data.clients.length} clients)`, () => {
+      const statsByClient = new Map<string, typeof data.dailyStats>();
+      const leadsByClient = new Map<string, typeof data.leadProjections>();
+      for (const client of data.clients) {
+        statsByClient.set(client.id, []);
+        leadsByClient.set(client.id, []);
+      }
+      for (const stat of data.dailyStats) {
+        statsByClient.get(stat.client_id)?.push(stat);
+      }
+      for (const lead of data.leadProjections) {
+        leadsByClient.get(lead.client_id)?.push(lead);
+      }
+      const result = new Map<string, ClientMetricsPack>();
+      for (const client of data.clients) {
+        result.set(
+          client.id,
+          createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []),
+        );
+      }
+      return result;
+    });
   }, [data]);
 
   const customFieldValuesByClient = useMemo(() => {
@@ -620,26 +636,28 @@ export function ClientsPage() {
   }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient]);
 
   const megaRows = useMemo<ClientMegaRow[]>(() => {
-    return scopedClients.map((client) => {
-      const manager = managerById.get(client.manager_id);
-      const managerName = manager
-        ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
-        : "Unassigned";
-      const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
-      const conditionPack = conditionPackByClientId.get(client.id) ?? null;
-      const allResults = conditionPack?.allResults ?? [];
-      const highestSeverity = getHighestSeverity(allResults);
-      const rollupCause = allResults.find((r) => r.severity === highestSeverity)?.label ?? "All KPIs on target";
-      return {
-        client,
-        managerName,
-        metrics,
-        highestSeverity,
-        healthScore: getHealthScore(allResults),
-        rollupCause,
-        conditionPack,
-      };
-    });
+    return timeSyncOp(`[perf][clients] mega-rows (${scopedClients.length} rows)`, () =>
+      scopedClients.map((client) => {
+        const manager = managerById.get(client.manager_id);
+        const managerName = manager
+          ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
+          : "Unassigned";
+        const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+        const conditionPack = conditionPackByClientId.get(client.id) ?? null;
+        const allResults = conditionPack?.allResults ?? [];
+        const highestSeverity = getHighestSeverity(allResults);
+        const rollupCause = allResults.find((r) => r.severity === highestSeverity)?.label ?? "All KPIs on target";
+        return {
+          client,
+          managerName,
+          metrics,
+          highestSeverity,
+          healthScore: getHealthScore(allResults),
+          rollupCause,
+          conditionPack,
+        };
+      }),
+    );
   }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
 
   const sortedMegaRows = useMemo(() => {
@@ -711,6 +729,7 @@ export function ClientsPage() {
 
   const openClient = useCallback(
     (id: string) => {
+      markInteractionStart("client-drawer:click");
       const client = scopedClients.find((c) => c.id === id) ?? null;
       selectionStore.set(id);
       setSelectedClientId(id);
@@ -860,7 +879,10 @@ export function ClientsPage() {
         subtitle="Dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in a single horizontally-scrollable surface. Click any row to open the configuration drawer."
         actions={
           <button
-            onClick={() => setIsCreatingClient(true)}
+            onClick={() => {
+              markInteractionStart("new-client-sheet:click");
+              setIsCreatingClient(true);
+            }}
             className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
           >
             New client

@@ -1,10 +1,11 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppErrorBoundary } from "./components/app-error-boundary";
 import { AppShell } from "./components/app-shell";
 import { Banner, LoadingState, Surface } from "./components/app-ui";
 import { runtimeConfig } from "./lib/env";
+import { startLongTaskObserver } from "./lib/perf-mark";
 import { AppProviders } from "./providers";
 import { useAuth } from "./providers/auth";
 import { CoreDataProvider } from "./providers/core-data";
@@ -266,6 +267,12 @@ function ProtectedApp() {
   );
 }
 
+/** Starts the long-task PerformanceObserver once. No-op in prod and tests. */
+function DevPerfMonitor({ children }: { children: ReactNode }) {
+  useEffect(() => startLongTaskObserver(), []);
+  return <>{children}</>;
+}
+
 function AppRouter() {
   return (
     <BrowserRouter>
@@ -314,11 +321,13 @@ export default function App() {
   }
 
   return (
-    <div className="dark">
-      <AppProviders>
-        <AppRouter />
-      </AppProviders>
-      <Toaster position="top-right" richColors closeButton />
-    </div>
+    <DevPerfMonitor>
+      <div className="dark">
+        <AppProviders>
+          <AppRouter />
+        </AppProviders>
+        <Toaster position="top-right" richColors closeButton />
+      </div>
+    </DevPerfMonitor>
   );
 }

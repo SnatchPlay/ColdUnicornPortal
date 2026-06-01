@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { X } from "lucide-react";
+import { useDeferredMount } from "../lib/use-deferred-mount";
+import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import {
   Bar,
   BarChart,
@@ -163,6 +165,24 @@ function InternalCampaignsPage() {
     () => accumulatedRows.find((item) => item.id === selectedCampaignId) ?? null,
     [accumulatedRows, selectedCampaignId],
   );
+  // Two-phase drawer: overlay + header paint first, form + chart deferred.
+  const campaignBodyReady = useDeferredMount(!!selectedCampaign && !!draft);
+
+  // Shell timing: measure on false→true transition of drawerOpen.
+  const campaignDrawerWasOpenRef = useRef(false);
+  const campaignDrawerOpen = !!selectedCampaign && !!draft;
+  useEffect(() => {
+    if (campaignDrawerOpen && !campaignDrawerWasOpenRef.current) {
+      measureAfterRaf2("campaign-drawer:click", "[perf][drawer] campaign shell click→raf2");
+    }
+    campaignDrawerWasOpenRef.current = campaignDrawerOpen;
+  }, [campaignDrawerOpen]);
+
+  // Content timing: deferred form + chart visible.
+  useEffect(() => {
+    if (!campaignBodyReady) return;
+    measureAfterRaf2("campaign-drawer:click", "[perf][drawer] campaign content deferred→raf2");
+  }, [campaignBodyReady]);
 
   const campaignColumns = useResizableColumns({
     storageKey: "table:campaigns:columns",
@@ -451,7 +471,7 @@ function InternalCampaignsPage() {
                   return (
                     <button
                       key={campaign.id}
-                      onClick={() => setSelectedCampaignId(campaign.id)}
+                      onClick={() => { markInteractionStart("campaign-drawer:click"); setSelectedCampaignId(campaign.id); }}
                       aria-label={`Open details for ${campaign.name}`}
                       className={`grid w-full gap-3 px-4 py-4 text-left transition md:min-w-[1200px] md:[grid-template-columns:var(--campaign-table-columns)] ${
                         isActive ? "bg-sky-500/10" : "hover:bg-white/5"
@@ -659,6 +679,8 @@ function InternalCampaignsPage() {
                 </button>
               </div>
 
+              {/* Phase 2: deferred form + chart */}
+              {campaignBodyReady ? (<>
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2">
                   <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Name</span>
@@ -797,6 +819,13 @@ function InternalCampaignsPage() {
                       <Bar dataKey="bounces" fill="#f97316" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                </div>
+              )}
+              </>) : (
+                <div className="mt-2 space-y-4" aria-hidden="true">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-24 animate-pulse rounded-2xl bg-white/[0.04]" />
+                  ))}
                 </div>
               )}
             </div>
