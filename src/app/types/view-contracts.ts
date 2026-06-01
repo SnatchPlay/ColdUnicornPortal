@@ -395,6 +395,27 @@ export interface AnalyticsClientLite {
   contracted_amount: number | null;
 }
 
+// --- Domains / Invoices / Blacklist (Phase 7 remaining legacy routes) ---------------------------
+// Per-page focused payloads replacing the 16MB global loadSnapshot for these three routes.
+// Mutations go through repository.X() directly; refresh() re-runs the loader.
+
+/** Payload for DomainsPage — full client rows (scopeClients/scopeDomains need manager_id). */
+export interface DomainsPagePayload {
+  clients: ClientRecord[];
+  domains: DomainRecord[];
+}
+
+/** Payload for InvoicesPage — full client rows (scopeClients/scopeInvoices need manager_id). */
+export interface InvoicesPagePayload {
+  clients: ClientRecord[];
+  invoices: InvoiceRecord[];
+}
+
+/** Payload for BlacklistPage — no client context needed. */
+export interface BlacklistPagePayload {
+  emailExcludeList: EmailExcludeRecord[];
+}
+
 // --- Admin settings (Phase 7 partial) ---------------------------------------------------------------
 // loadAdminSettings returns the three settings-specific tables plus full client rows for the
 // ConditionRuleBuilder client-selector. users come from useShellData().usersLite (already loaded).

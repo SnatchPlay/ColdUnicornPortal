@@ -1,22 +1,46 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BlacklistPage } from "../blacklist-page";
 import { DomainsPage } from "../domains-page";
 import { InvoicesPage } from "../invoices-page";
 import { useAuth } from "../../providers/auth";
-import { useCoreData } from "../../providers/core-data";
+import { repository } from "../../data/repository";
+
+// Prevent the heavy transitive module load from useCoreData (crm-integration-card etc.)
+vi.mock("../../providers/core-data", () => ({
+  useCoreData: vi.fn(() => ({ clients: [], loading: false, error: null, refresh: vi.fn() })),
+}));
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(),
+vi.mock("../../providers/shell-data", () => ({
+  useShellData: vi.fn(() => ({
+    clientsLite: [], usersLite: [], clientUsers: [], loading: false, error: null, refresh: vi.fn(),
+  })),
+}));
+
+vi.mock("../../data/repository", () => ({
+  RepositoryError: class RepositoryError extends Error {
+    table = "domains"; operation = "select"; kind = "unknown";
+    constructor(args: { message: string }) { super(args.message); }
+  },
+  repository: {
+    loadDomainsPage: vi.fn(),
+    loadInvoicesPage: vi.fn(),
+    loadBlacklistPage: vi.fn(),
+    createDomain: vi.fn(),
+    updateDomain: vi.fn(),
+    updateInvoice: vi.fn(),
+    upsertEmailExcludeDomain: vi.fn(),
+    deleteEmailExcludeDomain: vi.fn(),
+  },
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
-const mockedUseCoreData = vi.mocked(useCoreData);
+const mockedRepo = vi.mocked(repository);
 
 function makeAuth(role: "admin" | "manager") {
   return {
@@ -29,151 +53,88 @@ function makeAuth(role: "admin" | "manager") {
   };
 }
 
-function makeCoreData(overrides?: Record<string, unknown>) {
-  const base = {
-    users: [],
-    clients: [
-      {
-        id: "client-1",
-        name: "Acme",
-        manager_id: "manager-1",
-      },
-    ],
-    clientUsers: [],
-    campaigns: [],
-    leads: [],
-    replies: [],
-    campaignDailyStats: [],
-    dailyStats: [],
-    domains: [
-      {
-        id: "domain-1",
-        created_at: "2026-01-01",
-        client_id: "client-1",
-        domain_name: "acme.com",
-        setup_email: "setup@acme.com",
-        purchase_date: "2026-01-01",
-        exchange_date: "2026-01-10",
-        updated_at: "2026-01-12",
-        status: "active",
-        reputation: "good",
-        exchange_cost: 199,
-        campaign_verified_at: null,
-        warmup_verified_at: null,
-      },
-    ],
-    invoices: [
-      {
-        id: "invoice-1",
-        created_at: "2026-01-01",
-        client_id: "client-1",
-        issue_date: "2026-01-10",
-        amount: 1000,
-        status: "pending",
-        updated_at: "2026-01-10",
-      },
-    ],
-    emailExcludeList: [
-      {
-        domain: "blocked.com",
-        created_at: "2026-01-01",
-      },
-    ],
-    loading: false,
-    error: null,
-    refresh: vi.fn(async () => {}),
-    updateClient: vi.fn(async () => {}),
-    updateCampaign: vi.fn(async () => {}),
-    updateLead: vi.fn(async () => {}),
-    updateDomain: vi.fn(async () => {}),
-    updateInvoice: vi.fn(async () => {}),
-    upsertClientUserMapping: vi.fn(async () => {}),
-    deleteClientUserMapping: vi.fn(async () => {}),
-    upsertEmailExcludeDomain: vi.fn(async () => {}),
-    deleteEmailExcludeDomain: vi.fn(async () => {}),
-  };
+const domain = {
+  id: "domain-1", created_at: "2026-01-01", client_id: "client-1",
+  domain_name: "acme.com", setup_email: "setup@acme.com",
+  purchase_date: "2026-01-01", exchange_date: "2026-01-10",
+  updated_at: "2026-01-12", status: "active", reputation: "good",
+  exchange_cost: 199, campaign_verified_at: null, warmup_verified_at: null,
+};
 
-  return {
-    ...base,
-    ...overrides,
-  };
-}
+const client = { id: "client-1", name: "Acme", manager_id: "manager-1" };
+
+describe("Sprint B module operations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedRepo.loadDomainsPage.mockResolvedValue({ clients: [client], domains: [domain] } as never);
+    mockedRepo.loadInvoicesPage.mockResolvedValue({ clients: [client], invoices: [{
+      id: "invoice-1", created_at: "2026-01-01", client_id: "client-1",
+      issue_date: "2026-01-10", amount: 1000, status: "pending", updated_at: "2026-01-10",
+    }] } as never);
+    mockedRepo.loadBlacklistPage.mockResolvedValue({ emailExcludeList: [{
+      domain: "blocked.com", created_at: "2026-01-01",
+    }] } as never);
+    mockedRepo.updateDomain.mockResolvedValue(domain as never);
+    mockedRepo.updateInvoice.mockResolvedValue({} as never);
+    mockedRepo.upsertEmailExcludeDomain.mockResolvedValue({ domain: "spam.com", created_at: "2026-01-01" } as never);
+    mockedRepo.deleteEmailExcludeDomain.mockResolvedValue(undefined as never);
+  });
+
+  it("saves domain draft changes", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+
+    render(<MemoryRouter><DomainsPage /></MemoryRouter>);
+    await act(async () => {});
+
+    await chooseOptionByLabel("Status", "blocked");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(mockedRepo.updateDomain).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedRepo.updateDomain).toHaveBeenCalledWith("domain-1", expect.objectContaining({ status: "blocked" }));
+  });
+
+  it("saves invoice draft changes", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+
+    render(<MemoryRouter><InvoicesPage /></MemoryRouter>);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1250" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(mockedRepo.updateInvoice).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedRepo.updateInvoice).toHaveBeenCalledWith("invoice-1", expect.objectContaining({ amount: 1250 }));
+  });
+
+  it("allows admin to add and remove blacklist domains", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
+
+    render(<MemoryRouter><BlacklistPage /></MemoryRouter>);
+    await act(async () => {});
+
+    fireEvent.change(screen.getByLabelText("New blacklist domain"), { target: { value: "spam.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add domain" }));
+
+    await waitFor(() => {
+      expect(mockedRepo.upsertEmailExcludeDomain).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedRepo.upsertEmailExcludeDomain).toHaveBeenCalledWith("spam.com");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
+
+    await waitFor(() => {
+      expect(mockedRepo.deleteEmailExcludeDomain).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedRepo.deleteEmailExcludeDomain).toHaveBeenCalledWith("blocked.com");
+  });
+});
 
 async function chooseOptionByLabel(label: string, option: string | RegExp) {
   const trigger = screen.getByLabelText(label);
   fireEvent.click(trigger);
   fireEvent.click(await screen.findByRole("option", { name: option }));
 }
-
-describe("Sprint B module operations", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("saves domain draft changes", async () => {
-    const core = makeCoreData();
-    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
-    mockedUseCoreData.mockReturnValue(core as never);
-
-    render(
-      <MemoryRouter>
-        <DomainsPage />
-      </MemoryRouter>,
-    );
-
-    await chooseOptionByLabel("Status", "blocked");
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => {
-      expect(core.updateDomain).toHaveBeenCalledTimes(1);
-    });
-    expect(core.updateDomain).toHaveBeenCalledWith("domain-1", expect.objectContaining({ status: "blocked" }));
-  });
-
-  it("saves invoice draft changes", async () => {
-    const core = makeCoreData();
-    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
-    mockedUseCoreData.mockReturnValue(core as never);
-
-    render(
-      <MemoryRouter>
-        <InvoicesPage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1250" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => {
-      expect(core.updateInvoice).toHaveBeenCalledTimes(1);
-    });
-    expect(core.updateInvoice).toHaveBeenCalledWith("invoice-1", expect.objectContaining({ amount: 1250 }));
-  });
-
-  it("allows admin to add and remove blacklist domains", async () => {
-    const core = makeCoreData();
-    mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
-    mockedUseCoreData.mockReturnValue(core as never);
-
-    render(
-      <MemoryRouter>
-        <BlacklistPage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.change(screen.getByLabelText("New blacklist domain"), { target: { value: "spam.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add domain" }));
-
-    await waitFor(() => {
-      expect(core.upsertEmailExcludeDomain).toHaveBeenCalledTimes(1);
-    });
-    expect(core.upsertEmailExcludeDomain).toHaveBeenCalledWith("spam.com");
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
-
-    await waitFor(() => {
-      expect(core.deleteEmailExcludeDomain).toHaveBeenCalledTimes(1);
-    });
-    expect(core.deleteEmailExcludeDomain).toHaveBeenCalledWith("blocked.com");
-  });
-});

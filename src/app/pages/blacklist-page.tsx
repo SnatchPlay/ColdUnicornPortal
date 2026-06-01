@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { formatDate, formatNumber } from "../lib/format";
 import { isInternalAdmin } from "../lib/selectors";
+import { useBlacklistPage } from "../lib/use-blacklist";
+import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import type { EmailExcludeRecord } from "../types/core";
 
 function normalizeDomain(value: string) {
   return value.trim().toLowerCase();
@@ -13,9 +15,13 @@ function isDomainValid(value: string) {
   return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(value);
 }
 
+// Stable empty-array fallback — prevents new-reference cascades during loading.
+const EMPTY_EXCLUDE_LIST: EmailExcludeRecord[] = [];
+
 export function BlacklistPage() {
   const { identity } = useAuth();
-  const { emailExcludeList, loading, error, refresh, upsertEmailExcludeDomain, deleteEmailExcludeDomain } = useCoreData();
+  const { data, loading, error, refresh } = useBlacklistPage();
+  const emailExcludeList = data?.emailExcludeList ?? EMPTY_EXCLUDE_LIST;
 
   const [query, setQuery] = useState("");
   const [newDomain, setNewDomain] = useState("");
@@ -37,7 +43,8 @@ export function BlacklistPage() {
 
     setIsSubmitting(true);
     try {
-      await upsertEmailExcludeDomain(normalized);
+      await repository.upsertEmailExcludeDomain(normalized);
+      refresh();
       setNewDomain("");
     } finally {
       setIsSubmitting(false);
@@ -47,7 +54,8 @@ export function BlacklistPage() {
   async function removeDomain(domain: string) {
     setIsSubmitting(true);
     try {
-      await deleteEmailExcludeDomain(domain);
+      await repository.deleteEmailExcludeDomain(domain);
+      refresh();
     } finally {
       setIsSubmitting(false);
     }

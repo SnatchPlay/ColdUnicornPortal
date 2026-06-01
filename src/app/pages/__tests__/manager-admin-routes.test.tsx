@@ -47,6 +47,9 @@ vi.mock("../../data/repository", () => ({
     loadCampaignStats: vi.fn(),
     loadAnalyticsOverview: vi.fn(),
     loadAdminSettings: vi.fn(),
+    loadDomainsPage: vi.fn(),
+    loadInvoicesPage: vi.fn(),
+    loadBlacklistPage: vi.fn(),
   },
 }));
 
@@ -59,8 +62,8 @@ type RouteCase = {
   Component: () => JSX.Element;
 };
 
-// Non-dashboard, non-clients, non-leads, non-campaigns, non-statistics, non-settings routes.
-const LEGACY_ROUTE_CASES: RouteCase[] = [
+// Phase 7: domains / invoices / blacklist — per-page loaders, no CoreDataProvider.
+const MODULES_ROUTE_CASES: RouteCase[] = [
   { name: "manager domains route", role: "manager", title: "Domains", Component: DomainsPage },
   { name: "manager invoices route", role: "manager", title: "Invoices", Component: InvoicesPage },
   { name: "manager blacklist route", role: "manager", title: "Blacklist", Component: BlacklistPage },
@@ -154,26 +157,46 @@ describe("manager/admin route states", () => {
     mockedRepo.loadCampaignStats.mockResolvedValue({ rows: [] });
     mockedRepo.loadAnalyticsOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadAdminSettings.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadDomainsPage.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadInvoicesPage.mockReturnValue(new Promise(() => {}));
+    mockedRepo.loadBlacklistPage.mockReturnValue(new Promise(() => {}));
   });
 
-  // ── Legacy snapshot routes (still on CoreDataProvider) ──────────────────────────────────────
+  // ── Modules routes (Phase 7: per-page loaders, no CoreDataProvider) ─────────────────────────
 
-  it.each(LEGACY_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
+  it.each(MODULES_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
-    mockedUseCoreData.mockReturnValue(makeCoreData({ loading: true, error: null }) as never);
+    // Loader hangs (set in beforeEach) → hook stays in loading:true.
     renderRoute(Component);
     expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
   });
 
-  it.each(LEGACY_ROUTE_CASES)("renders error + retry on $name", ({ role, title, Component }) => {
-    const refresh = vi.fn(async () => {});
+  it.each(MODULES_ROUTE_CASES)("renders error + retry on $name", async ({ role, title, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
-    mockedUseCoreData.mockReturnValue(makeCoreData({ loading: false, error: "Runtime data sync failed", refresh }) as never);
+    const err = new Error("Runtime data sync failed");
+    mockedRepo.loadDomainsPage.mockRejectedValue(err);
+    mockedRepo.loadInvoicesPage.mockRejectedValue(err);
+    mockedRepo.loadBlacklistPage.mockRejectedValue(err);
+
     renderRoute(Component);
+    await act(async () => {});
+
     expect(screen.getByText(title)).toBeInTheDocument();
     expect(screen.getByText("Runtime data sync failed")).toBeInTheDocument();
+
+    const callsBefore =
+      mockedRepo.loadDomainsPage.mock.calls.length +
+      mockedRepo.loadInvoicesPage.mock.calls.length +
+      mockedRepo.loadBlacklistPage.mock.calls.length;
+
     fireEvent.click(screen.getByRole("button", { name: /Retry data sync/i }));
-    expect(refresh).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+
+    expect(
+      mockedRepo.loadDomainsPage.mock.calls.length +
+      mockedRepo.loadInvoicesPage.mock.calls.length +
+      mockedRepo.loadBlacklistPage.mock.calls.length,
+    ).toBeGreaterThan(callsBefore);
   });
 
   // ── Dashboard routes (Phase 2A: per-page loaders, no CoreDataProvider) ──────────────────────

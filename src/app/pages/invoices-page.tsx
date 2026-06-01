@@ -4,9 +4,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { scopeClients, scopeInvoices } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
+import { useInvoicesPage } from "../lib/use-invoices";
+import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
-import type { InvoiceRecord } from "../types/core";
+import type { ClientRecord, InvoiceRecord } from "../types/core";
 
 const INVOICE_STATUSES = ["pending", "issued", "sent", "paid", "overdue", "vindication"] as const;
 const INVOICE_UNSET_VALUE = "__unset_invoice_status__";
@@ -64,9 +65,15 @@ function buildInvoicePatch(invoice: InvoiceRecord, draft: InvoiceDraft): Partial
   return patch;
 }
 
+// Stable empty-array fallbacks — prevents new-reference cascades during loading.
+const EMPTY_CLIENTS: ClientRecord[] = [];
+const EMPTY_INVOICES: InvoiceRecord[] = [];
+
 export function InvoicesPage() {
   const { identity } = useAuth();
-  const { clients, invoices, updateInvoice, loading, error, refresh } = useCoreData();
+  const { data, loading, error, refresh } = useInvoicesPage();
+  const clients = data?.clients ?? EMPTY_CLIENTS;
+  const invoices = data?.invoices ?? EMPTY_INVOICES;
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -153,7 +160,8 @@ export function InvoicesPage() {
     if (!selectedInvoice || !isDraftDirty) return;
     setIsSavingDraft(true);
     try {
-      await updateInvoice(selectedInvoice.id, draftPatch);
+      await repository.updateInvoice(selectedInvoice.id, draftPatch);
+      refresh();
     } finally {
       setIsSavingDraft(false);
     }

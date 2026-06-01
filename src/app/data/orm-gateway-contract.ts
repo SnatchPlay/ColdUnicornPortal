@@ -19,11 +19,14 @@ import type {
   AdminDashboardOverview,
   AdminSettingsPayload,
   AnalyticsOverviewPayload,
+  BlacklistPagePayload,
   CampaignStatsResponse,
   CampaignsListParams,
   CampaignsListResponse,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  DomainsPagePayload,
+  InvoicesPagePayload,
   LeadDetailResult,
   LeadsFilterOptions,
   LeadsListParams,
@@ -114,6 +117,18 @@ export interface LoadAnalyticsOverviewPayload {
 
 export interface LoadAdminSettingsPayload {
   action: "loadAdminSettings";
+}
+
+export interface LoadDomainsPagePayload {
+  action: "loadDomainsPage";
+}
+
+export interface LoadInvoicesPagePayload {
+  action: "loadInvoicesPage";
+}
+
+export interface LoadBlacklistPagePayload {
+  action: "loadBlacklistPage";
 }
 
 export interface LoadCampaignsListPayload {
@@ -285,6 +300,9 @@ export type OrmGatewayRequest =
   | LoadLeadsFilterOptionsPayload
   | LoadAnalyticsOverviewPayload
   | LoadAdminSettingsPayload
+  | LoadDomainsPagePayload
+  | LoadInvoicesPagePayload
+  | LoadBlacklistPagePayload
   | LoadCampaignsListPayload
   | LoadCampaignStatsPayload
   | UpdateClientPayload
@@ -336,6 +354,9 @@ export interface OrmGatewayResponseMap {
   loadLeadsFilterOptions: LeadsFilterOptions;
   loadAnalyticsOverview: AnalyticsOverviewPayload;
   loadAdminSettings: AdminSettingsPayload;
+  loadDomainsPage: DomainsPagePayload;
+  loadInvoicesPage: InvoicesPagePayload;
+  loadBlacklistPage: BlacklistPagePayload;
   loadCampaignsList: CampaignsListResponse;
   loadCampaignStats: CampaignStatsResponse;
   loadConditionRules: ConditionRuleRecord[];
@@ -505,6 +526,18 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadAdminSettings") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadDomainsPage") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadInvoicesPage") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadBlacklistPage") {
     return { ok: true, value: { action } };
   }
 
