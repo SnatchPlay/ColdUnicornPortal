@@ -24,9 +24,14 @@ import { useAnalyticsOverview } from "../lib/use-analytics";
 import { useCampaignStats } from "../lib/use-campaigns";
 import { useAuth } from "../providers/auth";
 import { ClientStatisticsPage } from "./client-statistics-page";
+import type { AnalyticsLeadGroup } from "../types/view-contracts";
 import type { CampaignDailyStatRecord, DailyStatRecord, UserRecord } from "../types/core";
 
 const PIE_COLORS = ["#38bdf8", "#22c55e", "#f59e0b", "#f97316"];
+
+// Stable empty-array fallback — avoids creating a new [] reference every render while
+// the analytics overview is loading, which would cascade through memo/effect deps.
+const EMPTY_LEAD_GROUPS: AnalyticsLeadGroup[] = [];
 const PIE_COLOR_DOT_CLASSES = ["bg-sky-400", "bg-emerald-500", "bg-amber-500", "bg-orange-500"];
 const ALL_FILTER_VALUE = "__all__";
 const SELECT_OPTION_LIMIT = 80;
@@ -168,7 +173,7 @@ function InternalStatisticsPage() {
   const users = data?.users ?? [];
   const clients = data?.clients ?? [];
   const campaigns = data?.campaigns ?? [];
-  const scopedLeads = data?.leadProjections ?? [];
+  const scopedLeadGroups = data?.leadGroups ?? EMPTY_LEAD_GROUPS;
   const scopedDailyStats = data?.dailyStats ?? [];
 
   // Campaign daily stats come from the lazy hook when a campaign is selected;
@@ -273,9 +278,9 @@ function InternalStatisticsPage() {
     };
     for (const item of scopedStats) consider(item.report_date);
     for (const item of scopedDailyStats) consider(item.report_date);
-    for (const item of scopedLeads) consider(item.updated_at || item.created_at);
+    for (const g of scopedLeadGroups) consider(g.date);
     return latest ?? new Date();
-  }, [scopedDailyStats, scopedLeads, scopedStats]);
+  }, [scopedDailyStats, scopedLeadGroups, scopedStats]);
 
   const timeframeStats = useMemo(
     () => filterByTimeframe(scopedStats, (item) => item.report_date, timeframe, timeframeAnchor),
@@ -285,9 +290,9 @@ function InternalStatisticsPage() {
     () => filterByTimeframe(scopedDailyStats, (item) => item.report_date, timeframe, timeframeAnchor),
     [scopedDailyStats, timeframe, timeframeAnchor],
   );
-  const timeframeLeads = useMemo(
-    () => filterByTimeframe(scopedLeads, (item) => item.created_at, timeframe, timeframeAnchor),
-    [scopedLeads, timeframe, timeframeAnchor],
+  const timeframeLeadGroups = useMemo(
+    () => filterByTimeframe(scopedLeadGroups, (g) => g.date, timeframe, timeframeAnchor),
+    [scopedLeadGroups, timeframe, timeframeAnchor],
   );
 
   // When a campaign filter is active, scopedStats is the lazy campaign stats for that campaign —
@@ -315,15 +320,15 @@ function InternalStatisticsPage() {
     [clientFilterId, managerFilteredClientIds, timeframeDailyStats],
   );
 
-  const filteredLeads = useMemo(
+  const filteredLeadGroups = useMemo(
     () =>
-      timeframeLeads.filter((item) => {
-        if (!managerFilteredClientIds.has(item.client_id)) return false;
-        if (clientFilterId !== ALL_FILTER_VALUE && item.client_id !== clientFilterId) return false;
-        if (campaignFilterId !== ALL_FILTER_VALUE && item.campaign_id !== campaignFilterId) return false;
+      timeframeLeadGroups.filter((g) => {
+        if (!managerFilteredClientIds.has(g.client_id)) return false;
+        if (clientFilterId !== ALL_FILTER_VALUE && g.client_id !== clientFilterId) return false;
+        if (campaignFilterId !== ALL_FILTER_VALUE && g.campaign_id !== campaignFilterId) return false;
         return true;
       }),
-    [campaignFilterId, clientFilterId, managerFilteredClientIds, timeframeLeads],
+    [campaignFilterId, clientFilterId, managerFilteredClientIds, timeframeLeadGroups],
   );
 
   const sortedFilteredStats = useMemo(
@@ -424,7 +429,9 @@ function InternalStatisticsPage() {
           campaignFilterId !== ALL_FILTER_VALUE || clientDaily.length === 0
             ? aggregateCampaignStats(clientStats)
             : aggregateDailyStats(clientDaily);
-        const clientLeads = filteredLeads.filter((l) => l.client_id === client.id).length;
+        const clientLeads = filteredLeadGroups
+          .filter((g) => g.client_id === client.id)
+          .reduce((sum, g) => sum + g.count, 0);
         return {
           client,
           totalSent: totals.totalSent,
@@ -434,7 +441,7 @@ function InternalStatisticsPage() {
         };
       })
       .filter((item) => item.totalSent > 0 || item.clientLeads > 0);
-  }, [campaignFilterId, filteredDailyStats, filteredLeads, filteredStats, managerFilteredClients, scopedCampaigns, scopedClients.length]);
+  }, [campaignFilterId, filteredDailyStats, filteredLeadGroups, filteredStats, managerFilteredClients, scopedCampaigns, scopedClients.length]);
 
   const byManagerBreakdown = useMemo(() => {
     if (!showManagerScope || managerUsers.length === 0) return [];
@@ -450,7 +457,9 @@ function InternalStatisticsPage() {
           campaignFilterId !== ALL_FILTER_VALUE || managerDailyStats.length === 0
             ? aggregateCampaignStats(managerStats)
             : aggregateDailyStats(managerDailyStats);
-        const managerLeads = filteredLeads.filter((lead) => managerClientIds.has(lead.client_id)).length;
+        const managerLeads = filteredLeadGroups
+          .filter((g) => managerClientIds.has(g.client_id))
+          .reduce((sum, g) => sum + g.count, 0);
         return {
           manager,
           clientsCount: managerClients.length,
@@ -463,16 +472,16 @@ function InternalStatisticsPage() {
       })
       .filter((item) => item.clientsCount > 0 || item.campaignsCount > 0 || item.managerLeads > 0 || item.totalSent > 0 || item.totalReplies > 0);
     return rows.sort((a, b) => b.totalSent - a.totalSent || b.managerLeads - a.managerLeads);
-  }, [campaignFilterId, clientFilteredCampaigns, filteredDailyStats, filteredLeads, filteredStats, managerFilteredClients, managerUsers, showManagerScope]);
+  }, [campaignFilterId, clientFilteredCampaigns, filteredDailyStats, filteredLeadGroups, filteredStats, managerFilteredClients, managerUsers, showManagerScope]);
 
   const qualificationSeries = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of filteredLeads) {
-      const key = item.qualification ?? "unqualified";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const g of filteredLeadGroups) {
+      const key = g.qualification ?? "unqualified";
+      counts.set(key, (counts.get(key) ?? 0) + g.count);
     }
     return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
-  }, [filteredLeads]);
+  }, [filteredLeadGroups]);
 
   const managerLeadBreakdown = useMemo(() => {
     if (!showManagerScope || managerUsers.length === 0) return [];
@@ -481,13 +490,20 @@ function InternalStatisticsPage() {
         const managerClientIds = new Set(
           managerFilteredClients.filter((client) => client.manager_id === manager.id).map((client) => client.id),
         );
-        const managerLeads = filteredLeads.filter((lead) => managerClientIds.has(lead.client_id));
-        const mql = managerLeads.filter((lead) => (lead.qualification ?? "").toLowerCase() === "mql").length;
-        const preMql = managerLeads.filter((lead) => (lead.qualification ?? "").toLowerCase() === "premql").length;
-        const unqualified = managerLeads.filter((lead) => !lead.qualification).length;
+        const managerGroups = filteredLeadGroups.filter((g) => managerClientIds.has(g.client_id));
+        const total = managerGroups.reduce((sum, g) => sum + g.count, 0);
+        const mql = managerGroups
+          .filter((g) => (g.qualification ?? "").toLowerCase() === "mql")
+          .reduce((sum, g) => sum + g.count, 0);
+        const preMql = managerGroups
+          .filter((g) => (g.qualification ?? "").toLowerCase() === "premql")
+          .reduce((sum, g) => sum + g.count, 0);
+        const unqualified = managerGroups
+          .filter((g) => !g.qualification)
+          .reduce((sum, g) => sum + g.count, 0);
         return {
           manager,
-          total: managerLeads.length,
+          total,
           mql,
           preMql,
           unqualified,
@@ -495,7 +511,7 @@ function InternalStatisticsPage() {
       })
       .filter((item) => item.total > 0)
       .sort((a, b) => b.total - a.total || b.mql - a.mql);
-  }, [filteredLeads, managerFilteredClients, managerUsers, showManagerScope]);
+  }, [filteredLeadGroups, managerFilteredClients, managerUsers, showManagerScope]);
 
   /*
    * Campaign-specific sections stay on campaign_daily_stats because daily_stats
@@ -791,7 +807,7 @@ function InternalStatisticsPage() {
         />
         <MetricCard
           label="Leads"
-          value={formatNumber(filteredLeads.length)}
+          value={formatNumber(filteredLeadGroups.reduce((sum, g) => sum + g.count, 0))}
           hint="In current scope"
         />
         <MetricCard

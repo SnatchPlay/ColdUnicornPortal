@@ -22,6 +22,7 @@ import type {
   AdminDashboardOverview,
   ClientDashboardPayload,
   ClientsOverviewPayload,
+  AdminSettingsPayload,
   AnalyticsOverviewPayload,
   CampaignStatsResponse,
   CampaignsListParams,
@@ -57,6 +58,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
   loadAnalyticsOverview: { table: "analytics", operation: "select" },
+  loadAdminSettings: { table: "settings", operation: "select" },
   loadCampaignsList: { table: "campaigns", operation: "select" },
   loadCampaignStats: { table: "campaign_daily_stats", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
@@ -353,6 +355,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadLeadDetail" ||
     action === "loadLeadsFilterOptions" ||
     action === "loadAnalyticsOverview" ||
+    action === "loadAdminSettings" ||
     action === "loadCampaignsList" ||
     action === "loadCampaignStats";
   const isPerfTracked = isLoadSnapshot || isGatewayTracked;
@@ -503,6 +506,7 @@ export interface Repository {
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
+  loadAdminSettings(): Promise<AdminSettingsPayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
@@ -637,8 +641,30 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadLeadsFilterOptions", {});
   },
 
+  async loadAdminSettings() {
+    return invokeOrmGatewaySelectWithRetry("loadAdminSettings", {});
+  },
+
   async loadAnalyticsOverview() {
-    return invokeOrmGatewaySelectWithRetry("loadAnalyticsOverview", {});
+    const result = await invokeOrmGatewaySelectWithRetry("loadAnalyticsOverview", {});
+    if (import.meta.env.DEV) {
+      const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
+      const sections: Record<string, { bytes: number; rows: number }> = {
+        users:      { bytes: sizeOf(result.users),      rows: result.users.length },
+        clients:    { bytes: sizeOf(result.clients),    rows: result.clients.length },
+        campaigns:  { bytes: sizeOf(result.campaigns),  rows: result.campaigns.length },
+        leadGroups: { bytes: sizeOf(result.leadGroups), rows: result.leadGroups.length },
+        dailyStats: { bytes: sizeOf(result.dailyStats), rows: result.dailyStats.length },
+      };
+      const total = Object.values(sections).reduce((s, v) => s + v.bytes, 0);
+      console.group("[PERF][gateway] loadAnalyticsOverview breakdown");
+      for (const [name, { bytes, rows }] of Object.entries(sections)) {
+        console.log(`  ${name.padEnd(20)} ${(bytes / 1024).toFixed(1).padStart(8)} KB  (${rows} rows, ${((bytes / total) * 100).toFixed(1)}%)`);
+      }
+      console.log(`  ${"TOTAL".padEnd(20)} ${(total / 1024).toFixed(1).padStart(8)} KB`);
+      console.groupEnd();
+    }
+    return result;
   },
 
   async loadCampaignsList(params) {

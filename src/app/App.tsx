@@ -213,10 +213,8 @@ function ProtectedApp() {
                 <Route path="campaigns" element={identity.clientId ? <CampaignsPage /> : <ClientAccessBlocker />} />
                 {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
                 <Route path="statistics" element={identity.clientId ? <StatisticsPage /> : <ClientAccessBlocker />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 */}
-                <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="settings" element={<SettingsPage />} />
-                </Route>
+                {/* Phase 7 (partial): settings — per-page loader, no CoreDataProvider */}
+                <Route path="settings" element={<SettingsPage />} />
               </Route>
 
               {/* ── manager role ─────────────────────────────────────────────────────────── */}
@@ -231,12 +229,13 @@ function ProtectedApp() {
                 <Route path="campaigns" element={<CampaignsPage />} />
                 {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
                 <Route path="statistics" element={<StatisticsPage />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 */}
+                {/* Phase 7 (partial): settings — per-page loader, no CoreDataProvider */}
+                <Route path="settings" element={<SettingsPage />} />
+                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 full */}
                 <Route element={<LegacySnapshotOutlet />}>
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="blacklist" element={<BlacklistPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
                 </Route>
               </Route>
 
@@ -252,13 +251,14 @@ function ProtectedApp() {
                 <Route path="campaigns" element={<CampaignsPage />} />
                 {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
                 <Route path="statistics" element={<StatisticsPage />} />
-                {/* Legacy snapshot routes */}
+                {/* Phase 7 (partial): settings — per-page loader, no CoreDataProvider */}
+                <Route path="settings" element={<SettingsPage />} />
+                {/* Legacy snapshot routes — Phase 7 remaining: domains, invoices, blacklist, users */}
                 <Route element={<LegacySnapshotOutlet />}>
                   <Route path="users" element={<AdminUserManagementPage />} />
                   <Route path="domains" element={<DomainsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="blacklist" element={<BlacklistPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
                 </Route>
               </Route>
 

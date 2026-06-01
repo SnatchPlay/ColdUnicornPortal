@@ -355,35 +355,100 @@ export interface LeadDetailResult {
 }
 
 // --- Analytics overview (Phase 6) ---------------------------------------------------------------
-// InternalStatisticsPage: server returns scoped daily_stats + lead projections + entity lists.
+// InternalStatisticsPage: server returns scoped daily_stats + lead groups + entity lists.
 // campaignDailyStats are NOT included — the page uses daily_stats for the default time series
 // (it already has a smart fallback: uses daily_stats when no campaign filter is active). When a
 // campaign filter IS applied, loadCampaignStats(campaignId) lazy-loads the campaign series.
 // ClientStatisticsPage reuses loadClientDashboard (same data, single-client scope).
 //
-// Payload estimate for admin (48 clients, 609 campaigns, 3972 leads):
-//   users(lite) ~1KB + clients(full) ~24KB + campaigns(full) ~183KB
-//   + dailyStats(180d) ~518KB + leadProjections ~238KB ≈ ~964KB < 1.5MB target.
+// Payload estimate for admin (48 clients, 609 campaigns, 3972 leads → ~300 groups):
+//   users(lite) ~1KB + clients(lite) ~7KB + campaigns(full) ~183KB
+//   + dailyStats(180d) ~413KB + leadGroups ~10-25KB ≈ ~640KB < 800KB target.
 
+/**
+ * Minimal daily-stat projection for the InternalStatisticsPage.
+ * Only the 3 value fields actually rendered + report_date for filtering + client_id for scope.
+ * Schedule/human-replies/ooo/negative fields are NOT rendered by the analytics page and are omitted.
+ * Reduces per-row JSON from ~200 bytes to ~130 bytes (8640 rows → ~1.1MB savings over full DailyStatInput).
+ */
+export interface AnalyticsDailyStatInput {
+  client_id: string;
+  report_date: string | null;
+  emails_sent: number | null;
+  response_count: number | null;
+  bounce_count: number | null;
+}
+
+/**
+ * Lite client shape for the Analytics overview — only what InternalStatisticsPage reads.
+ * Drops: external_workspace_id, external_api_key, min_daily_sent, inboxes_count, crm_config,
+ * sms_phone_numbers, notification_emails, auto_ooo_enabled, linkedin_api_key, prospects_signed,
+ * prospects_added, setup_info, bi_setup_done, lost_reason, notes, and audit timestamps.
+ */
+export interface AnalyticsClientLite {
+  id: string;
+  name: string;
+  manager_id: string | null;
+  status: string | null;
+  kpi_leads: number | null;
+  kpi_meetings: number | null;
+  contracted_amount: number | null;
+}
+
+// --- Admin settings (Phase 7 partial) ---------------------------------------------------------------
+// loadAdminSettings returns the three settings-specific tables plus full client rows for the
+// ConditionRuleBuilder client-selector. users come from useShellData().usersLite (already loaded).
+// All mutations go through repository.X() directly.
+
+export interface AdminSettingsPayload {
+  clients: ClientRecord[];
+  conditionRules: ConditionRuleRecord[];
+  columnOverrides: ColumnOverrideRecord[];
+  clientCustomFields: ClientCustomFieldRecord[];
+}
+
+/**
+ * Server-side lead aggregate for the analytics overview. Replaces the row-level
+ * LeadMetricProjection (9 fields × 3973 rows = 1108KB) with pre-grouped counts
+ * (5 fields × ~200–400 groups = ~15–25KB).
+ *
+ * The page only needs qualification breakdown and per-client/manager counts;
+ * individual lead ids, pipeline booleans (meeting_booked / held / offer_sent / won)
+ * are never read by InternalStatisticsPage. Timeframe filtering is preserved via
+ * the `date` (YYYY-MM-DD) bucket — filterByTimeframe handles this format.
+ */
+export interface AnalyticsLeadGroup {
+  client_id: string;
+  campaign_id: string | null;
+  qualification: string | null; // null = "unqualified"
+  date: string;                 // YYYY-MM-DD (created_at date, UTC-bucketed)
+  count: number;
+}
+
+// --- Analytics overview (Phase 6) ---------------------------------------------------------------
 /** Complete data contract for the Internal Statistics page. */
 export interface AnalyticsOverviewPayload {
   /** All accessible users (lite) — for the manager filter dropdown. */
   users: UserLite[];
-  /** All accessible clients (full) — for filter dropdown + per-client breakdown. */
-  clients: ClientRecord[];
+  /**
+   * All accessible clients — lite projection (7 fields only).
+   * Full ClientRecord is NOT needed; the statistics page reads name/manager_id/status/kpis only.
+   */
+  clients: AnalyticsClientLite[];
   /** All accessible campaigns (full) — for campaign filter dropdown + per-campaign breakdown. */
   campaigns: CampaignRecord[];
   /**
-   * 180-day daily stats per-client. Used for the default time series charts.
-   * Only the 10 fields consumed by aggregateDailyStats are included (DailyStatInput shape).
+   * 180-day daily stats per-client — minimal 5-field projection.
+   * Schedule/human-replies/ooo/negative fields are not rendered by the page and are omitted.
    * When a campaign filter is applied, loadCampaignStats(campaignId) provides the campaign series.
    */
-  dailyStats: Array<DailyStatInput & { client_id: string }>;
+  dailyStats: AnalyticsDailyStatInput[];
   /**
-   * Minimal lead projections for qualification mix and pipeline breakdown charts.
-   * Same shape as LeadMetricProjection (9 fields). Do NOT cast to LeadRecord.
+   * Lead counts pre-aggregated by (client_id, campaign_id, qualification, date).
+   * Replaces row-level leadProjections — ~200–400 groups instead of 3973 rows.
+   * Window: same 180 days as dailyStats. Do NOT cast to LeadMetricProjection.
    */
-  leadProjections: LeadMetricProjection[];
+  leadGroups: AnalyticsLeadGroup[];
 }
 
 // --- Campaigns list + stats (Phase 5) -----------------------------------------------------------

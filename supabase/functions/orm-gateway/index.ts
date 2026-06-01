@@ -1742,7 +1742,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const t0 = performance.now();
     const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS); // 180d
 
-    const [usersRows, clientRows, campaignRows, leadRows, dailyStatRows] = await Promise.all([
+    const leadsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS); // 180d — same window as dailyStats
+
+    const [usersRows, clientRows, campaignRows, leadGroupRows, dailyStatRows] = await Promise.all([
       // User lites — same projection as shell.
       tx.select({
         id: schema.users.id,
@@ -1752,39 +1754,50 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         role: schema.users.role,
       }).from(schema.users).orderBy(desc(schema.users.createdAt)),
 
-      // Full client rows (needed for per-client breakdown + filter dropdown).
-      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+      // Client lite — only the 7 fields read by InternalStatisticsPage.
+      // Full ClientRecord (25+ fields including crm_config, notes, etc.) is not needed.
+      tx.select({
+        id: schema.clients.id,
+        name: schema.clients.name,
+        manager_id: schema.clients.managerId,
+        status: schema.clients.status,
+        kpi_leads: schema.clients.kpiLeads,
+        kpi_meetings: schema.clients.kpiMeetings,
+        contracted_amount: schema.clients.contractedAmount,
+      }).from(schema.clients).orderBy(asc(schema.clients.name)),
 
-      // Full campaign rows (needed for per-campaign breakdown + filter dropdown).
+      // Full campaign rows (all 12 campaign fields are used in the portfolio + filter dropdown).
       tx.select().from(schema.campaigns).orderBy(asc(schema.campaigns.name)),
 
-      // Lead projections — only the 9 fields consumed by qualification/pipeline charts.
-      // Same as LeadMetricProjection, no full rows. RLS set-based predicate (20260601b) → fast.
-      tx.select({
-        id: schema.leads.id,
-        client_id: schema.leads.clientId,
-        campaign_id: schema.leads.campaignId,
-        created_at: schema.leads.createdAt,
-        qualification: schema.leads.qualification,
-        meeting_booked: schema.leads.meetingBooked,
-        meeting_held: schema.leads.meetingHeld,
-        offer_sent: schema.leads.offerSent,
-        won: schema.leads.won,
-      }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
+      // Lead GROUPS — server-side aggregate instead of row-level projections.
+      // Replaces 3973 × 9-field rows (~1108KB) with ~200–400 × 5-field groups (~15–25KB).
+      // InternalStatisticsPage only needs qualification breakdowns + per-client/manager counts;
+      // pipeline booleans (meeting_booked/held/offer_sent/won) and lead ids are never read.
+      // RLS still applies (authenticated role sees only scoped clients' leads).
+      safeRawSelect(tx, sql`
+        SELECT
+          l.client_id::text        AS client_id,
+          l.campaign_id::text      AS campaign_id,
+          l.qualification::text    AS qualification,
+          (l.created_at AT TIME ZONE 'UTC')::date::text AS date,
+          COUNT(*)::int            AS count
+        FROM leads l
+        WHERE l.created_at >= ${leadsSince}::timestamptz
+        GROUP BY l.client_id, l.campaign_id, l.qualification,
+                 (l.created_at AT TIME ZONE 'UTC')::date
+        ORDER BY date DESC
+      `),
 
-      // 180-day daily stats — DailyStatInput fields only (10 fields, no mql_count/prospects_count).
+      // 180-day daily stats — MINIMAL 5-field projection (AnalyticsDailyStatInput).
+      // Drops: human_replies_count, ooo_count, negative_count, schedule_today/tomorrow/day_after
+      // — these are NOT rendered anywhere in InternalStatisticsPage.
+      // Saves ~54% per row vs DailyStatInput (5 vs 11 fields).
       tx.select({
         client_id: schema.dailyStats.clientId,
         report_date: schema.dailyStats.reportDate,
         emails_sent: schema.dailyStats.emailsSent,
         response_count: schema.dailyStats.responseCount,
         bounce_count: schema.dailyStats.bounceCount,
-        negative_count: schema.dailyStats.negativeCount,
-        ooo_count: schema.dailyStats.oooCount,
-        human_replies_count: schema.dailyStats.humanRepliesCount,
-        schedule_today: schema.dailyStats.scheduleToday,
-        schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
-        schedule_day_after: schema.dailyStats.scheduleDayAfter,
       }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
     ]);
 
@@ -1793,25 +1806,75 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     console.log(
       `[PERF][orm-gateway] loadAnalyticsOverview: ${totalMs.toFixed(1)}ms ` +
         `(users=${usersRows.length} clients=${clientRows.length} campaigns=${campaignRows.length} ` +
-        `leads=${leadRows.length} dailyStats=${dailyStatRows.length})`,
+        `leadGroups=${leadGroupRows.length} dailyStats=${dailyStatRows.length})`,
     );
 
     return {
       users: usersRows,
-      clients: clientRows.map(toClientRecord),
-      campaigns: campaignRows.map(toCampaignRecord),
-      leadProjections: leadRows.map((l) => ({
-        id: l.id,
-        client_id: l.client_id,
-        campaign_id: l.campaign_id ?? null,
-        created_at: l.created_at ? toIsoString(l.created_at) : null,
-        qualification: l.qualification ?? null,
-        meeting_booked: l.meeting_booked ?? null,
-        meeting_held: l.meeting_held ?? null,
-        offer_sent: l.offer_sent ?? null,
-        won: l.won ?? null,
+      clients: clientRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        manager_id: c.manager_id ?? null,
+        status: c.status ?? null,
+        kpi_leads: c.kpi_leads != null ? Number(c.kpi_leads) : null,
+        kpi_meetings: c.kpi_meetings != null ? Number(c.kpi_meetings) : null,
+        contracted_amount: normalizeNumeric(c.contracted_amount),
       })),
-      dailyStats: dailyStatRows,
+      campaigns: campaignRows.map(toCampaignRecord),
+      leadGroups: leadGroupRows.map((r) => ({
+        client_id: String(r.client_id ?? ""),
+        campaign_id: r.campaign_id != null ? String(r.campaign_id) : null,
+        qualification: r.qualification != null ? String(r.qualification) : null,
+        date: String(r.date ?? ""),
+        count: Number(r.count ?? 0),
+      })),
+      dailyStats: dailyStatRows.map((r) => ({
+        client_id: String(r.client_id),
+        report_date: String(r.report_date ?? ""),
+        emails_sent: r.emails_sent != null ? Number(r.emails_sent) : null,
+        response_count: r.response_count != null ? Number(r.response_count) : null,
+        bounce_count: r.bounce_count != null ? Number(r.bounce_count) : null,
+      })),
+    };
+  }
+
+  // ── Phase 7 (partial): admin settings ───────────────────────────────────────────────────────
+
+  if (payload.action === "loadAdminSettings") {
+    const t0 = performance.now();
+
+    const [clientRows, conditionRuleRows, columnOverrideRows, customFieldRows] = await Promise.all([
+      // Full client rows — needed by ConditionRuleBuilder client-selector.
+      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+
+      // Condition rules — full records for the rule editor.
+      tx.select().from(schema.conditionRules).orderBy(asc(schema.conditionRules.priority), asc(schema.conditionRules.createdAt)),
+
+      // Column overrides (raw SQL — table not in drizzle schema yet).
+      safeRawSelect(tx, sql`
+        SELECT column_key, label_override, hidden, position, updated_at, updated_by
+        FROM public.client_table_column_overrides
+      `),
+
+      // Custom field definitions.
+      safeRawSelect(tx, sql`
+        SELECT id, name, field_type, options, position, editable_by, created_by, created_at
+        FROM public.client_custom_fields
+        ORDER BY position ASC, created_at ASC
+      `),
+    ]);
+
+    console.log(
+      `[PERF][orm-gateway] loadAdminSettings: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length} conditionRules=${conditionRuleRows.length} ` +
+        `columnOverrides=${columnOverrideRows.length} customFields=${customFieldRows.length})`,
+    );
+
+    return {
+      clients: clientRows.map(toClientRecord),
+      conditionRules: conditionRuleRows.map(toConditionRuleRecord),
+      columnOverrides: (columnOverrideRows as Record<string, unknown>[]).map(toColumnOverrideRecord),
+      clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
     };
   }
 

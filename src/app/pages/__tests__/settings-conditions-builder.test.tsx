@@ -1,19 +1,57 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "../settings-page";
 import { useAuth } from "../../providers/auth";
-import { useCoreData } from "../../providers/core-data";
+import { repository } from "../../data/repository";
+
+// These tests exercise the real condition-rule builder, so it stays unmocked.
+// But the master-admin clients table-customization (mega-table) and the client
+// CRM card never render for super_admin/manager — stub them so this file does
+// not pull those heavy module graphs and tip the full suite over the heap limit.
+vi.mock("../clients-page/mega-table", () => ({
+  MEGA_COLUMNS: [],
+}));
+vi.mock("../../components/crm-integration-card", () => ({
+  CrmIntegrationCard: () => null,
+}));
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
 vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(),
+  useCoreData: vi.fn(() => ({
+    clients: [], conditionRules: [], columnOverrides: [], clientCustomFields: [],
+    createConditionRule: vi.fn(), updateConditionRule: vi.fn(), deleteConditionRule: vi.fn(),
+  })),
+}));
+
+vi.mock("../../providers/shell-data", () => ({
+  useShellData: vi.fn(() => ({
+    clientsLite: [], usersLite: [], clientUsers: [], loading: false, error: null, refresh: vi.fn(),
+  })),
+}));
+
+vi.mock("../../data/repository", () => ({
+  RepositoryError: class RepositoryError extends Error {
+    table = "settings"; operation = "select"; kind = "unknown";
+    constructor(args: { message: string }) { super(args.message); }
+  },
+  repository: {
+    loadAdminSettings: vi.fn(),
+    createConditionRule: vi.fn(),
+    updateConditionRule: vi.fn(),
+    deleteConditionRule: vi.fn(),
+    upsertColumnOverride: vi.fn(),
+    setColumnOrder: vi.fn(),
+    createClientCustomField: vi.fn(),
+    updateClientCustomField: vi.fn(),
+    deleteClientCustomField: vi.fn(),
+  },
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
-const mockedUseCoreData = vi.mocked(useCoreData);
+const mockedRepo = vi.mocked(repository);
 
 function makeRule() {
   return {
@@ -49,98 +87,76 @@ function makeRule() {
   };
 }
 
+function makeSettings(overrides: { conditionRules?: ReturnType<typeof makeRule>[] } = {}) {
+  return {
+    clients: [],
+    conditionRules: overrides.conditionRules ?? [],
+    columnOverrides: [],
+    clientCustomFields: [],
+  };
+}
+
+function makeAuth(role: "super_admin" | "manager" = "super_admin") {
+  return {
+    actorIdentity: null,
+    identity: {
+      id: role === "super_admin" ? "super-admin-1" : "manager-1",
+      fullName: role === "super_admin" ? "Admin" : "Manager",
+      email: `${role}@test.local`,
+      role,
+    },
+    session: { user: { email: `${role}@test.local` } },
+    error: null,
+    isImpersonating: false,
+    updateProfileName: vi.fn(async () => ({ ok: true, message: "ok" })),
+    updatePassword: vi.fn(async () => ({ ok: true, message: "ok" })),
+    requestPasswordReset: vi.fn(async () => ({ ok: true, message: "ok" })),
+    signOut: vi.fn(async () => {}),
+  };
+}
+
 describe("settings condition rules builder", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedRepo.updateConditionRule.mockResolvedValue(makeRule() as never);
+    mockedRepo.createConditionRule.mockResolvedValue(makeRule() as never);
   });
 
   it("shows admin-only rule builder and supports quick updates", async () => {
-    const updateConditionRule = vi.fn(async () => {});
-    mockedUseAuth.mockReturnValue({
-      actorIdentity: null,
-      identity: { id: "super-admin-1", fullName: "Admin", email: "admin@test.local", role: "super_admin" },
-      session: { user: { email: "admin@test.local" } },
-      error: null,
-      isImpersonating: false,
-      updateProfileName: vi.fn(async () => ({ ok: true, message: "ok" })),
-      updatePassword: vi.fn(async () => ({ ok: true, message: "ok" })),
-      requestPasswordReset: vi.fn(async () => ({ ok: true, message: "ok" })),
-      signOut: vi.fn(async () => {}),
-    } as never);
-    mockedUseCoreData.mockReturnValue({
-      clients: [],
-      conditionRules: [makeRule()],
-      createConditionRule: vi.fn(async () => {}),
-      updateConditionRule,
-      deleteConditionRule: vi.fn(async () => {}),
-      updateClient: vi.fn(async () => {}),
-    } as never);
+    mockedUseAuth.mockReturnValue(makeAuth("super_admin") as never);
+    mockedRepo.loadAdminSettings.mockResolvedValue(makeSettings({ conditionRules: [makeRule()] }) as never);
 
     render(<SettingsPage />);
+    await act(async () => {});
+
     expect(screen.getByText("Condition rules")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
     await waitFor(() => {
-      expect(updateConditionRule).toHaveBeenCalledWith("rule-1", { enabled: false });
+      expect(mockedRepo.updateConditionRule).toHaveBeenCalledWith("rule-1", { enabled: false });
     });
   });
 
-  it("hides rule builder for manager and runs validation in create flow", async () => {
-    const createConditionRule = vi.fn(async () => {});
-    mockedUseAuth.mockReturnValue({
-      actorIdentity: null,
-      identity: { id: "manager-1", fullName: "Manager", email: "manager@test.local", role: "manager" },
-      session: { user: { email: "manager@test.local" } },
-      error: null,
-      isImpersonating: false,
-      updateProfileName: vi.fn(async () => ({ ok: true, message: "ok" })),
-      updatePassword: vi.fn(async () => ({ ok: true, message: "ok" })),
-      requestPasswordReset: vi.fn(async () => ({ ok: true, message: "ok" })),
-      signOut: vi.fn(async () => {}),
-    } as never);
-    mockedUseCoreData.mockReturnValue({
-      clients: [],
-      conditionRules: [makeRule()],
-      createConditionRule,
-      updateConditionRule: vi.fn(async () => {}),
-      deleteConditionRule: vi.fn(async () => {}),
-      updateClient: vi.fn(async () => {}),
-    } as never);
+  it("hides rule builder for manager", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+    mockedRepo.loadAdminSettings.mockResolvedValue(makeSettings({ conditionRules: [makeRule()] }) as never);
 
     render(<SettingsPage />);
+    await act(async () => {});
+
     expect(screen.queryByText("Condition rules")).not.toBeInTheDocument();
-    expect(createConditionRule).not.toHaveBeenCalled();
+    expect(mockedRepo.createConditionRule).not.toHaveBeenCalled();
   });
 
   it("creates new rule from visual builder", async () => {
-    const createConditionRule = vi.fn(async () => {});
-    mockedUseAuth.mockReturnValue({
-      actorIdentity: null,
-      identity: { id: "super-admin-1", fullName: "Admin", email: "admin@test.local", role: "super_admin" },
-      session: { user: { email: "admin@test.local" } },
-      error: null,
-      isImpersonating: false,
-      updateProfileName: vi.fn(async () => ({ ok: true, message: "ok" })),
-      updatePassword: vi.fn(async () => ({ ok: true, message: "ok" })),
-      requestPasswordReset: vi.fn(async () => ({ ok: true, message: "ok" })),
-      signOut: vi.fn(async () => {}),
-    } as never);
-    mockedUseCoreData.mockReturnValue({
-      clients: [],
-      conditionRules: [makeRule()],
-      createConditionRule,
-      updateConditionRule: vi.fn(async () => {}),
-      deleteConditionRule: vi.fn(async () => {}),
-      updateClient: vi.fn(async () => {}),
-    } as never);
+    mockedUseAuth.mockReturnValue(makeAuth("super_admin") as never);
+    mockedRepo.loadAdminSettings.mockResolvedValue(makeSettings({ conditionRules: [makeRule()] }) as never);
 
     render(<SettingsPage />);
+    await act(async () => {});
+
     fireEvent.click(screen.getByRole("button", { name: "New rule" }));
 
-    // The new guided builder pre-fills a valid metric (BUILTIN_METRICS[0])
-    // when "New rule" is clicked, so the draft is already savable. We just
-    // tweak the name and key text inputs (still rendered in the Rule details
-    // section) and submit.
     const keyInput = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
       (input) => input.value.startsWith("new-rule-"),
     );
@@ -150,7 +166,7 @@ describe("settings condition rules builder", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
     await waitFor(() => {
-      expect(createConditionRule).toHaveBeenCalledTimes(1);
+      expect(mockedRepo.createConditionRule).toHaveBeenCalledTimes(1);
     });
   });
 });
