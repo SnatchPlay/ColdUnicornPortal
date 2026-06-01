@@ -1241,13 +1241,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
   }
 
   if (payload.action === "loadClientsOverview") {
-    // Phase 3: full clients page data contract. Replaces the universal snapshot for /clients routes.
-    // Returns: full client rows + users/mappings/conditions/overrides/customFields + lead projections
-    // + 180-day daily stats. No campaignDailyStats (not needed by createClientMetrics).
+    // Phase 5B shell: lightweight clients page data — config only, no time-series stats.
+    // leadProjections + dailyStats are fetched separately by loadClientsStats after first paint.
+    // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
-    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, leadProjectionRows, dailyStatRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer.
         tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
@@ -1289,42 +1288,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           SELECT client_id, field_id, value, updated_at, updated_by
           FROM public.client_custom_field_values
         `),
-
-        // ClientsLeadInput — only the 5 fields createClientMetrics reads (client_id for grouping +
-        // created_at/qualification/meeting_booked/won for aggregateLeads). No id, campaign_id,
-        // meeting_held, or offer_sent — saves ~44% vs the full LeadMetricProjection shape.
-        tx.select({
-          client_id: schema.leads.clientId,
-          created_at: schema.leads.createdAt,
-          qualification: schema.leads.qualification,
-          meeting_booked: schema.leads.meetingBooked,
-          won: schema.leads.won,
-        }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
-
-        // 180-day daily stats — only the 10 fields consumed by createClientMetrics (DailyStatInput).
-        // mql_count and prospects_count are omitted — they are not read by aggregateDailyStats.
-        tx.select({
-          client_id: schema.dailyStats.clientId,
-          report_date: schema.dailyStats.reportDate,
-          emails_sent: schema.dailyStats.emailsSent,
-          response_count: schema.dailyStats.responseCount,
-          bounce_count: schema.dailyStats.bounceCount,
-          negative_count: schema.dailyStats.negativeCount,
-          ooo_count: schema.dailyStats.oooCount,
-          human_replies_count: schema.dailyStats.humanRepliesCount,
-          schedule_today: schema.dailyStats.scheduleToday,
-          schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
-          schedule_day_after: schema.dailyStats.scheduleDayAfter,
-        }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
       ]);
 
     const durationMs = performance.now() - t0;
     console.log(
-      `[PERF][orm-gateway] loadClientsOverview: ${durationMs.toFixed(1)}ms ` +
+      `[PERF][orm-gateway] loadClientsOverview (shell): ${durationMs.toFixed(1)}ms ` +
         `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
-        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
-        `leadProjections=${leadProjectionRows.length}, dailyStats=${dailyStatRows.length})`,
+        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length})`,
     );
 
     return {
@@ -1335,6 +1306,48 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       columnOverrides: (columnOverrideRows as Record<string, unknown>[]).map(toColumnOverrideRecord),
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
+    };
+  }
+
+  if (payload.action === "loadClientsStats") {
+    // Phase 5B stats: heavy time-series data deferred until after shell paints.
+    // leadProjections ~583 KB + dailyStats ~799 KB = ~1.4 MB total.
+    const t0 = performance.now();
+    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
+
+    const [leadProjectionRows, dailyStatRows] = await Promise.all([
+      // ClientsLeadInput — only the 5 fields createClientMetrics reads.
+      tx.select({
+        client_id: schema.leads.clientId,
+        created_at: schema.leads.createdAt,
+        qualification: schema.leads.qualification,
+        meeting_booked: schema.leads.meetingBooked,
+        won: schema.leads.won,
+      }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
+
+      // 180-day daily stats — only the 10 DailyStatInput fields.
+      tx.select({
+        client_id: schema.dailyStats.clientId,
+        report_date: schema.dailyStats.reportDate,
+        emails_sent: schema.dailyStats.emailsSent,
+        response_count: schema.dailyStats.responseCount,
+        bounce_count: schema.dailyStats.bounceCount,
+        negative_count: schema.dailyStats.negativeCount,
+        ooo_count: schema.dailyStats.oooCount,
+        human_replies_count: schema.dailyStats.humanRepliesCount,
+        schedule_today: schema.dailyStats.scheduleToday,
+        schedule_tomorrow: schema.dailyStats.scheduleTomorrow,
+        schedule_day_after: schema.dailyStats.scheduleDayAfter,
+      }).from(schema.dailyStats).where(gte(schema.dailyStats.reportDate, dailyStatsSince)).orderBy(desc(schema.dailyStats.reportDate)),
+    ]);
+
+    const durationMs = performance.now() - t0;
+    console.log(
+      `[PERF][orm-gateway] loadClientsStats: ${durationMs.toFixed(1)}ms ` +
+        `(leadProjections=${leadProjectionRows.length}, dailyStats=${dailyStatRows.length})`,
+    );
+
+    return {
       leadProjections: leadProjectionRows.map((l) => ({
         client_id: l.client_id,
         created_at: l.created_at ? toIsoString(l.created_at) : null,
@@ -1343,6 +1356,188 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         won: l.won ?? null,
       })),
       dailyStats: dailyStatRows,
+    };
+  }
+
+  if (payload.action === "loadClientsMetricsSummary") {
+    // Phase 5C: compact per-client aggregate facts replacing raw ~1.4 MB stats transfer.
+    // Two GROUP BY queries (daily_stats + leads) return one row per client with pre-bucketed
+    // sums/counts for DoD/WoW/MoM windows. No raw rows are sent to the frontend.
+    const t0 = performance.now();
+
+    // Helper: parse a raw SQL result value into a safe integer (postgres.js may return
+    // bigint COUNT results as strings on some configurations).
+    function toInt(v: unknown): number {
+      if (typeof v === "number") return Math.round(v);
+      if (typeof v === "string") { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0; }
+      return 0;
+    }
+
+    // Daily-stats aggregation: one row per client_id.
+    // Week boundaries use date_trunc('week', CURRENT_DATE) which is Monday-based in PostgreSQL,
+    // matching the JS startOfWeek() function in client-metrics.ts.
+    // Month boundaries use date_trunc('month', ...) matching JS startOfMonth().
+    const dailySummaryRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        client_id,
+        -- DoD: individual day sums (d0=today .. d4=4 days ago)
+        COALESCE(SUM(emails_sent) FILTER (WHERE report_date = CURRENT_DATE), 0)::int                   AS sent_d0,
+        COALESCE(SUM(emails_sent) FILTER (WHERE report_date = CURRENT_DATE - 1), 0)::int               AS sent_d1,
+        COALESCE(SUM(emails_sent) FILTER (WHERE report_date = CURRENT_DATE - 2), 0)::int               AS sent_d2,
+        COALESCE(SUM(emails_sent) FILTER (WHERE report_date = CURRENT_DATE - 3), 0)::int               AS sent_d3,
+        COALESCE(SUM(emails_sent) FILTER (WHERE report_date = CURRENT_DATE - 4), 0)::int               AS sent_d4,
+        -- Schedule fields from today's rows only
+        COALESCE(SUM(schedule_today)     FILTER (WHERE report_date = CURRENT_DATE), 0)::int            AS sched_today,
+        COALESCE(SUM(schedule_tomorrow)  FILTER (WHERE report_date = CURRENT_DATE), 0)::int            AS sched_tomorrow,
+        COALESCE(SUM(schedule_day_after) FILTER (WHERE report_date = CURRENT_DATE), 0)::int            AS sched_day_after,
+        -- WoW week 0 (current ISO week Mon..Sun)
+        COALESCE(SUM(emails_sent)           FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date     AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS wow_sent_w0,
+        COALESCE(SUM(human_replies_count)   FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date     AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS wow_human_w0,
+        COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date     AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS wow_bounce_w0,
+        COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date     AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS wow_ooo_w0,
+        COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date     AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS wow_neg_w0,
+        -- WoW week 1
+        COALESCE(SUM(emails_sent)           FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS wow_sent_w1,
+        COALESCE(SUM(human_replies_count)   FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS wow_human_w1,
+        COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS wow_bounce_w1,
+        COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS wow_ooo_w1,
+        COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS wow_neg_w1,
+        -- WoW week 2
+        COALESCE(SUM(emails_sent)           FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS wow_sent_w2,
+        COALESCE(SUM(human_replies_count)   FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS wow_human_w2,
+        COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS wow_bounce_w2,
+        COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS wow_ooo_w2,
+        COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS wow_neg_w2,
+        -- WoW week 3
+        COALESCE(SUM(emails_sent)           FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS wow_sent_w3,
+        COALESCE(SUM(human_replies_count)   FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS wow_human_w3,
+        COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS wow_bounce_w3,
+        COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS wow_ooo_w3,
+        COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS wow_neg_w3,
+        -- WoW week 4
+        COALESCE(SUM(emails_sent)           FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_sent_w4,
+        COALESCE(SUM(human_replies_count)   FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_human_w4,
+        COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_bounce_w4,
+        COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_ooo_w4,
+        COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_neg_w4,
+        -- Latest non-zero prospects_count (approximation: MAX over 180-day window)
+        COALESCE(MAX(prospects_count) FILTER (WHERE prospects_count > 0), 0)::int                      AS latest_prospects
+      FROM daily_stats
+      WHERE report_date >= CURRENT_DATE - 180
+      GROUP BY client_id
+    `);
+
+    // Leads aggregation: one row per client_id. Uses created_at::date for temporal bucketing,
+    // consistent with JS aggregateLeads() which uses parseDate(lead.created_at).
+    // Qualification enum values: 'MQL', 'preMQL' (exact case from schema).
+    const leadSummaryRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        client_id,
+        -- 3-DoD: per-day counts of (MQL | preMQL) and MQL-only leads
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE))::int           AS td_total_d0,
+        (COUNT(*) FILTER (WHERE  qualification::text = 'MQL'                                    AND created_at::date = CURRENT_DATE))::int           AS td_sql_d0,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 1))::int        AS td_total_d1,
+        (COUNT(*) FILTER (WHERE  qualification::text = 'MQL'                                    AND created_at::date = CURRENT_DATE - 1))::int        AS td_sql_d1,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 2))::int        AS td_total_d2,
+        (COUNT(*) FILTER (WHERE  qualification::text = 'MQL'                                    AND created_at::date = CURRENT_DATE - 2))::int        AS td_sql_d2,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 3))::int        AS td_total_d3,
+        (COUNT(*) FILTER (WHERE  qualification::text = 'MQL'                                    AND created_at::date = CURRENT_DATE - 3))::int        AS td_sql_d3,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 4))::int        AS td_total_d4,
+        (COUNT(*) FILTER (WHERE  qualification::text = 'MQL'                                    AND created_at::date = CURRENT_DATE - 4))::int        AS td_sql_d4,
+        -- WoW: per-week total and MQL lead counts
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date      AND created_at::date <= date_trunc('week', CURRENT_DATE)::date + 6))::int AS wow_leads_w0,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date      AND created_at::date <= date_trunc('week', CURRENT_DATE)::date + 6))::int AS wow_sql_w0,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 7  AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 1))::int  AS wow_leads_w1,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 7  AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 1))::int  AS wow_sql_w1,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 14 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 8))::int   AS wow_leads_w2,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 14 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 8))::int   AS wow_sql_w2,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 21 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 15))::int  AS wow_leads_w3,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 21 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 15))::int  AS wow_sql_w3,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 28 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 22))::int  AS wow_leads_w4,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 28 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 22))::int  AS wow_sql_w4,
+        -- MoM: per-calendar-month counts (total / MQL / meeting_booked / won)
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE)::date                                AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_total_m0,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE)::date AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_sql_m0,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE)::date AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_mtg_m0,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE)::date AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_won_m0,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date            AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                                           AS mom_total_m1,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                      AS mom_sql_m1,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                      AS mom_mtg_m1,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                      AS mom_won_m1,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int                      AS mom_total_m2,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int AS mom_sql_m2,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int AS mom_mtg_m2,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int AS mom_won_m2,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int                     AS mom_total_m3,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int AS mom_sql_m3,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int AS mom_mtg_m3,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int AS mom_won_m3,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int                     AS mom_total_m4,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_sql_m4,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_mtg_m4,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_won_m4
+      FROM leads
+      GROUP BY client_id
+    `);
+
+    const durationMs = performance.now() - t0;
+    console.log(
+      `[PERF][orm-gateway] loadClientsMetricsSummary: ${durationMs.toFixed(1)}ms ` +
+        `(dailyStatClients=${dailySummaryRows.length}, leadClients=${leadSummaryRows.length})`,
+    );
+
+    // Merge daily-stats and leads summaries by client_id into compact per-client objects.
+    const dailyByClient = new Map<string, Record<string, unknown>>();
+    for (const row of dailySummaryRows) {
+      if (typeof row.client_id === "string") dailyByClient.set(row.client_id, row);
+    }
+    const leadByClient = new Map<string, Record<string, unknown>>();
+    for (const row of leadSummaryRows) {
+      if (typeof row.client_id === "string") leadByClient.set(row.client_id, row);
+    }
+
+    const allClientIds = new Set([...dailyByClient.keys(), ...leadByClient.keys()]);
+    const summaries = Array.from(allClientIds).map((clientId) => {
+      const d = dailyByClient.get(clientId) ?? {};
+      const l = leadByClient.get(clientId) ?? {};
+      return {
+        client_id: clientId,
+        daily_sent:         [toInt(d.sent_d0),    toInt(d.sent_d1),    toInt(d.sent_d2),    toInt(d.sent_d3),    toInt(d.sent_d4)],
+        schedule_today:      toInt(d.sched_today),
+        schedule_tomorrow:   toInt(d.sched_tomorrow),
+        schedule_day_after:  toInt(d.sched_day_after),
+        wow_sent:           [toInt(d.wow_sent_w0),   toInt(d.wow_sent_w1),   toInt(d.wow_sent_w2),   toInt(d.wow_sent_w3),   toInt(d.wow_sent_w4)],
+        wow_human:          [toInt(d.wow_human_w0),  toInt(d.wow_human_w1),  toInt(d.wow_human_w2),  toInt(d.wow_human_w3),  toInt(d.wow_human_w4)],
+        wow_bounce:         [toInt(d.wow_bounce_w0), toInt(d.wow_bounce_w1), toInt(d.wow_bounce_w2), toInt(d.wow_bounce_w3), toInt(d.wow_bounce_w4)],
+        wow_ooo:            [toInt(d.wow_ooo_w0),    toInt(d.wow_ooo_w1),    toInt(d.wow_ooo_w2),    toInt(d.wow_ooo_w3),    toInt(d.wow_ooo_w4)],
+        wow_negative:       [toInt(d.wow_neg_w0),    toInt(d.wow_neg_w1),    toInt(d.wow_neg_w2),    toInt(d.wow_neg_w3),    toInt(d.wow_neg_w4)],
+        wow_leads:          [toInt(l.wow_leads_w0),  toInt(l.wow_leads_w1),  toInt(l.wow_leads_w2),  toInt(l.wow_leads_w3),  toInt(l.wow_leads_w4)],
+        wow_sql:            [toInt(l.wow_sql_w0),    toInt(l.wow_sql_w1),    toInt(l.wow_sql_w2),    toInt(l.wow_sql_w3),    toInt(l.wow_sql_w4)],
+        mom_total:          [toInt(l.mom_total_m0),  toInt(l.mom_total_m1),  toInt(l.mom_total_m2),  toInt(l.mom_total_m3),  toInt(l.mom_total_m4)],
+        mom_sql:            [toInt(l.mom_sql_m0),    toInt(l.mom_sql_m1),    toInt(l.mom_sql_m2),    toInt(l.mom_sql_m3),    toInt(l.mom_sql_m4)],
+        mom_meetings:       [toInt(l.mom_mtg_m0),    toInt(l.mom_mtg_m1),    toInt(l.mom_mtg_m2),    toInt(l.mom_mtg_m3),    toInt(l.mom_mtg_m4)],
+        mom_won:            [toInt(l.mom_won_m0),    toInt(l.mom_won_m1),    toInt(l.mom_won_m2),    toInt(l.mom_won_m3),    toInt(l.mom_won_m4)],
+        threedod_total:     [toInt(l.td_total_d0),   toInt(l.td_total_d1),   toInt(l.td_total_d2),   toInt(l.td_total_d3),   toInt(l.td_total_d4)],
+        threedod_sql:       [toInt(l.td_sql_d0),     toInt(l.td_sql_d1),     toInt(l.td_sql_d2),     toInt(l.td_sql_d3),     toInt(l.td_sql_d4)],
+        latest_prospects_count: toInt(d.latest_prospects),
+      };
+    });
+
+    const estimatedBytes = JSON.stringify(summaries).length;
+    console.log(
+      `[PERF][orm-gateway] loadClientsMetricsSummary payload: clients=${summaries.length} ` +
+        `estimatedBytes=${estimatedBytes} (${(estimatedBytes / 1024).toFixed(1)} KB) ` +
+        `durationMs=${durationMs.toFixed(1)}`,
+    );
+
+    return {
+      summaries,
+      _meta: {
+        clientsCount: summaries.length,
+        dailyStatsRowsRead: dailySummaryRows.length,
+        leadRowsRead: leadSummaryRows.length,
+        computedAt: new Date().toISOString(),
+      },
     };
   }
 

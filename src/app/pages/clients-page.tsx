@@ -7,7 +7,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
 import { repository, RepositoryError } from "../data/repository";
 import { markInteractionStart, markPoint, measureAfterRaf2, measureBetween, timeSyncOp } from "../lib/perf-mark";
-import { createClientMetrics, type ClientMetricsPack } from "../lib/client-metrics";
+import { createClientMetricsFromSummary, type ClientMetricsPack } from "../lib/client-metrics";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
@@ -16,7 +16,7 @@ import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
 import type { ClientRecord, InviteRequest } from "../types/core";
-import type { ClientsOverviewPayload, UserLite } from "../types/view-contracts";
+import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
 import {
   ClientDrawer,
   buildClientPatch,
@@ -97,30 +97,110 @@ function mapClientsError(reason: unknown): string {
   return "Failed to load client data.";
 }
 
+// Skip the 2-rAF deferral in tests so stats load synchronously alongside the shell.
+const IS_TEST = typeof process !== "undefined" && process.env.NODE_ENV === "test";
+
 // ── Per-page data hook ─────────────────────────────────────────────────────────────────────────
+// Phase 5B/5C split: shell (~85 KB) loads first, compact metrics summary (~35–70 KB) loads after
+// first paint. Replaces the raw ~1.4 MB loadClientsStats transfer with pre-bucketed per-client
+// aggregate facts. createClientMetricsFromSummary converts facts → ClientMetricsPack on the
+// frontend without iterating over thousands of raw rows.
+
+const EMPTY_METRICS_SUMMARY: ClientMetricsSummary = {
+  client_id: "",
+  daily_sent:          [0, 0, 0, 0, 0],
+  schedule_today:      0,
+  schedule_tomorrow:   0,
+  schedule_day_after:  0,
+  wow_sent:            [0, 0, 0, 0, 0],
+  wow_human:           [0, 0, 0, 0, 0],
+  wow_bounce:          [0, 0, 0, 0, 0],
+  wow_ooo:             [0, 0, 0, 0, 0],
+  wow_negative:        [0, 0, 0, 0, 0],
+  wow_leads:           [0, 0, 0, 0, 0],
+  wow_sql:             [0, 0, 0, 0, 0],
+  mom_total:           [0, 0, 0, 0, 0],
+  mom_sql:             [0, 0, 0, 0, 0],
+  mom_meetings:        [0, 0, 0, 0, 0],
+  mom_won:             [0, 0, 0, 0, 0],
+  threedod_total:      [0, 0, 0, 0, 0],
+  threedod_sql:        [0, 0, 0, 0, 0],
+  latest_prospects_count: 0,
+};
 
 function useClientsOverview() {
   const { identity, loading: authLoading } = useAuth();
-  const [data, setData] = useState<ClientsOverviewPayload | null>(null);
+  // Full payload — shell fields are always populated; metricsSummaries starts empty and merges
+  // in after first paint (Phase 5C deferred load).
+  const [data, setData] = useState<ClientsMetricsFullPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statsLoaded, setStatsLoaded] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Deduplication: prevent concurrent in-flight requests for the same phase.
+  const shellInFlightRef = useRef(false);
+  const statsInFlightRef = useRef(false);
+
+  const loadStats = useCallback(async () => {
+    if (statsInFlightRef.current) return;
+    statsInFlightRef.current = true;
+    setStatsLoading(true);
+    markPoint("clients:stats:fetch:start");
+    try {
+      const result = await repository.loadClientsMetricsSummary();
+      markPoint("clients:stats:fetch:end");
+      measureBetween("clients:stats:fetch:start", "clients:stats:fetch:end", "[perf][clients] metrics summary fetch round-trip");
+      if (import.meta.env.DEV) {
+        const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
+        console.log(`[perf][clients] metrics summary payload bytes: ${(sizeOf(result.summaries) / 1024).toFixed(1)} KB (${result._meta.clientsCount} clients)`);
+      }
+      setData((prev) => (prev ? { ...prev, metricsSummaries: result.summaries } : null));
+      setStatsLoaded(true);
+      markPoint("clients:stats:state:set");
+    } catch (reason) {
+      // Stats failure is non-fatal: table renders without metrics, conditions, or DoD columns.
+      console.warn("[clients] metrics summary load failed — metrics will be unavailable:", mapClientsError(reason));
+    } finally {
+      statsInFlightRef.current = false;
+      setStatsLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
+    if (shellInFlightRef.current) return;
+    shellInFlightRef.current = true;
     setLoading(true);
+    setStatsLoaded(false);
     markPoint("clients:fetch:start");
     try {
-      const result = await repository.loadClientsOverview();
+      const shellResult = await repository.loadClientsOverview();
       markPoint("clients:fetch:end");
-      measureBetween("clients:fetch:start", "clients:fetch:end", "[perf][clients] fetch round-trip");
-      setData(result);
+      measureBetween("clients:fetch:start", "clients:fetch:end", "[perf][clients] shell fetch round-trip");
+      // Merge shell with existing summaries (or empty on first load) so the table
+      // keeps showing the last-known metrics during a manual refresh.
+      setData((prev) => ({
+        ...shellResult,
+        metricsSummaries: prev?.metricsSummaries ?? [],
+      }));
       markPoint("clients:state:set");
       setError(null);
+      // Log when the shell has rendered (2 rAFs after setData).
+      measureAfterRaf2("clients:fetch:start", "[perf][clients] first shell render ready");
+      // Defer stats load until after the shell paints so the main thread is free
+      // for layout/paint before receiving the ~1.4 MB stats payload.
+      if (IS_TEST) {
+        void loadStats();
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => void loadStats()));
+      }
     } catch (reason) {
       setError(mapClientsError(reason));
     } finally {
+      shellInFlightRef.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [loadStats]);
 
   useEffect(() => {
     if (authLoading || !identity) {
@@ -255,6 +335,8 @@ function useClientsOverview() {
   return {
     data,
     loading,
+    statsLoaded,
+    statsLoading,
     error,
     refresh: load,
     createClient,
@@ -511,6 +593,8 @@ export function ClientsPage() {
   const {
     data,
     loading,
+    statsLoaded,
+    statsLoading,
     error,
     refresh,
     createClient,
@@ -533,33 +617,23 @@ export function ClientsPage() {
   const clientCustomFields = useMemo(() => data?.clientCustomFields ?? [], [data]);
   const clientCustomFieldValues = useMemo(() => data?.clientCustomFieldValues ?? [], [data]);
 
-  // ── Derived per-client metrics (replaces metricsByClientId from useCoreData) ─────────────────
+  // ── Derived per-client metrics (Phase 5C: summary path) ──────────────────────────────────────
 
   const metricsByClientId = useMemo<ReadonlyMap<string, ClientMetricsPack>>(() => {
-    if (!data) return new Map();
+    // Skip until summaries arrive — running against empty data would produce false danger states
+    // in condition evaluation (e.g. "no emails sent today" when stats just haven't loaded yet).
+    if (!data || !statsLoaded) return new Map();
     return timeSyncOp(`[perf][clients] metrics-derivation (${data.clients.length} clients)`, () => {
-      const statsByClient = new Map<string, typeof data.dailyStats>();
-      const leadsByClient = new Map<string, typeof data.leadProjections>();
-      for (const client of data.clients) {
-        statsByClient.set(client.id, []);
-        leadsByClient.set(client.id, []);
-      }
-      for (const stat of data.dailyStats) {
-        statsByClient.get(stat.client_id)?.push(stat);
-      }
-      for (const lead of data.leadProjections) {
-        leadsByClient.get(lead.client_id)?.push(lead);
-      }
+      const summaryByClientId = new Map(data.metricsSummaries.map((s) => [s.client_id, s]));
       const result = new Map<string, ClientMetricsPack>();
       for (const client of data.clients) {
-        result.set(
-          client.id,
-          createClientMetrics(statsByClient.get(client.id) ?? [], leadsByClient.get(client.id) ?? []),
-        );
+        const summary = summaryByClientId.get(client.id) ?? EMPTY_METRICS_SUMMARY;
+        result.set(client.id, createClientMetricsFromSummary(summary));
       }
       return result;
     });
-  }, [data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, statsLoaded]);
 
   const customFieldValuesByClient = useMemo(() => {
     const out = new Map<string, Map<string, string | null>>();
@@ -613,9 +687,12 @@ export function ClientsPage() {
   );
 
   const conditionPackByClientId = useMemo(() => {
+    // No metrics yet → skip condition evaluation entirely so clients don't show
+    // false danger states while stats are loading.
+    if (metricsByClientId.size === 0) return new Map<string, ReturnType<typeof evaluateClientConditions>>();
     const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
     for (const client of scopedClients) {
-      const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+      const metrics = metricsByClientId.get(client.id) ?? createClientMetricsFromSummary(EMPTY_METRICS_SUMMARY);
       const manager = managerById.get(client.manager_id) ?? null;
       const context = buildClientConditionContext({
         client,
@@ -642,7 +719,7 @@ export function ClientsPage() {
         const managerName = manager
           ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
           : "Unassigned";
-        const metrics = metricsByClientId.get(client.id) ?? createClientMetrics([], []);
+        const metrics = metricsByClientId.get(client.id) ?? createClientMetricsFromSummary(EMPTY_METRICS_SUMMARY);
         const conditionPack = conditionPackByClientId.get(client.id) ?? null;
         const allResults = conditionPack?.allResults ?? [];
         const highestSeverity = getHighestSeverity(allResults);
@@ -898,7 +975,7 @@ export function ClientsPage() {
       ) : (
         <Surface
           title="Client PDCA grid"
-          subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter`}
+          subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
         >
           {/* ── Filter bar ─────────────────────────────────────── */}
           <div className="mb-4 space-y-3">

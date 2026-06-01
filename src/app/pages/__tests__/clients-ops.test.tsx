@@ -9,7 +9,7 @@ vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-// ClientsPage (Phase 3) loads via repository.loadClientsOverview — mock the whole module.
+// ClientsPage loads shell via loadClientsOverview then compact metrics via loadClientsMetricsSummary.
 // Synchronous factory so RepositoryError is a stub class (instanceof works in page code).
 vi.mock("../../data/repository", () => ({
   RepositoryError: class RepositoryError extends Error {
@@ -18,6 +18,8 @@ vi.mock("../../data/repository", () => ({
   },
   repository: {
     loadClientsOverview: vi.fn(),
+    loadClientsStats: vi.fn(),
+    loadClientsMetricsSummary: vi.fn(),
     updateClient: vi.fn(),
     sendInvite: vi.fn(),
     upsertClientUserMapping: vi.fn(),
@@ -47,50 +49,44 @@ function getDateKey(daysOffset: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function makeDailyStat(
-  clientId: string,
-  date: string,
-  sent: number,
-  scheduleToday = 0,
-  scheduleTomorrow = 0,
-  scheduleDayAfter = 0,
-) {
+// Compact metrics summary helpers — Phase 5C replacement for raw stats transfer.
+
+function makeEmptySummary(clientId: string) {
   return {
     client_id: clientId,
-    report_date: date,
-    emails_sent: sent,
-    mql_count: 0,
-    response_count: Math.round(sent * 0.2),
-    bounce_count: Math.round(sent * 0.05),
-    negative_count: Math.round(sent * 0.01),
-    ooo_count: Math.round(sent * 0.03),
-    human_replies_count: Math.round(sent * 0.1),
-    prospects_count: 0,
-    schedule_today: scheduleToday,
-    schedule_tomorrow: scheduleTomorrow,
-    schedule_day_after: scheduleDayAfter,
+    daily_sent: [0, 0, 0, 0, 0],
+    schedule_today: 0, schedule_tomorrow: 0, schedule_day_after: 0,
+    wow_sent: [0, 0, 0, 0, 0], wow_human: [0, 0, 0, 0, 0], wow_bounce: [0, 0, 0, 0, 0],
+    wow_ooo: [0, 0, 0, 0, 0], wow_negative: [0, 0, 0, 0, 0],
+    wow_leads: [0, 0, 0, 0, 0], wow_sql: [0, 0, 0, 0, 0],
+    mom_total: [0, 0, 0, 0, 0], mom_sql: [0, 0, 0, 0, 0],
+    mom_meetings: [0, 0, 0, 0, 0], mom_won: [0, 0, 0, 0, 0],
+    threedod_total: [0, 0, 0, 0, 0], threedod_sql: [0, 0, 0, 0, 0],
+    latest_prospects_count: 0,
   };
 }
 
-// Minimal lead projection — only the fields createClientMetrics reads.
-function makeLeadProjection(
-  clientId: string,
-  date: string,
-  qualification: string | null,
-  meetingBooked = false,
-  won = false,
-) {
+function wrapSummaries(summaries: ReturnType<typeof makeEmptySummary>[]) {
   return {
-    id: `${clientId}-lead-${date}-${qualification ?? "none"}-${meetingBooked}-${won}`,
-    client_id: clientId,
-    campaign_id: null as string | null,
-    created_at: `${date}T10:00:00.000Z`,
-    qualification,
-    meeting_booked: meetingBooked,
-    meeting_held: false,
-    offer_sent: false,
-    won,
+    summaries,
+    _meta: { clientsCount: summaries.length, dailyStatsRowsRead: summaries.length, leadRowsRead: summaries.length, computedAt: "" },
   };
+}
+
+// Default summary used for tests that assert DoD schedule/sent values.
+// Mirrors the values that makeClientsStats() previously produced via raw daily_stats rows:
+//   today: sent=380, schedToday=380, schedTomorrow=395, schedDayAfter=410
+//   yesterday: sent=395; -2: 384; -3: 300; -4: 280
+// 3-DoD: today has MQL+preMQL=2 (total), MQL=1 (sql); yesterday: MQL=1; -2: preMQL=1
+function makeMetricsSummaryPayload() {
+  return wrapSummaries([{
+    ...makeEmptySummary("client-1"),
+    daily_sent: [380, 395, 384, 300, 280],
+    schedule_today: 380, schedule_tomorrow: 395, schedule_day_after: 410,
+    wow_sent: [380, 0, 0, 0, 0],
+    threedod_total: [2, 1, 1, 0, 0],
+    threedod_sql:   [1, 1, 0, 0, 0],
+  }]);
 }
 
 // Full client record shape needed by the mega-table and drawer.
@@ -126,16 +122,8 @@ function makeClient(overrides?: Record<string, unknown>) {
   };
 }
 
-// Build a ClientsOverviewPayload for the loadClientsOverview mock.
+// Shell payload — returned by loadClientsOverview (no stats).
 function makeClientsOverview(overrides?: Record<string, unknown>) {
-  const today = getDateKey(0);
-  const minus1 = getDateKey(-1);
-  const minus2 = getDateKey(-2);
-  const minus3 = getDateKey(-3);
-  const minus4 = getDateKey(-4);
-  const minus9 = getDateKey(-9);
-  const minus40 = getDateKey(-40);
-
   const base = {
     clients: [makeClient()],
     usersLite: [
@@ -147,24 +135,7 @@ function makeClientsOverview(overrides?: Record<string, unknown>) {
     columnOverrides: [],
     clientCustomFields: [],
     clientCustomFieldValues: [],
-    leadProjections: [
-      makeLeadProjection("client-1", today, "MQL"),
-      makeLeadProjection("client-1", today, "preMQL"),
-      makeLeadProjection("client-1", minus1, "MQL", true),
-      makeLeadProjection("client-1", minus2, "preMQL"),
-      makeLeadProjection("client-1", minus3, null),
-      makeLeadProjection("client-1", minus40, "MQL", false, true),
-    ],
-    dailyStats: [
-      makeDailyStat("client-1", today, 380, 380, 395, 410),
-      makeDailyStat("client-1", minus1, 395),
-      makeDailyStat("client-1", minus2, 384),
-      makeDailyStat("client-1", minus3, 300),
-      makeDailyStat("client-1", minus4, 280),
-      makeDailyStat("client-1", minus9, 250),
-    ],
   };
-
   return { ...base, ...overrides };
 }
 
@@ -192,6 +163,8 @@ describe("clients operational tooling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedUseAuth.mockReturnValue(makeAuth() as never);
+    // Default: compact metrics summary loads alongside shell (Phase 5C).
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(makeMetricsSummaryPayload() as never);
     // Default: all mutations succeed silently.
     mockedRepo.updateClient.mockResolvedValue(makeClient() as never);
     mockedRepo.sendInvite.mockResolvedValue({ inviteId: "invite-1" });
@@ -241,10 +214,14 @@ describe("clients operational tooling", () => {
     expect(mockedRepo.updateClient).toHaveBeenCalledWith("client-1", expect.objectContaining({ name: "Acme Final" }));
   });
 
-  it("renders DoD/3DoD/WoW/MoM metric groups in the mega-table", async () => {
+  it("renders DoD/3DoD/WoW/MoM metric groups in the mega-table via loadClientsMetricsSummary", async () => {
     mockedRepo.loadClientsOverview.mockResolvedValue(makeClientsOverview() as never);
 
     await renderPage();
+
+    // Phase 5C: ClientsPage must use the compact summary path, not raw stats.
+    expect(mockedRepo.loadClientsMetricsSummary).toHaveBeenCalledTimes(1);
+    expect(mockedRepo.loadClientsStats).not.toHaveBeenCalled();
 
     expect(screen.getByText("DoD Schedule")).toBeInTheDocument();
     expect(screen.getByText("DoD Daily sent")).toBeInTheDocument();
@@ -316,28 +293,18 @@ describe("clients operational tooling", () => {
   });
 
   it("sorts overview table by MoM SQL column", async () => {
-    const today = getDateKey(0);
     const minus5 = getDateKey(-5);
-    const minus8 = getDateKey(-8);
 
     const client2 = makeClient({ id: "client-2", name: "Bravo", manager_id: "manager-1", updated_at: minus5, notification_emails: ["ops@bravo.test"] });
 
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({
-        clients: [makeClient(), client2],
-        clientUsers: [],
-        dailyStats: [
-          makeDailyStat("client-1", today, 200, 100, 100, 100),
-          makeDailyStat("client-2", today, 200, 100, 100, 100),
-        ],
-        leadProjections: [
-          makeLeadProjection("client-1", minus5, "MQL"),
-          makeLeadProjection("client-2", minus5, "MQL"),
-          makeLeadProjection("client-2", minus8, "MQL"),
-          makeLeadProjection("client-2", today, "MQL"),
-        ],
-      }) as never,
+      makeClientsOverview({ clients: [makeClient(), client2], clientUsers: [] }) as never,
     );
+    // client-1: 1 MQL this month; client-2: 3 MQLs this month — Bravo ranks higher DESC.
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(wrapSummaries([
+      { ...makeEmptySummary("client-1"), daily_sent: [200, 0, 0, 0, 0], schedule_today: 100, schedule_tomorrow: 100, schedule_day_after: 100, mom_sql: [1, 0, 0, 0, 0] },
+      { ...makeEmptySummary("client-2"), daily_sent: [200, 0, 0, 0, 0], schedule_today: 100, schedule_tomorrow: 100, schedule_day_after: 100, mom_sql: [3, 0, 0, 0, 0] },
+    ]) as never);
 
     await renderPage();
 

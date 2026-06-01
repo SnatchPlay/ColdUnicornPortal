@@ -1,3 +1,5 @@
+import type { ClientMetricsSummary } from "../types/view-contracts";
+
 /**
  * Minimal lead field set read by createClientMetrics. Accepts full LeadRecord (backwards-compatible)
  * and any projection that carries these four fields. Do NOT cast projections to LeadRecord.
@@ -373,4 +375,78 @@ export function createClientMetrics(dailyStats: DailyStatInput[], leads: LeadMet
     wowRows,
     momRows,
   };
+}
+
+/**
+ * Produce a ClientMetricsPack from a compact pre-bucketed summary (returned by
+ * loadClientsMetricsSummary). No raw row iteration — all temporal aggregation was
+ * done server-side. Output shape is identical to createClientMetrics().
+ */
+export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientMetricsPack {
+  const g = (arr: number[], i: number) => arr[i] ?? 0;
+
+  const dodRows: DodRow[] = [
+    { bucket: "+2", schedule: s.schedule_day_after, sent: null },
+    { bucket: "+1", schedule: s.schedule_tomorrow,  sent: null },
+    { bucket:  "0", schedule: s.schedule_today,     sent: g(s.daily_sent, 0) },
+    { bucket: "-1", schedule: null,                 sent: g(s.daily_sent, 1) },
+    { bucket: "-2", schedule: null,                 sent: g(s.daily_sent, 2) },
+    { bucket: "-3", schedule: null,                 sent: g(s.daily_sent, 3) },
+    { bucket: "-4", schedule: null,                 sent: g(s.daily_sent, 4) },
+  ];
+
+  const threeDodRows: ThreeDodRow[] = [0, 1, 2, 3, 4].map((i) => ({
+    bucket: i === 0 ? "0" : `-${i}`,
+    totalLeads: g(s.threedod_total, i),
+    sqlLeads:   g(s.threedod_sql,   i),
+  }));
+
+  const wowRows: WowRow[] = [0, 1, 2, 3, 4].map((i) => {
+    const sent    = g(s.wow_sent,     i);
+    const human   = g(s.wow_human,    i);
+    const bounce  = g(s.wow_bounce,   i);
+    const ooo     = g(s.wow_ooo,      i);
+    const negative = g(s.wow_negative, i);
+    return {
+      bucket: i === 0 ? "0" : `-${i}`,
+      totalLeads:   g(s.wow_leads, i),
+      sqlLeads:     g(s.wow_sql,   i),
+      responseRate: toRate(human + ooo, sent),
+      humanRate:    toRate(human,       sent),
+      bounceRate:   toRate(bounce,      sent),
+      oooRate:      toRate(ooo,         sent),
+      negativeRate: toRate(negative,    sent),
+    };
+  });
+
+  const momRows: MomRow[] = [0, 1, 2, 3, 4].map((i) => ({
+    bucket: i === 0 ? "0" : `-${i}`,
+    totalLeads: g(s.mom_total,    i),
+    sqlLeads:   g(s.mom_sql,      i),
+    meetings:   g(s.mom_meetings, i),
+    won:        g(s.mom_won,      i),
+  }));
+
+  const threeDodTotal = [0, 1, 2].reduce((acc, i) => acc + g(s.threedod_total, i), 0);
+  const threeDodSql   = [0, 1, 2].reduce((acc, i) => acc + g(s.threedod_sql,   i), 0);
+
+  const overview: ClientMetricsOverview = {
+    scheduleToday:    s.schedule_today,
+    scheduleTomorrow: s.schedule_tomorrow,
+    scheduleDayAfter: s.schedule_day_after,
+    sentToday:        g(s.daily_sent, 0),
+    sentYesterday:    g(s.daily_sent, 1),
+    sentTwoDaysAgo:   g(s.daily_sent, 2),
+    threeDodTotal,
+    threeDodSql,
+    wowResponseRate:  wowRows[0]?.responseRate  ?? null,
+    wowHumanRate:     wowRows[0]?.humanRate     ?? null,
+    wowBounceRate:    wowRows[0]?.bounceRate     ?? null,
+    wowOooRate:       wowRows[0]?.oooRate        ?? null,
+    wowSql:           wowRows[0]?.sqlLeads       ?? 0,
+    momSql:           momRows[0]?.sqlLeads       ?? 0,
+    latestProspectsCount: s.latest_prospects_count,
+  };
+
+  return { overview, dodRows, threeDodRows, wowRows, momRows };
 }
