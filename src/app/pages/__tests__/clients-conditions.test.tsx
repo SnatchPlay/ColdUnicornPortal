@@ -9,7 +9,7 @@ vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-// ClientsPage (Phase 3) loads via repository.loadClientsOverview.
+// ClientsPage loads shell via loadClientsOverview then compact metrics via loadClientsMetricsSummary.
 vi.mock("../../data/repository", () => ({
   RepositoryError: class RepositoryError extends Error {
     table = "clients"; operation = "select"; kind = "unknown";
@@ -17,6 +17,8 @@ vi.mock("../../data/repository", () => ({
   },
   repository: {
     loadClientsOverview: vi.fn(),
+    loadClientsStats: vi.fn(),
+    loadClientsMetricsSummary: vi.fn(),
     updateClient: vi.fn(),
     sendInvite: vi.fn(),
     upsertClientUserMapping: vi.fn(),
@@ -63,24 +65,18 @@ function makeConditionRule(overrides: Record<string, unknown>) {
   };
 }
 
-// Build a ClientsOverviewPayload for the condition evaluation tests.
+// Shell payload — returned by loadClientsOverview. Contains clients + config but no stats.
 function makeClientsOverview({
-  sentToday,
-  scheduleToday,
-  bounceCount,
   conditionRules,
   minDailySent = 100,
 }: {
-  sentToday: number;
-  scheduleToday: number;
-  bounceCount: number;
+  sentToday?: number;
+  scheduleToday?: number;
+  bounceCount?: number;
   conditionRules: unknown[];
   minDailySent?: number;
 }) {
   const today = getDateKey(0);
-  const minus1 = getDateKey(-1);
-  const minus2 = getDateKey(-2);
-
   return {
     clients: [
       {
@@ -119,55 +115,52 @@ function makeClientsOverview({
     columnOverrides: [],
     clientCustomFields: [],
     clientCustomFieldValues: [],
-    leadProjections: [],
-    dailyStats: [
-      {
-        client_id: "client-1",
-        report_date: today,
-        emails_sent: sentToday,
-        mql_count: 0,
-        response_count: 2,
-        bounce_count: bounceCount,
-        negative_count: 0,
-        ooo_count: 0,
-        human_replies_count: 1,
-        prospects_count: 0,
-        schedule_today: scheduleToday,
-        schedule_tomorrow: 0,
-        schedule_day_after: 0,
-      },
-      {
-        client_id: "client-1",
-        report_date: minus1,
-        emails_sent: 0,
-        mql_count: 0,
-        response_count: 0,
-        bounce_count: 0,
-        negative_count: 0,
-        ooo_count: 0,
-        human_replies_count: 0,
-        prospects_count: 0,
-        schedule_today: 0,
-        schedule_tomorrow: 0,
-        schedule_day_after: 0,
-      },
-      {
-        client_id: "client-1",
-        report_date: minus2,
-        emails_sent: 0,
-        mql_count: 0,
-        response_count: 0,
-        bounce_count: 0,
-        negative_count: 0,
-        ooo_count: 0,
-        human_replies_count: 0,
-        prospects_count: 0,
-        schedule_today: 0,
-        schedule_tomorrow: 0,
-        schedule_day_after: 0,
-      },
-    ],
   };
+}
+
+// Compact metrics summary helpers — Phase 5C replacement for raw stats transfer.
+
+function makeEmptySummary(clientId: string) {
+  return {
+    client_id: clientId,
+    daily_sent: [0, 0, 0, 0, 0],
+    schedule_today: 0, schedule_tomorrow: 0, schedule_day_after: 0,
+    wow_sent: [0, 0, 0, 0, 0], wow_human: [0, 0, 0, 0, 0], wow_bounce: [0, 0, 0, 0, 0],
+    wow_ooo: [0, 0, 0, 0, 0], wow_negative: [0, 0, 0, 0, 0],
+    wow_leads: [0, 0, 0, 0, 0], wow_sql: [0, 0, 0, 0, 0],
+    mom_total: [0, 0, 0, 0, 0], mom_sql: [0, 0, 0, 0, 0],
+    mom_meetings: [0, 0, 0, 0, 0], mom_won: [0, 0, 0, 0, 0],
+    threedod_total: [0, 0, 0, 0, 0], threedod_sql: [0, 0, 0, 0, 0],
+    latest_prospects_count: 0,
+  };
+}
+
+function wrapSummaries(summaries: ReturnType<typeof makeEmptySummary>[]) {
+  return {
+    summaries,
+    _meta: { clientsCount: summaries.length, dailyStatsRowsRead: summaries.length, leadRowsRead: 0, computedAt: "" },
+  };
+}
+
+// Compact summary equivalent of the old makeClientsStats. Produces a single-client payload
+// with sentToday in daily_sent[0] and wow_sent[0], scheduleToday in schedule_today, and
+// bounceCount in wow_bounce[0] (current-week bucket) so condition rules on wow_bounce_rate work.
+function makeMetricsSummaryPayload({
+  sentToday,
+  scheduleToday,
+  bounceCount,
+}: {
+  sentToday: number;
+  scheduleToday: number;
+  bounceCount: number;
+}) {
+  return wrapSummaries([{
+    ...makeEmptySummary("client-1"),
+    daily_sent: [sentToday, 0, 0, 0, 0],
+    schedule_today: scheduleToday,
+    wow_sent: [sentToday, 0, 0, 0, 0],
+    wow_bounce: [bounceCount, 0, 0, 0, 0],
+  }]);
 }
 
 async function renderPage() {
@@ -195,6 +188,8 @@ describe("clients condition surfaces", () => {
     mockedRepo.sendInvite.mockResolvedValue({ inviteId: null });
     mockedRepo.upsertClientUserMapping.mockResolvedValue({} as never);
     mockedRepo.deleteClientUserMapping.mockResolvedValue(undefined as never);
+    // Compact metrics summary default — individual tests override this when they need specific values.
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never);
   });
 
   it("shows danger highlight and explanation for bounce >= 2%", async () => {
@@ -211,7 +206,10 @@ describe("clients condition surfaces", () => {
       ],
     });
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
+      makeClientsOverview({ conditionRules: [wowBounceRule] }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
+      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 3 }) as never,
     );
 
     await renderPage();
@@ -233,7 +231,10 @@ describe("clients condition surfaces", () => {
       ],
     });
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ sentToday: 70, scheduleToday: 70, bounceCount: 0, conditionRules: [dodRule], minDailySent: 100 }) as never,
+      makeClientsOverview({ conditionRules: [dodRule], minDailySent: 100 }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
+      makeMetricsSummaryPayload({ sentToday: 70, scheduleToday: 70, bounceCount: 0 }) as never,
     );
 
     await renderPage();
@@ -256,7 +257,10 @@ describe("clients condition surfaces", () => {
       ],
     });
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 0, conditionRules: [wowBounceRule] }) as never,
+      makeClientsOverview({ conditionRules: [wowBounceRule] }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
+      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
     );
 
     await renderPage();
@@ -278,7 +282,10 @@ describe("clients condition surfaces", () => {
       ],
     });
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ sentToday: 100, scheduleToday: 100, bounceCount: 3, conditionRules: [wowBounceRule] }) as never,
+      makeClientsOverview({ conditionRules: [wowBounceRule] }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
+      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 3 }) as never,
     );
 
     await renderPage();

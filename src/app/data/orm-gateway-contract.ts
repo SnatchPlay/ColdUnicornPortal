@@ -24,7 +24,9 @@ import type {
   CampaignsListParams,
   CampaignsListResponse,
   ClientDashboardPayload,
+  ClientsMetricsSummaryPayload,
   ClientsOverviewPayload,
+  ClientsStatsPayload,
   DomainsPagePayload,
   InvoicesPagePayload,
   LeadDetailResult,
@@ -95,6 +97,20 @@ export interface LoadClientDashboardPayload {
 
 export interface LoadClientsOverviewPayload {
   action: "loadClientsOverview";
+}
+
+/** Separate heavy-stats request — deferred until after shell renders. */
+export interface LoadClientsStatsPayload {
+  action: "loadClientsStats";
+}
+
+/**
+ * Compact metrics-summary request — deferred until after shell renders.
+ * Returns pre-bucketed aggregate facts per client; replaces raw loadClientsStats
+ * for table-metrics purposes. Payload target: ~30–70 KB vs ~1.4 MB for raw stats.
+ */
+export interface LoadClientsMetricsSummaryPayload {
+  action: "loadClientsMetricsSummary";
 }
 
 export interface LoadLeadsListPayload {
@@ -295,6 +311,8 @@ export type OrmGatewayRequest =
   | LoadManagerDashboardPayload
   | LoadClientDashboardPayload
   | LoadClientsOverviewPayload
+  | LoadClientsStatsPayload
+  | LoadClientsMetricsSummaryPayload
   | LoadLeadsListPayload
   | LoadLeadDetailPayload
   | LoadLeadsFilterOptionsPayload
@@ -349,6 +367,8 @@ export interface OrmGatewayResponseMap {
   loadManagerDashboardOverview: ManagerDashboardOverview;
   loadClientDashboard: ClientDashboardPayload;
   loadClientsOverview: ClientsOverviewPayload;
+  loadClientsStats: ClientsStatsPayload;
+  loadClientsMetricsSummary: ClientsMetricsSummaryPayload;
   loadLeadsList: LeadsListResponse;
   loadLeadDetail: LeadDetailResult;
   loadLeadsFilterOptions: LeadsFilterOptions;
@@ -476,6 +496,14 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadClientsOverview") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadClientsStats") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadClientsMetricsSummary") {
     return { ok: true, value: { action } };
   }
 

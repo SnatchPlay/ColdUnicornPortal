@@ -27,7 +27,9 @@ import type {
   CampaignsListParams,
   CampaignsListResponse,
   ClientDashboardPayload,
+  ClientsMetricsSummaryPayload,
   ClientsOverviewPayload,
+  ClientsStatsPayload,
   DomainsPagePayload,
   InvoicesPagePayload,
   LeadDetailResult,
@@ -57,6 +59,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadManagerDashboardOverview: { table: "dashboard", operation: "select" },
   loadClientDashboard: { table: "dashboard", operation: "select" },
   loadClientsOverview: { table: "clients", operation: "select" },
+  loadClientsStats: { table: "clients", operation: "select" },
+  loadClientsMetricsSummary: { table: "clients", operation: "select" },
   loadLeadsList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
@@ -357,6 +361,8 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadManagerDashboardOverview" ||
     action === "loadClientDashboard" ||
     action === "loadClientsOverview" ||
+    action === "loadClientsStats" ||
+    action === "loadClientsMetricsSummary" ||
     action === "loadLeadsList" ||
     action === "loadLeadDetail" ||
     action === "loadLeadsFilterOptions" ||
@@ -508,6 +514,8 @@ export interface Repository {
   loadManagerDashboardOverview(managerId: string): Promise<ManagerDashboardOverview>;
   loadClientDashboard(clientId: string): Promise<ClientDashboardPayload>;
   loadClientsOverview(): Promise<ClientsOverviewPayload>;
+  loadClientsStats(): Promise<ClientsStatsPayload>;
+  loadClientsMetricsSummary(): Promise<ClientsMetricsSummaryPayload>;
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
@@ -615,24 +623,51 @@ export const repository: Repository = {
     if (import.meta.env.DEV) {
       const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
       const sections: Record<string, { bytes: number; rows: number }> = {
-        clients:               { bytes: sizeOf(result.clients),               rows: result.clients.length },
-        usersLite:             { bytes: sizeOf(result.usersLite),             rows: result.usersLite.length },
-        clientUsers:           { bytes: sizeOf(result.clientUsers),           rows: result.clientUsers.length },
-        conditionRules:        { bytes: sizeOf(result.conditionRules),        rows: result.conditionRules.length },
-        columnOverrides:       { bytes: sizeOf(result.columnOverrides),       rows: result.columnOverrides.length },
-        clientCustomFields:    { bytes: sizeOf(result.clientCustomFields),    rows: result.clientCustomFields.length },
+        clients:                 { bytes: sizeOf(result.clients),                 rows: result.clients.length },
+        usersLite:               { bytes: sizeOf(result.usersLite),               rows: result.usersLite.length },
+        clientUsers:             { bytes: sizeOf(result.clientUsers),             rows: result.clientUsers.length },
+        conditionRules:          { bytes: sizeOf(result.conditionRules),          rows: result.conditionRules.length },
+        columnOverrides:         { bytes: sizeOf(result.columnOverrides),         rows: result.columnOverrides.length },
+        clientCustomFields:      { bytes: sizeOf(result.clientCustomFields),      rows: result.clientCustomFields.length },
         clientCustomFieldValues: { bytes: sizeOf(result.clientCustomFieldValues), rows: result.clientCustomFieldValues.length },
-        leadProjections:       { bytes: sizeOf(result.leadProjections),       rows: result.leadProjections.length },
-        dailyStats:            { bytes: sizeOf(result.dailyStats),            rows: result.dailyStats.length },
       };
       const total = Object.values(sections).reduce((sum, s) => sum + s.bytes, 0);
       const sorted = Object.entries(sections).sort((a, b) => b[1].bytes - a[1].bytes);
-      console.group("[PERF][gateway] loadClientsOverview payload breakdown");
+      console.group("[PERF][gateway] loadClientsOverview shell payload breakdown");
       for (const [name, { bytes, rows }] of sorted) {
         const pct = total > 0 ? ((bytes / total) * 100).toFixed(1) : "0.0";
         console.log(`  ${name.padEnd(24)} ${(bytes / 1024).toFixed(1).padStart(8)} KB  (${pct.padStart(5)}%)  rows=${rows}`);
       }
       console.log(`  ${"TOTAL".padEnd(24)} ${(total / 1024).toFixed(1).padStart(8)} KB`);
+      console.groupEnd();
+    }
+    return result;
+  },
+
+  async loadClientsStats() {
+    const result = await invokeOrmGatewaySelectWithRetry("loadClientsStats", {});
+    if (import.meta.env.DEV) {
+      const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
+      const lpBytes = sizeOf(result.leadProjections);
+      const dsBytes = sizeOf(result.dailyStats);
+      const total = lpBytes + dsBytes;
+      console.group("[PERF][gateway] loadClientsStats payload breakdown");
+      console.log(`  ${"leadProjections".padEnd(24)} ${(lpBytes / 1024).toFixed(1).padStart(8)} KB  rows=${result.leadProjections.length}`);
+      console.log(`  ${"dailyStats".padEnd(24)} ${(dsBytes / 1024).toFixed(1).padStart(8)} KB  rows=${result.dailyStats.length}`);
+      console.log(`  ${"TOTAL".padEnd(24)} ${(total / 1024).toFixed(1).padStart(8)} KB`);
+      console.groupEnd();
+    }
+    return result;
+  },
+
+  async loadClientsMetricsSummary() {
+    const result = await invokeOrmGatewaySelectWithRetry("loadClientsMetricsSummary", {});
+    if (import.meta.env.DEV) {
+      const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
+      const totalBytes = sizeOf(result.summaries);
+      console.group("[PERF][gateway] loadClientsMetricsSummary payload breakdown");
+      console.log(`  ${"summaries".padEnd(24)} ${(totalBytes / 1024).toFixed(1).padStart(8)} KB  clients=${result.summaries.length}`);
+      console.log(`  ${"_meta".padEnd(24)} ${JSON.stringify(result._meta)}`);
       console.groupEnd();
     }
     return result;

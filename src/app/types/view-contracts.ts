@@ -203,15 +203,17 @@ export interface ManagerDashboardOverview {
   }>;
 }
 
-// --- Clients overview (Phase 3) -------------------------------------------------------------------
-// Server returns full editable client rows + all data slices the clients mega-table and drawer need.
-// Lead payload is a projection (not full rows) so the dominant lead-row weight is eliminated.
-// campaignDailyStats are NOT included — the clients page only needs createClientMetrics inputs.
+// --- Clients overview (Phase 5B split) ------------------------------------------------------------
+// loadClientsOverview returns lightweight shell (~85 KB): client rows + config.
+// loadClientsStats   returns heavy stats  (~1.4 MB): leadProjections + dailyStats.
+// The frontend defers the stats request until after the shell paints so the table and
+// drawer are interactive without waiting for 1.4 MB of time-series data.
 
 /**
- * Complete data contract for the Clients page. Replaces the universal snapshot for that route.
- * Target payload: below 1.5 MB. Full client rows are retained because the drawer edits them.
- * Lead rows are projected to the 5 fields createClientMetrics reads — full rows are not shipped.
+ * Lightweight shell payload for the Clients page — returned by loadClientsOverview.
+ * Contains everything needed to render the table structure, drawer, and mutations.
+ * Does NOT include time-series stats; those arrive via loadClientsStats.
+ * Target payload: ~85 KB.
  */
 export interface ClientsOverviewPayload {
   /** Full editable client rows scoped by RLS. Drawer and mutations require all fields. */
@@ -228,19 +230,99 @@ export interface ClientsOverviewPayload {
   clientCustomFields: ClientCustomFieldRecord[];
   /** Per-client custom field values. */
   clientCustomFieldValues: ClientCustomFieldValueRecord[];
+}
+
+/**
+ * Heavy stats payload for the Clients page — returned by loadClientsStats.
+ * Loaded after the shell paints. Merged into ClientsOverviewPayload in useClientsOverview.
+ * Target payload: ~1.4 MB (leadProjections ~583 KB + dailyStats ~799 KB).
+ */
+export interface ClientsStatsPayload {
   /**
    * Minimal lead projections for ALL visible clients. Only 5 fields — exactly what
-   * createClientMetrics consumes for DoD/WoW/MoM aggregates. Saves ~44% vs LeadMetricProjection.
-   * Do NOT cast to LeadRecord or LeadMetricProjection.
+   * createClientMetrics consumes for DoD/WoW/MoM aggregates.
    */
   leadProjections: ClientsLeadInput[];
   /**
    * 180-day daily stats for ALL visible clients. Includes client_id for per-client partitioning.
-   * Only the 10 fields consumed by createClientMetrics — mql_count and prospects_count are omitted.
-   * Use DailyStatInput (client-metrics.ts) as the consumer interface.
+   * Only the 10 fields consumed by createClientMetrics.
    */
   dailyStats: Array<DailyStatInput & { client_id: string }>;
 }
+
+/**
+ * Full merged shape held in useClientsOverview state after both loads complete.
+ * Before stats arrive, leadProjections and dailyStats are empty arrays.
+ */
+export type ClientsFullPayload = ClientsOverviewPayload & ClientsStatsPayload;
+
+/**
+ * Compact per-client metrics summary — returned by loadClientsMetricsSummary.
+ * Contains pre-bucketed aggregate facts only; no raw rows. The frontend
+ * applies createClientMetricsFromSummary to produce the full ClientMetricsPack.
+ *
+ * Arrays are always length 5. Index 0 = current period (today / this week / this month).
+ * daily_sent[0..4]: today, yesterday, -2d, -3d, -4d.
+ * wow_*[0..4]:  current week (Mon–Sun), last week, ..., -4 weeks.
+ * mom_*[0..4]:  current month, last month, ..., -4 months.
+ * threedod_*[0..4]: today, yesterday, -2d, -3d, -4d.
+ */
+export interface ClientMetricsSummary {
+  client_id: string;
+  /** emails_sent per day: [today, -1d, -2d, -3d, -4d] */
+  daily_sent: number[];
+  schedule_today: number;
+  schedule_tomorrow: number;
+  schedule_day_after: number;
+  /** SUM(emails_sent) per ISO week: [current, -1w, -2w, -3w, -4w] */
+  wow_sent: number[];
+  /** SUM(human_replies_count) per week */
+  wow_human: number[];
+  /** SUM(bounce_count) per week */
+  wow_bounce: number[];
+  /** SUM(ooo_count) per week */
+  wow_ooo: number[];
+  /** SUM(negative_count) per week */
+  wow_negative: number[];
+  /** COUNT(*) leads by created_at week */
+  wow_leads: number[];
+  /** COUNT(*) leads with qualification='MQL' by created_at week */
+  wow_sql: number[];
+  /** COUNT(*) leads by created_at month: [current, -1m, -2m, -3m, -4m] */
+  mom_total: number[];
+  /** COUNT(*) MQL leads by month */
+  mom_sql: number[];
+  /** COUNT(*) meeting_booked=true leads by month */
+  mom_meetings: number[];
+  /** COUNT(*) won=true leads by month */
+  mom_won: number[];
+  /** COUNT(*) (MQL or preMQL) leads by created_at day: [today, -1d, -2d, -3d, -4d] */
+  threedod_total: number[];
+  /** COUNT(*) MQL leads by day */
+  threedod_sql: number[];
+  /** MAX(prospects_count) filtered to rows where prospects_count > 0 */
+  latest_prospects_count: number;
+}
+
+/** Payload returned by loadClientsMetricsSummary. */
+export interface ClientsMetricsSummaryPayload {
+  summaries: ClientMetricsSummary[];
+  _meta: {
+    clientsCount: number;
+    dailyStatsRowsRead: number;
+    leadRowsRead: number;
+    computedAt: string;
+  };
+}
+
+/**
+ * Full merged shape used by useClientsOverview after migrating to the compact
+ * metrics-summary path. Replaces ClientsFullPayload for the ClientsPage state.
+ * Before summaries arrive, metricsSummaries is an empty array.
+ */
+export type ClientsMetricsFullPayload = ClientsOverviewPayload & {
+  metricsSummaries: ClientMetricsSummary[];
+};
 
 /**
  * Client dashboard projection payload. Contains bounded raw data; ALL KPI/chart logic runs on
