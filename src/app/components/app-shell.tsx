@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
+import { LightweightSheet } from "./ui/lightweight-sheet";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -32,7 +32,7 @@ import {
   BreadcrumbSeparator,
 } from "./ui/breadcrumb";
 import { runtimeConfig } from "../lib/env";
-import { markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
+import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { useAuth } from "../providers/auth";
 import { useShellData } from "../providers/shell-data";
@@ -436,18 +436,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           </aside>
         )}
 
-        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-          <SheetContent
-            side="left"
-            className="w-[86vw] max-w-[320px] border-r border-[#1f1f1f] bg-[#050505] p-0 text-white lg:hidden"
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>Navigation</SheetTitle>
-              <SheetDescription>Open workspace navigation and account controls.</SheetDescription>
-            </SheetHeader>
-            <div className="flex h-full flex-col overflow-y-auto">{sidebarPanelNode}</div>
-          </SheetContent>
-        </Sheet>
+        <LightweightSheet
+          open={isMobileMenuOpen}
+          onOpenChange={setIsMobileMenuOpen}
+          side="left"
+          labelledBy="mobile-nav-title"
+          className="w-[86vw] max-w-[320px] border-r border-[#1f1f1f] bg-[#050505] p-0 text-white"
+        >
+          {/* sr-only accessible label for the dialog */}
+          <h2 id="mobile-nav-title" className="sr-only">Navigation</h2>
+          <div className="flex h-full flex-col overflow-y-auto">{sidebarPanelNode}</div>
+        </LightweightSheet>
 
         <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4 lg:hidden">
@@ -455,6 +454,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => {
                 markInteractionStart("menu:click");
                 measureAfterRaf2("menu:click", "[perf][menu] mobile click→raf2");
+                logAfterRaf2("[perf][menu] lightweight-mobile open state→raf2");
                 setIsMobileMenuOpen(true);
               }}
               className="inline-flex items-center gap-2 rounded-lg border border-[#242424] bg-[#080808] px-3 py-2 text-sm text-neutral-300 transition hover:bg-[#111] hover:text-white"
