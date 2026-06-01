@@ -20,13 +20,16 @@ import type {
 } from "../types/core";
 import type {
   AdminDashboardOverview,
-  ClientDashboardPayload,
-  ClientsOverviewPayload,
   AdminSettingsPayload,
   AnalyticsOverviewPayload,
+  BlacklistPagePayload,
   CampaignStatsResponse,
   CampaignsListParams,
   CampaignsListResponse,
+  ClientDashboardPayload,
+  ClientsOverviewPayload,
+  DomainsPagePayload,
+  InvoicesPagePayload,
   LeadDetailResult,
   LeadsFilterOptions,
   LeadsListParams,
@@ -59,6 +62,9 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
   loadAnalyticsOverview: { table: "analytics", operation: "select" },
   loadAdminSettings: { table: "settings", operation: "select" },
+  loadDomainsPage: { table: "domains", operation: "select" },
+  loadInvoicesPage: { table: "invoices", operation: "select" },
+  loadBlacklistPage: { table: "email_exclude_list", operation: "select" },
   loadCampaignsList: { table: "campaigns", operation: "select" },
   loadCampaignStats: { table: "campaign_daily_stats", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
@@ -507,6 +513,9 @@ export interface Repository {
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
   loadAdminSettings(): Promise<AdminSettingsPayload>;
+  loadDomainsPage(): Promise<DomainsPagePayload>;
+  loadInvoicesPage(): Promise<InvoicesPagePayload>;
+  loadBlacklistPage(): Promise<BlacklistPagePayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
@@ -643,6 +652,18 @@ export const repository: Repository = {
 
   async loadAdminSettings() {
     return invokeOrmGatewaySelectWithRetry("loadAdminSettings", {});
+  },
+
+  async loadDomainsPage() {
+    return invokeOrmGatewaySelectWithRetry("loadDomainsPage", {});
+  },
+
+  async loadInvoicesPage() {
+    return invokeOrmGatewaySelectWithRetry("loadInvoicesPage", {});
+  },
+
+  async loadBlacklistPage() {
+    return invokeOrmGatewaySelectWithRetry("loadBlacklistPage", {});
   },
 
   async loadAnalyticsOverview() {

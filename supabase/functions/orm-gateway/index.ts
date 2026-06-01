@@ -1878,6 +1878,52 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     };
   }
 
+  // ── Phase 7 remaining: domains / invoices / blacklist per-page loaders ─────────────────────────
+
+  if (payload.action === "loadDomainsPage") {
+    const t0 = performance.now();
+    const [clientRows, domainRows] = await Promise.all([
+      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+      tx.select().from(schema.domains).orderBy(desc(schema.domains.updatedAt)),
+    ]);
+    console.log(
+      `[PERF][orm-gateway] loadDomainsPage: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length} domains=${domainRows.length})`,
+    );
+    return {
+      clients: clientRows.map(toClientRecord),
+      domains: domainRows.map(toDomainRecord),
+    };
+  }
+
+  if (payload.action === "loadInvoicesPage") {
+    const t0 = performance.now();
+    const [clientRows, invoiceRows] = await Promise.all([
+      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+      tx.select().from(schema.invoices).orderBy(desc(schema.invoices.issueDate)),
+    ]);
+    console.log(
+      `[PERF][orm-gateway] loadInvoicesPage: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length} invoices=${invoiceRows.length})`,
+    );
+    return {
+      clients: clientRows.map(toClientRecord),
+      invoices: invoiceRows.map(toInvoiceRecord),
+    };
+  }
+
+  if (payload.action === "loadBlacklistPage") {
+    const t0 = performance.now();
+    const rows = await tx.select().from(schema.emailExcludeList).orderBy(desc(schema.emailExcludeList.createdAt));
+    console.log(
+      `[PERF][orm-gateway] loadBlacklistPage: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(entries=${rows.length})`,
+    );
+    return {
+      emailExcludeList: rows.map(toEmailExcludeRecord),
+    };
+  }
+
   if (payload.action === "loadConditionRules") {
     const rows = await tx
       .select()

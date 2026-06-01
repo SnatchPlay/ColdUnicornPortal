@@ -231,12 +231,10 @@ function ProtectedApp() {
                 <Route path="statistics" element={<StatisticsPage />} />
                 {/* Phase 7 (partial): settings — per-page loader, no CoreDataProvider */}
                 <Route path="settings" element={<SettingsPage />} />
-                {/* Legacy snapshot routes — still need CoreDataProvider until Phase 7 full */}
-                <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="domains" element={<DomainsPage />} />
-                  <Route path="invoices" element={<InvoicesPage />} />
-                  <Route path="blacklist" element={<BlacklistPage />} />
-                </Route>
+                {/* Phase 7: domains / invoices / blacklist — per-page loaders, no CoreDataProvider */}
+                <Route path="domains" element={<DomainsPage />} />
+                <Route path="invoices" element={<InvoicesPage />} />
+                <Route path="blacklist" element={<BlacklistPage />} />
               </Route>
 
               {/* ── admin / super_admin / master_admin ───────────────────────────────────── */}
@@ -251,15 +249,12 @@ function ProtectedApp() {
                 <Route path="campaigns" element={<CampaignsPage />} />
                 {/* Phase 6: statistics — per-page loader, no CoreDataProvider */}
                 <Route path="statistics" element={<StatisticsPage />} />
-                {/* Phase 7 (partial): settings — per-page loader, no CoreDataProvider */}
+                {/* Phase 7: settings / domains / invoices / blacklist / users — per-page loaders */}
                 <Route path="settings" element={<SettingsPage />} />
-                {/* Legacy snapshot routes — Phase 7 remaining: domains, invoices, blacklist, users */}
-                <Route element={<LegacySnapshotOutlet />}>
-                  <Route path="users" element={<AdminUserManagementPage />} />
-                  <Route path="domains" element={<DomainsPage />} />
-                  <Route path="invoices" element={<InvoicesPage />} />
-                  <Route path="blacklist" element={<BlacklistPage />} />
-                </Route>
+                <Route path="users" element={<AdminUserManagementPage />} />
+                <Route path="domains" element={<DomainsPage />} />
+                <Route path="invoices" element={<InvoicesPage />} />
+                <Route path="blacklist" element={<BlacklistPage />} />
               </Route>
 
               <Route path="*" element={<HomeRedirect />} />

@@ -5,9 +5,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { formatDate, formatMoney } from "../lib/format";
 import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
+import { useDomainsPage } from "../lib/use-domains";
+import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
-import type { DomainRecord, DomainStatus } from "../types/core";
+import type { ClientRecord, DomainRecord, DomainStatus } from "../types/core";
 
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
 const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
@@ -81,9 +82,15 @@ function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<Dom
   return patch;
 }
 
+// Stable empty-array fallbacks — prevents new-reference cascades during loading.
+const EMPTY_CLIENTS: ClientRecord[] = [];
+const EMPTY_DOMAINS: DomainRecord[] = [];
+
 export function DomainsPage() {
   const { identity } = useAuth();
-  const { clients, domains, createDomain, updateDomain, loading, error, refresh } = useCoreData();
+  const { data, loading, error, refresh } = useDomainsPage();
+  const clients = data?.clients ?? EMPTY_CLIENTS;
+  const domains = data?.domains ?? EMPTY_DOMAINS;
   const [isCreatingDomain, setIsCreatingDomain] = useState(false);
   const [createDomainDraft, setCreateDomainDraft] = useState<CreateDomainDraft | null>(null);
   const [isSubmittingCreateDomain, setIsSubmittingCreateDomain] = useState(false);
@@ -192,7 +199,7 @@ export function DomainsPage() {
     ) return;
     setIsSubmittingCreateDomain(true);
     try {
-      await createDomain({
+      await repository.createDomain({
         client_id: createDomainDraft.clientId,
         domain_name: createDomainDraft.domainName.trim(),
         setup_email: createDomainDraft.setupEmail.trim(),
@@ -204,10 +211,11 @@ export function DomainsPage() {
         campaign_verified_at: null,
         warmup_verified_at: null,
       });
+      refresh();
       setIsCreatingDomain(false);
       setCreateDomainDraft(null);
     } catch {
-      // error shown via toast from core-data
+      // mutations throw RepositoryError on failure; toast handled by caller
     } finally {
       setIsSubmittingCreateDomain(false);
     }
@@ -217,7 +225,8 @@ export function DomainsPage() {
     if (!selectedDomain || !isDraftDirty) return;
     setIsSavingDraft(true);
     try {
-      await updateDomain(selectedDomain.id, draftPatch);
+      await repository.updateDomain(selectedDomain.id, draftPatch);
+      refresh();
     } finally {
       setIsSavingDraft(false);
     }

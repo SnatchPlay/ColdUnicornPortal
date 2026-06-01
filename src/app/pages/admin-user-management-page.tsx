@@ -6,8 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { formatDate, formatNumber } from "../lib/format";
 import { isInternalAdmin } from "../lib/selectors";
+import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import { useCoreData } from "../providers/core-data";
+import { useShellData } from "../providers/shell-data";
 import type { InviteRecord, InviteRole, InviteStatus } from "../types/core";
 
 type InviteFilter = "all" | InviteStatus;
@@ -47,7 +48,8 @@ function formatInviteDate(value: string | null) {
 
 export function AdminUserManagementPage() {
   const { identity } = useAuth();
-  const { clients, loading, error, sendInvite, listInvites, resendInvite, revokeInvite } = useCoreData();
+  // clients come from the already-loaded shell data (no extra round-trip needed).
+  const { clientsLite: clients } = useShellData();
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("client");
@@ -70,14 +72,14 @@ export function AdminUserManagementPage() {
   const refreshInvites = useCallback(async () => {
     setIsLoadingInvites(true);
     try {
-      const nextInvites = await listInvites();
+      const nextInvites = await repository.listInvites();
       setInvites(nextInvites);
     } catch {
       setInvites([]);
     } finally {
       setIsLoadingInvites(false);
     }
-  }, [listInvites]);
+  }, []);
 
   useEffect(() => {
     if (!canAccess) return;
@@ -117,7 +119,7 @@ export function AdminUserManagementPage() {
     setMessage(null);
 
     try {
-      await sendInvite({
+      await repository.sendInvite({
         email: normalizedEmail,
         role: inviteRole,
         ...(inviteRole === "client" ? { clientId: inviteClientId } : {}),
@@ -140,7 +142,7 @@ export function AdminUserManagementPage() {
     setPendingAction({ inviteId, action: "resend" });
     setMessage(null);
     try {
-      await resendInvite(inviteId);
+      await repository.resendInvite(inviteId);
       setMessage({ tone: "info", text: "Invitation resent successfully." });
       await refreshInvites();
     } catch {
@@ -154,7 +156,7 @@ export function AdminUserManagementPage() {
     setPendingAction({ inviteId, action: "revoke" });
     setMessage(null);
     try {
-      await revokeInvite(inviteId);
+      await repository.revokeInvite(inviteId);
       setMessage({ tone: "info", text: "Invitation revoked." });
       await refreshInvites();
     } catch {
@@ -173,10 +175,6 @@ export function AdminUserManagementPage() {
     );
   }
 
-  if (loading) {
-    return <LoadingState />;
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -184,7 +182,6 @@ export function AdminUserManagementPage() {
         subtitle="Invite-only access control with lifecycle actions for pending, accepted, and expired invitations."
       />
 
-      {error && <Banner tone="warning">{error}</Banner>}
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
 
       <Surface
