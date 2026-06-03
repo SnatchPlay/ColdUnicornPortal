@@ -153,15 +153,49 @@ export interface AdminDashboardOverview {
   latestSnapshotDate: string | null;
 }
 
+/**
+ * Optional server-side filters for the manager dashboard. When `clientId` is set the whole
+ * dashboard is scoped to that single client; `campaignStatus` restricts the campaign-based
+ * surfaces (watchlist + momentum + the campaigns metric). `campaignStatus` defaults to "active"
+ * server-side; pass "all" to disable the status restriction.
+ */
+export interface ManagerDashboardParams {
+  clientId?: string;
+  campaignStatus?: string;
+  /** ISO date (YYYY-MM-DD) inclusive bounds. Drives lead/stat-based metrics, momentum, watchlist, portfolio. */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 /** Manager dashboard aggregate payload. Scoped to the manager's assigned clients. */
 export interface ManagerDashboardOverview {
   metrics: {
     assignedClientsCount: number;
-    activeCampaignsCount: number;
-    leadsInProgressCount: number;
-    unclassifiedRepliesCount: number;
-    recentRepliesCount14d: number;
+    /** Campaigns matching the active campaignStatus filter within the scoped clients. */
+    campaignsCount: number;
   };
+  /**
+   * Raw lead field combinations with row count for the scoped leads. Mirrors the admin payload:
+   * frontend applies `getLeadStage` to each group and accumulates MQL / preMQL / beyond-MQL /
+   * unqualified buckets. Server must NOT pre-apply stage logic.
+   */
+  pipelineGroups: Array<{
+    qualification: string | null;
+    meeting_booked: boolean | null;
+    meeting_held: boolean | null;
+    offer_sent: boolean | null;
+    won: boolean | null;
+    count: number;
+  }>;
+  /** 21-day campaign activity series (sent/replies/positive) for the scope. Sorted ascending by date. */
+  campaignMomentum21d: Array<{
+    date: string;
+    sent: number;
+    replies: number;
+    positive: number;
+  }>;
+  /** All manager clients (unfiltered by the clientId param) for the filter dropdown. */
+  filterClients: Array<{ id: string; name: string }>;
   /** Per-client portfolio summary. Frontend computes KPI progress. */
   clientPortfolio: Array<{
     clientId: string;
@@ -174,7 +208,7 @@ export interface ManagerDashboardOverview {
     kpiMeetings: number | null;
   }>;
   /**
-   * All manager-scoped campaigns with total sent/replies (not windowed). Frontend applies the
+   * Scoped campaigns (status-filtered) with total sent/replies (not windowed). Frontend applies the
    * watchlist filter (status !== active OR replyRate < 1%) and sorts by reply rate ascending.
    */
   campaignWatchlist: Array<{
@@ -185,22 +219,11 @@ export interface ManagerDashboardOverview {
     sent: number;
     replies: number;
   }>;
-  /** 10 most recently updated leads in the manager's scope. Frontend applies getLeadStage. */
-  leadQueue: Array<{
-    leadId: string;
-    clientId: string;
-    clientName: string;
-    campaignId: string | null;
-    firstName: string | null;
-    lastName: string | null;
-    qualification: string | null;
-    meeting_booked: boolean | null;
-    meeting_held: boolean | null;
-    offer_sent: boolean | null;
-    won: boolean | null;
-    updatedAt: string | null;
-    createdAt: string | null;
-  }>;
+  /**
+   * 10 most recently updated leads in the manager's scope, as full lead rows so the dashboard can
+   * open the editable lead drawer directly (toLeadDraft / buildLeadPatch) without a second request.
+   */
+  leadQueue: LeadsListRow[];
 }
 
 // --- Clients overview (Phase 5B split) ------------------------------------------------------------

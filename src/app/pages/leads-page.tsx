@@ -12,7 +12,7 @@ import {
   type LeadDrawerData,
 } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
-import { Checkbox } from "../components/ui/checkbox";
+import { LeadEditForm } from "../components/lead-edit-form";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -40,9 +40,9 @@ import {
   type TimeframeValue,
 } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
+import { buildLeadPatch, toLeadDraft, type LeadDraft } from "../lib/lead-draft";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
-import type { LeadRecord, LeadQualification, LeadGender } from "../types/core";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import { ClientLeadsPage } from "./client-leads-page";
 
@@ -56,16 +56,6 @@ interface CreateLeadDraft {
   jobTitle: string;
 }
 
-const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
-  "preMQL",
-  "MQL",
-  "meeting_scheduled",
-  "meeting_held",
-  "offer_sent",
-  "won",
-  "rejected",
-];
-const LEAD_QUALIFICATION_UNSET = "__lead_unqualified__";
 const ALL_FILTER_VALUE = "__all__";
 const PAGE_SIZE = 50;
 const MAX_PAGE_LINKS = 5;
@@ -73,30 +63,6 @@ const MAX_PAGE_LINKS = 5;
 type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
 type LeadSortKey = "lead" | "client" | "company" | "status" | "created";
-
-interface LeadDraft {
-  qualification: LeadQualification | "";
-  comments: string;
-  meetingBooked: boolean;
-  meetingHeld: boolean;
-  offerSent: boolean;
-  won: boolean;
-  email: string;
-  firstName: string;
-  lastName: string;
-  jobTitle: string;
-  companyName: string;
-  linkedinUrl: string;
-  phoneNumber: string;
-  phoneSource: string;
-  gender: LeadGender | "";
-  country: string;
-  industry: string;
-  headcountRange: string;
-  website: string;
-  expectedReturnDate: string;
-  addedToOooCampaign: boolean;
-}
 
 function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
   const safeLeft = (left ?? "").toLowerCase();
@@ -108,81 +74,6 @@ function compareText(left: string | null | undefined, right: string | null | und
 function sortIndicator(active: boolean, direction: SortDirection) {
   if (!active) return "sort";
   return direction === "asc" ? "asc" : "desc";
-}
-
-function toLeadDraft(lead: LeadRecord): LeadDraft {
-  return {
-    qualification: lead.qualification ?? "",
-    comments: lead.comments ?? "",
-    meetingBooked: lead.meeting_booked,
-    meetingHeld: lead.meeting_held,
-    offerSent: lead.offer_sent,
-    won: lead.won,
-    email: lead.email ?? "",
-    firstName: lead.first_name ?? "",
-    lastName: lead.last_name ?? "",
-    jobTitle: lead.job_title ?? "",
-    companyName: lead.company_name ?? "",
-    linkedinUrl: lead.linkedin_url ?? "",
-    phoneNumber: lead.phone_number ?? "",
-    phoneSource: lead.phone_source ?? "",
-    gender: lead.gender ?? "",
-    country: lead.country ?? "",
-    industry: lead.industry ?? "",
-    headcountRange: lead.headcount_range ?? "",
-    website: lead.website ?? "",
-    expectedReturnDate: lead.expected_return_date ?? "",
-    addedToOooCampaign: lead.added_to_ooo_campaign,
-  };
-}
-
-function nullableString(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
-function buildLeadPatch(lead: LeadRecord, draft: LeadDraft): Partial<LeadRecord> {
-  const patch: Partial<LeadRecord> = {};
-
-  const nextQualification = draft.qualification || null;
-  if ((lead.qualification ?? null) !== nextQualification) patch.qualification = nextQualification;
-  if ((lead.comments ?? "") !== draft.comments) patch.comments = draft.comments;
-  if (lead.meeting_booked !== draft.meetingBooked) patch.meeting_booked = draft.meetingBooked;
-  if (lead.meeting_held !== draft.meetingHeld) patch.meeting_held = draft.meetingHeld;
-  if (lead.offer_sent !== draft.offerSent) patch.offer_sent = draft.offerSent;
-  if (lead.won !== draft.won) patch.won = draft.won;
-
-  const nextEmail = nullableString(draft.email);
-  if ((lead.email ?? null) !== nextEmail) patch.email = nextEmail;
-  const nextFirst = nullableString(draft.firstName);
-  if ((lead.first_name ?? null) !== nextFirst) patch.first_name = nextFirst;
-  const nextLast = nullableString(draft.lastName);
-  if ((lead.last_name ?? null) !== nextLast) patch.last_name = nextLast;
-  const nextJob = nullableString(draft.jobTitle);
-  if ((lead.job_title ?? null) !== nextJob) patch.job_title = nextJob;
-  const nextCompany = nullableString(draft.companyName);
-  if ((lead.company_name ?? null) !== nextCompany) patch.company_name = nextCompany;
-  const nextLinkedIn = nullableString(draft.linkedinUrl);
-  if ((lead.linkedin_url ?? null) !== nextLinkedIn) patch.linkedin_url = nextLinkedIn;
-  const nextPhone = nullableString(draft.phoneNumber);
-  if ((lead.phone_number ?? null) !== nextPhone) patch.phone_number = nextPhone;
-  const nextPhoneSource = nullableString(draft.phoneSource);
-  if ((lead.phone_source ?? null) !== nextPhoneSource) patch.phone_source = nextPhoneSource;
-  const nextGender = (draft.gender || null) as LeadGender | null;
-  if ((lead.gender ?? null) !== nextGender) patch.gender = nextGender;
-  const nextCountry = nullableString(draft.country);
-  if ((lead.country ?? null) !== nextCountry) patch.country = nextCountry;
-  const nextIndustry = nullableString(draft.industry);
-  if ((lead.industry ?? null) !== nextIndustry) patch.industry = nextIndustry;
-  const nextHeadcount = nullableString(draft.headcountRange);
-  if ((lead.headcount_range ?? null) !== nextHeadcount) patch.headcount_range = nextHeadcount;
-  const nextWebsite = nullableString(draft.website);
-  if ((lead.website ?? null) !== nextWebsite) patch.website = nextWebsite;
-  const nextOooDate = nullableString(draft.expectedReturnDate);
-  if ((lead.expected_return_date ?? null) !== nextOooDate) patch.expected_return_date = nextOooDate;
-  if (lead.added_to_ooo_campaign !== draft.addedToOooCampaign) patch.added_to_ooo_campaign = draft.addedToOooCampaign;
-
-  return patch;
 }
 
 function getStageLabel(stage: PipelineStage) {
@@ -942,109 +833,3 @@ function InternalLeadsPage() {
   );
 }
 
-function EditLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{children}</span>;
-}
-
-function EditInput({ value, onChange, disabled, type = "text", placeholder }: {
-  value: string; onChange: (next: string) => void; disabled?: boolean; type?: string; placeholder?: string;
-}) {
-  return (
-    <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} disabled={disabled}
-      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-sky-400/40 disabled:opacity-60" />
-  );
-}
-
-const LEAD_GENDER_UNSET = "__lead_gender_unset__";
-
-function LeadEditForm({ draft, updateDraft, readOnly }: {
-  draft: LeadDraft;
-  updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;
-  readOnly: boolean;
-}) {
-  const set = <K extends keyof LeadDraft>(key: K, value: LeadDraft[K]) =>
-    updateDraft((current) => ({ ...current, [key]: value }));
-
-  return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Identity</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-2"><EditLabel>First name</EditLabel><EditInput value={draft.firstName} onChange={(v) => set("firstName", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>Last name</EditLabel><EditInput value={draft.lastName} onChange={(v) => set("lastName", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>Email</EditLabel><EditInput value={draft.email} onChange={(v) => set("email", v)} disabled={readOnly} type="email" /></label>
-          <label className="space-y-2"><EditLabel>Job title</EditLabel><EditInput value={draft.jobTitle} onChange={(v) => set("jobTitle", v)} disabled={readOnly} /></label>
-          <label className="space-y-2 md:col-span-2"><EditLabel>Company</EditLabel><EditInput value={draft.companyName} onChange={(v) => set("companyName", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>LinkedIn URL</EditLabel><EditInput value={draft.linkedinUrl} onChange={(v) => set("linkedinUrl", v)} disabled={readOnly} placeholder="https://linkedin.com/in/…" /></label>
-          <label className="space-y-2"><EditLabel>Website</EditLabel><EditInput value={draft.website} onChange={(v) => set("website", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>Phone</EditLabel><EditInput value={draft.phoneNumber} onChange={(v) => set("phoneNumber", v)} disabled={readOnly} type="tel" /></label>
-          <label className="space-y-2"><EditLabel>Phone source</EditLabel><EditInput value={draft.phoneSource} onChange={(v) => set("phoneSource", v)} disabled={readOnly} placeholder="manual, enrichment, …" /></label>
-          <label className="space-y-2">
-            <EditLabel>Gender</EditLabel>
-            <Select value={draft.gender === "" ? LEAD_GENDER_UNSET : draft.gender} disabled={readOnly} onValueChange={(value) => set("gender", value === LEAD_GENDER_UNSET ? "" : (value as LeadGender))}>
-              <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder="Unknown" /></SelectTrigger>
-              <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-                <SelectItem value={LEAD_GENDER_UNSET} className="text-white focus:bg-[#1a1a1a] focus:text-white">Unknown</SelectItem>
-                <SelectItem value="male" className="text-white focus:bg-[#1a1a1a] focus:text-white">male</SelectItem>
-                <SelectItem value="female" className="text-white focus:bg-[#1a1a1a] focus:text-white">female</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-2"><EditLabel>Country</EditLabel><EditInput value={draft.country} onChange={(v) => set("country", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>Industry</EditLabel><EditInput value={draft.industry} onChange={(v) => set("industry", v)} disabled={readOnly} /></label>
-          <label className="space-y-2"><EditLabel>Headcount</EditLabel><EditInput value={draft.headcountRange} onChange={(v) => set("headcountRange", v)} disabled={readOnly} placeholder="e.g. 51-200" /></label>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Pipeline</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-2">
-            <EditLabel>Qualification</EditLabel>
-            <Select value={draft.qualification === "" ? LEAD_QUALIFICATION_UNSET : draft.qualification} disabled={readOnly} onValueChange={(value) => set("qualification", value === LEAD_QUALIFICATION_UNSET ? "" : (value as LeadQualification))}>
-              <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder="unqualified" /></SelectTrigger>
-              <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                <SelectItem value={LEAD_QUALIFICATION_UNSET} className="text-white focus:bg-[#1a1a1a] focus:text-white">unqualified</SelectItem>
-                {EDITABLE_QUALIFICATIONS.map((q) => <SelectItem key={q} value={q} className="text-white focus:bg-[#1a1a1a] focus:text-white">{q}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-2">
-            <EditLabel>Comments</EditLabel>
-            <textarea value={draft.comments} onChange={(event) => set("comments", event.target.value)} disabled={readOnly} rows={3} className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none disabled:opacity-60" />
-          </label>
-        </div>
-        <div className="grid gap-3 md:grid-cols-4">
-          {[
-            { label: "Meeting booked", key: "meetingBooked" as const, value: draft.meetingBooked },
-            { label: "Meeting held", key: "meetingHeld" as const, value: draft.meetingHeld },
-            { label: "Offer sent", key: "offerSent" as const, value: draft.offerSent },
-            { label: "Won", key: "won" as const, value: draft.won },
-          ].map((item) => (
-            <label key={item.label} className="rounded-2xl border border-white/10 bg-black/10 p-4">
-              <EditLabel>{item.label}</EditLabel>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-sm">{item.value ? "Yes" : "No"}</span>
-                <Checkbox checked={item.value} disabled={readOnly} onCheckedChange={(checked) => set(item.key, checked === true)} />
-              </div>
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">OOO</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-2"><EditLabel>Expected return date</EditLabel><EditInput value={draft.expectedReturnDate} onChange={(v) => set("expectedReturnDate", v)} disabled={readOnly} type="date" /></label>
-          <label className="rounded-2xl border border-white/10 bg-black/10 p-4">
-            <EditLabel>In OOO campaign</EditLabel>
-            <div className="mt-3 flex items-center justify-between">
-              <span className="text-sm">{draft.addedToOooCampaign ? "Yes" : "No"}</span>
-              <Checkbox checked={draft.addedToOooCampaign} disabled={readOnly} onCheckedChange={(checked) => set("addedToOooCampaign", checked === true)} />
-            </div>
-          </label>
-        </div>
-      </section>
-    </div>
-  );
-}

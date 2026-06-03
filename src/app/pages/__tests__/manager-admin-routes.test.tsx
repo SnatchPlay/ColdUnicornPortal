@@ -135,7 +135,8 @@ const emptyAdminDashboard = {
 };
 
 const emptyManagerDashboard = {
-  metrics: { assignedClientsCount: 0, activeCampaignsCount: 0, leadsInProgressCount: 0, unclassifiedRepliesCount: 0, recentRepliesCount14d: 0 },
+  metrics: { assignedClientsCount: 0, campaignsCount: 0 },
+  pipelineGroups: [], campaignMomentum21d: [], filterClients: [],
   clientPortfolio: [], campaignWatchlist: [], leadQueue: [],
 };
 
@@ -301,16 +302,18 @@ describe("manager/admin route states", () => {
     expect(screen.getByText("Campaign momentum: Positive")).toBeInTheDocument();
   });
 
-  it("removes manager reply triage panel and keeps campaign watchlist stretched", async () => {
+  it("shows manager split momentum charts + lead queue and drops unclassified replies", async () => {
     mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
     mockedRepo.loadManagerDashboardOverview.mockResolvedValue(emptyManagerDashboard as never);
 
     renderRoute(ManagerDashboardPage);
     await act(async () => {});
 
-    expect(screen.queryByText("Reply triage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unclassified replies")).not.toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Sent")).toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Replies")).toBeInTheDocument();
+    expect(screen.getByText("Campaign momentum: Positive")).toBeInTheDocument();
+    expect(screen.getByText("Lead queue")).toBeInTheDocument();
     expect(screen.getByText("Campaign watchlist")).toBeInTheDocument();
-    const watchlistSection = screen.getByText("Campaign watchlist").closest("section");
-    expect(watchlistSection?.className).toContain("xl:row-span-2");
   });
 });

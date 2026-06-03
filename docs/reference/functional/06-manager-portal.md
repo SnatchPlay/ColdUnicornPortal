@@ -24,18 +24,36 @@ File: [`src/app/pages/manager-dashboard-page.tsx`](../../../src/app/pages/manage
 
 ### 1.1 Purpose
 
-Day-one view for the Customer Success manager. Surfaces anomalies that need action: stopped campaigns, clients behind KPI, unclassified replies, most recent lead state changes.
+Day-one view for the Customer Success manager. Surfaces the working lead queue first, campaign momentum trends, clients behind KPI, and stopped/low-reply campaigns. The whole payload is computed server-side in `loadManagerDashboardOverview` ([orm-gateway](../../../supabase/functions/orm-gateway/index.ts)); see [04-metrics §12](./04-metrics-catalog.md#12-manager-dashboard-aggregates).
+
+### 1.1a Filters
+
+A `Surface title="Filters"` at the top, above the metric cards (3 controls):
+
+- **Client** Select — `All clients` (default) or one of the manager's clients (`filterClients` from the payload). Scopes the entire dashboard to that client.
+- **Campaign status** Select — `Active` (default), `Launching`, `Stopped`, `Completed`, `Draft`, or `All statuses`. Restricts the campaign-based surfaces (campaigns metric, watchlist, momentum charts).
+- **Date range** — `DateRangeButton` (same presets as Analytics: 7d/30d/90d/MTD/QTD/YTD/All + custom). Default `Last 30 Days`. Drives **all period-sensitive metrics**: MQL/preMQL counts (`leads.created_at` in range), momentum series and watchlist totals (`campaign_daily_stats.report_date` in range), and portfolio MQL/won counts. `Assigned clients` and the campaign count are structural (not date-scoped). The lead queue is limited to leads created in the range.
+
+Changing any filter re-fetches the dashboard (`repository.loadManagerDashboardOverview(managerId, { clientId, campaignStatus, dateFrom, dateTo })`) with a `loadIdRef` stale guard ([CLAUDE.md §2.3](../../../CLAUDE.md)). The Filters subtitle shows the active period and a "Refreshing…" hint during in-flight reloads.
 
 ### 1.2 Metric cards (4)
 
-`MetricCard` row at the top. See [04-metrics В§12](./04-metrics-catalog.md#12-manager-dashboard-aggregates).
+`MetricCard` row. See [04-metrics §12](./04-metrics-catalog.md#12-manager-dashboard-aggregates).
 
 | # | Label | Value | Data |
 |---|-------|-------|------|
-| 1 | Assigned clients | `scopedClients.length` | `scopeClients` by `manager_id` |
-| 2 | Active campaigns | `count(scopedCampaigns WHERE status='active')` | `scopeCampaigns` |
-| 3 | Leads in progress | `count(scopedLeads WHERE stage в€‰ ('won','rejected'))` (approx; actual uses recency filter) | `scopeLeads` |
-| 4 | Unclassified replies | `count(scopedReplies WHERE classification IS NULL)` | `scopeReplies` |
+| 1 | Assigned clients | scoped client count | scoped `clients` |
+| 2 | `<status>` campaigns | `count(scoped campaigns WHERE status = campaignStatus)` | `campaigns.status` (label reflects the status filter) |
+| 3 | MQLs | leads whose `getLeadStage` = `MQL` | `pipelineGroups` (hint: count beyond MQL) |
+| 4 | preMQLs | leads whose `getLeadStage` = `preMQL` | `pipelineGroups` (hint: not-yet-qualified count) |
+
+**Unclassified replies** was removed (cards 3+4 replaced by the MQL/preMQL split). Reply classification is owned by n8n; there is no portal triage UI.
+
+### 1.2a Layout & campaign momentum charts
+
+Below the metric cards, a two-column grid (`xl:grid-cols-[1.6fr_1fr]`): **left** holds the three momentum `AreaChart`s; **right** holds the Lead queue (top), Campaign watchlist, and Assigned client portfolio.
+
+The charts (Sent / Replies / Positive) mirror the Admin dashboard, fed by `campaignMomentum21d` — for the manager this is the daily series over the **selected timeframe** (falls back to 21 days only if no range is sent), scoped + status-filtered. See [08 §4](./08-charts-catalog.md#4-manager-dashboard-surfaces).
 
 ### 1.3 Campaign watchlist surface
 
@@ -68,16 +86,11 @@ Clicking a client row navigates to `/manager/clients?selected=вЂ¦` or scrolls
 
 ### 1.5 Lead queue surface
 
-`Surface title="Lead queue"`. 10 most recently updated leads in scope.
+`Surface title="Lead queue"`, positioned at the **top of the right column** (beside the momentum charts) so it stays visible — previously it sat at the bottom and was easy to miss. Up to 10 leads created in the selected period, rendered as clickable cards (name, client · company, updated timestamp, pipeline-stage badge).
 
-Columns:
+Data: server returns `leadQueue` as **full `LeadsListRow` records** (created within the date range, sorted `updated_at DESC`, limit 10) so a card click opens the editable lead drawer with no extra request.
 
-- Lead name + avatar initials
-- Pipeline stage (colored badge)
-- Client name
-- Updated timestamp
-
-Data: `scopedLeads` sorted by `updated_at DESC` then sliced to 10.
+**Lead drawer (editable):** clicking a card opens `ManagerLeadDrawer` — a right-side drawer reusing the shared [`LeadEditForm`](../../../src/app/components/lead-edit-form.tsx) + draft helpers ([`lead-draft.ts`](../../../src/app/lib/lead-draft.ts)) and the portal [`LeadConversation`](../../../src/app/components/portal-ui.tsx) / `LeadMetaSection`. Reply history is lazy-loaded via `useLeadDetail`. Editable fields and save semantics match the Leads page drawer ([§3.4](#34-lead-drawer-editable)); `Save changes` calls `repository.updateLead` then refreshes the dashboard. An "Open in Leads" link jumps to the full workspace. `Escape` closes.
 
 ### 1.6 Empty / loading / error
 

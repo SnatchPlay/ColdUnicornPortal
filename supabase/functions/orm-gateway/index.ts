@@ -988,99 +988,138 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
   if (payload.action === "loadManagerDashboardOverview") {
     const managerId = payload.managerId;
+    const clientFilter = payload.clientId ?? null;
+    const statusFilterRaw = payload.campaignStatus ?? "active";
+    const statusFilter = statusFilterRaw === "all" ? null : statusFilterRaw;
+    const dateFrom = payload.dateFrom ?? null; // 'YYYY-MM-DD' inclusive lower bound
+    const dateTo = payload.dateTo ?? null; // 'YYYY-MM-DD' inclusive upper bound
     const t0 = performance.now();
-    const since14d = isoDaysAgo(14);
+    const since21d = isoDaysAgo(21);
 
-    const [metricsRows, portfolioRows, watchlistRows, queueRows] = await Promise.all([
-      rawQuery<{
-        assigned_clients_count: number;
-        active_campaigns_count: number;
-        leads_in_progress_count: number;
-        unclassified_replies_count: number;
-        recent_replies_count_14d: number;
-      }>(tx, sql`
-        SELECT
-          (SELECT COUNT(*)::int FROM clients WHERE manager_id = ${managerId}) AS assigned_clients_count,
-          (SELECT COUNT(*)::int FROM campaigns WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND status = 'active') AS active_campaigns_count,
-          (SELECT COUNT(*)::int FROM leads WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND NOT COALESCE(won, false) AND NOT COALESCE(offer_sent, false)) AS leads_in_progress_count,
-          (SELECT COUNT(*)::int FROM replies WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND classification IS NULL) AS unclassified_replies_count,
-          (SELECT COUNT(*)::int FROM replies WHERE client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId}) AND received_at >= ${since14d}) AS recent_replies_count_14d
-      `),
-      rawQuery<{
-        client_id: string;
-        client_name: string;
-        status: string | null;
-        kpi_leads: number | null;
-        kpi_meetings: number | null;
-        campaigns_count: number;
-        mql_count: number;
-        won_count: number;
-      }>(tx, sql`
-        SELECT
-          c.id AS client_id,
-          c.name AS client_name,
-          c.status,
-          c.kpi_leads,
-          c.kpi_meetings,
-          COUNT(DISTINCT camp.id)::int AS campaigns_count,
-          COUNT(DISTINCT CASE WHEN l.qualification = 'MQL' THEN l.id END)::int AS mql_count,
-          COUNT(DISTINCT CASE WHEN l.won = true THEN l.id END)::int AS won_count
-        FROM clients c
-        LEFT JOIN campaigns camp ON camp.client_id = c.id
-        LEFT JOIN leads l ON l.client_id = c.id
-        WHERE c.manager_id = ${managerId}
-        GROUP BY c.id, c.name, c.status, c.kpi_leads, c.kpi_meetings
-        ORDER BY c.name
-      `),
-      rawQuery<{ campaign_id: string; campaign_name: string; client_id: string; status: string | null; sent: number; replies: number }>(tx, sql`
-        SELECT
-          camp.id AS campaign_id,
-          camp.name AS campaign_name,
-          camp.client_id,
-          camp.status,
-          COALESCE(SUM(cds.sent_count), 0)::int AS sent,
-          COALESCE(SUM(cds.reply_count), 0)::int AS replies
-        FROM campaigns camp
-        LEFT JOIN campaign_daily_stats cds ON cds.campaign_id = camp.id
-        WHERE camp.client_id IN (SELECT id FROM clients WHERE manager_id = ${managerId})
-        GROUP BY camp.id, camp.name, camp.client_id, camp.status
-      `),
-      rawQuery<{
-        lead_id: string;
-        client_id: string;
-        client_name: string;
-        campaign_id: string | null;
-        first_name: string | null;
-        last_name: string | null;
-        qualification: string | null;
-        meeting_booked: boolean | null;
-        meeting_held: boolean | null;
-        offer_sent: boolean | null;
-        won: boolean | null;
-        updated_at: unknown;
-        created_at: unknown;
-      }>(tx, sql`
-        SELECT
-          l.id AS lead_id,
-          l.client_id,
-          c.name AS client_name,
-          l.campaign_id,
-          l.first_name,
-          l.last_name,
-          l.qualification,
-          l.meeting_booked,
-          l.meeting_held,
-          l.offer_sent,
-          l.won,
-          l.updated_at,
-          l.created_at
-        FROM leads l
-        JOIN clients c ON c.id = l.client_id
-        WHERE c.manager_id = ${managerId}
-        ORDER BY COALESCE(l.updated_at, l.created_at) DESC
-        LIMIT 10
-      `),
-    ]);
+    // Scoped client IDs subquery: the manager's clients, optionally narrowed to one client.
+    // Factories (fresh fragment per call) so the same subquery/condition can be embedded repeatedly.
+    const scopedClientIds = () => clientFilter
+      ? sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND id = ${clientFilter}`
+      : sql`SELECT id FROM clients WHERE manager_id = ${managerId}`;
+    const campStatusCond = () => statusFilter ? sql`AND camp.status = ${statusFilter}` : sql``;
+    // Date-range conditions. `column` is the timestamp/date expression to compare (e.g. created_at, cds.report_date).
+    const dateCond = (column: string) => {
+      let f = sql``;
+      if (dateFrom) f = sql`${f} AND ${sql.raw(column)} >= ${dateFrom}`;
+      if (dateTo) f = sql`${f} AND ${sql.raw(column)} <= ${dateTo}`;
+      return f;
+    };
+    // For COUNT(CASE) on a LEFT JOINed leads row, the date bound goes inside the CASE so clients with
+    // zero in-range leads are still returned (the LEFT JOIN row is not filtered out by a WHERE clause).
+    const leadDateCaseCond = () => {
+      let f = sql``;
+      if (dateFrom) f = sql`${f} AND l.created_at >= ${dateFrom}`;
+      if (dateTo) f = sql`${f} AND l.created_at <= ${dateTo}`;
+      return f;
+    };
+
+    const [metricsRows, pipelineGroupRows, momentumRows, portfolioRows, watchlistRows, queueRows, filterClientRows] =
+      await Promise.all([
+        rawQuery<{ assigned_clients_count: number; campaigns_count: number }>(tx, sql`
+          SELECT
+            (SELECT COUNT(*)::int FROM (${scopedClientIds()}) AS sc) AS assigned_clients_count,
+            (SELECT COUNT(*)::int FROM campaigns camp WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}) AS campaigns_count
+        `),
+        rawQuery<{
+          qualification: string | null;
+          meeting_booked: boolean | null;
+          meeting_held: boolean | null;
+          offer_sent: boolean | null;
+          won: boolean | null;
+          count: number;
+        }>(tx, sql`
+          SELECT qualification, meeting_booked, meeting_held, offer_sent, won, COUNT(*)::int AS count
+          FROM leads
+          WHERE client_id IN (${scopedClientIds()})${dateCond("created_at")}
+          GROUP BY qualification, meeting_booked, meeting_held, offer_sent, won
+        `),
+        rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
+          SELECT
+            cds.report_date AS date,
+            COALESCE(SUM(cds.sent_count), 0)::int AS sent,
+            COALESCE(SUM(cds.reply_count), 0)::int AS replies,
+            COALESCE(SUM(cds.positive_replies_count), 0)::int AS positive
+          FROM campaign_daily_stats cds
+          JOIN campaigns camp ON camp.id = cds.campaign_id
+          WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}
+            ${dateFrom || dateTo ? dateCond("cds.report_date") : sql`AND cds.report_date >= ${since21d}`}
+          GROUP BY cds.report_date
+          ORDER BY cds.report_date ASC
+        `),
+        rawQuery<{
+          client_id: string;
+          client_name: string;
+          status: string | null;
+          kpi_leads: number | null;
+          kpi_meetings: number | null;
+          campaigns_count: number;
+          mql_count: number;
+          won_count: number;
+        }>(tx, sql`
+          SELECT
+            c.id AS client_id,
+            c.name AS client_name,
+            c.status,
+            c.kpi_leads,
+            c.kpi_meetings,
+            COUNT(DISTINCT camp.id)::int AS campaigns_count,
+            COUNT(DISTINCT CASE WHEN l.qualification = 'MQL'${leadDateCaseCond()} THEN l.id END)::int AS mql_count,
+            COUNT(DISTINCT CASE WHEN l.won = true${leadDateCaseCond()} THEN l.id END)::int AS won_count
+          FROM clients c
+          LEFT JOIN campaigns camp ON camp.client_id = c.id
+          LEFT JOIN leads l ON l.client_id = c.id
+          WHERE c.id IN (${scopedClientIds()})
+          GROUP BY c.id, c.name, c.status, c.kpi_leads, c.kpi_meetings
+          ORDER BY c.name
+        `),
+        rawQuery<{ campaign_id: string; campaign_name: string; client_id: string; status: string | null; sent: number; replies: number }>(tx, sql`
+          SELECT
+            camp.id AS campaign_id,
+            camp.name AS campaign_name,
+            camp.client_id,
+            camp.status,
+            COALESCE(SUM(cds.sent_count), 0)::int AS sent,
+            COALESCE(SUM(cds.reply_count), 0)::int AS replies
+          FROM campaigns camp
+          LEFT JOIN campaign_daily_stats cds ON cds.campaign_id = camp.id${dateCond("cds.report_date")}
+          WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}
+          GROUP BY camp.id, camp.name, camp.client_id, camp.status
+        `),
+        rawQuery<Record<string, unknown>>(tx, sql`
+          SELECT
+            l.id, l.created_at, l.updated_at, l.client_id,
+            l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
+            l.company_name, l.linkedin_url, l.gender, l.qualification,
+            l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+            l.industry, l.headcount_range, l.website, l.country,
+            l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
+            l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
+            l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+            l.source, l.reply_text, l.comments,
+            c.name AS client_name,
+            camp.name AS campaign_name,
+            COALESCE(r.reply_count, 0)::int AS reply_count,
+            r.last_reply_at
+          FROM leads l
+          JOIN clients c ON c.id = l.client_id
+          LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+          LEFT JOIN (
+            SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
+            FROM replies GROUP BY lead_id
+          ) r ON r.lead_id = l.id
+          WHERE l.client_id IN (${scopedClientIds()})${dateCond("l.created_at")}
+          ORDER BY COALESCE(l.updated_at, l.created_at) DESC
+          LIMIT 10
+        `),
+        rawQuery<{ id: string; name: string }>(tx, sql`
+          SELECT id, name FROM clients WHERE manager_id = ${managerId} ORDER BY name
+        `),
+      ]);
 
     const m = metricsRows[0];
     console.log(`[PERF][orm-gateway] loadManagerDashboardOverview: ${(performance.now() - t0).toFixed(1)}ms`);
@@ -1088,11 +1127,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     return {
       metrics: {
         assignedClientsCount: m?.assigned_clients_count ?? 0,
-        activeCampaignsCount: m?.active_campaigns_count ?? 0,
-        leadsInProgressCount: m?.leads_in_progress_count ?? 0,
-        unclassifiedRepliesCount: m?.unclassified_replies_count ?? 0,
-        recentRepliesCount14d: m?.recent_replies_count_14d ?? 0,
+        campaignsCount: m?.campaigns_count ?? 0,
       },
+      pipelineGroups: pipelineGroupRows,
+      campaignMomentum21d: momentumRows,
+      filterClients: filterClientRows.map((row) => ({ id: String(row.id), name: String(row.name) })),
       clientPortfolio: portfolioRows.map((row) => ({
         clientId: String(row.client_id),
         clientName: String(row.client_name),
@@ -1111,20 +1150,46 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         sent: row.sent ?? 0,
         replies: row.replies ?? 0,
       })),
-      leadQueue: queueRows.map((row) => ({
-        leadId: String(row.lead_id),
-        clientId: String(row.client_id),
-        clientName: String(row.client_name),
-        campaignId: row.campaign_id ? String(row.campaign_id) : null,
-        firstName: row.first_name ? String(row.first_name) : null,
-        lastName: row.last_name ? String(row.last_name) : null,
-        qualification: row.qualification ? String(row.qualification) : null,
-        meeting_booked: row.meeting_booked ?? null,
-        meeting_held: row.meeting_held ?? null,
-        offer_sent: row.offer_sent ?? null,
-        won: row.won ?? null,
-        updatedAt: toIsoString(row.updated_at),
-        createdAt: toIsoString(row.created_at),
+      leadQueue: queueRows.map((r) => ({
+        id: String(r.id),
+        created_at: r.created_at ? toIsoString(r.created_at) ?? "" : "",
+        updated_at: r.updated_at ? toIsoString(r.updated_at) ?? "" : "",
+        client_id: String(r.client_id),
+        campaign_id: r.campaign_id ? String(r.campaign_id) : null,
+        email: r.email ? String(r.email) : null,
+        first_name: r.first_name ? String(r.first_name) : null,
+        last_name: r.last_name ? String(r.last_name) : null,
+        job_title: r.job_title ? String(r.job_title) : null,
+        company_name: r.company_name ? String(r.company_name) : null,
+        linkedin_url: r.linkedin_url ? String(r.linkedin_url) : null,
+        gender: r.gender ? String(r.gender) : null,
+        qualification: r.qualification ? String(r.qualification) : null,
+        expected_return_date: r.expected_return_date ? String(r.expected_return_date) : null,
+        external_id: r.external_id ? String(r.external_id) : null,
+        phone_number: r.phone_number ? String(r.phone_number) : null,
+        phone_source: r.phone_source ? String(r.phone_source) : null,
+        industry: r.industry ? String(r.industry) : null,
+        headcount_range: r.headcount_range ? String(r.headcount_range) : null,
+        website: r.website ? String(r.website) : null,
+        country: r.country ? String(r.country) : null,
+        message_title: r.message_title ? String(r.message_title) : null,
+        message_number: r.message_number != null ? Number(r.message_number) : null,
+        response_time_hours: r.response_time_hours != null ? Number(r.response_time_hours) : null,
+        response_time_label: r.response_time_label ? String(r.response_time_label) : null,
+        meeting_booked: Boolean(r.meeting_booked),
+        meeting_held: Boolean(r.meeting_held),
+        offer_sent: Boolean(r.offer_sent),
+        won: Boolean(r.won),
+        added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
+        external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
+        external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
+        source: r.source ? String(r.source) : "smartlead",
+        reply_text: r.reply_text ? String(r.reply_text) : null,
+        comments: r.comments ? String(r.comments) : null,
+        clientName: String(r.client_name ?? ""),
+        campaignName: r.campaign_name ? String(r.campaign_name) : null,
+        replyCount: Number(r.reply_count ?? 0),
+        lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
       })),
     };
   }

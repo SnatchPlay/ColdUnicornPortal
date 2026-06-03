@@ -37,6 +37,7 @@ import type {
   LeadsListParams,
   LeadsListResponse,
   ManagerDashboardOverview,
+  ManagerDashboardParams,
   ShellData,
 } from "../types/view-contracts";
 import type {
@@ -511,7 +512,7 @@ export interface Repository {
   }): Promise<CoreSnapshot>;
   loadShellData(): Promise<ShellData>;
   loadAdminDashboardOverview(): Promise<AdminDashboardOverview>;
-  loadManagerDashboardOverview(managerId: string): Promise<ManagerDashboardOverview>;
+  loadManagerDashboardOverview(managerId: string, params?: ManagerDashboardParams): Promise<ManagerDashboardOverview>;
   loadClientDashboard(clientId: string): Promise<ClientDashboardPayload>;
   loadClientsOverview(): Promise<ClientsOverviewPayload>;
   loadClientsStats(): Promise<ClientsStatsPayload>;
@@ -610,8 +611,14 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadAdminDashboardOverview", {});
   },
 
-  async loadManagerDashboardOverview(managerId) {
-    return invokeOrmGatewaySelectWithRetry("loadManagerDashboardOverview", { managerId });
+  async loadManagerDashboardOverview(managerId, params) {
+    return invokeOrmGatewaySelectWithRetry("loadManagerDashboardOverview", {
+      managerId,
+      clientId: params?.clientId,
+      campaignStatus: params?.campaignStatus,
+      dateFrom: params?.dateFrom,
+      dateTo: params?.dateTo,
+    });
   },
 
   async loadClientDashboard(clientId) {

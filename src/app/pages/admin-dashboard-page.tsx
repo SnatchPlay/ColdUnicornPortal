@@ -9,62 +9,11 @@ import {
   YAxis,
 } from "recharts";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
-import { repository, RepositoryError } from "../data/repository";
+import { repository } from "../data/repository";
+import { DASHBOARD_CHART_TOOLTIP, MOMENTUM_CHARTS, formatMomentumSeries, mapDashboardError, pipelineCountsFromGroups } from "../lib/dashboard-momentum";
 import { formatDate, formatNumber } from "../lib/format";
-import { getLeadStage } from "../lib/selectors";
 import type { AdminDashboardOverview } from "../types/view-contracts";
 import { useAuth } from "../providers/auth";
-
-const TOOLTIP = {
-  contentStyle: {
-    backgroundColor: "rgba(2,6,23,0.98)",
-    border: "1px solid rgba(148,163,184,0.2)",
-    borderRadius: "16px",
-    color: "#fff",
-  },
-  labelStyle: {
-    color: "rgba(226,232,240,0.92)",
-  },
-  itemStyle: {
-    color: "#f8fafc",
-  },
-  cursor: false,
-};
-
-const MOMENTUM_CHARTS = [
-  {
-    key: "sent" as const,
-    title: "Campaign momentum: Sent",
-    subtitle: "21-day sent trend.",
-    stroke: "#38bdf8",
-    fill: "#38bdf822",
-  },
-  {
-    key: "replies" as const,
-    title: "Campaign momentum: Replies",
-    subtitle: "21-day replies trend.",
-    stroke: "#22c55e",
-    fill: "#22c55e22",
-  },
-  {
-    key: "positive" as const,
-    title: "Campaign momentum: Positive",
-    subtitle: "21-day positive replies trend.",
-    stroke: "#f59e0b",
-    fill: "#f59e0b22",
-  },
-];
-
-function mapDashboardError(reason: unknown): string {
-  if (reason instanceof RepositoryError) {
-    if (reason.kind === "timeout") return `Loading timed out. A database performance issue may be affecting this view.`;
-    if (reason.kind === "permission") return `Access to dashboard data is blocked by your current permissions.`;
-    if (reason.kind === "network") return `Dashboard data could not be loaded due to a network error. Try again.`;
-    return reason.message;
-  }
-  if (reason instanceof Error) return reason.message;
-  return "Failed to load dashboard data.";
-}
 
 function useAdminDashboard() {
   const { identity, loading: authLoading } = useAuth();
@@ -99,24 +48,9 @@ function useAdminDashboard() {
 export function AdminDashboardPage() {
   const { data, loading, error, refresh } = useAdminDashboard();
 
-  const pipelineCounts = useMemo(() => {
-    let mql = 0, preMql = 0, beyondMql = 0, unqualified = 0;
-    for (const group of data?.pipelineGroups ?? []) {
-      const stage = getLeadStage(group);
-      if (stage === "MQL") mql += group.count;
-      else if (stage === "preMQL") preMql += group.count;
-      else if (stage === "unqualified") unqualified += group.count;
-      else beyondMql += group.count;
-    }
-    return { mql, preMql, beyondMql, unqualified };
-  }, [data]);
+  const pipelineCounts = useMemo(() => pipelineCountsFromGroups(data?.pipelineGroups), [data]);
 
-  const campaignSeries = useMemo(() => {
-    return (data?.campaignMomentum21d ?? []).map((item) => ({
-      ...item,
-      label: formatDate(item.date, { day: "2-digit", month: "short" }),
-    }));
-  }, [data]);
+  const campaignSeries = useMemo(() => formatMomentumSeries(data?.campaignMomentum21d), [data]);
 
   const managerCapacityRows = useMemo(() => {
     return (data?.managerCapacity ?? []).map((row) => ({
@@ -206,7 +140,7 @@ export function AdminDashboardPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                        <Tooltip {...TOOLTIP} />
+                        <Tooltip {...DASHBOARD_CHART_TOOLTIP} />
                         <Area type="monotone" dataKey={chart.key} stroke={chart.stroke} fill={chart.fill} strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
