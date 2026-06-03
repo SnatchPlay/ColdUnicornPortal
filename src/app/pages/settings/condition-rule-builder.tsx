@@ -60,11 +60,11 @@ import type {
 // ---------- helpers --------------------------------------------------------
 
 const SEVERITY_OPTIONS: { id: ConditionSeverity; label: string; chip: string }[] = [
-  { id: "good", label: "Good", chip: "border-emerald-400/40 bg-emerald-500/15 text-emerald-100" },
-  { id: "info", label: "Info", chip: "border-sky-400/40 bg-sky-500/15 text-sky-100" },
-  { id: "warning", label: "Warning", chip: "border-amber-400/40 bg-amber-500/15 text-amber-100" },
-  { id: "danger", label: "Danger", chip: "border-red-400/40 bg-red-500/15 text-red-100" },
-  { id: "critical_over", label: "Critical", chip: "border-red-500/60 bg-red-600/30 text-red-50" },
+  { id: "good",          label: "Good",     chip: "sev-badge-good" },
+  { id: "info",          label: "Info",     chip: "border-sky-400/40 bg-sky-500/15 text-sky-100" },
+  { id: "warning",       label: "Warning",  chip: "sev-badge-warning" },
+  { id: "danger",        label: "Danger",   chip: "sev-badge-danger" },
+  { id: "critical_over", label: "Critical", chip: "sev-badge-critical" },
 ];
 
 const OPERATOR_LABEL: Record<ConditionOperator, string> = {
