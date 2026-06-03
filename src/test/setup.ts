@@ -1,4 +1,13 @@
 import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+// Guarantee DOM teardown between every test, regardless of RTL auto-cleanup detection.
+// Without this, leftover renders intermittently leak across tests run in the same worker
+// (surfaced as "multiple elements found" in unrelated suites).
+afterEach(() => {
+  cleanup();
+});
 
 class ResizeObserverMock {
   observe() {}

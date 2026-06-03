@@ -87,6 +87,14 @@ export interface LoadManagerDashboardPayload {
   action: "loadManagerDashboardOverview";
   /** Effective manager ID (post-impersonation from identity.id). */
   managerId: string;
+  /** Optional: scope the whole dashboard to a single client. */
+  clientId?: string;
+  /** Optional: campaign status filter for watchlist/momentum/metrics. Defaults to "active"; "all" disables. */
+  campaignStatus?: string;
+  /** Optional ISO date (YYYY-MM-DD) inclusive lower bound for leads (created_at) and stats (report_date). */
+  dateFrom?: string;
+  /** Optional ISO date (YYYY-MM-DD) inclusive upper bound. */
+  dateTo?: string;
 }
 
 export interface LoadClientDashboardPayload {
@@ -485,7 +493,17 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     if (!hasStringField(payload, "managerId")) {
       return { ok: false, error: "loadManagerDashboardOverview requires managerId." };
     }
-    return { ok: true, value: { action, managerId: String(payload.managerId) } };
+    return {
+      ok: true,
+      value: {
+        action,
+        managerId: String(payload.managerId),
+        clientId: isString(payload.clientId) ? payload.clientId : undefined,
+        campaignStatus: isString(payload.campaignStatus) ? payload.campaignStatus : undefined,
+        dateFrom: isString(payload.dateFrom) ? payload.dateFrom : undefined,
+        dateTo: isString(payload.dateTo) ? payload.dateTo : undefined,
+      },
+    };
   }
 
   if (action === "loadClientDashboard") {

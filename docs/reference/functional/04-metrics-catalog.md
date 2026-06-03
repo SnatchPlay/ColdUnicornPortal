@@ -502,41 +502,45 @@ Visible to manager and admin in ClientsPage "MoM" tab.
 
 ## 12. Manager-dashboard aggregates
 
-Inline in [`manager-dashboard-page.tsx`](../../../src/app/pages/manager-dashboard-page.tsx).
+Computed **server-side** in the `loadManagerDashboardOverview` handler of [`orm-gateway/index.ts`](../../../supabase/functions/orm-gateway/index.ts); the page ([`manager-dashboard-page.tsx`](../../../src/app/pages/manager-dashboard-page.tsx)) only derives the MQL / preMQL split and KPI-progress ratios from the returned facts.
+
+**Filters (all optional, passed to the gateway):** `clientId` scopes the whole dashboard to one client; `campaignStatus` (default `active`, `all` disables) restricts the campaign-based surfaces (campaigns metric, watchlist, momentum); `dateFrom`/`dateTo` (ISO `YYYY-MM-DD`, default = last 30 days) scope all period-sensitive facts — leads by `created_at` (pipeline split, portfolio MQL/won, lead queue) and `campaign_daily_stats` by `report_date` (momentum, watchlist). `Assigned clients` and the campaign count stay structural. The page re-fetches on any filter change with a `loadIdRef` stale guard. `filterClients` (all manager clients, unfiltered) populates the client dropdown.
+
+> **Why date bounds live inside `COUNT(CASE …)` for the portfolio query:** the portfolio LEFT JOINs leads; a `WHERE l.created_at …` would drop clients with zero in-range leads. Putting the bound inside the CASE (and in the watchlist's JOIN `ON`) keeps every scoped client/campaign while counting only in-range activity.
 
 ### 12.1 Assigned clients
 
-- **Formula:** `scopeClients(identity, clients).length`.
+- **Formula:** `COUNT(*)` over the scoped clients subquery (`manager_id = managerId`, optionally `AND id = clientId`).
 - **Source:** `clients.manager_id`.
-- **Scope:** clients where `manager_id = identity.id`.
 
-### 12.2 Active campaigns
+### 12.2 Campaigns (status-filtered)
 
-- **Formula:** `count(scopeCampaigns(вЂ¦) WHERE status = 'active')`.
-- **Source:** `campaigns.status`.
+- **Formula:** `COUNT(campaigns WHERE client_id IN scopedClients [AND status = campaignStatus])`.
+- **Source:** `campaigns.status`. Card label reflects the active status filter (e.g. "Active campaigns", "Stopped campaigns").
 
-### 12.3 Leads in progress
+### 12.3 MQLs / preMQLs split <a id="123-mqls-premqls-split"></a>
 
-- **Formula:** `count(scopeLeads(вЂ¦) WHERE stage в€‰ ('won','rejected'))` roughly; the page uses `count(scopedLeads)` over a recency filter (leads updated in last 14 days are the working set).
+- **Source:** server returns `pipelineGroups` (raw `qualification`/`meeting_booked`/`meeting_held`/`offer_sent`/`won` combinations + count) for the scoped leads. The page applies `getLeadStage` to each group (same as the Admin dashboard) and accumulates:
+  - **MQLs** = leads whose resolved stage is `MQL`. Hint shows `beyondMql` (leads moved past MQL).
+  - **preMQLs** = leads whose resolved stage is `preMQL`. Hint shows `unqualified` (leads with no qualification yet).
+- **Why:** replaces the former single "Leads in progress" card. The split mirrors the Admin dashboard and surfaces qualification health at a glance. **Unclassified replies** (former card 4) was removed — reply classification is owned by n8n and there is no portal triage UI ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-no-reply-triage-ui)).
 
-### 12.4 Unclassified replies <a id="125-unclassified-replies"></a>
+### 12.4 Per-client KPI progress
 
-- **Formula:** `count(scopeReplies(вЂ¦) WHERE classification IS NULL)`.
-- **Source:** `replies.classification`.
-- **Interpretation:** sanity check on **n8n ingestion**, not a user action queue. All replies are classified by n8n; an "unclassified" count growing means ingestion is lagging or broken. There is no triage UI ([decision](../../BUSINESS_LOGIC.md#decision-2026-04-25-no-reply-triage-ui)).
-
-### 12.5 Per-client KPI progress
-
-For each assigned client:
+For each scoped client (server `clientPortfolio` rows):
 
 - `campaignsCount` = `count(campaigns WHERE client_id = client.id)`.
 - `mqls` = `count(leads WHERE client_id = client.id AND qualification='MQL')`.
 - `won`  = `count(leads WHERE client_id = client.id AND won=true)`.
-- Progress ratios: `mqls / client.kpi_leads`, `meetings / client.kpi_meetings` (target values from `clients.kpi_leads` / `kpi_meetings`).
+- Progress ratio (page-derived): `mqls / client.kpi_leads` (target from `clients.kpi_leads`).
 
-### 12.6 Campaign watchlist
+### 12.5 Campaign watchlist
 
-Filtering logic in `manager-dashboard-page.tsx` selects campaigns that are either `stopped`/`launching` **or** have a low reply rate computed from the 14-day window of `campaign_daily_stats`.
+Server returns scoped campaigns (status-filtered) with total `sent`/`reply` from `campaign_daily_stats`. The page keeps campaigns that are non-`active` **or** have reply rate `< 1%`, sorts by reply rate ascending, slices to 8.
+
+### 12.6 Campaign momentum (Sent / Replies / Positive)
+
+Daily series over the **selected timeframe** (default last 30 days; falls back to 21 days only if no range is sent) from `campaign_daily_stats` joined to scoped + status-filtered campaigns, grouped by `report_date`: `sent = SUM(sent_count)`, `replies = SUM(reply_count)`, `positive = SUM(positive_replies_count)`. Same payload shape as the Admin dashboard `campaignMomentum21d` (which stays fixed at 21 days). See [08 §4](./08-charts-catalog.md#4-manager-dashboard-surfaces).
 
 ### 12.7 Internal Statistics summary and manager breakdown
 

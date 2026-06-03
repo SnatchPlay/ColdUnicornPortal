@@ -145,13 +145,20 @@ Page: [`client-campaigns-page.tsx`](../../../src/app/pages/client-campaigns-page
 
 Page: [`manager-dashboard-page.tsx`](../../../src/app/pages/manager-dashboard-page.tsx).
 
-The manager dashboard contains **no recharts graphs** (it optimises for tabular situational awareness). The surfaces are:
+The manager dashboard now mirrors the Admin dashboard's three **campaign momentum `AreaChart`s** plus its tabular surfaces. Uses the shared `DASHBOARD_CHART_TOOLTIP` + `MOMENTUM_CHARTS` config from [`dashboard-momentum.ts`](../../../src/app/lib/dashboard-momentum.ts). Layout: charts in the **left** column, tabular surfaces (Lead queue, watchlist, portfolio) in the **right** column. The momentum series covers the **selected timeframe** (default 30 days), not a fixed window.
 
-- Campaign watchlist вЂ” tabular.
-- Assigned client portfolio вЂ” tabular with inline KPI progress bars (HTML `<div>` widths, not recharts).
-- Lead queue вЂ” tabular.
+- **Campaign momentum: Sent** — `AreaChart`, `dataKey="sent"`, stroke `#38bdf8`, fill `#38bdf822`.
+- **Campaign momentum: Replies** — `AreaChart`, `dataKey="replies"`, stroke `#22c55e`, fill `#22c55e22`.
+- **Campaign momentum: Positive** — `AreaChart`, `dataKey="positive"`, stroke `#f59e0b`, fill `#f59e0b22`.
+  - **Data:** server `campaignMomentum21d` (21-day daily series from `campaign_daily_stats` joined to scoped + status-filtered campaigns). Same shape as [§7 Admin momentum](#7-admin-dashboard-charts). Each maps to `{ date, label, sent, replies, positive }`; empty → `EmptyState`.
 
-No charts to catalogue here beyond the HTML progress bars already described in [06 В§1.4](./06-manager-portal.md#14-assigned-client-portfolio-surface).
+Tabular surfaces (no recharts):
+
+- Lead queue — clickable cards opening the editable lead drawer (shared `LeadEditForm` + `LeadConversation` + `LeadMetaSection`).
+- Campaign watchlist — tabular.
+- Assigned client portfolio — tabular with inline KPI progress (HTML, not recharts), see [06 §1.4](./06-manager-portal.md#14-assigned-client-portfolio-surface).
+
+Both chart sets and the watchlist/portfolio/momentum respond to the dashboard's **client** and **campaign-status** filters.
 
 ---
 
