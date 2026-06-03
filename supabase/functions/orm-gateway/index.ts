@@ -2401,7 +2401,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         ${input.field_type},
         ${optionsJson === null ? null : JSON.stringify(optionsJson)}::jsonb,
         ${input.position ?? 0},
-        ${editableBy}::jsonb,
+        array(select jsonb_array_elements_text(${editableBy}::jsonb)),
         nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
       )
       returning id, name, field_type, options, position, editable_by, created_by, created_at
@@ -2424,7 +2424,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         field_type = case when ${setType} then ${patch.field_type ?? null} else field_type end,
         options = case when ${setOptions} then ${patch.options === undefined || patch.options === null ? null : JSON.stringify(patch.options)}::jsonb else options end,
         position = case when ${setPosition} then ${patch.position ?? 0} else position end,
-        editable_by = case when ${setEditableBy} then ${patch.editable_by === undefined ? JSON.stringify(["master_admin"]) : JSON.stringify(patch.editable_by)}::jsonb else editable_by end
+        editable_by = case when ${setEditableBy} then array(select jsonb_array_elements_text(${patch.editable_by === undefined ? JSON.stringify(["master_admin"]) : JSON.stringify(patch.editable_by)}::jsonb)) else editable_by end
       where id = ${payload.fieldId}
       returning id, name, field_type, options, position, editable_by, created_by, created_at
     `);
