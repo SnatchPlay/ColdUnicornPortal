@@ -409,12 +409,10 @@ function YesNoPill({ value }: { value: boolean }) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-        value
-          ? "bg-emerald-500/15 text-emerald-300"
-          : "bg-neutral-500/10 text-neutral-400",
+        value ? "yes-pill" : "bg-neutral-500/10 text-neutral-400",
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", value ? "bg-emerald-400" : "bg-neutral-500")} />
+      <span className={cn("h-1.5 w-1.5 rounded-full", value ? "yes-pill-dot" : "bg-neutral-500")} />
       {value ? "Yes" : "No"}
     </span>
   );
@@ -423,17 +421,12 @@ function YesNoPill({ value }: { value: boolean }) {
 function ReplyClassificationBadge({ value }: { value: string | null }) {
   if (!value) return <span className="text-xs text-neutral-500">unclassified</span>;
   const tone =
-    value === "Interested"
-      ? "bg-emerald-500/15 text-emerald-300"
-      : value === "OOO"
-        ? "bg-amber-500/15 text-amber-300"
-        : value === "NRR"
-          ? "bg-sky-500/15 text-sky-300"
-          : value === "Left_Company"
-            ? "bg-violet-500/15 text-violet-300"
-            : value === "Spam_Inbound"
-              ? "bg-red-500/15 text-red-300"
-              : "bg-neutral-500/15 text-neutral-300";
+    value === "Interested"   ? "reply-badge-interested" :
+    value === "OOO"          ? "reply-badge-ooo" :
+    value === "NRR"          ? "reply-badge-nrr" :
+    value === "Left_Company" ? "reply-badge-left" :
+    value === "Spam_Inbound" ? "reply-badge-spam" :
+                               "reply-badge-neutral";
   return (
     <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium", tone)}>
       {value.replace(/_/g, " ")}

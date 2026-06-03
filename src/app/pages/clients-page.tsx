@@ -52,12 +52,12 @@ interface CreateClientDraft {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  Active: "border-emerald-500 bg-emerald-900/40 text-emerald-200",
-  Abo: "border-sky-400 bg-sky-900/40 text-sky-200",
-  Sales: "border-violet-400 bg-violet-900/40 text-violet-200",
-  "On hold": "border-amber-400 bg-amber-900/40 text-amber-200",
-  Offboarding: "border-orange-400 bg-orange-900/40 text-orange-200",
-  Inactive: "border-red-500 bg-red-900/40 text-red-200",
+  Active: "status-badge-active",
+  Abo: "status-badge-abo",
+  Sales: "status-badge-sales",
+  "On hold": "status-badge-onhold",
+  Offboarding: "status-badge-offboard",
+  Inactive: "status-badge-inactive",
 };
 
 function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity | null): boolean {

@@ -13,7 +13,9 @@ import {
   Settings,
   UserCog,
   Users,
+  Contrast,
 } from "lucide-react";
+import { useColorTheme } from "../providers/color-theme";
 import { cn } from "./ui/utils";
 import {
   Select,
@@ -152,6 +154,7 @@ const SidebarPanel = memo(function SidebarPanel({
   const [, startNavTransition] = useTransition();
   const [managerTargetId, setManagerTargetId] = useState("");
   const [clientTargetId, setClientTargetId] = useState("");
+  const { isContrast, toggleTheme } = useColorTheme();
 
   function handleImpersonateAdmin() {
     if (!actorIdentity) return;
@@ -329,6 +332,18 @@ const SidebarPanel = memo(function SidebarPanel({
             <p className="truncate text-sm text-white">{identity.fullName}</p>
             <p className="truncate text-xs text-neutral-500">{getRoleLabel(identity.role)}</p>
           </div>
+          <button
+            onClick={toggleTheme}
+            title={isContrast ? "Switch to default colours" : "Switch to contrast colours (colorblind-friendly)"}
+            className={cn(
+              "rounded-lg p-2 transition",
+              isContrast
+                ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                : "text-neutral-400 hover:bg-[#111] hover:text-white",
+            )}
+          >
+            <Contrast className="h-4 w-4" />
+          </button>
           <button
             onClick={() => {
               onNavigate();

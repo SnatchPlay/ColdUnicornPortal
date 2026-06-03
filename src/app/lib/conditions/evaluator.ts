@@ -309,9 +309,9 @@ export function getCellCondition(results: ConditionEvaluationResult[], columnKey
 export function getSeverityClassName(severity: ConditionSeverity | null) {
   if (!severity) return "";
 
-  if (severity === "critical_over") return "border-fuchsia-400/60 bg-fuchsia-500/12 text-fuchsia-100";
-  if (severity === "danger") return "border-red-400/45 bg-red-500/12 text-red-100";
-  if (severity === "warning") return "border-amber-300/45 bg-amber-500/12 text-amber-100";
+  if (severity === "critical_over") return "sev-badge-critical";
+  if (severity === "danger") return "sev-badge-danger";
+  if (severity === "warning") return "sev-badge-warning";
   if (severity === "info") return "border-sky-300/45 bg-sky-500/12 text-sky-100";
-  return "border-emerald-300/45 bg-emerald-500/12 text-emerald-100";
+  return "sev-badge-good";
 }

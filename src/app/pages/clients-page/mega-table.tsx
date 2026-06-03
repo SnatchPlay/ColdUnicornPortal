@@ -188,21 +188,15 @@ function buildColumns(): MegaColumn[] {
     render: (row) => {
       const s = row.client.status ?? "—";
       const cls =
-        s === "Active"
-          ? "border-emerald-500 bg-emerald-900/60"
-          : s === "Abo"
-          ? "border-sky-400 bg-sky-900/60"
-          : s === "Sales"
-          ? "border-violet-400 bg-violet-900/60"
-          : s === "On hold"
-          ? "border-amber-400 bg-amber-900/60"
-          : s === "Offboarding"
-          ? "border-orange-400 bg-orange-900/60"
-          : s === "Inactive"
-          ? "border-red-500 bg-red-900/60"
-          : "border-border bg-white/5";
+        s === "Active"     ? "status-badge-active" :
+        s === "Inactive"   ? "status-badge-inactive" :
+        s === "Abo"        ? "status-badge-abo" :
+        s === "Sales"      ? "status-badge-sales" :
+        s === "On hold"    ? "status-badge-onhold" :
+        s === "Offboarding"? "status-badge-offboard" :
+        "border-border bg-white/5 text-white";
       return (
-        <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white", cls)}>
+        <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", cls)}>
           {s}
         </span>
       );
@@ -525,18 +519,10 @@ function severityLabel(severity: ConditionSeverity): string {
 }
 
 function conditionCellWrapperClass(severity: ConditionSeverity): string {
-  if (severity === "critical_over") {
-    return "rounded border border-fuchsia-400 bg-fuchsia-900/70 text-white font-semibold";
-  }
-  if (severity === "danger") {
-    return "rounded border border-red-500 bg-red-900/70 text-white font-semibold";
-  }
-  if (severity === "warning") {
-    return "rounded border border-amber-400 bg-amber-900/70 text-white font-semibold";
-  }
-  if (severity === "good") {
-    return "rounded border border-emerald-500 bg-emerald-900/70 text-white font-medium";
-  }
+  if (severity === "critical_over") return "cond-cell cond-cell-critical";
+  if (severity === "danger") return "cond-cell cond-cell-danger";
+  if (severity === "warning") return "cond-cell cond-cell-warning";
+  if (severity === "good") return "cond-cell cond-cell-good";
   return "rounded";
 }
 
@@ -545,7 +531,7 @@ function renderCellWithCondition(content: ReactNode, condition: ConditionEvaluat
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={cn("px-1.5 py-0.5", conditionCellWrapperClass(condition.severity))}>{content}</div>
+        <div className={conditionCellWrapperClass(condition.severity)}>{content}</div>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
         <p>

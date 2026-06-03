@@ -229,6 +229,88 @@
   }
 }
 
+/* ── Severity + status colour system ──────────────────────────────────────
+   These rules are intentionally NOT inside any @layer so they sit above
+   Tailwind's @layer utilities in the CSS cascade. This lets them override
+   the Badge component's default bg-primary / text-primary-foreground without
+   needing !important.
+
+   Neon palette (contrast layer):
+     good/active    → #00ff41  matrix green    (black text)
+     danger/inactive→ #ff0033  neon red        (white text)
+     warning        → #ffe000  electric yellow (black text)
+     critical       → #ff00ff  neon magenta    (black text)
+     abo/sky        → #00e5ff  electric cyan   (black text)
+     sales/violet   → #bf00ff  neon violet     (white text)
+     on-hold/amber  → #ffa500  neon amber      (black text)
+     offboarding    → #ff6600  neon orange     (white text)
+──────────────────────────────────────────────────────────────────────────── */
+
+/* --- Condition cell wrappers (coloured boxes inside mega-table cells) --- */
+.cond-cell {
+  border-radius: 0.25rem;
+  border-width: 1px;
+  border-style: solid;
+  padding: 0.125rem 0.375rem;
+}
+.cond-cell-good    { border-color: #10b981; background-color: rgb(6 78 59 / 0.7);   color: white; font-weight: 500; }
+.cond-cell-danger  { border-color: #ef4444; background-color: rgb(127 29 29 / 0.7); color: white; font-weight: 600; }
+.cond-cell-warning { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.7); color: white; font-weight: 600; }
+.cond-cell-critical{ border-color: #e879f9; background-color: rgb(112 26 117 / 0.7);color: white; font-weight: 600; }
+
+[data-color-theme="contrast"] .cond-cell-good    { border-color: #00cc33; background-color: #00ff41; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-danger  { border-color: #cc0022; background-color: #ff0033; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-warning { border-color: #ccb300; background-color: #ffe000; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-critical{ border-color: #cc00cc; background-color: #ff00ff; color: #000; font-weight: 800; }
+
+/* --- Severity badges (name-column rollup, condition chips, rule builder) --- */
+.sev-badge-good    { border-color: rgb(167 243 208 / 0.45); background-color: rgb(16 185 129 / 0.12); color: #d1fae5; }
+.sev-badge-danger  { border-color: rgb(252 165 165 / 0.45); background-color: rgb(239 68 68 / 0.12);  color: #fee2e2; }
+.sev-badge-warning { border-color: rgb(253 230 138 / 0.45); background-color: rgb(245 158 11 / 0.12); color: #fef3c7; }
+.sev-badge-critical{ border-color: rgb(240 171 252 / 0.6);  background-color: rgb(217 70 239 / 0.12); color: #fae8ff; }
+
+[data-color-theme="contrast"] .sev-badge-good    { border-color: #00ff41; background-color: rgba(0,255,65,0.15);  color: #00ff41; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-danger  { border-color: #ff0033; background-color: rgba(255,0,51,0.15);  color: #ff4466; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-warning { border-color: #ffe000; background-color: rgba(255,224,0,0.15); color: #ffe000; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-critical{ border-color: #ff00ff; background-color: rgba(255,0,255,0.15); color: #ff66ff; font-weight: 700; }
+
+/* --- Client status badges (Active / Inactive / Abo / Sales / …) --- */
+.status-badge-active   { border-color: #10b981; background-color: rgb(6 78 59 / 0.4);   color: #6ee7b7; }
+.status-badge-inactive { border-color: #ef4444; background-color: rgb(127 29 29 / 0.4); color: #fca5a5; }
+.status-badge-abo      { border-color: #38bdf8; background-color: rgb(12 74 110 / 0.4); color: #7dd3fc; }
+.status-badge-sales    { border-color: #a78bfa; background-color: rgb(76 29 149 / 0.4); color: #c4b5fd; }
+.status-badge-onhold   { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.4); color: #fde68a; }
+.status-badge-offboard { border-color: #fb923c; background-color: rgb(124 45 18 / 0.4); color: #fdba74; }
+
+[data-color-theme="contrast"] .status-badge-active   { border-color: #00cc33; background-color: #00ff41; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-inactive { border-color: #cc0022; background-color: #ff0033; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-abo      { border-color: #00b8cc; background-color: #00e5ff; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-sales    { border-color: #9900cc; background-color: #bf00ff; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-onhold   { border-color: #cc8400; background-color: #ffa500; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-offboard { border-color: #cc5200; background-color: #ff6600; color: #fff; font-weight: 800; }
+
+/* --- Reply classification badges (Interested / OOO / NRR / Left_Company / Spam) --- */
+.reply-badge-interested { background-color: rgb(16 185 129 / 0.15);  color: #6ee7b7; }
+.reply-badge-ooo        { background-color: rgb(245 158 11 / 0.15);  color: #fcd34d; }
+.reply-badge-nrr        { background-color: rgb(56 189 248 / 0.15);  color: #7dd3fc; }
+.reply-badge-left       { background-color: rgb(167 139 250 / 0.15); color: #c4b5fd; }
+.reply-badge-spam       { background-color: rgb(239 68 68 / 0.15);   color: #fca5a5; }
+.reply-badge-neutral    { background-color: rgb(115 115 115 / 0.15); color: #a3a3a3; }
+
+[data-color-theme="contrast"] .reply-badge-interested { background-color: rgba(0,255,65,0.2);    color: #00ff41; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-ooo        { background-color: rgba(255,224,0,0.2);   color: #ffe000; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-nrr        { background-color: rgba(0,229,255,0.2);   color: #00e5ff; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-left       { background-color: rgba(191,0,255,0.2);   color: #df80ff; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-spam       { background-color: rgba(255,0,51,0.2);    color: #ff4466; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-neutral    { background-color: rgba(115,115,115,0.2); color: #d4d4d4; font-weight: 700; }
+
+/* --- Yes/No pill (lead boolean fields) --- */
+.yes-pill     { background-color: rgb(16 185 129 / 0.15); color: #6ee7b7; }
+.yes-pill-dot { background-color: #10b981; }
+
+[data-color-theme="contrast"] .yes-pill     { background-color: rgba(0,255,65,0.15); color: #00ff41; font-weight: 700; }
+[data-color-theme="contrast"] .yes-pill-dot { background-color: #00ff41; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
