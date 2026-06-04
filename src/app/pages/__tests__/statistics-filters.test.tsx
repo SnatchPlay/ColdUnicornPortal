@@ -119,7 +119,7 @@ describe("statistics internal filters", () => {
     await act(async () => {});
 
     // daily_stats used: 3 active days, sum(emails_sent) = 100+110+120 = 330
-    expect(screen.getByText("Sent volume chart with 30 calendar days and 3 active days.")).toBeInTheDocument();
+    expect(screen.getByText("Sent volume chart with 21 calendar days and 3 active days.")).toBeInTheDocument();
     expect(screen.getAllByText("330").length).toBeGreaterThan(0);
   });
 
@@ -142,7 +142,7 @@ describe("statistics internal filters", () => {
     await chooseOptionByLabel("Filter statistics by campaign", "Campaign Alpha");
     await act(async () => {}); // flush loadCampaignStats
 
-    expect(screen.getByText("Sent volume chart with 30 calendar days and 1 active day.")).toBeInTheDocument();
+    expect(screen.getByText("Sent volume chart with 21 calendar days and 1 active day.")).toBeInTheDocument();
     expect(screen.getAllByText("150").length).toBeGreaterThan(0);
   });
 
@@ -199,11 +199,11 @@ describe("statistics internal filters", () => {
     await act(async () => {});
 
     // Default 30-day view: both daily stat dates are in range → 2 active days, sent=100+80=180
-    expect(screen.getByText("Sent volume chart with 30 calendar days and 2 active days.")).toBeInTheDocument();
+    expect(screen.getByText("Sent volume chart with 21 calendar days and 2 active days.")).toBeInTheDocument();
     expect(screen.getAllByText("180").length).toBeGreaterThan(0);
 
     // Switch to Last 7 Days — older date (2026-05-01) falls outside
-    fireEvent.click(screen.getByRole("button", { name: /Last 30 Days/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Last 21 Days/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Last 7 Days" }));
 
     // Only latest date (2026-05-20) is in a 7-day window around today only if today is close.

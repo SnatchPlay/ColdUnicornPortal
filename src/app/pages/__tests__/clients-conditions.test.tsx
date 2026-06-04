@@ -215,7 +215,7 @@ describe("clients condition surfaces", () => {
     await renderPage();
 
     const cell = screen.getByText("3.0%").closest("div");
-    expect(cell?.className).toContain("border-red");
+    expect(cell?.className).toContain("cond-cell-danger");
     expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
   });
 
@@ -241,7 +241,7 @@ describe("clients condition surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open details for Acme" }));
 
     const dangerCells = screen.getAllByText("70");
-    const highlighted = dangerCells.find((item) => item.closest("div")?.className.includes("border-red"));
+    const highlighted = dangerCells.find((item) => item.closest("div")?.className.includes("cond-cell-danger"));
     expect(highlighted).toBeTruthy();
   });
 
