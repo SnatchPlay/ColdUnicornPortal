@@ -1,15 +1,15 @@
 import { useMemo, useState } from "react";
 import {
   Area,
-  AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
   XAxis,
   YAxis,
 } from "recharts";
+import { linearRegression } from "../lib/dashboard-momentum";
 import {
   ChartPanel,
   ChartTooltip,
@@ -62,9 +62,23 @@ export function ClientStatisticsPage() {
     () => getClientKpis(scopedClients, scopedCampaigns, timeframeLeads, timeframeStats),
     [scopedCampaigns, scopedClients, timeframeLeads, timeframeStats],
   );
-  const dailySent = useMemo(() => getDailySentSeries(timeframeStats), [timeframeStats]);
-  const activity = useMemo(() => getPipelineActivitySeries(timeframeLeads), [timeframeLeads]);
-  const performance = useMemo(() => getCampaignPerformance(scopedCampaigns, timeframeStats), [scopedCampaigns, timeframeStats]);
+  const dailySent = useMemo(() => {
+    const pts = getDailySentSeries(timeframeStats);
+    const trend = linearRegression(pts.map((p) => p.sent));
+    return pts.map((p, i) => ({ ...p, sent_trend: trend[i] }));
+  }, [timeframeStats]);
+  const activity = useMemo(() => {
+    const pts = getPipelineActivitySeries(timeframeLeads);
+    const mqlsTrend = linearRegression(pts.map((p) => p.mqls));
+    const meetingsTrend = linearRegression(pts.map((p) => p.meetings));
+    const wonTrend = linearRegression(pts.map((p) => p.won));
+    return pts.map((p, i) => ({ ...p, mqls_trend: mqlsTrend[i], meetings_trend: meetingsTrend[i], won_trend: wonTrend[i] }));
+  }, [timeframeLeads]);
+  const performance = useMemo(() => {
+    const pts = getCampaignPerformance(scopedCampaigns, timeframeStats);
+    const trend = linearRegression(pts.map((p) => p.replyRate));
+    return pts.map((p, i) => ({ ...p, replyRate_trend: trend[i] }));
+  }, [scopedCampaigns, timeframeStats]);
   const conversion = useMemo(() => getConversionRates(timeframeLeads, kpis.prospects), [kpis.prospects, timeframeLeads]);
   const timeframeLabel = getTimeframeLabel(timeframe);
 
@@ -116,8 +130,11 @@ export function ClientStatisticsPage() {
                 <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
                 <ChartTooltip />
                 <Line type="monotone" dataKey="mqls" stroke="#3b82f6" strokeWidth={2.5} />
+                <Line type="monotone" dataKey="mqls_trend" stroke="#3b82f6" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
                 <Line type="monotone" dataKey="meetings" stroke="#8b5cf6" strokeWidth={2.5} />
+                <Line type="monotone" dataKey="meetings_trend" stroke="#8b5cf6" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
                 <Line type="monotone" dataKey="won" stroke="#22c55e" strokeWidth={2.5} />
+                <Line type="monotone" dataKey="won_trend" stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
               </LineChart>
             </ResponsiveChart>
           </>
@@ -132,13 +149,14 @@ export function ClientStatisticsPage() {
             <>
               <ChartTextSummary summary={`Daily sent area chart with ${dailySent.length} points and total sent ${formatNumber(kpis.emailsSent)}.`} />
               <ResponsiveChart>
-                <AreaChart data={dailySent}>
+                <ComposedChart data={dailySent}>
                   <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <ChartTooltip />
                   <Area type="monotone" dataKey="sent" stroke="#22c55e" fill="#22c55e22" strokeWidth={2.5} />
-                </AreaChart>
+                  <Line type="monotone" dataKey="sent_trend" stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
+                </ComposedChart>
               </ResponsiveChart>
             </>
           )}
@@ -156,13 +174,14 @@ export function ClientStatisticsPage() {
                 )} campaigns in selected timeframe.`}
               />
               <ResponsiveChart>
-                <BarChart data={performance.slice(0, 8)}>
+                <ComposedChart data={performance.slice(0, 8)}>
                   <CartesianGrid stroke="#141414" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#8a8a8a", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <ChartTooltip />
                   <Bar dataKey="replyRate" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <Line type="monotone" dataKey="replyRate_trend" stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
+                </ComposedChart>
               </ResponsiveChart>
             </>
           )}

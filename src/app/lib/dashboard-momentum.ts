@@ -2,6 +2,19 @@ import { RepositoryError } from "../data/repository";
 import { formatDate } from "./format";
 import { getLeadStage } from "./selectors";
 
+/** Computes a least-squares linear regression over `values` and returns the trend y-values (≥ 0). */
+export function linearRegression(values: number[]): number[] {
+  const n = values.length;
+  if (n < 2) return values.slice();
+  const sumX = (n * (n - 1)) / 2;
+  const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
+  const sumY = values.reduce((s, v) => s + v, 0);
+  const sumXY = values.reduce((s, v, i) => s + i * v, 0);
+  const m = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const b = (sumY - m * sumX) / n;
+  return values.map((_, i) => Math.max(0, m * i + b));
+}
+
 /**
  * Shared building blocks for the Admin + Manager dashboards. Both surfaces render the same
  * campaign-momentum AreaCharts and derive the same MQL / preMQL pipeline split, so the chart
@@ -72,10 +85,33 @@ interface MomentumPoint {
   positive: number;
 }
 
-/** Appends a short day/month `label` to each 21-day momentum point for the chart X axis. */
+/** Appends a short day/month `label` and computed trend values to each momentum point. */
 export function formatMomentumSeries(series: MomentumPoint[] | undefined) {
-  return (series ?? []).map((item) => ({
+  const pts = series ?? [];
+  const sentTrend = linearRegression(pts.map((p) => p.sent));
+  const repliesTrend = linearRegression(pts.map((p) => p.replies));
+  const positiveTrend = linearRegression(pts.map((p) => p.positive));
+  return pts.map((item, i) => ({
     ...item,
     label: formatDate(item.date, { day: "2-digit", month: "short" }),
+    sent_trend: sentTrend[i],
+    replies_trend: repliesTrend[i],
+    positive_trend: positiveTrend[i],
+  }));
+}
+
+interface CountPoint {
+  date: string;
+  count: number;
+}
+
+/** Appends a label and trend value to each count-series point (used for new admin dashboard charts). */
+export function formatCountSeries(series: CountPoint[] | undefined) {
+  const pts = series ?? [];
+  const trend = linearRegression(pts.map((p) => p.count));
+  return pts.map((item, i) => ({
+    ...item,
+    label: formatDate(item.date, { day: "2-digit", month: "short" }),
+    count_trend: trend[i],
   }));
 }

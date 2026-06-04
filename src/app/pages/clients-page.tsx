@@ -45,6 +45,7 @@ interface CreateClientDraft {
   status: ClientStatus | "";
   externalWorkspaceId: number | null;
   externalApiKey: string;
+  linkedinApiKey: string;
   kpiLeads: number | null;
   kpiMeetings: number | null;
   contractedAmount: number | null;
@@ -391,6 +392,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
         status: "Active",
         externalWorkspaceId: null,
         externalApiKey: "",
+        linkedinApiKey: "",
         kpiLeads: null,
         kpiMeetings: null,
         contractedAmount: null,
@@ -422,7 +424,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
         sms_phone_numbers: null,
         notification_emails: null,
         auto_ooo_enabled: false,
-        linkedin_api_key: null,
+        linkedin_api_key: draft.linkedinApiKey.trim() || null,
         prospects_signed: 0,
         prospects_added: 0,
         setup_info: null,
@@ -509,7 +511,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
                     d ? { ...d, externalWorkspaceId: e.target.value === "" ? null : Number(e.target.value) } : d,
                   )
                 }
-                placeholder="Smartlead workspace ID"
+                placeholder="EmailBison workspace ID"
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
               />
             </label>
@@ -518,7 +520,16 @@ const CreateClientSheet = memo(function CreateClientSheet({
               <input
                 value={draft.externalApiKey}
                 onChange={(e) => setDraft((d) => (d ? { ...d, externalApiKey: e.target.value } : d))}
-                placeholder="Smartlead API key"
+                placeholder="EmailBison API key"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
+              />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">LinkedIn API key</span>
+              <input
+                value={draft.linkedinApiKey}
+                onChange={(e) => setDraft((d) => (d ? { ...d, linkedinApiKey: e.target.value } : d))}
+                placeholder="Paste LinkedIn key…"
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
               />
             </label>
@@ -729,7 +740,7 @@ export function ClientsPage() {
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [nameSearch, setNameSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["Active"]));
   const [managerFilter, setManagerFilter] = useState("all");
   const [sort, setSort] = useState<MegaSortState>({ key: "health", direction: "asc" });
 

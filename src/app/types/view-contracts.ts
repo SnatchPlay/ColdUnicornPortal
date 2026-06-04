@@ -121,6 +121,8 @@ export interface AdminDashboardOverview {
     /** Clients whose manager_id is NULL or does not belong to a manager-role user. */
     clientsWithoutManager: number;
     activeCampaignsCount: number;
+    /** Clients with status = 'Active'. */
+    activeClientsCount: number;
   };
   /**
    * Raw lead field combinations with row count. Frontend applies `getLeadStage` to each group and
@@ -141,6 +143,10 @@ export interface AdminDashboardOverview {
     replies: number;
     positive: number;
   }>;
+  /** Per-day count of distinct clients that had at least one new lead created (21d). */
+  clientsWithLeads21d: Array<{ date: string; count: number }>;
+  /** Per-day count of Active-status clients that had at least one email sent (21d). */
+  activeClientsWithSent21d: Array<{ date: string; count: number }>;
   /** Up to 8 managers with their client/campaign/lead load. Sorted by clientsCount DESC. */
   managerCapacity: Array<{
     managerId: string;

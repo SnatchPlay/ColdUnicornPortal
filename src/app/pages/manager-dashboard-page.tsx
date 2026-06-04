@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
@@ -358,13 +358,14 @@ export function ManagerDashboardPage() {
                   <ChartTextSummary summary={`${chart.title} chart with ${campaignSeries.length} daily points.`} />
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={campaignSeries}>
+                      <ComposedChart data={campaignSeries}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fill: "rgba(148,163,184,0.8)", fontSize: 11 }} axisLine={false} tickLine={false} />
                         <Tooltip {...DASHBOARD_CHART_TOOLTIP} />
                         <Area type="monotone" dataKey={chart.key} stroke={chart.stroke} fill={chart.fill} strokeWidth={2} />
-                      </AreaChart>
+                        <Line type="monotone" dataKey={`${chart.key}_trend`} stroke={chart.stroke} strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} />
+                      </ComposedChart>
                     </ResponsiveContainer>
                   </div>
                 </>
