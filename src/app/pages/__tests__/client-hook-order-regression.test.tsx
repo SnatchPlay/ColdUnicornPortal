@@ -186,7 +186,8 @@ describe("client page hook-order regression coverage", () => {
   it("applies the dashboard timeframe to client monthly charts", async () => {
     // Fake only Date so waitFor / act still use real timers internally.
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
+    // System time: May 5. 21-day window = Apr 14–May 5, covering both Apr 28 and May 4 data.
+    vi.setSystemTime(new Date("2026-05-05T12:00:00.000Z"));
 
     mockedRepo.loadClientDashboard.mockResolvedValue({
       client: { id: "client-1", name: "Client One", status: null, kpi_leads: null, kpi_meetings: null, prospects_added: 0 },
@@ -196,11 +197,11 @@ describe("client page hook-order regression coverage", () => {
       leadProjections: [],
       campaignDailyStats: [
         { campaign_id: "campaign-1", report_date: "2026-04-28", sent_count: 100, reply_count: 10, bounce_count: 1, unique_open_count: null, positive_replies_count: null },
-        { campaign_id: "campaign-1", report_date: "2026-05-24", sent_count: 70, reply_count: 7, bounce_count: 0, unique_open_count: null, positive_replies_count: null },
+        { campaign_id: "campaign-1", report_date: "2026-05-04", sent_count: 70, reply_count: 7, bounce_count: 0, unique_open_count: null, positive_replies_count: null },
       ],
       dailyStats: [
         { client_id: "client-1", report_date: "2026-04-28", mql_count: 5, prospects_count: 80, emails_sent: 100, response_count: 10, bounce_count: 1, negative_count: null, ooo_count: null, human_replies_count: null, schedule_today: null, schedule_tomorrow: null, schedule_day_after: null },
-        { client_id: "client-1", report_date: "2026-05-24", mql_count: 2, prospects_count: 120, emails_sent: 70, response_count: 7, bounce_count: 0, negative_count: null, ooo_count: null, human_replies_count: null, schedule_today: null, schedule_tomorrow: null, schedule_day_after: null },
+        { client_id: "client-1", report_date: "2026-05-04", mql_count: 2, prospects_count: 120, emails_sent: 70, response_count: 7, bounce_count: 0, negative_count: null, ooo_count: null, human_replies_count: null, schedule_today: null, schedule_tomorrow: null, schedule_day_after: null },
       ],
     } as never);
 
@@ -211,7 +212,7 @@ describe("client page hook-order regression coverage", () => {
     expect(screen.getByText("Monthly sent chart with 2 months and total 170 emails.")).toBeInTheDocument();
     expect(screen.getByText("Monthly prospects chart with 2 months and total 40 prospects added.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Last 30 Days/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Last 21 Days/i }));
     fireEvent.click(screen.getByRole("button", { name: "Last 7 Days" }));
 
     expect(screen.getByText("Monthly leads chart with 1 month and total 2 leads.")).toBeInTheDocument();
