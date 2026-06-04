@@ -27,9 +27,6 @@ test-results/
 .DS_Store
 Thumbs.db
 
-# Local AI assistant artifacts
-.agents/
-.claude/
 
 #Legacy files
 legacy crm integration/
