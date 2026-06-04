@@ -1,6 +1,6 @@
 import { formatDate } from "./format";
 
-export type TimeframePreset = "7d" | "30d" | "90d" | "mtd" | "qtd" | "ytd" | "all" | "custom";
+export type TimeframePreset = "7d" | "21d" | "30d" | "90d" | "mtd" | "qtd" | "ytd" | "all" | "custom";
 
 export interface TimeframeValue {
   preset: TimeframePreset;
@@ -10,6 +10,7 @@ export interface TimeframeValue {
 
 export const TIMEFRAME_PRESETS: Array<{ key: Exclude<TimeframePreset, "custom">; label: string }> = [
   { key: "7d", label: "Last 7 Days" },
+  { key: "21d", label: "Last 21 Days" },
   { key: "30d", label: "Last 30 Days" },
   { key: "90d", label: "Last 90 Days" },
   { key: "mtd", label: "Month to Date" },
@@ -56,6 +57,8 @@ function getPresetBounds(preset: Exclude<TimeframePreset, "custom">, now = new D
   switch (preset) {
     case "7d":
       return { start: addDays(today, -6), end: toEndOfDay(today) };
+    case "21d":
+      return { start: addDays(today, -20), end: toEndOfDay(today) };
     case "30d":
       return { start: addDays(today, -29), end: toEndOfDay(today) };
     case "90d":
@@ -76,7 +79,7 @@ function getPresetBounds(preset: Exclude<TimeframePreset, "custom">, now = new D
 
 export function createDefaultTimeframe(): TimeframeValue {
   return {
-    preset: "30d",
+    preset: "21d",
     customStart: null,
     customEnd: null,
   };

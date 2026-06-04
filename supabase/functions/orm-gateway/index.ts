@@ -914,9 +914,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const t0 = performance.now();
     const since21d = isoDaysAgo(21);
 
-    const [clientCountRows, activeCampaignCountRows, noManagerCountRows, pipelineGroupRows, momentumRows, managerCapacityRows, latestDateRows] =
+    const [clientCountRows, activeCampaignCountRows, noManagerCountRows, pipelineGroupRows, momentumRows, managerCapacityRows, latestDateRows, clientsWithLeadsRows, activeClientsWithSentRows] =
       await Promise.all([
-        rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM clients`),
+        rawQuery<{ count: number; active_count: number }>(tx, sql`SELECT COUNT(*)::int AS count, COUNT(CASE WHEN status = 'Active' THEN 1 END)::int AS active_count FROM clients`),
         rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM campaigns WHERE status = 'active'`),
         rawQuery<{ count: number }>(tx, sql`
           SELECT COUNT(*)::int AS count FROM clients
@@ -933,18 +933,19 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         }>(tx, sql`
           SELECT qualification, meeting_booked, meeting_held, offer_sent, won, COUNT(*)::int AS count
           FROM leads
+          WHERE created_at >= ${since21d}
           GROUP BY qualification, meeting_booked, meeting_held, offer_sent, won
         `),
         rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
           SELECT
-            report_date AS date,
-            COALESCE(SUM(sent_count), 0)::int AS sent,
-            COALESCE(SUM(reply_count), 0)::int AS replies,
-            COALESCE(SUM(positive_replies_count), 0)::int AS positive
-          FROM campaign_daily_stats
-          WHERE report_date >= ${since21d}
-          GROUP BY report_date
-          ORDER BY report_date ASC
+            gs.d::text AS date,
+            COALESCE(SUM(ds.emails_sent), 0)::int AS sent,
+            COALESCE(SUM(ds.response_count), 0)::int AS replies,
+            COALESCE(SUM(ds.human_replies_count), 0)::int AS positive
+          FROM generate_series(${since21d}::date, CURRENT_DATE, '1 day'::interval) AS gs(d)
+          LEFT JOIN daily_stats ds ON ds.report_date = gs.d
+          GROUP BY gs.d
+          ORDER BY gs.d ASC
         `),
         rawQuery<{ manager_id: string; manager_name: string; clients_count: number; active_campaigns_count: number; leads_count: number }>(tx, sql`
           SELECT
@@ -963,6 +964,25 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           LIMIT 8
         `),
         rawQuery<{ latest: string | null }>(tx, sql`SELECT MAX(report_date) AS latest FROM daily_stats`),
+        rawQuery<{ date: string; count: number }>(tx, sql`
+          SELECT
+            gs.d::text AS date,
+            COUNT(DISTINCT l.client_id)::int AS count
+          FROM generate_series(${since21d}::date, CURRENT_DATE, '1 day'::interval) AS gs(d)
+          LEFT JOIN leads l ON DATE(l.created_at) = gs.d
+          GROUP BY gs.d
+          ORDER BY gs.d ASC
+        `),
+        rawQuery<{ date: string; count: number }>(tx, sql`
+          SELECT
+            gs.d::text AS date,
+            COUNT(DISTINCT ds.client_id)::int AS count
+          FROM generate_series(${since21d}::date, CURRENT_DATE, '1 day'::interval) AS gs(d)
+          LEFT JOIN daily_stats ds ON ds.report_date = gs.d AND ds.emails_sent > 0
+          LEFT JOIN clients c ON c.id = ds.client_id AND c.status = 'Active'
+          GROUP BY gs.d
+          ORDER BY gs.d ASC
+        `),
       ]);
 
     console.log(`[PERF][orm-gateway] loadAdminDashboardOverview: ${(performance.now() - t0).toFixed(1)}ms`);
@@ -972,9 +992,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         clientsCount: clientCountRows[0]?.count ?? 0,
         clientsWithoutManager: noManagerCountRows[0]?.count ?? 0,
         activeCampaignsCount: activeCampaignCountRows[0]?.count ?? 0,
+        activeClientsCount: clientCountRows[0]?.active_count ?? 0,
       },
       pipelineGroups: pipelineGroupRows,
       campaignMomentum21d: momentumRows,
+      clientsWithLeads21d: clientsWithLeadsRows,
+      activeClientsWithSent21d: activeClientsWithSentRows,
       managerCapacity: managerCapacityRows.map((row) => ({
         managerId: String(row.manager_id),
         managerName: String(row.manager_name),
@@ -1040,16 +1063,20 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         `),
         rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
           SELECT
-            cds.report_date AS date,
-            COALESCE(SUM(cds.sent_count), 0)::int AS sent,
-            COALESCE(SUM(cds.reply_count), 0)::int AS replies,
-            COALESCE(SUM(cds.positive_replies_count), 0)::int AS positive
-          FROM campaign_daily_stats cds
-          JOIN campaigns camp ON camp.id = cds.campaign_id
-          WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}
-            ${dateFrom || dateTo ? dateCond("cds.report_date") : sql`AND cds.report_date >= ${since21d}`}
-          GROUP BY cds.report_date
-          ORDER BY cds.report_date ASC
+            gs.d::text AS date,
+            COALESCE(SUM(ds.emails_sent), 0)::int AS sent,
+            COALESCE(SUM(ds.response_count), 0)::int AS replies,
+            COALESCE(SUM(ds.human_replies_count), 0)::int AS positive
+          FROM generate_series(
+            ${dateFrom ? sql`${dateFrom}::date` : sql`(CURRENT_DATE - INTERVAL '20 days')::date`},
+            ${dateTo ? sql`${dateTo}::date` : sql`CURRENT_DATE`},
+            '1 day'::interval
+          ) AS gs(d)
+          LEFT JOIN daily_stats ds
+            ON ds.report_date = gs.d
+            AND ds.client_id IN (${scopedClientIds()})
+          GROUP BY gs.d
+          ORDER BY gs.d ASC
         `),
         rawQuery<{
           client_id: string;

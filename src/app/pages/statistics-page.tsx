@@ -17,6 +17,7 @@ import { DateRangeButton } from "../components/portal-ui";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { linearRegression } from "../lib/dashboard-momentum";
 import { formatDate, formatNumber } from "../lib/format";
 import { isInternalAdmin, sortClientsAlpha } from "../lib/selectors";
 import { createDefaultTimeframe, filterByTimeframe, getTimeframeLabel, resolveTimeframeBounds } from "../lib/timeframe";
@@ -392,8 +393,20 @@ function InternalStatisticsPage() {
     return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [campaignFilterId, sortedFilteredDailyStats, sortedFilteredStats, timeframeBounds]);
 
-  const sentSeries = dailySeries;
-  const signalsSeries = dailySeries;
+  const dailySeriesWithTrend = useMemo(() => {
+    const sentTrend = linearRegression(dailySeries.map((p) => p.sent));
+    const repliesTrend = linearRegression(dailySeries.map((p) => p.replies));
+    const bouncesTrend = linearRegression(dailySeries.map((p) => p.bounces));
+    return dailySeries.map((p, i) => ({
+      ...p,
+      sent_trend: sentTrend[i],
+      replies_trend: repliesTrend[i],
+      bounces_trend: bouncesTrend[i],
+    }));
+  }, [dailySeries]);
+
+  const sentSeries = dailySeriesWithTrend;
+  const signalsSeries = dailySeriesWithTrend;
 
   const activityCoverage = useMemo(() => {
     const sourceDates = campaignFilterId === ALL_FILTER_VALUE && filteredDailyStats.length > 0
@@ -837,6 +850,7 @@ function InternalStatisticsPage() {
                       itemStyle={{ color: "#f8fafc" }}
                     />
                     <Line type="monotone" dataKey="sent" stroke="#38bdf8" strokeWidth={2.5} dot={false} name="Sent" />
+                    <Line type="monotone" dataKey="sent_trend" stroke="#38bdf8" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
                     <Legend wrapperStyle={{ fontSize: 12, color: "rgba(148,163,184,0.8)" }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -864,7 +878,9 @@ function InternalStatisticsPage() {
                       itemStyle={{ color: "#f8fafc" }}
                     />
                     <Line type="monotone" dataKey="replies" stroke="#22c55e" strokeWidth={2.5} dot={false} name="Replies" />
+                    <Line type="monotone" dataKey="replies_trend" stroke="#22c55e" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
                     <Line type="monotone" dataKey="bounces" stroke="#f97316" strokeWidth={2.5} dot={false} name="Bounces" />
+                    <Line type="monotone" dataKey="bounces_trend" stroke="#f97316" strokeDasharray="4 2" strokeOpacity={0.55} strokeWidth={1.5} dot={false} activeDot={false} legendType="none" />
                     <Legend wrapperStyle={{ fontSize: 12, color: "rgba(148,163,184,0.8)" }} />
                   </LineChart>
                 </ResponsiveContainer>
