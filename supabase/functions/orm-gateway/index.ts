@@ -947,10 +947,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           GROUP BY gs.d
           ORDER BY gs.d ASC
         `),
-        rawQuery<{ manager_id: string; manager_name: string; clients_count: number; active_campaigns_count: number; leads_count: number }>(tx, sql`
+        rawQuery<{ manager_id: string; manager_name: string; manager_role: string; clients_count: number; active_campaigns_count: number; leads_count: number }>(tx, sql`
           SELECT
             u.id AS manager_id,
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS manager_name,
+            u.role AS manager_role,
             COUNT(DISTINCT c.id)::int AS clients_count,
             COUNT(DISTINCT CASE WHEN camp.status = 'active' THEN camp.id END)::int AS active_campaigns_count,
             COUNT(DISTINCT l.id)::int AS leads_count
@@ -958,8 +959,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           LEFT JOIN clients c ON c.manager_id = u.id
           LEFT JOIN campaigns camp ON camp.client_id = c.id
           LEFT JOIN leads l ON l.client_id = c.id
-          WHERE u.role = 'manager'
-          GROUP BY u.id, u.first_name, u.last_name
+          WHERE u.role IN ('manager', 'admin')
+          GROUP BY u.id, u.first_name, u.last_name, u.role
           ORDER BY clients_count DESC
           LIMIT 8
         `),
@@ -1001,6 +1002,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       managerCapacity: managerCapacityRows.map((row) => ({
         managerId: String(row.manager_id),
         managerName: String(row.manager_name),
+        managerRole: (row.manager_role === "admin" ? "admin" : "manager") as "admin" | "manager",
         clientsCount: row.clients_count ?? 0,
         activeCampaignsCount: row.active_campaigns_count ?? 0,
         leadsCount: row.leads_count ?? 0,

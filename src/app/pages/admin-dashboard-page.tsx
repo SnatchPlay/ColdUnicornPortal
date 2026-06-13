@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, MetricCard, Surface } from "../components/app-ui";
 import { repository } from "../data/repository";
 import { DASHBOARD_CHART_TOOLTIP, MOMENTUM_CHARTS, formatCountSeries, formatMomentumSeries, mapDashboardError, pipelineCountsFromGroups } from "../lib/dashboard-momentum";
 import { formatDate, formatNumber } from "../lib/format";
@@ -59,6 +59,7 @@ export function AdminDashboardPage() {
   const managerCapacityRows = useMemo(() => {
     return (data?.managerCapacity ?? []).map((row) => ({
       managerName: row.managerName,
+      managerRole: row.managerRole,
       clients: row.clientsCount,
       activeCampaigns: row.activeCampaignsCount,
       leads: row.leadsCount,
@@ -101,10 +102,6 @@ export function AdminDashboardPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          title="Admin Dashboard"
-          subtitle="Global operational command center for portfolio health and assignments."
-        />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
           onClick={() => {
@@ -119,10 +116,6 @@ export function AdminDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Admin Dashboard"
-        subtitle="Global command surface: assignment health and campaign momentum."
-      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {metrics.map((item) => (
           <MetricCard key={item.label} {...item} />
@@ -155,7 +148,7 @@ export function AdminDashboardPage() {
             </Surface>
           ))}
 
-          <Surface title="Clients receiving leads (21d)" subtitle="Daily count of distinct clients with at least one new lead created.">
+          <Surface title="Daily count of clients with at least one new lead received" subtitle="">
             {clientsWithLeadsSeries.length === 0 ? (
               <EmptyState title="No lead data" description="No leads were created in the last 21 days." />
             ) : (
@@ -177,7 +170,7 @@ export function AdminDashboardPage() {
             )}
           </Surface>
 
-          <Surface title="Active clients sending (21d)" subtitle="Daily count of Active-status clients with at least one email sent.">
+          <Surface title="Daily count of Active-status clients with at least one email sent" subtitle="">
             {activeClientsWithSentSeries.length === 0 ? (
               <EmptyState title="No send data" description="No Active clients had emails sent in the last 21 days." />
             ) : (
@@ -201,17 +194,22 @@ export function AdminDashboardPage() {
         </div>
 
         <Surface
-          title="Manager capacity"
-          subtitle="Visible load split across managers and assignments."
+          title="Team capacity"
+          subtitle=""
           actions={<p className="text-xs text-muted-foreground">Snapshot: {formatDate(latestSnapshotDate)}</p>}
         >
           {managerCapacityRows.length === 0 ? (
-            <EmptyState title="No manager capacity data" description="Assign clients to managers to populate this section." />
+            <EmptyState title="No team capacity data" description="Assign clients to managers to populate this section." />
           ) : (
             <div className="space-y-3">
               {managerCapacityRows.map((row) => (
                 <div key={row.managerName} className="rounded-2xl border border-border bg-black/10 p-4">
-                  <p className="text-sm">{row.managerName}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm">{row.managerName}</p>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${row.managerRole === "admin" ? "bg-violet-500/15 text-violet-400" : "bg-sky-500/15 text-sky-400"}`}>
+                      {row.managerRole === "admin" ? "Admin" : "CS Manager"}
+                    </span>
+                  </div>
                   <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Clients</p>

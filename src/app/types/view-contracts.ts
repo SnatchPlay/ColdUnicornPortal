@@ -147,10 +147,11 @@ export interface AdminDashboardOverview {
   clientsWithLeads21d: Array<{ date: string; count: number }>;
   /** Per-day count of Active-status clients that had at least one email sent (21d). */
   activeClientsWithSent21d: Array<{ date: string; count: number }>;
-  /** Up to 8 managers with their client/campaign/lead load. Sorted by clientsCount DESC. */
+  /** Up to 8 admins + managers with their client/campaign/lead load. Sorted by clientsCount DESC. */
   managerCapacity: Array<{
     managerId: string;
     managerName: string;
+    managerRole: "admin" | "manager";
     clientsCount: number;
     activeCampaignsCount: number;
     leadsCount: number;
