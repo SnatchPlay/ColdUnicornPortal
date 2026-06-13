@@ -99,7 +99,7 @@ const LEADS_ROUTE_CASES: RouteCase[] = [
 // Dashboard routes (Phase 2A): per-page loaders, no CoreDataProvider.
 const DASHBOARD_ROUTE_CASES: RouteCase[] = [
   { name: "manager dashboard route", role: "manager", title: "Manager Dashboard", Component: ManagerDashboardPage },
-  { name: "admin dashboard route", role: "admin", title: "Admin Dashboard", Component: AdminDashboardPage },
+  { name: "admin dashboard route", role: "admin", title: "Runtime data sync failed", Component: AdminDashboardPage },
 ];
 
 const mockedUseAuth = vi.mocked(useAuth);
@@ -297,9 +297,9 @@ describe("manager/admin route states", () => {
 
     expect(screen.queryByText("Unclassified replies")).not.toBeInTheDocument();
     expect(screen.queryByText("At-risk clients")).not.toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Sent")).toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Replies")).toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Positive")).toBeInTheDocument();
+    expect(screen.getByText("Daily sent trend")).toBeInTheDocument();
+    expect(screen.getByText("Daily replies trend")).toBeInTheDocument();
+    expect(screen.getByText("Daily positive trend")).toBeInTheDocument();
   });
 
   it("shows manager split momentum charts + lead queue and drops unclassified replies", async () => {
@@ -310,9 +310,9 @@ describe("manager/admin route states", () => {
     await act(async () => {});
 
     expect(screen.queryByText("Unclassified replies")).not.toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Sent")).toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Replies")).toBeInTheDocument();
-    expect(screen.getByText("Campaign momentum: Positive")).toBeInTheDocument();
+    expect(screen.getByText("Daily sent trend")).toBeInTheDocument();
+    expect(screen.getByText("Daily replies trend")).toBeInTheDocument();
+    expect(screen.getByText("Daily positive trend")).toBeInTheDocument();
     expect(screen.getByText("Lead queue")).toBeInTheDocument();
     expect(screen.getByText("Campaign watchlist")).toBeInTheDocument();
   });

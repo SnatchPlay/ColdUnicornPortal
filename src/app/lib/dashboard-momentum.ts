@@ -40,9 +40,9 @@ export const DASHBOARD_CHART_TOOLTIP = {
  * dashboard renders the series for its selected timeframe.
  */
 export const MOMENTUM_CHARTS = [
-  { key: "sent" as const, title: "Campaign momentum: Sent", subtitle: "Daily sent trend.", stroke: "#38bdf8", fill: "#38bdf822" },
-  { key: "replies" as const, title: "Campaign momentum: Replies", subtitle: "Daily replies trend.", stroke: "#22c55e", fill: "#22c55e22" },
-  { key: "positive" as const, title: "Campaign momentum: Positive", subtitle: "Daily positive replies trend.", stroke: "#f59e0b", fill: "#f59e0b22" },
+  { key: "sent" as const, title: "Daily sent trend", subtitle: "", stroke: "#38bdf8", fill: "#38bdf822" },
+  { key: "replies" as const, title: "Daily replies trend", subtitle: "", stroke: "#22c55e", fill: "#22c55e22" },
+  { key: "positive" as const, title: "Daily positive trend", subtitle: "", stroke: "#f59e0b", fill: "#f59e0b22" },
 ];
 
 export function mapDashboardError(reason: unknown): string {
