@@ -50,6 +50,8 @@ interface MegaColumn {
   render: (row: ClientMegaRow) => ReactNode;
   /** Sort comparator key — string or number. */
   sortValue?: (row: ClientMegaRow) => string | number | null;
+  /** When true, renders the 1-based row index instead of col.render(). */
+  ordinal?: boolean;
   /** Optional explicit condition column key (matches `column_key` on condition rules). */
   conditionKey?: string;
   /** Condition cell key for DoD per-bucket lookup (overrides conditionKey). */
@@ -66,17 +68,6 @@ interface MegaColumn {
   momMetricKey?: string;
   defaultDirection?: SortDirection;
 }
-
-const GROUP_META: Record<Group, { label: string }> = {
-  cs: { label: "Customer Success" },
-  basic: { label: "Basic" },
-  dodSched: { label: "DoD Schedule" },
-  dodSent: { label: "DoD Daily sent" },
-  td3: { label: "3-Day rolling" },
-  wow: { label: "Week over Week" },
-  mom: { label: "Month over Month" },
-  custom: { label: "Custom" },
-};
 
 const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
 const DOD_SENT_BUCKETS = ["0", "-1", "-2", "-3", "-4"] as const;
@@ -117,14 +108,27 @@ function momLookup(row: ClientMegaRow, bucket: string): MomRow | undefined {
 function buildColumns(): MegaColumn[] {
   const out: MegaColumn[] = [];
 
+  // --- Ordinal # -----------------------------------------------------------
+  out.push({
+    id: "ordinal",
+    group: "cs",
+    sub: "Customer Success",
+    label: "#",
+    width: 30,
+    minWidth: 26,
+    align: "center",
+    ordinal: true,
+    render: () => "",
+  });
+
   // --- Sticky (Customer Success) -----------------------------------------
   out.push({
     id: "name",
     group: "cs",
     sub: "Customer Success",
     label: "Client",
-    width: 220,
-    minWidth: 160,
+    width: 160,
+    minWidth: 120,
     align: "left",
     sticky: true,
     defaultDirection: "asc",
@@ -166,8 +170,8 @@ function buildColumns(): MegaColumn[] {
     group: "cs",
     sub: "Customer Success",
     label: "Manager",
-    width: 130,
-    minWidth: 100,
+    width: 100,
+    minWidth: 80,
     align: "left",
     sticky: false,
     defaultDirection: "asc",
@@ -181,8 +185,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Status",
-    width: 80,
-    minWidth: 68,
+    width: 64,
+    minWidth: 52,
     align: "center",
     defaultDirection: "asc",
     render: (row) => {
@@ -208,8 +212,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Inboxes",
-    width: 64,
-    minWidth: 52,
+    width: 48,
+    minWidth: 38,
     align: "center",
     conditionKey: "inboxes",
     defaultDirection: "desc",
@@ -221,8 +225,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Signed",
-    width: 68,
-    minWidth: 56,
+    width: 48,
+    minWidth: 38,
     align: "center",
     conditionKey: "prospects_signed",
     defaultDirection: "desc",
@@ -234,8 +238,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Added",
-    width: 68,
-    minWidth: 56,
+    width: 48,
+    minWidth: 38,
     align: "center",
     conditionKey: "prospects_added",
     defaultDirection: "desc",
@@ -247,8 +251,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Min sent",
-    width: 68,
-    minWidth: 56,
+    width: 48,
+    minWidth: 38,
     align: "center",
     conditionKey: "min_sent",
     defaultDirection: "desc",
@@ -260,8 +264,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "KPI L",
-    width: 56,
-    minWidth: 48,
+    width: 40,
+    minWidth: 34,
     align: "center",
     defaultDirection: "desc",
     render: (row) => formatNum(row.client.kpi_leads),
@@ -272,8 +276,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "KPI M",
-    width: 56,
-    minWidth: 48,
+    width: 40,
+    minWidth: 34,
     align: "center",
     defaultDirection: "desc",
     render: (row) => formatNum(row.client.kpi_meetings),
@@ -284,8 +288,8 @@ function buildColumns(): MegaColumn[] {
     group: "basic",
     sub: "Basic",
     label: "Bi",
-    width: 44,
-    minWidth: 40,
+    width: 34,
+    minWidth: 28,
     align: "center",
     conditionKey: "bi_setup",
     defaultDirection: "desc",
@@ -300,8 +304,8 @@ function buildColumns(): MegaColumn[] {
       group: "dodSched",
       sub: "Schedule",
       label: b,
-      width: 50,
-      minWidth: 42,
+      width: 38,
+      minWidth: 32,
       align: "center",
       dodBucket: b,
       dodKind: "schedule",
@@ -318,8 +322,8 @@ function buildColumns(): MegaColumn[] {
       group: "dodSent",
       sub: "Daily sent",
       label: b,
-      width: 50,
-      minWidth: 42,
+      width: 38,
+      minWidth: 32,
       align: "center",
       dodBucket: b,
       dodKind: "sent",
@@ -336,8 +340,8 @@ function buildColumns(): MegaColumn[] {
       group: "td3",
       sub: "3-DoD TOTAL leads",
       label: b,
-      width: 42,
-      minWidth: 36,
+      width: 32,
+      minWidth: 28,
       align: "center",
       td3Bucket: b,
       td3MetricKey: "three_dod_total",
@@ -352,8 +356,8 @@ function buildColumns(): MegaColumn[] {
       group: "td3",
       sub: "3-DoD SQL leads",
       label: b,
-      width: 42,
-      minWidth: 36,
+      width: 32,
+      minWidth: 28,
       align: "center",
       td3Bucket: b,
       td3MetricKey: "three_dod_sql",
@@ -422,8 +426,8 @@ function buildColumns(): MegaColumn[] {
         group: "wow",
         sub: `WoW ${m.label}`,
         label: b,
-        width: m.format === "rate" ? 50 : 42,
-        minWidth: 38,
+        width: m.format === "rate" ? 40 : 32,
+        minWidth: 28,
         align: "center",
         wowBucket: b,
         wowMetricKey: m.conditionKey,
@@ -456,8 +460,8 @@ function buildColumns(): MegaColumn[] {
         group: "mom",
         sub: `MoM ${m.label}`,
         label: b,
-        width: 42,
-        minWidth: 36,
+        width: 32,
+        minWidth: 28,
         align: "center",
         momBucket: b,
         momMetricKey: m.conditionKey,
@@ -561,6 +565,7 @@ export interface ClientsMegaTableProps {
   sort: MegaSortState;
   onSortChange: (next: MegaSortState) => void;
   onRowClick: (clientId: string) => void;
+  onHighlight: (clientId: string) => void;
   selectionStore: SelectionStore;
   storageKey?: string;
   /** Master-admin label/visibility overrides keyed by column id. */
@@ -660,6 +665,7 @@ interface MegaRowProps {
   stickyOffsets: Map<number, number>;
   colBorderClasses: string[];
   onRowClick: (clientId: string) => void;
+  onHighlight: (clientId: string) => void;
   selectionStore: SelectionStore;
 }
 
@@ -671,10 +677,9 @@ const MegaRow = memo(function MegaRow({
   stickyOffsets,
   colBorderClasses,
   onRowClick,
+  onHighlight,
   selectionStore,
 }: MegaRowProps) {
-  // Subscribe per-row so only the previously-selected and newly-selected
-  // rows re-render when the selection changes. The table shell does not.
   const isSelected = useSyncExternalStore(
     selectionStore.subscribe,
     () => selectionStore.get() === row.client.id,
@@ -683,11 +688,10 @@ const MegaRow = memo(function MegaRow({
   const rowTint = rIdx % 2 ? "bg-black/20" : "bg-transparent";
 
   return (
-    <button
-      onClick={() => onRowClick(row.client.id)}
-      aria-label={`Open details for ${row.client.name}`}
+    <div
+      aria-label={`Row for ${row.client.name}`}
       className={cn(
-        "flex h-9 w-full text-left focus:outline-none focus:ring-1 focus:ring-sky-400/50",
+        "flex h-9 w-full",
         rowTint,
         isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
       )}
@@ -707,14 +711,18 @@ const MegaRow = memo(function MegaRow({
         }
 
         const condition = cellCondition(row, col);
-        const content = col.render(row);
+        const content = col.ordinal ? String(rIdx + 1) : col.render(row);
+        const opensDrawer = col.id === "name";
 
         return (
           <div
             key={col.id}
             style={style}
+            role={opensDrawer ? "button" : undefined}
+            aria-label={opensDrawer ? `Open details for ${row.client.name}` : undefined}
+            onClick={() => opensDrawer ? onRowClick(row.client.id) : onHighlight(row.client.id)}
             className={cn(
-              "flex items-center px-1.5 text-xs",
+              "flex cursor-pointer items-center px-1.5 text-xs",
               colBorderClasses[i],
               col.align === "left"
                 ? "justify-start"
@@ -724,11 +732,11 @@ const MegaRow = memo(function MegaRow({
               col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.07)]" : "",
             )}
           >
-            {col.sticky ? content : renderCellWithCondition(content, condition)}
+            {col.sticky || col.ordinal ? content : renderCellWithCondition(content, condition)}
           </div>
         );
       })}
-    </button>
+    </div>
   );
 });
 
@@ -738,6 +746,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     sort,
     onSortChange,
     onRowClick,
+    onHighlight,
     selectionStore,
     storageKey = "table:clients:mega-columns",
     columnOverrides,
@@ -843,23 +852,6 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     return s;
   }, [cols]);
 
-  // Group bands segments
-  const groupSegments = useMemo(() => {
-    const segs: Array<{ group: Group; from: number; to: number; width: number }> = [];
-    let cur: { group: Group; from: number; width: number } | null = null;
-    cols.forEach((col, idx) => {
-      const w = widths[idx] ?? col.width;
-      if (!cur || cur.group !== col.group) {
-        if (cur) segs.push({ ...cur, to: idx - 1 });
-        cur = { group: col.group, from: idx, width: w };
-      } else {
-        cur.width += w;
-      }
-    });
-    if (cur) segs.push({ ...cur, to: cols.length - 1 });
-    return segs;
-  }, [cols, widths]);
-
   const subSegments = useMemo(() => {
     const segs: Array<{ sub: string; group: Group; from: number; lastIdx: number; width: number }> = [];
     let cur: { sub: string; group: Group; from: number; lastIdx: number; width: number } | null = null;
@@ -907,21 +899,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
         <div style={{ width: totalWidth, minWidth: totalWidth }}>
           {/* Sticky header — three rows stay pinned on vertical scroll */}
           <div className="sticky top-0 z-20 bg-[#080808]">
-          {/* Group bands */}
-          <div className="flex h-7 border-b border-white/20 bg-[#0a0a0a] text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground">
-            {groupSegments.map((seg) => (
-              <div
-                key={`g-${seg.from}`}
-                style={{ width: seg.width, minWidth: seg.width }}
-                className="flex items-center justify-center border-r-2 border-r-white/40 px-2"
-              >
-                {GROUP_META[seg.group].label}
-              </div>
-            ))}
-          </div>
-
           {/* Sub bands */}
-          <div className="flex h-6 border-b border-white/15 bg-black/30 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="flex h-6 border-b border-white/15 bg-black/30 text-[10px] font-bold uppercase tracking-[0.14em] text-foreground">
             {subSegments.map((seg, i) => (
               <div
                 key={`s-${seg.from}-${i}`}
@@ -937,7 +916,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           </div>
 
           {/* Column headers */}
-          <div className="flex h-9 border-b border-white/20 bg-[#080808]">
+          <div className="flex h-6 border-b border-white/20 bg-[#080808]">
             {cols.map((col, i) => {
               const isActive = sort.key === col.id;
               const w = widths[i] ?? col.width;
@@ -997,6 +976,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
                 stickyOffsets={stickyOffsets}
                 colBorderClasses={colBorderClasses}
                 onRowClick={onRowClick}
+                onHighlight={onHighlight}
                 selectionStore={selectionStore}
               />
             ))}

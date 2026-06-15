@@ -258,9 +258,9 @@
 .cond-cell-warning { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.7); color: white; font-weight: 600; }
 .cond-cell-critical{ border-color: #e879f9; background-color: rgb(112 26 117 / 0.7);color: white; font-weight: 600; }
 
-[data-color-theme="contrast"] .cond-cell-good    { border-color: #00cc33; background-color: #00ff41; color: #000; font-weight: 800; }
-[data-color-theme="contrast"] .cond-cell-danger  { border-color: #cc0022; background-color: #ff0033; color: #fff; font-weight: 800; }
-[data-color-theme="contrast"] .cond-cell-warning { border-color: #ccb300; background-color: #ffe000; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-good    { border-color: #05cc00; background-color: #06F701; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-danger  { border-color: #c80000; background-color: #FA0200; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .cond-cell-warning { border-color: #c9c900; background-color: #F9F909; color: #000; font-weight: 800; }
 [data-color-theme="contrast"] .cond-cell-critical{ border-color: #cc00cc; background-color: #ff00ff; color: #000; font-weight: 800; }
 
 /* --- Severity badges (name-column rollup, condition chips, rule builder) --- */
@@ -269,9 +269,9 @@
 .sev-badge-warning { border-color: rgb(253 230 138 / 0.45); background-color: rgb(245 158 11 / 0.12); color: #fef3c7; }
 .sev-badge-critical{ border-color: rgb(240 171 252 / 0.6);  background-color: rgb(217 70 239 / 0.12); color: #fae8ff; }
 
-[data-color-theme="contrast"] .sev-badge-good    { border-color: #00ff41; background-color: rgba(0,255,65,0.15);  color: #00ff41; font-weight: 700; }
-[data-color-theme="contrast"] .sev-badge-danger  { border-color: #ff0033; background-color: rgba(255,0,51,0.15);  color: #ff4466; font-weight: 700; }
-[data-color-theme="contrast"] .sev-badge-warning { border-color: #ffe000; background-color: rgba(255,224,0,0.15); color: #ffe000; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-good    { border-color: #06F701; background-color: rgba(6,247,1,0.15);   color: #06F701; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-danger  { border-color: #FA0200; background-color: rgba(250,2,0,0.15);   color: #FA4466; font-weight: 700; }
+[data-color-theme="contrast"] .sev-badge-warning { border-color: #F9F909; background-color: rgba(249,249,9,0.15); color: #F9F909; font-weight: 700; }
 [data-color-theme="contrast"] .sev-badge-critical{ border-color: #ff00ff; background-color: rgba(255,0,255,0.15); color: #ff66ff; font-weight: 700; }
 
 /* --- Client status badges (Active / Inactive / Abo / Sales / …) --- */
@@ -282,8 +282,8 @@
 .status-badge-onhold   { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.4); color: #fde68a; }
 .status-badge-offboard { border-color: #fb923c; background-color: rgb(124 45 18 / 0.4); color: #fdba74; }
 
-[data-color-theme="contrast"] .status-badge-active   { border-color: #00cc33; background-color: #00ff41; color: #000; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-inactive { border-color: #cc0022; background-color: #ff0033; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-active   { border-color: #05cc00; background-color: #06F701; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-inactive { border-color: #c80000; background-color: #FA0200; color: #fff; font-weight: 800; }
 [data-color-theme="contrast"] .status-badge-abo      { border-color: #00b8cc; background-color: #00e5ff; color: #000; font-weight: 800; }
 [data-color-theme="contrast"] .status-badge-sales    { border-color: #9900cc; background-color: #bf00ff; color: #fff; font-weight: 800; }
 [data-color-theme="contrast"] .status-badge-onhold   { border-color: #cc8400; background-color: #ffa500; color: #000; font-weight: 800; }
@@ -297,11 +297,11 @@
 .reply-badge-spam       { background-color: rgb(239 68 68 / 0.15);   color: #fca5a5; }
 .reply-badge-neutral    { background-color: rgb(115 115 115 / 0.15); color: #a3a3a3; }
 
-[data-color-theme="contrast"] .reply-badge-interested { background-color: rgba(0,255,65,0.2);    color: #00ff41; font-weight: 700; }
-[data-color-theme="contrast"] .reply-badge-ooo        { background-color: rgba(255,224,0,0.2);   color: #ffe000; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-interested { background-color: rgba(6,247,1,0.2);     color: #06F701; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-ooo        { background-color: rgba(249,249,9,0.2);   color: #F9F909; font-weight: 700; }
 [data-color-theme="contrast"] .reply-badge-nrr        { background-color: rgba(0,229,255,0.2);   color: #00e5ff; font-weight: 700; }
 [data-color-theme="contrast"] .reply-badge-left       { background-color: rgba(191,0,255,0.2);   color: #df80ff; font-weight: 700; }
-[data-color-theme="contrast"] .reply-badge-spam       { background-color: rgba(255,0,51,0.2);    color: #ff4466; font-weight: 700; }
+[data-color-theme="contrast"] .reply-badge-spam       { background-color: rgba(250,2,0,0.2);     color: #FA4466; font-weight: 700; }
 [data-color-theme="contrast"] .reply-badge-neutral    { background-color: rgba(115,115,115,0.2); color: #d4d4d4; font-weight: 700; }
 
 /* --- Yes/No pill (lead boolean fields) --- */

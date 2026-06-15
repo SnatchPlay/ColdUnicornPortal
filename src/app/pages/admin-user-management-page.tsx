@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Banner, EmptyState, LoadingState, MetricCard, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, LoadingState, MetricCard, Surface } from "../components/app-ui";
 import { Info } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -177,11 +177,6 @@ export function AdminUserManagementPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="User Management"
-        subtitle="Invite-only access control with lifecycle actions for pending, accepted, and expired invitations."
-      />
-
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
 
       <Surface
