@@ -477,6 +477,33 @@ function buildColumns(): MegaColumn[] {
 
 export const MEGA_COLUMNS = buildColumns();
 export const MEGA_COLUMN_COUNT = MEGA_COLUMNS.length;
+/** Distinct built-in section (sub-band) names, in display order. Used by the
+ * master-admin customization panel to offer per-section name overrides. */
+export const MEGA_SECTIONS: string[] = (() => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const col of MEGA_COLUMNS) {
+    if (!seen.has(col.sub)) {
+      seen.add(col.sub);
+      out.push(col.sub);
+    }
+  }
+  return out;
+})();
+
+/** Section (sub) → group lookup. Each built-in section maps to exactly one
+ * group; the synthetic "Custom" section maps to the custom group. Used when a
+ * column is reassigned to another section so its group band stays consistent. */
+const SECTION_TO_GROUP = new Map<string, Group>(MEGA_COLUMNS.map((c) => [c.sub, c.group]));
+SECTION_TO_GROUP.set("Custom", "custom");
+
+/** Re-home a column into another section when a `colsection:<id>` override is
+ * set. Keeps `group` in sync so the thick group separators match the new band. */
+function applySectionAssignment(col: MegaColumn, overrideMap: Map<string, ColumnOverrideRecord>): MegaColumn {
+  const assigned = overrideMap.get(`colsection:${col.id}`)?.label_override;
+  if (!assigned || assigned === col.sub) return col;
+  return { ...col, sub: assigned, group: SECTION_TO_GROUP.get(assigned) ?? col.group };
+}
 const STICKY_INDICES = MEGA_COLUMNS.map((c, i) => (c.sticky ? i : -1)).filter((i) => i >= 0);
 
 function computeStickyOffsets(widths: number[]): Map<number, number> {
@@ -691,7 +718,7 @@ const MegaRow = memo(function MegaRow({
     <div
       aria-label={`Row for ${row.client.name}`}
       className={cn(
-        "flex h-9 w-full",
+        "flex h-10 w-full",
         rowTint,
         isSelected ? "outline outline-1 outline-sky-400/60" : "hover:bg-white/5",
       )}
@@ -704,7 +731,7 @@ const MegaRow = memo(function MegaRow({
           style.left = stickyOffsets.get(i) ?? 0;
           style.zIndex = 5;
           style.background = isSelected
-            ? "rgba(56, 189, 248, 0.06)"
+            ? rIdx % 2 ? "#0d1518" : "#0a1216"
             : rIdx % 2
             ? "#0a0a0a"
             : "#070707";
@@ -764,12 +791,13 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const emptyValues = new Map<string, ReadonlyMap<string, string | null>>();
     const valueMap = customFieldValuesByClient ?? emptyValues;
 
-    // Built-in entries: apply label override + hidden filter.
+    // Built-in entries: apply label override + section reassignment + hidden filter.
     const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
       const labelled = override?.label_override ? { ...col, label: override.label_override } : col;
-      return [{ col: labelled as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
+      const homed = applySectionAssignment(labelled, overrideMap);
+      return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
     });
 
     // Custom field entries: position from column_overrides (key "cf:{id}") when set,
@@ -777,15 +805,16 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const sortedCustom = (customFields ?? []).slice().sort((l, r) => l.position - r.position);
     const customEntries = sortedCustom.map((field, i) => {
       const cfOverride = overrideMap.get(`cf:${field.id}`);
+      const col = customFieldColumn(field, valueMap, Boolean(canEditCustomField?.(field.id)), onCustomFieldValueChange);
       return {
-        col: customFieldColumn(field, valueMap, Boolean(canEditCustomField?.(field.id)), onCustomFieldValueChange),
+        col: applySectionAssignment(col, overrideMap),
         position: cfOverride?.position ?? null,
         naturalOrder: MEGA_COLUMNS.length + i,
       };
     });
 
     // Unified sort: explicit position first (ascending), then natural order.
-    return [...builtInEntries, ...customEntries]
+    const ordered = [...builtInEntries, ...customEntries]
       .sort((a, b) => {
         const ap = a.position, bp = b.position;
         if (ap !== null && bp !== null) return ap - bp;
@@ -794,6 +823,14 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
         return a.naturalOrder - b.naturalOrder;
       })
       .map((e) => e.col);
+
+    // Apply section (sub-band) name overrides. Stored under the synthetic key
+    // `section:<original sub>`; every column sharing that sub maps to the same
+    // new name, so the band stays contiguous in the boundary/segment logic.
+    return ordered.map((col) => {
+      const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
+      return sectionLabel ? { ...col, sub: sectionLabel } : col;
+    });
   }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
@@ -870,8 +907,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
   }, [cols, widths]);
 
   function colBorderClass(i: number) {
-    if (groupBoundarySet.has(i)) return "border-r-2 border-r-white/40";
-    if (subBoundarySet.has(i)) return "border-r border-r-white/25";
+    if (groupBoundarySet.has(i)) return "border-r-2 border-r-white/70";
+    if (subBoundarySet.has(i)) return "border-r-2 border-r-white/35";
     return "border-r border-white/10";
   }
 
@@ -900,14 +937,14 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           {/* Sticky header — three rows stay pinned on vertical scroll */}
           <div className="sticky top-0 z-20 bg-[#080808]">
           {/* Sub bands */}
-          <div className="flex h-6 border-b border-white/15 bg-black/30 text-[10px] font-bold uppercase tracking-[0.14em] text-foreground">
+          <div className="flex h-8 border-b border-white/15 bg-black/30 text-[10px] font-bold uppercase tracking-[0.14em] text-foreground">
             {subSegments.map((seg, i) => (
               <div
                 key={`s-${seg.from}-${i}`}
                 style={{ width: seg.width, minWidth: seg.width }}
                 className={cn(
                   "flex items-center justify-center px-2",
-                  groupBoundarySet.has(seg.lastIdx) ? "border-r-2 border-r-white/40" : "border-r border-r-white/25",
+                  groupBoundarySet.has(seg.lastIdx) ? "border-r-2 border-r-white/70" : "border-r-2 border-r-white/35",
                 )}
               >
                 {seg.sub}
@@ -916,7 +953,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           </div>
 
           {/* Column headers */}
-          <div className="flex h-6 border-b border-white/20 bg-[#080808]">
+          <div className="flex h-8 border-b border-white/20 bg-[#080808]">
             {cols.map((col, i) => {
               const isActive = sort.key === col.id;
               const w = widths[i] ?? col.width;
@@ -943,15 +980,23 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
                     col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.10)]" : "",
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleSort(col)}
-                    className="truncate whitespace-nowrap hover:text-foreground"
-                    aria-label={`Sort by ${col.sub} ${col.label}`.trim()}
-                  >
-                    {col.label}
-                    {isActive ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col)}
+                        className="truncate whitespace-nowrap hover:text-foreground"
+                        aria-label={`Sort by ${col.sub} ${col.label}`.trim()}
+                      >
+                        {col.label}
+                        {isActive ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-[#111] text-xs text-white" sideOffset={6}>
+                      {col.sub ? <span className="text-neutral-400">{col.sub} · </span> : null}
+                      {col.label}
+                    </TooltipContent>
+                  </Tooltip>
                   {!isLast && (
                     <div
                       onMouseDown={resizable.getResizeMouseDown(i)}
