@@ -251,7 +251,6 @@ describe("manager/admin route states", () => {
     renderRoute(Component);
     await act(async () => {});
 
-    expect(screen.getByText("Clients")).toBeInTheDocument();
     expect(screen.getByText("Runtime data sync failed")).toBeInTheDocument();
 
     const callsBefore = mockedRepo.loadClientsOverview.mock.calls.length;

@@ -223,11 +223,11 @@ describe("clients operational tooling", () => {
     expect(mockedRepo.loadClientsMetricsSummary).toHaveBeenCalledTimes(1);
     expect(mockedRepo.loadClientsStats).not.toHaveBeenCalled();
 
-    expect(screen.getByText("DoD Schedule")).toBeInTheDocument();
-    expect(screen.getByText("DoD Daily sent")).toBeInTheDocument();
-    expect(screen.getByText("3-Day rolling")).toBeInTheDocument();
-    expect(screen.getByText("Week over Week")).toBeInTheDocument();
-    expect(screen.getByText("Month over Month")).toBeInTheDocument();
+    expect(screen.getByText("Schedule")).toBeInTheDocument();
+    expect(screen.getByText("Daily sent")).toBeInTheDocument();
+    expect(screen.getAllByText("3-DoD TOTAL leads").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("WoW Total").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("MoM Total").length).toBeGreaterThan(0);
     // Schedule value 410 (+2) is unique to schedule_day_after for today
     expect(screen.getByText("410")).toBeInTheDocument();
     // 395 appears in both schedule +1 and DoD sent -1 — at least one match

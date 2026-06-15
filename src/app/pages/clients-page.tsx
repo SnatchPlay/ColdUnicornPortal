@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { Banner, EmptyState, InlineLinkButton, LoadingState, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
@@ -897,6 +897,10 @@ export function ClientsPage() {
 
   const handleRowClick = useCallback((id: string) => openClient(id), [openClient]);
 
+  const handleCellHighlight = useCallback((id: string) => {
+    selectionStore.set(id);
+  }, [selectionStore]);
+
   useEffect(() => {
     setVisibleRowsCount(PAGE_SIZE);
     if (selectedClientId && !scopedClients.some((c) => c.id === selectedClientId)) {
@@ -905,13 +909,24 @@ export function ClientsPage() {
   }, [scopedClients, selectedClientId, healthFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
 
   useEffect(() => {
-    if (!selectedClient) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") closeClient();
+      if (event.key === "Escape") {
+        closeClient();
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const currentId = selectionStore.get();
+      if (!currentId) return;
+      const idx = visibleMegaRows.findIndex((r) => r.client.id === currentId);
+      if (idx === -1) return;
+      const nextIdx = event.key === "ArrowRight" ? idx + 1 : idx - 1;
+      if (nextIdx < 0 || nextIdx >= visibleMegaRows.length) return;
+      event.preventDefault();
+      selectionStore.set(visibleMegaRows[nextIdx].client.id);
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedClient, closeClient]);
+  }, [closeClient, selectionStore, visibleMegaRows]);
 
   const draftPatch = useMemo(() => {
     if (!selectedClient || !draft) return {};
@@ -1004,7 +1019,6 @@ export function ClientsPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Clients" subtitle="Operational client control surface for managing core client settings." />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton
           onClick={() => {
@@ -1019,18 +1033,14 @@ export function ClientsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Clients"
-        subtitle="Dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in a single horizontally-scrollable surface. Click any row to open the configuration drawer."
-        actions={
-          <CreateClientSheetHost
-            managerUsers={managerUsers}
-            canEditAssignments={canEditAssignments}
-            onCreateClient={handleCreateClientStable}
-            defaultManagerId={defaultManagerId}
-          />
-        }
-      />
+      <div className="flex justify-end">
+        <CreateClientSheetHost
+          managerUsers={managerUsers}
+          canEditAssignments={canEditAssignments}
+          onCreateClient={handleCreateClientStable}
+          defaultManagerId={defaultManagerId}
+        />
+      </div>
 
       {scopedClients.length === 0 ? (
         <EmptyState
@@ -1150,6 +1160,7 @@ export function ClientsPage() {
               sort={sort}
               onSortChange={setSort}
               onRowClick={handleRowClick}
+              onHighlight={handleCellHighlight}
               selectionStore={selectionStore}
               columnOverrides={columnOverrides}
               customFields={clientCustomFields}

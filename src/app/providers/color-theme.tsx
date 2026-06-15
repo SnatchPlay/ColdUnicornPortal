@@ -19,9 +19,9 @@ const STORAGE_KEY = "pdca-color-theme";
 export function ColorThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<ColorTheme>(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY) === "contrast" ? "contrast" : "default";
+      return localStorage.getItem(STORAGE_KEY) === "default" ? "default" : "contrast";
     } catch {
-      return "default";
+      return "contrast";
     }
   });
 
