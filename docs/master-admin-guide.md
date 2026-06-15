@@ -55,10 +55,47 @@ The first row's ↑ and the last row's ↓ are disabled. You can move a column a
 
 To revert to the original order: not exposed in the UI yet. Ask engineering to clear the `position` column on `client_table_column_overrides` for the columns you want to reset.
 
+### Renaming section bands
+
+**Where:** Settings → Clients table customization → Section names.
+
+The Clients table groups columns under section bands shown in the top header row (e.g. **Customer Success**, **Basic**, **Schedule**, **Daily sent**, **WoW Total**, **MoM Won**, **Custom**). Each section has a row with its original name (greyed, left) and an override box (right):
+
+1. Type the new section name (e.g. rename "Daily sent" to "Outbound").
+2. Click outside the box — every admin and CS manager sees the new band name the next time they refresh.
+3. To revert, clear the box and click out.
+
+This only changes the **displayed band name**; it does not regroup columns or change any calculation. Section overrides are stored alongside column overrides on `client_table_column_overrides` under the key `section:<original name>`.
+
+### Moving a column into another section
+
+**Where:** Settings → Clients table customization → Column order → the **Section** dropdown on each row.
+
+Each column row has a **Section** dropdown listing every section band. Pick a different one to move that column under another band (e.g. put "Inboxes" under "WoW Resp"):
+
+1. Choose the target section in the dropdown — the change is global and immediate.
+2. **Important:** this only changes which band the column sits under, it does **not** move the column. A section band is just a run of neighbouring columns with the same section. So after reassigning, **drag the column (using the grip handle) next to that section's other columns**, otherwise the band visually splits into two pieces with the same name.
+3. To put a column back, pick its original section in the dropdown.
+
+The column's calculation never changes — only the band it is grouped under.
+
+### Creating your own section
+
+**Where:** Settings → Clients table customization → Section names.
+
+You are not limited to the built-in bands — you can invent new ones:
+
+1. In the **Section names** card, type a name in the "New section name" box at the bottom and click **Add section** (or press Enter).
+2. The new section now appears in the **Section** dropdown of every column in the Column order list, and as a row (tagged `custom`) in the Section names card where you can give it a display name.
+3. Assign one or more columns to it via their Section dropdown, then drag those columns next to each other. The new band appears in the clients table only once at least one column is assigned to it.
+4. To remove a custom section, click the **trash icon** on its row. Any columns assigned to it return to their original band automatically.
+
+Built-in sections cannot be deleted (only renamed); only sections you created have a trash icon.
+
 ### What you cannot do here
 
 - You cannot **change what a built-in column calculates**. The formula stays the same; only the displayed name and position change.
-- You cannot **resize** columns from here. Resizing is done by dragging the column edge in the Clients page itself (per-user, not global).
+- You cannot **resize** columns from here. Resizing is done by dragging the column edge in the Clients page itself. Resize is **per-user** (not global) and is saved in that user's browser (`localStorage`) — it persists across logins on the same browser and is no longer reset when the column set finishes loading on sign-in.
 
 ---
 

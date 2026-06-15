@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 interface UseResizableColumnsOptions {
   storageKey: string;
@@ -19,6 +19,17 @@ function normalizeWidths(values: unknown, expectedLength: number) {
   return normalized;
 }
 
+function readStoredWidths(storageKey: string, defaultWidths: number[]): number[] {
+  if (typeof window === "undefined") return defaultWidths;
+  const raw = window.localStorage.getItem(storageKey);
+  if (!raw) return defaultWidths;
+  try {
+    return normalizeWidths(JSON.parse(raw), defaultWidths.length) ?? defaultWidths;
+  } catch {
+    return defaultWidths;
+  }
+}
+
 export function useResizableColumns(options: UseResizableColumnsOptions): UseResizableColumnsResult {
   const { storageKey, defaultWidths } = options;
   const minWidths = useMemo(
@@ -26,18 +37,19 @@ export function useResizableColumns(options: UseResizableColumnsOptions): UseRes
     [defaultWidths, options.minWidths],
   );
 
-  const [widths, setWidths] = useState<number[]>(() => {
-    if (typeof window === "undefined") return defaultWidths;
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return defaultWidths;
+  const [widths, setWidths] = useState<number[]>(() => readStoredWidths(storageKey, defaultWidths));
 
-    try {
-      const parsed = JSON.parse(raw);
-      return normalizeWidths(parsed, defaultWidths.length) ?? defaultWidths;
-    } catch {
-      return defaultWidths;
-    }
-  });
+  // When the storage key changes (the column set settled after async data
+  // loaded — e.g. column overrides hide columns on login, changing the count),
+  // re-read the persisted widths for the new key. Without this the one-shot
+  // useState initializer keeps the widths from the *initial* key, so a saved
+  // layout under the settled key is never restored and appears to "reset".
+  const prevKeyRef = useRef(storageKey);
+  useEffect(() => {
+    if (prevKeyRef.current === storageKey) return;
+    prevKeyRef.current = storageKey;
+    setWidths(readStoredWidths(storageKey, defaultWidths));
+  }, [storageKey, defaultWidths]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

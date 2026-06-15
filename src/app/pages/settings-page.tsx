@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
@@ -30,7 +30,7 @@ import { useAdminSettings } from "../lib/use-settings";
 import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
 import { useShellData } from "../providers/shell-data";
-import { MEGA_COLUMNS } from "./clients-page/mega-table";
+import { MEGA_COLUMNS, MEGA_SECTIONS } from "./clients-page/mega-table";
 import { ConditionRuleBuilder } from "./settings/condition-rule-builder";
 import { BUILTIN_METRICS } from "../lib/conditions/metric-catalog";
 import type {
@@ -774,6 +774,22 @@ interface ClientsTableCustomizationProps {
   onDeleteField: (fieldId: string) => Promise<void>;
 }
 
+// Master-admin custom sections (bands invented on top of the built-in ones) are
+// persisted as a single override row: key `sections:custom`, label_override = a
+// JSON array of section names. mega-table needs no knowledge of this — a section
+// only materialises when a column is reassigned to it via `colsection:<id>`.
+const CUSTOM_SECTIONS_KEY = "sections:custom";
+
+function parseCustomSections(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function ClientsTableCustomization({
   columnOverrides,
   customFields,
@@ -830,6 +846,86 @@ function ClientsTableCustomization({
       return an - bn;
     });
   }, [overrideMap, customFields]);
+
+  // Master-admin-created sections. Persisted list ∪ any sections still referenced
+  // by a `colsection:<id>` assignment (defends against orphaned references).
+  const persistedCustomSections = useMemo(
+    () => parseCustomSections(overrideMap.get(CUSTOM_SECTIONS_KEY)?.label_override),
+    [overrideMap],
+  );
+  const reservedSections = useMemo(() => new Set([...MEGA_SECTIONS, "Custom"]), []);
+  const customSections = useMemo(() => {
+    const referenced = columnOverrides
+      .filter((o) => o.column_key.startsWith("colsection:") && o.label_override)
+      .map((o) => o.label_override as string)
+      .filter((name) => !reservedSections.has(name));
+    return Array.from(new Set([...persistedCustomSections, ...referenced]));
+  }, [columnOverrides, persistedCustomSections, reservedSections]);
+
+  // Sections a column can be reassigned to: built-in bands, the custom-field band
+  // (when custom fields exist), plus any master-admin-created sections.
+  const sectionOptions = useMemo(() => {
+    const opts = [...MEGA_SECTIONS];
+    if (customFields.length > 0) opts.push("Custom");
+    for (const s of customSections) if (!opts.includes(s)) opts.push(s);
+    return opts;
+  }, [customFields.length, customSections]);
+
+  const [newSectionName, setNewSectionName] = useState("");
+
+  async function handleAddSection() {
+    const name = newSectionName.trim();
+    if (!name) return;
+    if (reservedSections.has(name) || persistedCustomSections.includes(name)) {
+      setNewSectionName("");
+      return; // already exists — nothing to create
+    }
+    await onUpsertOverride(CUSTOM_SECTIONS_KEY, {
+      label_override: JSON.stringify([...persistedCustomSections, name]),
+    });
+    setNewSectionName("");
+  }
+
+  async function handleDeleteSection(name: string) {
+    // Reassign any columns that point at this section back to their natural band,
+    // drop its rename row, then remove it from the persisted list.
+    for (const o of columnOverrides) {
+      if (o.column_key.startsWith("colsection:") && o.label_override === name) {
+        await onUpsertOverride(o.column_key, { label_override: null });
+      }
+    }
+    if (overrideMap.get(`section:${name}`)) {
+      await onUpsertOverride(`section:${name}`, { label_override: null });
+    }
+    await onUpsertOverride(CUSTOM_SECTIONS_KEY, {
+      label_override: JSON.stringify(persistedCustomSections.filter((s) => s !== name)),
+    });
+  }
+
+  // Per-column section reassignment (synthetic key `colsection:<id>` storing the
+  // target section name in label_override; null clears back to the natural band).
+  const renderSectionSelect = (columnKey: string, naturalSub: string) => {
+    const assigned = overrideMap.get(`colsection:${columnKey}`)?.label_override ?? naturalSub;
+    return (
+      <select
+        value={assigned}
+        onChange={(event) => {
+          const value = event.target.value;
+          const next = value === naturalSub ? null : value;
+          const current = overrideMap.get(`colsection:${columnKey}`)?.label_override ?? null;
+          if (next === current) return;
+          void onUpsertOverride(`colsection:${columnKey}`, { label_override: next });
+        }}
+        onClick={(event) => event.stopPropagation()}
+        className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+      >
+        {!sectionOptions.includes(assigned) && <option value={assigned}>{assigned}</option>}
+        {sectionOptions.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    );
+  };
 
   // Drag-and-drop state — unified column list
   const draggedIdxRef = useRef<number | null>(null);
@@ -923,13 +1019,14 @@ function ClientsTableCustomization({
         <div className="rounded-2xl border border-border bg-black/10 p-4">
           <p className="mb-1 text-sm">Column order</p>
           <p className="mb-3 text-[10px] text-muted-foreground">
-            Drag rows to reorder all columns — built-in and custom together. For built-in columns you can also override the display label or hide the column entirely. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
+            Drag rows to reorder all columns — built-in and custom together. For built-in columns you can also override the display label, reassign the column to another <strong>section</strong>, or hide it entirely. Reassigning only changes the band a column sits under — drag it next to that section's other columns so the band stays contiguous. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
           </p>
           {/* Table header */}
-          <div className="grid grid-cols-[24px_1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="grid grid-cols-[24px_1.3fr_1.5fr_1.1fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             <span />
             <span>Column</span>
             <span>Display label (override)</span>
+            <span>Section</span>
             <span>Visibility</span>
           </div>
           <div
@@ -952,7 +1049,7 @@ function ClientsTableCustomization({
                   onDrop={(e) => handleDrop(e, idx)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "grid grid-cols-[24px_1.4fr_2fr_auto] items-center gap-3 px-3 py-2 transition-colors",
+                    "grid grid-cols-[24px_1.3fr_1.5fr_1.1fr_auto] items-center gap-3 px-3 py-2 transition-colors",
                     isBeingDragged ? "opacity-40" : "",
                     isDropTarget ? "border-t-2 border-t-sky-400" : "",
                   )}
@@ -977,6 +1074,7 @@ function ClientsTableCustomization({
                         }}
                         className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
                       />
+                      {renderSectionSelect(entry.id, entry.sub)}
                       <label className="flex items-center gap-2 text-xs text-muted-foreground">
                         <input
                           type="checkbox"
@@ -994,7 +1092,8 @@ function ClientsTableCustomization({
                       <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground w-fit">
                         {entry.fieldType}
                       </span>
-                      <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-sky-400/70">
+                      {renderSectionSelect(entry.id, "Custom")}
+                      <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-sky-400/70 w-fit">
                         custom
                       </span>
                     </>
@@ -1002,6 +1101,92 @@ function ClientsTableCustomization({
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-black/10 p-4">
+          <p className="mb-1 text-sm">Section names</p>
+          <p className="mb-3 text-[10px] text-muted-foreground">
+            Rename the section bands that group the columns above (the top header row in the clients table), or create your own section. Assign columns to a section in the <strong>Section</strong> dropdown of the Column order list above. Leave the name blank to keep the default. A created section appears in the table only once at least one column is assigned to it.
+          </p>
+          <div className="grid grid-cols-[1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span>Section</span>
+            <span>Display name (override)</span>
+            <span />
+          </div>
+          <div className="divide-y divide-white/5">
+            {MEGA_SECTIONS.map((section) => {
+              const override = overrideMap.get(`section:${section}`);
+              return (
+                <div key={section} className="grid grid-cols-[1.4fr_2fr_auto] items-center gap-3 px-3 py-2">
+                  <span className="truncate text-xs text-neutral-300">{section}</span>
+                  <input
+                    type="text"
+                    defaultValue={override?.label_override ?? ""}
+                    placeholder={section}
+                    onBlur={(event) => {
+                      const next = event.target.value.trim() || null;
+                      if (next === (override?.label_override ?? null)) return;
+                      void onUpsertOverride(`section:${section}`, { label_override: next });
+                    }}
+                    className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                  />
+                  <span className="w-7" />
+                </div>
+              );
+            })}
+            {customSections.map((section) => {
+              const override = overrideMap.get(`section:${section}`);
+              return (
+                <div key={`custom-${section}`} className="grid grid-cols-[1.4fr_2fr_auto] items-center gap-3 px-3 py-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-xs text-neutral-300">{section}</span>
+                    <span className="shrink-0 rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.14em] text-sky-400/70">
+                      custom
+                    </span>
+                  </span>
+                  <input
+                    type="text"
+                    defaultValue={override?.label_override ?? ""}
+                    placeholder={section}
+                    onBlur={(event) => {
+                      const next = event.target.value.trim() || null;
+                      if (next === (override?.label_override ?? null)) return;
+                      void onUpsertOverride(`section:${section}`, { label_override: next });
+                    }}
+                    className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteSection(section)}
+                    title="Delete section (columns return to their original band)"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 text-muted-foreground hover:border-red-400/40 hover:text-red-300"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="text"
+              value={newSectionName}
+              onChange={(event) => setNewSectionName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleAddSection();
+              }}
+              placeholder="New section name"
+              className="w-full max-w-xs rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void handleAddSection()}
+              disabled={!newSectionName.trim()}
+              className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add section
+            </button>
           </div>
         </div>
 

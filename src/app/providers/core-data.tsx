@@ -782,8 +782,12 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
 
   const setColumnOrder = useCallback(async (orderedKeys: string[]) => {
     const previous = snapshot.columnOverrides;
+    const orderedSet = new Set(orderedKeys);
+    // Overrides not part of the reorder (e.g. `section:<name>` band labels) must
+    // survive — the gateway only returns the reordered keys, so we re-merge them.
+    const untouched = previous.filter((o) => !orderedSet.has(o.column_key));
     // Optimistic local update — keeps the table feeling instant on click.
-    const optimistic = orderedKeys.map<ColumnOverrideRecord>((key, idx) => {
+    const reordered = orderedKeys.map<ColumnOverrideRecord>((key, idx) => {
       const existing = previous.find((o) => o.column_key === key);
       return {
         column_key: key,
@@ -794,10 +798,10 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
         updated_by: existing?.updated_by ?? null,
       };
     });
-    setSnapshot((current) => ({ ...current, columnOverrides: optimistic }));
+    setSnapshot((current) => ({ ...current, columnOverrides: [...untouched, ...reordered] }));
     try {
       const updated = await repository.setColumnOrder(orderedKeys);
-      setSnapshot((current) => ({ ...current, columnOverrides: updated }));
+      setSnapshot((current) => ({ ...current, columnOverrides: [...untouched, ...updated] }));
       setError(null);
     } catch (reason) {
       const message = mapCoreDataError(reason);
