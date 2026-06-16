@@ -1,7 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { ExternalLink, Pencil } from "lucide-react";
 import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
 import { Badge } from "../../components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
 import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../../lib/client-metrics";
@@ -664,6 +666,113 @@ export interface ClientsMegaTableProps {
   onCustomFieldValueChange?: (clientId: string, fieldId: string, value: string | null) => void;
 }
 
+function parseSafeHref(raw: string | null | undefined): string | null {
+  const href = raw?.trim();
+  if (!href) return null;
+  try {
+    const u = new URL(href);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function LinkCell({
+  value,
+  canEdit,
+  onSave,
+}: {
+  value: string | null;
+  canEdit: boolean;
+  onSave?: (next: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+
+  const safe = parseSafeHref(value);
+
+  function handleOpen(e: React.MouseEvent) {
+    e.stopPropagation();
+    setDraft(value ?? "");
+    setOpen(true);
+  }
+
+  function handleSave() {
+    const next = draft.trim() || null;
+    if (next !== (value ?? null)) onSave?.(next);
+    setOpen(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") handleSave();
+    if (e.key === "Escape") setOpen(false);
+  }
+
+  return (
+    <span className="group/link inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      {safe ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <a
+              href={safe}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center text-sky-400 hover:text-sky-300"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs break-all text-xs">
+            {value}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="text-neutral-600">—</span>
+      )}
+      {canEdit && (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <button
+              onClick={handleOpen}
+              className="inline-flex items-center text-neutral-500 hover:text-neutral-300 transition-colors"
+              tabIndex={-1}
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent side="bottom" align="start" className="w-80 p-3">
+            <p className="mb-2 text-xs font-medium text-neutral-300">Edit link</p>
+            <input
+              autoFocus
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="https://…"
+              className="w-full rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-sky-500/50"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                onClick={() => setOpen(false)}
+                className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="rounded bg-sky-600/20 px-3 py-1 text-xs text-sky-300 hover:bg-sky-600/30"
+              >
+                Save
+              </button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+    </span>
+  );
+}
+
 function customFieldColumn(
   field: ClientCustomFieldRecord,
   valuesByClient: ReadonlyMap<string, ReadonlyMap<string, string | null>>,
@@ -720,26 +829,12 @@ function customFieldColumn(
         );
       }
       if (field.field_type === "link") {
-        const href = value?.trim();
-        if (!href) return <span className="text-neutral-600">—</span>;
-        let safe: string | null = null;
-        try {
-          const u = new URL(href);
-          if (u.protocol === "https:" || u.protocol === "http:") safe = u.href;
-        } catch {
-          safe = null;
-        }
-        if (!safe) return <span className="truncate text-xs text-neutral-400">{href}</span>;
         return (
-          <a
-            href={safe}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="truncate text-xs text-sky-400 underline-offset-2 hover:underline"
-          >
-            {href.replace(/^https?:\/\//, "")}
-          </a>
+          <LinkCell
+            value={value}
+            canEdit={canEdit}
+            onSave={(next) => onChange?.(row.client.id, field.id, next)}
+          />
         );
       }
       if (!canEdit) {
