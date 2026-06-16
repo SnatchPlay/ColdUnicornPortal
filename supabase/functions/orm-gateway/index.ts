@@ -597,7 +597,7 @@ function toClientCustomFieldRecord(row: Record<string, unknown>) {
   return {
     id: String(row.id),
     name: String(row.name),
-    field_type: String(row.field_type) as "text" | "checkbox" | "droplist",
+    field_type: String(row.field_type) as "text" | "checkbox" | "droplist" | "link",
     options: row.options === null || row.options === undefined ? null : (row.options as string[]),
     position: Number(row.position ?? 0),
     editable_by: Array.isArray(row.editable_by) ? (row.editable_by as string[]) : ["master_admin"],
@@ -1690,8 +1690,15 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       : sql``;
 
     // Stage filter applied to data query only (not stage count — counts reflect all stages).
-    const stageWhereClause = p.stage
-      ? sql`AND (${stageExpr}) = ${p.stage}`
+    // Build a combined WHERE clause that safely merges base conditions with the stage predicate.
+    // If baseWhereParts is empty and a stage is set, we must emit WHERE (not AND) to avoid
+    // generating "AND (...) = '...' " without a preceding WHERE — which is invalid SQL and
+    // causes the gateway to error when a manager filters by MQL/preMQL without other filters.
+    const dataWhereParts = p.stage
+      ? [...baseWhereParts, sql`(${stageExpr}) = ${p.stage}`]
+      : baseWhereParts;
+    const dataWhereClause = dataWhereParts.length > 0
+      ? sql`WHERE ${sql.join(dataWhereParts, sql` AND `)}`
       : sql``;
 
     // Sort ORDER BY clause.
@@ -1756,8 +1763,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
         FROM replies GROUP BY lead_id
       ) r ON r.lead_id = l.id
-      ${baseWhereClause}
-      ${stageWhereClause}
+      ${dataWhereClause}
       ${orderClause}
       LIMIT ${pageSize} OFFSET ${offset}
     `);

@@ -86,6 +86,11 @@ function formatRate(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function calcMinSent(prospectsSignedRaw: number | null | undefined): number | null {
+  if (prospectsSignedRaw == null) return null;
+  return Math.ceil((prospectsSignedRaw * 3) / 20);
+}
+
 function bucketMap<T extends { bucket: string }>(rows: T[]): Map<string, T> {
   const m = new Map<string, T>();
   for (const r of rows) m.set(r.bucket, r);
@@ -256,8 +261,26 @@ function buildColumns(): MegaColumn[] {
     align: "center",
     conditionKey: "min_sent",
     defaultDirection: "desc",
-    render: (row) => formatNum(row.client.min_daily_sent),
-    sortValue: (row) => row.client.min_daily_sent ?? null,
+    render: (row) => formatNum(calcMinSent(row.client.prospects_signed)),
+    sortValue: (row) => calcMinSent(row.client.prospects_signed),
+  });
+  out.push({
+    id: "min_mailboxes",
+    group: "basic",
+    sub: "Basic",
+    label: "Min MBX",
+    width: 56,
+    minWidth: 44,
+    align: "center",
+    defaultDirection: "desc",
+    render: (row) => {
+      const ms = calcMinSent(row.client.prospects_signed);
+      return formatNum(ms === null ? null : Math.ceil(ms / 10));
+    },
+    sortValue: (row) => {
+      const ms = calcMinSent(row.client.prospects_signed);
+      return ms === null ? null : Math.ceil(ms / 10);
+    },
   });
   out.push({
     id: "kpi_leads",
@@ -295,6 +318,29 @@ function buildColumns(): MegaColumn[] {
     defaultDirection: "desc",
     render: (row) => (row.client.bi_setup_done ? "✓" : "—"),
     sortValue: (row) => (row.client.bi_setup_done ? 1 : 0),
+  });
+  out.push({
+    id: "notes",
+    group: "basic",
+    sub: "Basic",
+    label: "Notes",
+    width: 160,
+    minWidth: 80,
+    align: "left",
+    defaultDirection: "asc",
+    render: (row) => {
+      const text = row.client.notes;
+      if (!text) return <span className="text-neutral-600">—</span>;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="truncate text-xs text-neutral-300 cursor-default">{text}</span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-pre-wrap text-xs">{text}</TooltipContent>
+        </Tooltip>
+      );
+    },
+    sortValue: (row) => row.client.notes ?? "",
   });
 
   // --- DoD Schedule -------------------------------------------------------
@@ -671,6 +717,29 @@ function customFieldColumn(
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
+        );
+      }
+      if (field.field_type === "link") {
+        const href = value?.trim();
+        if (!href) return <span className="text-neutral-600">—</span>;
+        let safe: string | null = null;
+        try {
+          const u = new URL(href);
+          if (u.protocol === "https:" || u.protocol === "http:") safe = u.href;
+        } catch {
+          safe = null;
+        }
+        if (!safe) return <span className="truncate text-xs text-neutral-400">{href}</span>;
+        return (
+          <a
+            href={safe}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="truncate text-xs text-sky-400 underline-offset-2 hover:underline"
+          >
+            {href.replace(/^https?:\/\//, "")}
+          </a>
         );
       }
       if (!canEdit) {
