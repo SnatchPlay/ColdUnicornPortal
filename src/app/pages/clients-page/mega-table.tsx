@@ -1,4 +1,4 @@
-import { memo, useMemo, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
 import { Badge } from "../../components/ui/badge";
@@ -557,12 +557,21 @@ function conditionCellWrapperClass(severity: ConditionSeverity): string {
   return "rounded";
 }
 
-function renderCellWithCondition(content: ReactNode, condition: ConditionEvaluationResult | undefined): ReactNode {
+function renderCellWithCondition(
+  content: ReactNode,
+  condition: ConditionEvaluationResult | undefined,
+  isCellSelected: boolean,
+): ReactNode {
   if (!condition) return <span className="text-white">{content}</span>;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={conditionCellWrapperClass(condition.severity)}>{content}</div>
+        {/* ring-inset on the inner div because .cond-cell fills 100%+margin,
+            completely covering any ring placed on the outer cell div */}
+        <div className={cn(
+          conditionCellWrapperClass(condition.severity),
+          isCellSelected && "ring-2 ring-inset ring-sky-400/90",
+        )}>{content}</div>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs space-y-1 bg-[#111] text-xs text-white" sideOffset={8}>
         <p>
@@ -592,8 +601,10 @@ export interface ClientsMegaTableProps {
   sort: MegaSortState;
   onSortChange: (next: MegaSortState) => void;
   onRowClick: (clientId: string) => void;
-  onHighlight: (clientId: string) => void;
+  onHighlight: (clientId: string, colId: string) => void;
   selectionStore: SelectionStore;
+  /** Parent ref that receives the ordered visible column id array after each render. */
+  colsRef?: MutableRefObject<string[]>;
   storageKey?: string;
   /** Master-admin label/visibility overrides keyed by column id. */
   columnOverrides?: ColumnOverrideRecord[];
@@ -620,8 +631,8 @@ function customFieldColumn(
     group: "custom",
     sub: "Custom",
     label: field.name,
-    width: field.field_type === "checkbox" ? 90 : 160,
-    minWidth: field.field_type === "checkbox" ? 70 : 120,
+    width: field.field_type === "checkbox" ? 90 : field.field_type === "droplist" ? 120 : 140,
+    minWidth: field.field_type === "checkbox" ? 50 : 60,
     align: "left",
     // Lets condition rules with `column_key: "cf:<id>"` and surface
     // `clients_overview` colour this cell via cellCondition().
@@ -692,7 +703,7 @@ interface MegaRowProps {
   stickyOffsets: Map<number, number>;
   colBorderClasses: string[];
   onRowClick: (clientId: string) => void;
-  onHighlight: (clientId: string) => void;
+  onHighlight: (clientId: string, colId: string) => void;
   selectionStore: SelectionStore;
 }
 
@@ -709,8 +720,15 @@ const MegaRow = memo(function MegaRow({
 }: MegaRowProps) {
   const isSelected = useSyncExternalStore(
     selectionStore.subscribe,
-    () => selectionStore.get() === row.client.id,
+    () => selectionStore.get().clientId === row.client.id,
     () => false,
+  );
+  // Returns colId only for the selected row; null for all others → snapshot is
+  // primitive-stable so non-selected rows never re-render on column changes.
+  const selectedColId = useSyncExternalStore(
+    selectionStore.subscribe,
+    () => (selectionStore.get().clientId === row.client.id ? selectionStore.get().colId : null),
+    () => null,
   );
   const rowTint = rIdx % 2 ? "bg-black/20" : "bg-transparent";
 
@@ -740,6 +758,7 @@ const MegaRow = memo(function MegaRow({
         const condition = cellCondition(row, col);
         const content = col.ordinal ? String(rIdx + 1) : col.render(row);
         const opensDrawer = col.id === "name";
+        const isCellSelected = selectedColId !== null && col.id === selectedColId;
 
         return (
           <div
@@ -747,7 +766,7 @@ const MegaRow = memo(function MegaRow({
             style={style}
             role={opensDrawer ? "button" : undefined}
             aria-label={opensDrawer ? `Open details for ${row.client.name}` : undefined}
-            onClick={() => opensDrawer ? onRowClick(row.client.id) : onHighlight(row.client.id)}
+            onClick={() => opensDrawer ? onRowClick(row.client.id) : onHighlight(row.client.id, col.id)}
             className={cn(
               "flex cursor-pointer items-center px-1.5 text-xs",
               colBorderClasses[i],
@@ -757,9 +776,10 @@ const MegaRow = memo(function MegaRow({
                 ? "justify-end"
                 : "justify-center",
               col.sticky ? "shadow-[inset_-2px_0_0_rgba(255,255,255,0.07)]" : "",
+              isCellSelected ? "bg-sky-500/15 ring-2 ring-inset ring-sky-400/90" : "",
             )}
           >
-            {col.sticky || col.ordinal ? content : renderCellWithCondition(content, condition)}
+            {col.sticky || col.ordinal ? content : renderCellWithCondition(content, condition, isCellSelected)}
           </div>
         );
       })}
@@ -781,6 +801,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     customFieldValuesByClient,
     canEditCustomField,
     onCustomFieldValueChange,
+    colsRef,
   } = props;
   useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
   useDevRenderCount("ClientsMegaTable", () => `rows=${rows.length}`);
@@ -922,6 +943,35 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     [cols, groupBoundarySet, subBoundarySet],
   );
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Keep the parent's colsRef up-to-date so the keyboard handler knows visible col order.
+  useEffect(() => {
+    if (colsRef) colsRef.current = cols.map((c) => c.id);
+  }, [cols, colsRef]);
+
+  // Scroll the table horizontally so the keyboard-selected cell stays visible.
+  useEffect(() => {
+    const unsubscribe = selectionStore.subscribe(() => {
+      const state = selectionStore.get();
+      if (!state.colId || !scrollContainerRef.current) return;
+      const colIdx = cols.findIndex((c) => c.id === state.colId);
+      if (colIdx === -1) return;
+      let left = 0;
+      for (let i = 0; i < colIdx; i++) left += widths[i] ?? 0;
+      const w = widths[colIdx] ?? 0;
+      const container = scrollContainerRef.current;
+      const scrollLeft = container.scrollLeft;
+      const visible = container.clientWidth;
+      if (left < scrollLeft) {
+        container.scrollLeft = left;
+      } else if (left + w > scrollLeft + visible) {
+        container.scrollLeft = left + w - visible;
+      }
+    });
+    return unsubscribe;
+  }, [selectionStore, cols, widths]);
+
   function toggleSort(col: MegaColumn) {
     if (sort.key === col.id) {
       onSortChange({ key: col.id, direction: sort.direction === "asc" ? "desc" : "asc" });
@@ -932,7 +982,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/20">
-      <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 20rem)" }}>
+      <div ref={scrollContainerRef} className="overflow-auto" style={{ maxHeight: "calc(100vh - 20rem)" }}>
         <div style={{ width: totalWidth, minWidth: totalWidth }}>
           {/* Sticky header — three rows stay pinned on vertical scroll */}
           <div className="sticky top-0 z-20 bg-[#080808]">
@@ -997,12 +1047,17 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
                       {col.label}
                     </TooltipContent>
                   </Tooltip>
-                  {!isLast && (
-                    <div
-                      onMouseDown={resizable.getResizeMouseDown(i)}
-                      className="absolute -right-1 top-0 h-full w-2 cursor-col-resize bg-transparent transition hover:bg-white/15"
-                    />
-                  )}
+                  {/* z-10 ensures this handle wins pointer events over the adjacent
+                      column header div, which would otherwise paint on top of the
+                      -4px overflow zone. Last column gets a left-anchored handle
+                      so it is always resizable. */}
+                  <div
+                    onMouseDown={resizable.getResizeMouseDown(i)}
+                    className={cn(
+                      "absolute top-0 h-full w-2 cursor-col-resize bg-transparent transition hover:bg-white/15 z-10",
+                      isLast ? "-left-1" : "-right-1",
+                    )}
+                  />
                 </div>
               );
             })}
