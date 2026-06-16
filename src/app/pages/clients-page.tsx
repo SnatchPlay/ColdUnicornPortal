@@ -692,7 +692,6 @@ export function ClientsPage() {
       }
       return result;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, statsLoaded]);
 
   const customFieldValuesByClient = useMemo(() => {
@@ -867,16 +866,19 @@ export function ClientsPage() {
   const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
   const canInviteUsers = identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
 
-  // External store that broadcasts the selected-client id to per-row
-  // subscribers in the mega-table. Decouples the row highlight from React
-  // props so ClientsMegaTable does not re-render on drawer open/close.
+  // External store that broadcasts the selected-client id and column id to
+  // per-row subscribers in the mega-table. Decouples the row/cell highlight
+  // from React props so ClientsMegaTable does not re-render on drawer open/close.
   const selectionStore = useMemo(createSelectionStore, []);
+  // Ref filled by ClientsMegaTable with the ordered visible column id array;
+  // read by the keyboard handler to perform horizontal column navigation.
+  const tableColsRef = useRef<string[]>([]);
 
   const openClient = useCallback(
     (id: string) => {
       markInteractionStart("client-drawer:click");
       const client = scopedClients.find((c) => c.id === id) ?? null;
-      selectionStore.set(id);
+      selectionStore.set({ clientId: id, colId: null });
       setSelectedClientId(id);
       setDraft(client ? toClientDraft(client) : null);
       setMappingUserId("");
@@ -887,7 +889,7 @@ export function ClientsPage() {
   );
 
   const closeClient = useCallback(() => {
-    selectionStore.set(null);
+    selectionStore.set({ clientId: null, colId: null });
     setSelectedClientId(null);
     setDraft(null);
     setMappingUserId("");
@@ -897,8 +899,8 @@ export function ClientsPage() {
 
   const handleRowClick = useCallback((id: string) => openClient(id), [openClient]);
 
-  const handleCellHighlight = useCallback((id: string) => {
-    selectionStore.set(id);
+  const handleCellHighlight = useCallback((clientId: string, colId: string) => {
+    selectionStore.set({ clientId, colId });
   }, [selectionStore]);
 
   useEffect(() => {
@@ -915,18 +917,23 @@ export function ClientsPage() {
         return;
       }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const currentId = selectionStore.get();
-      if (!currentId) return;
-      const idx = visibleMegaRows.findIndex((r) => r.client.id === currentId);
-      if (idx === -1) return;
-      const nextIdx = event.key === "ArrowRight" ? idx + 1 : idx - 1;
-      if (nextIdx < 0 || nextIdx >= visibleMegaRows.length) return;
+      const state = selectionStore.get();
+      if (!state.clientId) return;
+      const colIds = tableColsRef.current;
+      if (!colIds.length) return;
+      const currentColIdx = state.colId ? colIds.indexOf(state.colId) : -1;
+      const nextIdx =
+        event.key === "ArrowRight"
+          ? currentColIdx === -1 ? 0 : currentColIdx + 1
+          : currentColIdx === -1 ? colIds.length - 1 : currentColIdx - 1;
+      if (nextIdx < 0 || nextIdx >= colIds.length) return;
       event.preventDefault();
-      selectionStore.set(visibleMegaRows[nextIdx].client.id);
+      selectionStore.set({ clientId: state.clientId, colId: colIds[nextIdx] });
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeClient, selectionStore, visibleMegaRows]);
+    // tableColsRef is a ref — not a dep; selectionStore is stable
+  }, [closeClient, selectionStore]);
 
   const draftPatch = useMemo(() => {
     if (!selectedClient || !draft) return {};
@@ -1162,6 +1169,7 @@ export function ClientsPage() {
               onRowClick={handleRowClick}
               onHighlight={handleCellHighlight}
               selectionStore={selectionStore}
+              colsRef={tableColsRef}
               columnOverrides={columnOverrides}
               customFields={clientCustomFields}
               customFieldValuesByClient={customFieldValuesByClient}

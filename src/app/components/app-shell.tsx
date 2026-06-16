@@ -51,13 +51,13 @@ interface NavItem {
 
 const ADMIN_NAV: NavItem[] = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/admin/users", label: "User management", icon: UserCog },
   { to: "/admin/clients", label: "Clients", icon: Building2 },
   { to: "/admin/leads", label: "Leads", icon: Users },
   { to: "/admin/campaigns", label: "Campaigns", icon: Rocket },
   { to: "/admin/statistics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/domains", label: "Domains", icon: Globe2 },
   { to: "/admin/invoices", label: "Invoices", icon: ReceiptText },
+  { to: "/admin/users", label: "User management", icon: UserCog },
   { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -92,7 +92,7 @@ const MOBILE_PRIMARY_BY_ROLE: Record<AppRole, string[]> = {
   master_admin: ["/admin/dashboard", "/admin/clients", "/admin/leads", "/admin/campaigns"],
 };
 
-const SIDEBAR_HIDDEN_STORAGE_KEY = "app_shell_sidebar_hidden";
+const SIDEBAR_HIDDEN_STORAGE_KEY = "app_shell_sidebar_hidden"; // legacy key
 const SIDEBAR_MODE_STORAGE_KEY = "app_shell_sidebar_mode";
 
 function roleHomePath(role: AppRole) {
@@ -101,15 +101,14 @@ function roleHomePath(role: AppRole) {
   return "/client/dashboard";
 }
 
-function readInitialSidebarHidden() {
+function readInitialSidebarCollapsed() {
   if (typeof window === "undefined") return false;
-
+  // Legacy: "1" in old hidden key means collapsed now (was fully hidden before).
   const legacy = window.localStorage.getItem(SIDEBAR_HIDDEN_STORAGE_KEY);
   if (legacy === "1") return true;
   if (legacy === "0") return false;
-
   const mode = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
-  return mode === "hidden";
+  return mode === "collapsed" || mode === "hidden";
 }
 
 function isPathActive(currentPath: string, itemPath: string) {
@@ -133,6 +132,8 @@ interface SidebarPanelProps {
   stopImpersonation: () => void;
   signOut: () => void;
   onNavigate: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const SidebarPanel = memo(function SidebarPanel({
@@ -148,6 +149,8 @@ const SidebarPanel = memo(function SidebarPanel({
   stopImpersonation,
   signOut,
   onNavigate,
+  isCollapsed,
+  onToggleCollapse,
 }: SidebarPanelProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -155,6 +158,70 @@ const SidebarPanel = memo(function SidebarPanel({
   const [managerTargetId, setManagerTargetId] = useState("");
   const [clientTargetId, setClientTargetId] = useState("");
   const { isContrast, toggleTheme } = useColorTheme();
+
+  if (isCollapsed) {
+    return (
+      <div className="flex h-full flex-col items-center">
+        <button
+          onClick={onToggleCollapse}
+          title="Show menu"
+          aria-label="Expand sidebar"
+          className="flex h-[88px] w-full items-center justify-center border-b border-[#1f1f1f] text-neutral-500 transition hover:bg-[#111] hover:text-white"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <nav className="flex flex-1 flex-col items-center gap-1 px-2 py-4">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = isPathActive(location.pathname, item.to);
+            return (
+              <a
+                key={item.to}
+                href={item.to}
+                title={item.label}
+                aria-label={item.label}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onNavigate();
+                  startNavTransition(() => navigate(item.to));
+                }}
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-xl border transition",
+                  isActive
+                    ? "border-[#3a3a3a] bg-[#232323] text-white"
+                    : "border-transparent text-neutral-400 hover:border-[#242424] hover:bg-[#111] hover:text-white",
+                )}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+              </a>
+            );
+          })}
+        </nav>
+        <div className="flex flex-col items-center gap-2 border-t border-[#1f1f1f] px-2 py-4">
+          <button
+            onClick={toggleTheme}
+            title={isContrast ? "Switch to default colours" : "Switch to contrast colours (colorblind-friendly)"}
+            className={cn(
+              "flex h-10 w-10 items-center justify-center rounded-lg transition",
+              isContrast
+                ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                : "text-neutral-400 hover:bg-[#111] hover:text-white",
+            )}
+          >
+            <Contrast className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => { onNavigate(); void signOut(); }}
+            title="Sign out"
+            aria-label="Sign out"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-[#111] hover:text-white"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   function handleImpersonateAdmin() {
     if (!actorIdentity) return;
@@ -189,12 +256,20 @@ const SidebarPanel = memo(function SidebarPanel({
 
   return (
     <>
-      <Link to={homePath} onClick={onNavigate} className="border-b border-[#1f1f1f] px-6 py-6">
-        <div className="flex items-center">
+      <div className="flex items-start justify-between border-b border-[#1f1f1f] px-6 py-6">
+        <Link to={homePath} onClick={onNavigate} className="min-w-0">
           <img src={coldUnicornLogo} alt="ColdUnicorn" className="h-10 w-auto object-contain" />
-        </div>
-        <p className="mt-3 text-sm leading-5 text-neutral-500">ColdUnicorn PDCA Platform</p>
-      </Link>
+          <p className="mt-3 text-sm leading-5 text-neutral-500">PDCA portal</p>
+        </Link>
+        <button
+          onClick={onToggleCollapse}
+          title="Hide menu"
+          aria-label="Collapse sidebar"
+          className="mt-1 shrink-0 rounded-lg p-1.5 text-neutral-500 transition hover:bg-[#111] hover:text-white"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+      </div>
 
       {identity.role === "client" ? (
         <div className="border-b border-[#1f1f1f] px-7 py-6">
@@ -376,7 +451,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { usersLite: users, clientsLite: clients } = useShellData();
   const { actorIdentity, identity, isImpersonating, impersonate, stopImpersonation, signOut } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDesktopSidebarHidden, setIsDesktopSidebarHidden] = useState(() => readInitialSidebarHidden());
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(() => readInitialSidebarCollapsed());
 
   const managerOptions = useMemo(
     () =>
@@ -401,8 +476,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SIDEBAR_HIDDEN_STORAGE_KEY, isDesktopSidebarHidden ? "1" : "0");
-  }, [isDesktopSidebarHidden]);
+    window.localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, isDesktopSidebarCollapsed ? "collapsed" : "expanded");
+  }, [isDesktopSidebarCollapsed]);
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
@@ -414,7 +489,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const navItems = NAV_BY_ROLE[identity.role];
   const homePath = navItems[0]?.to ?? "/";
-  const hasDesktopSidebar = !isDesktopSidebarHidden;
   const mobilePrimary = navItems.filter((item) => MOBILE_PRIMARY_BY_ROLE[identity.role].includes(item.to));
   const currentRolePrefix = identity.role === "super_admin" ? "admin" : identity.role;
   const rootPath = `/${currentRolePrefix}`;
@@ -439,17 +513,22 @@ export function AppShell({ children }: { children: ReactNode }) {
       stopImpersonation={stopImpersonation}
       signOut={signOut}
       onNavigate={closeMenu}
+      isCollapsed={isDesktopSidebarCollapsed}
+      onToggleCollapse={() => setIsDesktopSidebarCollapsed((c) => !c)}
     />
   );
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
       <div className="flex min-h-screen">
-        {hasDesktopSidebar && (
-          <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col overflow-y-auto border-r border-[#1f1f1f] bg-[#050505] lg:flex">
-            {sidebarPanelNode}
-          </aside>
-        )}
+        <aside
+          className={cn(
+            "sticky top-0 hidden h-screen shrink-0 flex-col overflow-y-auto border-r border-[#1f1f1f] bg-[#050505] transition-[width] duration-200 lg:flex",
+            isDesktopSidebarCollapsed ? "w-16" : "w-[300px]",
+          )}
+        >
+          {sidebarPanelNode}
+        </aside>
 
         <LightweightSheet
           open={isMobileMenuOpen}
@@ -481,34 +560,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             <p className="truncate text-sm text-neutral-400">{pageLabel}</p>
           </div>
 
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4">
-            <div className="min-w-0">
-              <Breadcrumb>
-                <BreadcrumbList className="text-xs sm:text-sm">
-                  <BreadcrumbItem>
-                    <BreadcrumbLink asChild>
-                      <Link to={crumbHomePath}>{getRoleLabel(identity.role)}</Link>
-                    </BreadcrumbLink>
-                  </BreadcrumbItem>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    {location.pathname === rootPath ? (
-                      <BreadcrumbPage>Home</BreadcrumbPage>
-                    ) : (
-                      <BreadcrumbPage>{pageLabel}</BreadcrumbPage>
-                    )}
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            </div>
-            <button
-              onClick={() => setIsDesktopSidebarHidden((current) => !current)}
-              className="hidden items-center gap-2 rounded-lg border border-[#242424] bg-[#080808] px-3 py-2 text-sm text-neutral-300 transition hover:bg-[#111] hover:text-white lg:inline-flex"
-              aria-label="Toggle menu"
-            >
-              <Menu className="h-4 w-4" />
-              <span>{isDesktopSidebarHidden ? "Show menu" : "Hide menu"}</span>
-            </button>
+          <div className="mb-4 border-b border-[#1f1f1f] pb-4">
+            <Breadcrumb>
+              <BreadcrumbList className="text-xs sm:text-sm">
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to={crumbHomePath}>{getRoleLabel(identity.role)}</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  {location.pathname === rootPath ? (
+                    <BreadcrumbPage>Home</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbPage>{pageLabel}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
 
           {/* StablePageContent prevents heavy route pages from re-rendering when AppShell
