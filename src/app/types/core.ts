@@ -276,7 +276,7 @@ export interface InviteRecord {
   canRevoke: boolean;
 }
 
-export type ClientCustomFieldType = "text" | "checkbox" | "droplist";
+export type ClientCustomFieldType = "text" | "checkbox" | "droplist" | "link";
 
 export interface ColumnOverrideRecord {
   column_key: string;

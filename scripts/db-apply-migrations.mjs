@@ -6,7 +6,7 @@ const CONNECTION =
   process.env.SUPABASE_DB_URL ??
   "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
 
-const MIGRATIONS_DIR = new URL("../supabase/migrations/", import.meta.url).pathname.replace(/^\//, "");
+const MIGRATIONS_DIR = new URL("../supabase/migrations/", import.meta.url).pathname;
 
 const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });
 

@@ -1296,6 +1296,7 @@ function ClientsTableCustomization({
                 <option value="text">text</option>
                 <option value="checkbox">checkbox</option>
                 <option value="droplist">droplist</option>
+                <option value="link">link</option>
               </select>
               {newFieldType === "droplist" ? (
                 <input
