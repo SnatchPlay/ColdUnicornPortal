@@ -24,7 +24,6 @@ import {
   PaginationPrevious,
 } from "../components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { useIsMobile } from "../components/ui/use-mobile";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
@@ -358,6 +357,9 @@ function InternalLeadsPage() {
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const totalCount = data?.totalCount ?? 0;
   const stageCounts = data?.stageCounts ?? {};
+  // When a stage filter is active, the visible scope is that stage's count, not the grand total.
+  // totalCount always reflects all stages (the count query ignores the stage filter intentionally).
+  const scopedCount = stageFilter !== "all" ? (stageCounts[stageFilter] ?? 0) : totalCount;
   const clientsLite = useMemo(() => filterOptions?.clientsLite ?? [], [filterOptions]);
   const campaignsLite = useMemo(() => filterOptions?.campaignsLite ?? [], [filterOptions]);
 
@@ -368,7 +370,7 @@ function InternalLeadsPage() {
     [campaignsLite, clientFilter],
   );
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(scopedCount / PAGE_SIZE));
   const safeCurrentPage = clampPage(currentPage, totalPages);
   const pageWindow = useMemo(() => buildPageWindow(safeCurrentPage, totalPages), [safeCurrentPage, totalPages]);
   const timeframeLabel = getTimeframeLabel(timeframe);
@@ -598,25 +600,34 @@ function InternalLeadsPage() {
 
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Stage</p>
-            <ToggleGroup
-              type="single"
-              value={stageFilter}
-              onValueChange={handleStageFilterChange}
-              variant="outline"
-              className="w-full flex-wrap rounded-xl border border-border bg-black/10 p-1 md:flex-nowrap"
-            >
-              <ToggleGroupItem value="all" className="h-9 flex-1 text-xs md:text-sm">
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={() => handleStageFilterChange("all")}
+                className={cn(
+                  "h-8 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
+                  stageFilter === "all"
+                    ? "border-border bg-[#2a2a2a] text-white"
+                    : "border-border bg-transparent text-muted-foreground hover:bg-[#1a1a1a] hover:text-white",
+                )}
+              >
                 All ({totalCount})
-              </ToggleGroupItem>
+              </button>
               {PIPELINE_STAGES.map((stage) => (
-                <ToggleGroupItem key={stage.key} value={stage.key} className="h-9 flex-1 text-xs md:text-sm">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
-                    <span className="truncate">{stage.label} ({stageCounts[stage.key] ?? 0})</span>
-                  </span>
-                </ToggleGroupItem>
+                <button
+                  key={stage.key}
+                  onClick={() => handleStageFilterChange(stage.key)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
+                    stageFilter === stage.key
+                      ? "border-border bg-[#2a2a2a] text-white"
+                      : "border-border bg-transparent text-muted-foreground hover:bg-[#1a1a1a] hover:text-white",
+                  )}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stage.color }} />
+                  {stage.label} ({stageCounts[stage.key] ?? 0})
+                </button>
               ))}
-            </ToggleGroup>
+            </div>
           </div>
         </div>
       </Surface>
@@ -624,7 +635,7 @@ function InternalLeadsPage() {
       {rows.length === 0 && !loading ? (
         <EmptyState title="No leads match the current filters" description="Leads are scoped by role and searchable across core enrichment fields." />
       ) : (
-        <Surface title="Lead list" subtitle={`${rows.length} of ${totalCount} leads in current scope`}>
+        <Surface title="Lead list" subtitle={`${rows.length} of ${scopedCount} leads in current scope`}>
           {loading && (
             <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
