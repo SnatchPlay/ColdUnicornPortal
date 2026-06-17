@@ -127,7 +127,7 @@ describe("internal leads filters", () => {
     expect(screen.getByRole("button", { name: /lead-ooo/i })).toBeInTheDocument();
 
     // Stage filter MQL while ooo scope is on → no results.
-    fireEvent.click(screen.getByRole("radio", { name: /^MQL \(/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^MQL \(/i }));
     await act(async () => {});
 
     expect(screen.getByText("No leads match the current filters")).toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("internal leads filters", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Campaign Alpha" }));
     await act(async () => {});
 
-    fireEvent.click(screen.getByRole("radio", { name: /All \(\d+\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /All \(\d+\)/i }));
     await act(async () => {});
 
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(2);
