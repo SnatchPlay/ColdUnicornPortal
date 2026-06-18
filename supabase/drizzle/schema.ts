@@ -109,6 +109,9 @@ export const users = pgTable("users", {
 	lastName: text("last_name").notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	role: userRole().notNull(),
+	isActive: boolean("is_active").default(true).notNull(),
+	deactivatedAt: timestamp("deactivated_at", { withTimezone: true, mode: 'string' }),
+	deactivatedBy: uuid("deactivated_by"),
 }, (table) => [
 	unique("users_email_key").on(table.email),
 	pgPolicy("users_select_self", { as: "permissive", for: "select", to: ["authenticated"], using: sql`(auth.uid() = id)` }),

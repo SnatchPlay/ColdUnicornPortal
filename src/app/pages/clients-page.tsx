@@ -16,7 +16,8 @@ import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator"
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
-import type { ClientRecord, InviteRequest } from "../types/core";
+import type { ClientCustomFieldRecord, ClientRecord, InviteRequest } from "../types/core";
+import { getCustomFieldSortValue } from "../lib/custom-field-sort";
 import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
 import {
   ClientDrawer,
@@ -74,18 +75,42 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function compareMega(left: ClientMegaRow, right: ClientMegaRow, sort: MegaSortState): number {
-  const col = MEGA_COLUMNS.find((c) => c.id === sort.key);
-  if (!col || !col.sortValue) return 0;
-  const a = col.sortValue(left);
-  const b = col.sortValue(right);
+interface CustomSortContext {
+  fields: ReadonlyMap<string, ClientCustomFieldRecord>;
+  valuesByClient: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+}
+
+function compareMega(
+  left: ClientMegaRow,
+  right: ClientMegaRow,
+  sort: MegaSortState,
+  customCtx?: CustomSortContext,
+): number {
+  let a: string | number | null;
+  let b: string | number | null;
+  // Custom columns ("cf:<id>") aren't in the static MEGA_COLUMNS list, so resolve
+  // their sort value from the field definition + stored values here. Without this
+  // branch sorting a custom column was a no-op (the 3G "nothing happens" bug).
+  if (sort.key.startsWith("cf:") && customCtx) {
+    const fieldId = sort.key.slice(3);
+    const field = customCtx.fields.get(fieldId);
+    if (!field) return 0;
+    a = getCustomFieldSortValue(field, customCtx.valuesByClient.get(left.client.id)?.get(fieldId) ?? null);
+    b = getCustomFieldSortValue(field, customCtx.valuesByClient.get(right.client.id)?.get(fieldId) ?? null);
+  } else {
+    const col = MEGA_COLUMNS.find((c) => c.id === sort.key);
+    if (!col || !col.sortValue) return 0;
+    a = col.sortValue(left);
+    b = col.sortValue(right);
+  }
   const dir = sort.direction === "asc" ? 1 : -1;
+  // Empty/null always sorts last, regardless of direction.
   if (a === null || a === undefined) return 1;
   if (b === null || b === undefined) return -1;
   if (typeof a === "number" && typeof b === "number") {
     return (a - b) * dir;
   }
-  return String(a).localeCompare(String(b)) * dir;
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * dir;
 }
 
 function mapClientsError(reason: unknown): string {
@@ -804,9 +829,15 @@ export function ClientsPage() {
     );
   }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
 
+  const customFieldById = useMemo(
+    () => new Map(clientCustomFields.map((f) => [f.id, f] as const)),
+    [clientCustomFields],
+  );
+
   const sortedMegaRows = useMemo(() => {
-    return megaRows.slice().sort((a, b) => compareMega(a, b, sort));
-  }, [megaRows, sort]);
+    const customCtx = { fields: customFieldById, valuesByClient: customFieldValuesByClient };
+    return megaRows.slice().sort((a, b) => compareMega(a, b, sort, customCtx));
+  }, [megaRows, sort, customFieldById, customFieldValuesByClient]);
 
   const nameSearchTrimmed = nameSearch.trim().toLowerCase();
   const filteredMegaRows = useMemo(

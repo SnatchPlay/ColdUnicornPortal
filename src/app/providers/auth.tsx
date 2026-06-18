@@ -19,6 +19,7 @@ export type AuthErrorCode =
   | "session_invalid"
   | "profile_missing"
   | "client_mapping_missing"
+  | "account_deactivated"
   | "permission"
   | "network"
   | "unknown";
@@ -86,7 +87,23 @@ async function loadIdentity(session: Session | null) {
   }
 
   try {
-    return await repository.loadIdentity(session.user.id);
+    // Deactivation gate (2C): a deactivated account keeps a valid JWT but must
+    // not retain portal access. private.current_app_role() already returns NULL
+    // for them (stripping all role-gated RLS data); signing them out here is the
+    // clean UX complement. Both calls only need the session, so run them together
+    // rather than adding a sequential round-trip to startup.
+    const [result, stillActive] = await Promise.all([
+      repository.loadIdentity(session.user.id),
+      repository.isCurrentAccountActive(),
+    ]);
+    if (result.identity && !stillActive) {
+      return {
+        identity: null,
+        error: "Your account has been deactivated. Contact an administrator if you believe this is a mistake.",
+        errorCode: "account_deactivated" as const,
+      };
+    }
+    return result;
   } catch (reason) {
     if (reason instanceof RepositoryError) {
       return {

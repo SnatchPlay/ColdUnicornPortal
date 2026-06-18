@@ -56,6 +56,16 @@ const EMPTY_CONDITION_RULES: ConditionRuleRecord[] = [];
 const EMPTY_COLUMN_OVERRIDES: ColumnOverrideRecord[] = [];
 const EMPTY_CUSTOM_FIELDS: ClientCustomFieldRecord[] = [];
 
+// Order shown in both the "add column" and "change type" selects.
+const CUSTOM_FIELD_TYPE_OPTIONS: ClientCustomFieldType[] = [
+  "text",
+  "number",
+  "currency",
+  "checkbox",
+  "droplist",
+  "link",
+];
+
 function emptyRule(createdBy: string | null): ConditionRule {
   const now = new Date().toISOString();
   // Seed with the first built-in metric so a fresh rule is already valid
@@ -1013,7 +1023,7 @@ function ClientsTableCustomization({
   return (
     <Surface
       title="Clients table customization"
-      subtitle="Master-admin only: rename or hide built-in columns; add text/checkbox/droplist columns."
+      subtitle="Master-admin only: rename or hide built-in columns; add text/number/currency/checkbox/droplist/link columns."
     >
       <div className="space-y-6">
         <div className="rounded-2xl border border-border bg-black/10 p-4">
@@ -1191,7 +1201,10 @@ function ClientsTableCustomization({
         </div>
 
         <div className="rounded-2xl border border-border bg-black/10 p-4">
-          <p className="mb-3 text-sm">Custom columns</p>
+          <p className="mb-1 text-sm">Custom columns</p>
+          <p className="mb-3 text-[10px] text-muted-foreground">
+            Use <strong>number</strong> or <strong>currency</strong> for values that must sort numerically (e.g. MRR like <code className="text-neutral-300">8000 zł</code>). Changing a field's type keeps existing values, but values that don't fit the new type may sort or render as empty until corrected.
+          </p>
           <div className="space-y-2">
             {customFields.length === 0 ? (
               <p className="text-xs text-muted-foreground">No custom columns yet.</p>
@@ -1215,9 +1228,32 @@ function ClientsTableCustomization({
                         }}
                         className="w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
                       />
-                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        {field.field_type}
-                      </span>
+                      <select
+                        value={field.field_type}
+                        title="Change field type — existing values are kept"
+                        onChange={(event) => {
+                          const nextType = event.target.value as ClientCustomFieldType;
+                          if (nextType === field.field_type) return;
+                          // droplist requires a non-empty options array (DB CHECK);
+                          // seed defaults if switching to droplist without options.
+                          const patch: { field_type: ClientCustomFieldType; options?: string[] | null } =
+                            { field_type: nextType };
+                          if (nextType === "droplist") {
+                            patch.options =
+                              field.options && field.options.length > 0
+                                ? field.options
+                                : ["Option 1", "Option 2"];
+                          } else {
+                            patch.options = null;
+                          }
+                          void onUpdateField(field.id, patch);
+                        }}
+                        className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground outline-none"
+                      >
+                        {CUSTOM_FIELD_TYPE_OPTIONS.map((type) => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
                       {field.field_type === "droplist" ? (
                         <input
                           type="text"
@@ -1293,10 +1329,9 @@ function ClientsTableCustomization({
                 onChange={(event) => setNewFieldType(event.target.value as ClientCustomFieldType)}
                 className="rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-xs outline-none"
               >
-                <option value="text">text</option>
-                <option value="checkbox">checkbox</option>
-                <option value="droplist">droplist</option>
-                <option value="link">link</option>
+                {CUSTOM_FIELD_TYPE_OPTIONS.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
               </select>
               {newFieldType === "droplist" ? (
                 <input

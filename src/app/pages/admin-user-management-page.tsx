@@ -1,15 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, EmptyState, LoadingState, MetricCard, Surface } from "../components/app-ui";
 import { Info } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { formatDate, formatNumber } from "../lib/format";
-import { isInternalAdmin } from "../lib/selectors";
-import { repository } from "../data/repository";
+import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
+import { repository, RepositoryError } from "../data/repository";
 import { useAuth } from "../providers/auth";
 import { useShellData } from "../providers/shell-data";
-import type { InviteRecord, InviteRole, InviteStatus } from "../types/core";
+import type { AppRole, InviteRecord, InviteRole, InviteStatus, ManagedUserRecord } from "../types/core";
+
+const ALL_ROLES: AppRole[] = ["super_admin", "master_admin", "admin", "manager", "client"];
+
+// Roles the current actor is allowed to assign. Only a super_admin may grant
+// super_admin; this is also enforced server-side by admin_update_user_role.
+function assignableRoles(actorRole: AppRole | undefined): AppRole[] {
+  if (actorRole === "super_admin") return ALL_ROLES;
+  return ALL_ROLES.filter((role) => role !== "super_admin");
+}
 
 type InviteFilter = "all" | InviteStatus;
 
@@ -47,9 +56,16 @@ function formatInviteDate(value: string | null) {
 }
 
 export function AdminUserManagementPage() {
-  const { identity } = useAuth();
+  const { identity, actorIdentity } = useAuth();
   // clients come from the already-loaded shell data (no extra round-trip needed).
   const { clientsLite: clients } = useShellData();
+
+  // ── Team users (2B/2C) ────────────────────────────────────────────────────
+  const [users, setUsers] = useState<ManagedUserRecord[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [showInactiveUsers, setShowInactiveUsers] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const usersLoadIdRef = useRef(0);
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("client");
@@ -85,6 +101,79 @@ export function AdminUserManagementPage() {
     if (!canAccess) return;
     void refreshInvites();
   }, [canAccess, refreshInvites]);
+
+  const refreshUsers = useCallback(async () => {
+    const id = ++usersLoadIdRef.current;
+    setIsLoadingUsers(true);
+    try {
+      const nextUsers = await repository.listManagedUsers();
+      if (id !== usersLoadIdRef.current) return; // stale — discard
+      setUsers(nextUsers);
+    } catch {
+      if (id !== usersLoadIdRef.current) return;
+      setUsers([]);
+    } finally {
+      if (id === usersLoadIdRef.current) setIsLoadingUsers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!canAccess) return;
+    void refreshUsers();
+  }, [canAccess, refreshUsers]);
+
+  const visibleUsers = useMemo(
+    () => (showInactiveUsers ? users : users.filter((user) => user.is_active)),
+    [users, showInactiveUsers],
+  );
+  const inactiveUserCount = useMemo(() => users.filter((user) => !user.is_active).length, [users]);
+
+  async function runUserMutation(
+    user: ManagedUserRecord,
+    mutate: () => Promise<ManagedUserRecord>,
+    successText: string,
+    errorText: string,
+  ) {
+    setPendingUserId(user.id);
+    setMessage(null);
+    try {
+      const updated = await mutate();
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setMessage({ tone: "info", text: successText });
+    } catch (reason) {
+      setMessage({ tone: "danger", text: reason instanceof RepositoryError ? reason.message : errorText });
+    } finally {
+      setPendingUserId(null);
+    }
+  }
+
+  async function handleRoleChange(user: ManagedUserRecord, nextRole: AppRole) {
+    if (nextRole === user.role) return;
+    await runUserMutation(
+      user,
+      () => repository.updateUserRole(user.id, nextRole),
+      `${user.email} is now ${getRoleLabel(nextRole)}.`,
+      "Could not change the user's role.",
+    );
+  }
+
+  async function handleToggleActive(user: ManagedUserRecord) {
+    const nextActive = !user.is_active;
+    if (
+      !nextActive &&
+      !window.confirm(
+        `Deactivate ${user.email}? They will be signed out and lose portal access until reactivated. No data is deleted.`,
+      )
+    ) {
+      return;
+    }
+    await runUserMutation(
+      user,
+      () => repository.setUserActive(user.id, nextActive),
+      nextActive ? `${user.email} reactivated.` : `${user.email} deactivated.`,
+      "Could not change the user's status.",
+    );
+  }
 
   const filteredInvites = useMemo(() => {
     if (activeFilter === "all") return invites;
@@ -175,9 +264,110 @@ export function AdminUserManagementPage() {
     );
   }
 
+  const canAssignSuperAdmin = actorIdentity?.role === "super_admin";
+  const roleOptions = assignableRoles(actorIdentity?.role);
+
   return (
     <div className="space-y-6">
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
+
+      <Surface
+        title="Team users"
+        subtitle="All portal users. Change a role or deactivate an account — changes are enforced server-side."
+        actions={
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showInactiveUsers}
+              onChange={(event) => setShowInactiveUsers(event.target.checked)}
+            />
+            Show deactivated{inactiveUserCount > 0 ? ` (${inactiveUserCount})` : ""}
+          </label>
+        }
+      >
+        {isLoadingUsers && users.length === 0 ? (
+          <LoadingState />
+        ) : visibleUsers.length === 0 ? (
+          <EmptyState
+            title="No users to show"
+            description="No portal users match the current filter."
+          />
+        ) : (
+          <div className="space-y-2">
+            {visibleUsers.map((user) => {
+              const isSelf = actorIdentity?.id === user.id;
+              const isProtectedSuperAdmin = user.role === "super_admin" && !canAssignSuperAdmin;
+              const roleLocked = isSelf || isProtectedSuperAdmin;
+              const isPending = pendingUserId === user.id;
+              const fullName = `${user.first_name} ${user.last_name}`.trim();
+              // Keep the user's current role selectable even if not in the assignable
+              // set (so a super_admin row still displays "super admin" for an admin actor).
+              const options = roleOptions.includes(user.role) ? roleOptions : [user.role, ...roleOptions];
+              return (
+                <div
+                  key={user.id}
+                  className="grid grid-cols-[1.4fr_auto_auto_auto] items-center gap-3 rounded-2xl border border-[#242424] bg-[#080808] px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-white">
+                      {fullName || user.email}
+                      {isSelf && <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">you</span>}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                  </div>
+
+                  <Select
+                    value={user.role}
+                    onValueChange={(value) => void handleRoleChange(user, value as AppRole)}
+                    disabled={roleLocked || isPending}
+                  >
+                    <SelectTrigger className="h-auto w-40 rounded-xl border-white/10 bg-black/20 px-3 py-2 text-xs text-white disabled:opacity-50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                      {options.map((role) => (
+                        <SelectItem key={role} value={role} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                          {getRoleLabel(role)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] ${
+                      user.is_active
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                        : "border-neutral-500/30 bg-neutral-500/10 text-neutral-300"
+                    }`}
+                  >
+                    {user.is_active ? "active" : "deactivated"}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleActive(user)}
+                    disabled={isSelf || isProtectedSuperAdmin || isPending}
+                    title={
+                      isSelf
+                        ? "You cannot deactivate your own account"
+                        : isProtectedSuperAdmin
+                          ? "Only a super admin can change a super admin account"
+                          : undefined
+                    }
+                    className={`rounded-full border px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      user.is_active
+                        ? "border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/20"
+                        : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                    }`}
+                  >
+                    {isPending ? "…" : user.is_active ? "Deactivate" : "Reactivate"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Surface>
 
       <Surface
         title="Create invitation"

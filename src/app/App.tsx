@@ -46,6 +46,9 @@ function blockerMessage(errorCode: ReturnType<typeof useAuth>["errorCode"], erro
   if (errorCode === "client_mapping_missing") {
     return error ?? "Your client account is authenticated, but client access mapping is not assigned yet.";
   }
+  if (errorCode === "account_deactivated") {
+    return error ?? "Your account has been deactivated. Contact an administrator if you believe this is a mistake.";
+  }
   if (errorCode === "permission") {
     return error ?? "Your authenticated session does not have permission to load this workspace.";
   }

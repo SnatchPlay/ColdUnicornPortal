@@ -3,7 +3,7 @@
 This is a plain-language guide for the **Master Admin** of the ColdUnicorn PDCA portal. It explains the three things only you can do, with no technical background needed:
 
 1. Rename or hide columns in the Clients table
-2. Add your own custom columns (text / checkbox / dropdown)
+2. Add your own custom columns (text / number / currency / checkbox / dropdown / link)
 3. Set "yellow" and "red" warning thresholds on metrics
 
 If you can sign in to the portal, you can do everything below. You will not need to touch code, SQL, or anything in Supabase.
@@ -103,15 +103,20 @@ Built-in sections cannot be deleted (only renamed); only sections you created ha
 
 **Where:** Settings → Clients table customization → Custom columns.
 
-This is the section that lets you replicate "I just need to see this on every client" needs you used to handle by adding a column in Google Sheets. You can create three kinds of column:
+This is the section that lets you replicate "I just need to see this on every client" needs you used to handle by adding a column in Google Sheets. You can create these kinds of column:
 
 | Type | What it looks like | Good for |
 |------|-------------------|----------|
 | **text** | A small text box per client | Notes, short status labels, ticket numbers |
+| **number** | A numeric box per client | Counts, scores — anything that must **sort numerically** |
+| **currency** | A box that accepts amounts like `8000 zł`, `10000 PLN`, `12 000 zł` | MRR / contract values — sorts by the numeric amount, ignoring the currency symbol |
 | **checkbox** | A tick box per client | Setup steps done, flags ("Trial?", "BI dashboard live?") |
 | **droplist** | A dropdown per client with options you define | Stage labels, vertical names, owner labels |
+| **link** | A URL with an open-in-new-tab icon | Contract links, dashboards |
 
 Custom columns appear **at the end** of the Clients table, after the "MoM" section, under a "Custom" group.
+
+> **Why number / currency matter for sorting.** A **text** column sorts alphabetically, so `10000` sorts *before* `8000` (because "1" < "8"). If you want a column like **MRR** to sort by amount, use **currency** (or **number**). Currency tolerates `zł`, `zl`, `PLN`, `€`, `EUR`, `$`, `USD`, `£`, `GBP` and space/comma thousands separators.
 
 ### To add a new custom column
 
@@ -128,7 +133,7 @@ Custom columns appear **at the end** of the Clients table, after the "MoM" secti
 
 - **Rename:** click in the name box, type the new name, click out.
 - **Edit droplist options:** click in the options box, change the comma-separated list, click out. (Be careful: if you remove an option that is already selected on some clients, those clients will show "—" until someone picks a new option for them.)
-- **Change the type** is not supported. If you need to switch a text column to a droplist, delete it and create a new one.
+- **Change the type:** use the **type dropdown** on the column's row. Existing values are **kept** — nothing is deleted. Values that don't fit the new type may sort or render as "—" until corrected (e.g. a free-text note left in a column you switch to **number**). This is the recommended way to fix an MRR column that was created as **text**: switch its type to **currency** and it will start sorting by amount immediately, with all existing values preserved. (Switching *to* droplist seeds two placeholder options for you to edit.)
 
 ### To delete a custom column
 
@@ -138,9 +143,10 @@ Click the red **Delete** button on its row. You will be asked to confirm. Deleti
 
 You (master admin) fill these in directly in the **Clients page**, not in Settings. Open the Clients page, find each custom column at the right end of the table, and:
 
-- For **text** — click the cell, type, click out.
+- For **text / number / currency** — click the cell, type, click out. For **currency** you can include the symbol (`8000 zł`); the table reads the number out of it for sorting.
 - For **checkbox** — tick or untick the box.
 - For **droplist** — pick an option from the dropdown.
+- For **link** — click the pencil to paste a URL; the open-in-new-tab icon appears once a valid link is saved.
 
 Other internal admins (regular admins, CS managers) **can see** these values but **cannot edit** them. Only you can change them. This is intentional so the data stays consistent.
 
