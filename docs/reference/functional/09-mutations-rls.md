@@ -209,6 +209,19 @@ Runtime data actions call `/functions/v1/orm-gateway`. Invitation lifecycle rema
 - **Server action:** invalidates pending invite.
 - **Returns:** `{ ok: true }`.
 
+### 3.6 Admin user management — Postgres RPCs (not the gateway)
+
+User-management writes (2B/2C) call **SECURITY DEFINER functions** directly via `supabase.rpc(...)` from `repository.ts` — deliberately **not** the `orm-gateway` edge function. This keeps the entire feature deployable through a migration alone (no edge redeploy) while enforcing every permission rule in SQL. Migration: [`20260618_user_management_and_custom_field_types.sql`](../../../supabase/migrations/20260618_user_management_and_custom_field_types.sql).
+
+| Repository method | RPC | Enforced server-side |
+|-------------------|-----|----------------------|
+| `listManagedUsers()` | `public.admin_list_users()` | Caller must be `super_admin`/`admin`/`master_admin`; returns all users incl. `is_active`/`deactivated_at`. |
+| `updateUserRole(userId, role)` | `public.admin_update_user_role(target, new_role)` | Internal-admin only · cannot change own role · only `super_admin` may assign/modify `super_admin` · last-admin guard (can't demote the last active admin-tier user). |
+| `setUserActive(userId, active)` | `public.admin_set_user_active(target, active)` | Internal-admin only · cannot deactivate self · only `super_admin` may toggle a `super_admin` · last-admin guard. Sets `deactivated_at`/`deactivated_by`. |
+| `isCurrentAccountActive()` | `public.current_account_active()` | Auth gate — the auth provider signs out a deactivated user. Fails open on RPC error. |
+
+All four are `revoke all from public; grant execute to authenticated`. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
+
 ---
 
 ## 4. Mutation ownership matrix

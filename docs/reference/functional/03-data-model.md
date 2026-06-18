@@ -54,6 +54,9 @@ Agency-facing user profile. Created on invite acceptance by the `send-invite` ed
 | `last_name` | text not null | |
 | `updated_at` | timestamptz, default `now()` | |
 | `role` | `user_role` not null | |
+| `is_active` | boolean not null default true | Soft-deactivate flag (migration `20260618`). `false` → `private.current_app_role()` returns NULL → no role-gated RLS access. |
+| `deactivated_at` | timestamptz nullable | Set when deactivated, cleared on reactivate. |
+| `deactivated_by` | uuid FK > `users.id` nullable | Audit: who deactivated the account. |
 
 RLS:
 
@@ -61,7 +64,7 @@ RLS:
 - `users_select_internal` — visible to internal users (admin/manager) for dropdowns and attribution. The policy body is `to ["authenticated"]` without an explicit `using` in the Drizzle declaration; actual predicate lives in the SQL migration at `docs/reference/supabase-production-rls.sql`.
 - `users_update_self` — `auth.uid() = id` for both `using` and `with check`; supports profile-name updates through `orm-gateway`.
 
-No INSERT/DELETE policies — row creation remains invite/auth-owned; updates are limited to self-service profile fields.
+No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-service updates go through `users_update_self`; **admin role changes and deactivation go through SECURITY DEFINER RPCs** (`admin_update_user_role`, `admin_set_user_active`) that enforce their own permission checks and bypass the self-only UPDATE policy. See [09-mutations-rls.md](09-mutations-rls.md).
 
 #### `client_users` — mapping user > client(s) — [schema.ts:313-339](../../../supabase/drizzle/schema.ts#L313-L339)
 
@@ -431,7 +434,7 @@ All policies reference `private.*` helpers defined in `docs/reference/supabase-p
 
 | Helper | Signature | Predicate |
 |--------|-----------|-----------|
-| `private.current_app_role()` | `returns text` | `SELECT role FROM users WHERE id = auth.uid()` (or equivalent). Returns text so callers can compare to literals. |
+| `private.current_app_role()` | `returns text` | `SELECT role FROM users WHERE id = auth.uid() AND coalesce(is_active, true)`. Returns text so callers can compare to literals. Since migration `20260618` a **deactivated** user yields NULL → all role-gated RLS denies them (true server-side lockout). |
 | `private.is_admin_user()` | `returns boolean` | `current_app_role() IN ('super_admin', 'admin', 'master_admin')`. |
 | `private.is_internal_user()` | `returns boolean` | `current_app_role() IN ('super_admin', 'admin', 'manager', 'master_admin')` — anyone with internal staff access. Source of truth for `users_select_internal` and `email_exclude_list_select_internal` policies; `private.is_internal_user` and `public.is_internal_user` must stay in lockstep (see migration `20260526_master_admin_private_is_internal_user.sql`). |
 | `private.can_access_client(client_id uuid)` | `returns boolean` | Admin/super_admin/master_admin > TRUE; manager > client is assigned (`manager_id = auth.uid()`); client > user is mapped via `client_users`. |
@@ -501,6 +504,11 @@ Notable behavior encoded in seed:
 - Directly mapped rules are enabled; ambiguous or missing-field rules are seeded disabled with `notes`.
 - Legacy low-rate green behavior for WoW response/human/OOO is preserved in notes for parity.
 Earlier Drizzle migrations live in `supabase/drizzle/migrations/0000_stiff_fixer.sql` — the baseline ddl.
+
+### `supabase/migrations/20260618_user_management_and_custom_field_types.sql`
+
+- **2C user management:** adds `users.is_active` / `deactivated_at` / `deactivated_by`; makes `private.current_app_role()` is_active-aware; adds SECURITY DEFINER RPCs `admin_list_users`, `admin_update_user_role`, `admin_set_user_active`, `current_account_active` (all `grant execute to authenticated`, with internal-admin + self/super-admin/last-admin guards). See [09-mutations-rls.md §3.6](09-mutations-rls.md).
+- **3G custom field types:** relaxes the `client_custom_fields_field_type_check` CHECK to allow `'number'` and `'currency'` in addition to `text/checkbox/droplist/link`. No data migration — values stay raw text in `client_custom_field_values`; parsing/sorting is frontend-only.
 
 ---
 

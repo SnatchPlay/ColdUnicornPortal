@@ -1,6 +1,7 @@
 ﻿import { runtimeConfig } from "../lib/env";
 import { supabase } from "../lib/supabase";
 import type {
+  AppRole,
   CampaignRecord,
   ClientCustomFieldRecord,
   ClientCustomFieldType,
@@ -16,6 +17,7 @@ import type {
   InviteRequest,
   InvoiceRecord,
   LeadRecord,
+  ManagedUserRecord,
   UserRecord,
 } from "../types/core";
 import type {
@@ -225,6 +227,33 @@ function mapRepositoryError(reason: unknown, table: string, operation: Repositor
     details: pg.details,
     hint: pg.hint,
   });
+}
+
+// Shared envelope for the admin user-management RPCs (SECURITY DEFINER functions
+// called directly, not via the gateway). Throws a RepositoryError on failure.
+async function invokeUserRpc(
+  fn: "admin_list_users" | "admin_update_user_role" | "admin_set_user_active",
+  params: Record<string, unknown>,
+  operation: RepositoryOperation,
+): Promise<unknown> {
+  const { data, error } = await supabase.rpc(fn, params);
+  if (error) throw mapRepositoryError(error, "users", operation);
+  return data;
+}
+
+function toManagedUserRecord(row: Record<string, unknown>): ManagedUserRecord {
+  return {
+    id: String(row.id),
+    created_at: String(row.created_at),
+    updated_at: row.updated_at == null ? null : String(row.updated_at),
+    email: String(row.email),
+    first_name: String(row.first_name ?? ""),
+    last_name: String(row.last_name ?? ""),
+    role: row.role as AppRole,
+    is_active: Boolean(row.is_active),
+    deactivated_at: row.deactivated_at == null ? null : String(row.deactivated_at),
+    deactivated_by: row.deactivated_by == null ? null : String(row.deactivated_by),
+  };
 }
 
 function isRetryable(error: RepositoryError) {
@@ -555,6 +584,13 @@ export interface Repository {
   deleteEmailExcludeDomain(domain: string): Promise<void>;
   loadIdentity(sessionUserId: string): Promise<LoadIdentityResult>;
   updateProfileName(sessionUserId: string, fullName: string): Promise<UserRecord>;
+  // Admin user management (2B/2C). Backed by SECURITY DEFINER RPCs that enforce
+  // role/deactivation invariants server-side; the publishable key + RLS apply.
+  listManagedUsers(): Promise<ManagedUserRecord[]>;
+  updateUserRole(userId: string, role: AppRole): Promise<ManagedUserRecord>;
+  setUserActive(userId: string, active: boolean): Promise<ManagedUserRecord>;
+  /** True when the *current* signed-in account is still active (not deactivated). */
+  isCurrentAccountActive(): Promise<boolean>;
   upsertColumnOverride(
     columnKey: string,
     patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
@@ -867,6 +903,28 @@ export const repository: Repository = {
   async updateProfileName(sessionUserId, fullName) {
     const { user } = await invokeOrmGatewayAction("updateProfileName", { sessionUserId, fullName });
     return user;
+  },
+
+  async listManagedUsers() {
+    const data = await invokeUserRpc("admin_list_users", {}, "select");
+    return (Array.isArray(data) ? data : []).map((row) => toManagedUserRecord(row as Record<string, unknown>));
+  },
+
+  async updateUserRole(userId, role) {
+    const data = await invokeUserRpc("admin_update_user_role", { target_user_id: userId, new_role: role }, "update");
+    return toManagedUserRecord(data as Record<string, unknown>);
+  },
+
+  async setUserActive(userId, active) {
+    const data = await invokeUserRpc("admin_set_user_active", { target_user_id: userId, active }, "update");
+    return toManagedUserRecord(data as Record<string, unknown>);
+  },
+
+  async isCurrentAccountActive() {
+    const { data, error } = await supabase.rpc("current_account_active");
+    // Fail open on transient/RPC errors — never lock a user out on a network blip.
+    if (error) return true;
+    return data !== false;
   },
 
   async upsertColumnOverride(columnKey, patch) {

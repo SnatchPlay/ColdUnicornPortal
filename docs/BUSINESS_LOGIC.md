@@ -165,7 +165,7 @@ Restrictions:
 Inherits everything Manager can do, with global scope:
 
 - See all clients, leads, campaigns, domains, invoices, replies.
-- **User management:** invite admins, managers, clients via `send-invite` edge function; resend, revoke; map users to clients.
+- **User management:** invite admins, managers, clients via `send-invite` edge function; resend, revoke; map users to clients. List all portal users, **change their role**, and **deactivate/reactivate** accounts (soft, not hard-delete; super_admin-only for super_admin targets; last-admin guard).
 - **Blacklist write:** add/remove domains in `email_exclude_list`.
 - **Reassign managers:** edit `clients.manager_id`.
 - **Manage condition rules:** full CRUD of safe JSON DSL rules in `/admin/settings`.
@@ -517,6 +517,20 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 ## 12. Decisions log
 
 Append-only. Each entry: date, decision, rationale, references.
+
+### Decision (2026-06-18): User Management lists existing users; role change + soft-deactivate
+
+The admin **User Management** page now lists all portal users (not just invitations) and lets an admin/master_admin **change a user's role** and **deactivate/reactivate** an account. Hard delete is intentionally **not** offered — users are referenced by `clients.manager_id`, `agency_crm_deals.salesperson_id`, `*_updated_by`, etc., so deletion would break FKs and audit history. Deactivation is a soft flag (`users.is_active` + `deactivated_at`/`deactivated_by`).
+
+All permission rules are enforced **server-side** in SECURITY DEFINER Postgres functions (`admin_update_user_role`, `admin_set_user_active`, `admin_list_users`), called via `supabase.rpc()` — not the `orm-gateway` edge function — so the feature ships via migration alone. Guards: cannot change/deactivate your own account, only `super_admin` may touch `super_admin`, and a last-admin guard. A deactivated user is locked out because `private.current_app_role()` returns NULL for them (no role-gated RLS access) and the auth provider signs them out via `current_account_active()`.
+
+**Rationale:** Client feedback "I don't see anybody from my team" — the page only managed invites. **References:** migration `20260618`, [09-mutations-rls.md §3.6](reference/functional/09-mutations-rls.md), [03-data-model.md §2.1](reference/functional/03-data-model.md).
+
+### Decision (2026-06-18): Custom field types `number` and `currency`; editable field type
+
+Master-admin custom columns gain **number** and **currency** types, and the type of an existing column can now be **changed** in Settings (existing values are preserved, never deleted). Sorting for every custom field type is centralized in [`getCustomFieldSortValue`](../src/app/lib/custom-field-sort.ts): number/currency sort by parsed amount (currency tolerates `zł`/`PLN`/`€`/`$`/`£` and space/comma grouping), droplist by configured option order, checkbox by boolean, text/link by normalized string; empty values sort last.
+
+This fixes two bugs: (1) sorting a custom column did nothing because the page comparator only knew the static built-in columns; (2) an "MRR" column entered as free text (`8000 zł`) sorted lexicographically. The fix is **not** MRR-specific — switch any text column to **currency** to get numeric sort. **References:** migration `20260618` (relaxed `field_type` CHECK), [master-admin-guide.md §2](master-admin-guide.md).
 
 ### Decision (2026-04-25): Documentation snapshot established
 

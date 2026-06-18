@@ -12,6 +12,7 @@ import { dodCellKey, momCellKey, threeDodCellKey, wowCellKey } from "../../lib/c
 import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatNumber } from "../../lib/format";
+import { getCustomFieldSortValue } from "../../lib/custom-field-sort";
 import { useResizableColumns } from "../../lib/use-resizable-columns";
 import type {
   ClientCustomFieldRecord,
@@ -781,6 +782,7 @@ function customFieldColumn(
 ): MegaColumn {
   const lookup = (row: ClientMegaRow): string | null =>
     valuesByClient.get(row.client.id)?.get(field.id) ?? null;
+  const isNumeric = field.field_type === "number" || field.field_type === "currency";
   return {
     id: `cf:${field.id}`,
     group: "custom",
@@ -788,7 +790,7 @@ function customFieldColumn(
     label: field.name,
     width: field.field_type === "checkbox" ? 90 : field.field_type === "droplist" ? 120 : 140,
     minWidth: field.field_type === "checkbox" ? 50 : 60,
-    align: "left",
+    align: isNumeric ? "right" : "left",
     // Lets condition rules with `column_key: "cf:<id>"` and surface
     // `clients_overview` colour this cell via cellCondition().
     conditionKey: `cf:${field.id}`,
@@ -838,11 +840,16 @@ function customFieldColumn(
         );
       }
       if (!canEdit) {
-        return <span className="truncate text-xs text-neutral-300">{value ?? "—"}</span>;
+        return (
+          <span className={cn("truncate text-xs text-neutral-300", isNumeric && "block text-right")}>
+            {value ?? "—"}
+          </span>
+        );
       }
       return (
         <input
           type="text"
+          inputMode={isNumeric ? "decimal" : undefined}
           defaultValue={value ?? ""}
           onClick={(event) => event.stopPropagation()}
           onBlur={(event) => {
@@ -850,12 +857,15 @@ function customFieldColumn(
             if (next === (value ?? "")) return;
             onChange?.(row.client.id, field.id, next || null);
           }}
-          className="w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500"
-          placeholder="—"
+          className={cn(
+            "w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500",
+            isNumeric && "text-right",
+          )}
+          placeholder={field.field_type === "currency" ? "e.g. 8000 zł" : "—"}
         />
       );
     },
-    sortValue: (row) => lookup(row) ?? "",
+    sortValue: (row) => getCustomFieldSortValue(field, lookup(row)),
   };
 }
 

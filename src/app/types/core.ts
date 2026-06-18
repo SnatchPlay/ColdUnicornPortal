@@ -50,6 +50,15 @@ export interface UserRecord {
   role: AppRole;
 }
 
+// Full user row for the admin User Management page (includes soft-deactivate status).
+// Returned by the SECURITY DEFINER RPC public.admin_list_users() and the
+// admin_update_user_role / admin_set_user_active mutations.
+export interface ManagedUserRecord extends UserRecord {
+  is_active: boolean;
+  deactivated_at: string | null;
+  deactivated_by: string | null;
+}
+
 export interface ClientRecord {
   id: string;
   created_at: string;
@@ -276,7 +285,7 @@ export interface InviteRecord {
   canRevoke: boolean;
 }
 
-export type ClientCustomFieldType = "text" | "checkbox" | "droplist" | "link";
+export type ClientCustomFieldType = "text" | "checkbox" | "droplist" | "link" | "number" | "currency";
 
 export interface ColumnOverrideRecord {
   column_key: string;
