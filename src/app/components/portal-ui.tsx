@@ -703,10 +703,10 @@ export function LeadDetailSections({ lead }: { lead: LeadDrawerData }) {
             </div>
           ) : null}
         </div>
-        {record.comments && (
+        {record.client_note && (
           <div className="mt-3 rounded-2xl bg-[#111] p-4">
-            <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">Comments</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white">{record.comments}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">Note</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white">{record.client_note}</p>
           </div>
         )}
       </section>

@@ -55,7 +55,7 @@ function makeRow(overrides: Partial<{
     message_title: null, message_number: null, response_time_hours: null, response_time_label: null,
     meeting_booked: false, meeting_held: false, offer_sent: false, won: false,
     added_to_ooo_campaign: false, external_blacklist_id: null, external_domain_blacklist_id: null,
-    source: "test", reply_text: null, comments: null,
+    source: "test", reply_text: null, client_note: null, coldunicorn_note: null, highlight: null,
     clientName: overrides.clientName ?? "Acme",
     campaignName: overrides.campaignName ?? "Campaign Alpha",
     replyCount: 0, lastReplyAt: null,

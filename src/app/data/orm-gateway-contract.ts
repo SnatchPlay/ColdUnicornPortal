@@ -12,6 +12,8 @@
   EmailExcludeRecord,
   Identity,
   InvoiceRecord,
+  LeadCustomFieldRecord,
+  LeadCustomFieldValueRecord,
   LeadRecord,
   UserRecord,
 } from "../types/core";
@@ -311,6 +313,48 @@ export interface UpsertClientCustomFieldValuePayload {
   value: string | null;
 }
 
+export interface LoadLeadCustomFieldsPayload {
+  action: "loadLeadCustomFields";
+  /** Restrict to a single client; omit to load all accessible clients' definitions. */
+  clientId?: string;
+}
+
+export interface CreateLeadCustomFieldPayload {
+  action: "createLeadCustomField";
+  input: {
+    client_id: string;
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+    editable_by?: string[];
+  };
+}
+
+export interface UpdateLeadCustomFieldPayload {
+  action: "updateLeadCustomField";
+  fieldId: string;
+  patch: {
+    name?: string;
+    field_type?: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+    editable_by?: string[];
+  };
+}
+
+export interface DeleteLeadCustomFieldPayload {
+  action: "deleteLeadCustomField";
+  fieldId: string;
+}
+
+export interface UpsertLeadCustomFieldValuePayload {
+  action: "upsertLeadCustomFieldValue";
+  leadId: string;
+  fieldId: string;
+  value: string | null;
+}
+
 export type OrmGatewayRequest =
   | LoadSnapshotPayload
   | LoadConditionRulesPayload
@@ -354,7 +398,12 @@ export type OrmGatewayRequest =
   | CreateClientCustomFieldPayload
   | UpdateClientCustomFieldPayload
   | DeleteClientCustomFieldPayload
-  | UpsertClientCustomFieldValuePayload;
+  | UpsertClientCustomFieldValuePayload
+  | LoadLeadCustomFieldsPayload
+  | CreateLeadCustomFieldPayload
+  | UpdateLeadCustomFieldPayload
+  | DeleteLeadCustomFieldPayload
+  | UpsertLeadCustomFieldValuePayload;
 
 export type OrmGatewayAction = OrmGatewayRequest["action"];
 
@@ -412,6 +461,11 @@ export interface OrmGatewayResponseMap {
   updateClientCustomField: ClientCustomFieldRecord;
   deleteClientCustomField: { ok: true };
   upsertClientCustomFieldValue: ClientCustomFieldValueRecord;
+  loadLeadCustomFields: LeadCustomFieldRecord[];
+  createLeadCustomField: LeadCustomFieldRecord;
+  updateLeadCustomField: LeadCustomFieldRecord;
+  deleteLeadCustomField: { ok: true };
+  upsertLeadCustomFieldValue: LeadCustomFieldValueRecord;
 }
 
 interface ParseSuccess {
@@ -817,6 +871,61 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       value: {
         action,
         clientId: String(payload.clientId),
+        fieldId: String(payload.fieldId),
+        value: value as string | null,
+      },
+    };
+  }
+
+  if (action === "loadLeadCustomFields") {
+    return { ok: true, value: { action, clientId: isString(payload.clientId) ? payload.clientId : undefined } };
+  }
+
+  if (action === "createLeadCustomField") {
+    if (!hasObjectField(payload, "input")) {
+      return { ok: false, error: "createLeadCustomField requires input object." };
+    }
+    const input = payload.input as CreateLeadCustomFieldPayload["input"];
+    if (!isString(input.client_id) || !isString(input.name)) {
+      return { ok: false, error: "createLeadCustomField input requires client_id and name." };
+    }
+    return { ok: true, value: { action, input } };
+  }
+
+  if (action === "updateLeadCustomField") {
+    if (!hasStringField(payload, "fieldId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "updateLeadCustomField requires fieldId and patch object." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        fieldId: String(payload.fieldId),
+        patch: payload.patch as UpdateLeadCustomFieldPayload["patch"],
+      },
+    };
+  }
+
+  if (action === "deleteLeadCustomField") {
+    if (!hasStringField(payload, "fieldId")) {
+      return { ok: false, error: "deleteLeadCustomField requires fieldId." };
+    }
+    return { ok: true, value: { action, fieldId: String(payload.fieldId) } };
+  }
+
+  if (action === "upsertLeadCustomFieldValue") {
+    if (!hasStringField(payload, "leadId") || !hasStringField(payload, "fieldId")) {
+      return { ok: false, error: "upsertLeadCustomFieldValue requires leadId and fieldId." };
+    }
+    const value = payload.value;
+    if (value !== null && typeof value !== "string") {
+      return { ok: false, error: "upsertLeadCustomFieldValue.value must be a string or null." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        leadId: String(payload.leadId),
         fieldId: String(payload.fieldId),
         value: value as string | null,
       },
