@@ -518,6 +518,21 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 
 Append-only. Each entry: date, decision, rationale, references.
 
+### Decision (2026-06-18): Leads report replaces the Google-Sheets client report (Batch 4)
+
+The Leads tab became a dense, spreadsheet-style **report table** designed to replace the client's external Google-Sheets lead report. Shipped this batch:
+
+- **Compact table (4A):** small font, narrow resizable columns, sticky header, horizontal scroll, truncation + tooltips, on both the internal Leads page and the client portal report — driven by one shared column registry (`src/app/lib/lead-report-columns.tsx`) and `LeadReportTable`.
+- **Report columns (4C):** the Google-Sheets fields that already exist in the schema (name, job title, email, phone/source, company, industry, headcount, lead received, campaign, message title/#, website, qualification, response time, status, mail-from-lead preview, LinkedIn) plus the new notes.
+- **Notes (4D):** `comments` renamed to **`client_note`** (client-facing) + new **`coldunicorn_note`** (internal; hidden from the client role at the gateway).
+- **Row highlight (4E):** manual `green`/`yellow`/`red` semi-transparent row colour (`leads.highlight`), set by admin/manager.
+- **Per-client custom columns (4F):** new `lead_custom_fields` / `lead_custom_field_values` ([ADR-0007](adr/0007-per-client-lead-custom-fields.md)); defined by admin/master_admin only, scoped per client, never leaking across clients.
+- **Export (4G):** CSV + XLSX (lazy-loaded SheetJS) of **all** rows matching the current filters/sort (paged server-side, role-scoped); the client export omits the internal note.
+
+**Deliberately deferred:** the **status-model change** (abandoning the micro-CRM booleans for a `qualification`-only single status) is **out of this batch**. KPIs, stage counts, filters, the checkbox edit UI, and the n8n ingestion contract are unchanged; the report "Status" column is read-only, derived from the existing `getLeadStage()`. The `qualification` enum already contains the five target statuses, so no enum change was needed. Confirm the full status model with the client before migrating — it touches KPIs, historical rows, and ingestion.
+
+**Rationale:** Client feedback Batch 4 (narrower columns, replace the Sheets report, client/internal notes, row highlights, custom columns, export). **References:** migrations `20260618b`, `20260618c`; [ADR-0004](adr/0004-lead-state-boundaries.md), [ADR-0007](adr/0007-per-client-lead-custom-fields.md); [03-data-model.md §2.4](reference/functional/03-data-model.md), [09-mutations-rls.md §2.3/§2.13b](reference/functional/09-mutations-rls.md).
+
 ### Decision (2026-06-18): User Management lists existing users; role change + soft-deactivate
 
 The admin **User Management** page now lists all portal users (not just invitations) and lets an admin/master_admin **change a user's role** and **deactivate/reactivate** an account. Hard delete is intentionally **not** offered — users are referenced by `clients.manager_id`, `agency_crm_deals.salesperson_id`, `*_updated_by`, etc., so deletion would break FKs and audit history. Deactivation is a soft flag (`users.is_active` + `deactivated_at`/`deactivated_by`).

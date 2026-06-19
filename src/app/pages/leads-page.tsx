@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
@@ -24,11 +24,15 @@ import {
   PaginationPrevious,
 } from "../components/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { useIsMobile } from "../components/ui/use-mobile";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
-import { formatDate, getFullName } from "../lib/format";
+import { getFullName } from "../lib/format";
+import { buildLeadReportColumns } from "../lib/lead-report-columns";
+import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
+import { LeadReportTable } from "../components/lead-report-table";
+import { LeadCustomColumnsManager } from "../components/lead-custom-columns-manager";
+import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export";
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
 import {
   TIMEFRAME_PRESETS,
@@ -61,27 +65,9 @@ const MAX_PAGE_LINKS = 5;
 
 type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
-type LeadSortKey = "lead" | "client" | "company" | "status" | "created";
-
-function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
-  const safeLeft = (left ?? "").toLowerCase();
-  const safeRight = (right ?? "").toLowerCase();
-  const result = safeLeft.localeCompare(safeRight);
-  return direction === "asc" ? result : -result;
-}
-
-function sortIndicator(active: boolean, direction: SortDirection) {
-  if (!active) return "sort";
-  return direction === "asc" ? "asc" : "desc";
-}
-
-function getStageLabel(stage: PipelineStage) {
-  return PIPELINE_STAGES.find((item) => item.key === stage)?.label ?? stage;
-}
-
-function getStageColor(stage: PipelineStage) {
-  return PIPELINE_STAGES.find((item) => item.key === stage)?.color ?? "#737373";
-}
+// Server sort fields supported by loadLeadsList (see orm-gateway orderClause).
+const LEAD_SORT_KEYS = ["lead", "client", "company", "campaign", "step", "status", "replies", "lastReply", "created"] as const;
+type LeadSortKey = (typeof LEAD_SORT_KEYS)[number];
 
 function clampPage(page: number, totalPages: number) {
   if (totalPages <= 0) return 1;
@@ -286,7 +272,6 @@ export function LeadsPage() {
 function InternalLeadsPage() {
   useDevRenderCount("InternalLeadsPage");
   const { identity } = useAuth();
-  const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
@@ -316,25 +301,23 @@ function InternalLeadsPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
+    const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
     const sortDirection = searchParams.get("dir");
-    const key: LeadSortKey =
-      sortKey === "lead" || sortKey === "company" || sortKey === "status" || sortKey === "created"
-        ? sortKey
-        : "created";
     const direction: SortDirection = sortDirection === "asc" || sortDirection === "desc" ? sortDirection : "desc";
     return { key, direction };
   });
 
-  // Resolve timeframe bounds for the server.
-  const { from: timeframeFrom, to: timeframeTo } = useMemo(() => resolveTimeframeBounds(timeframe), [timeframe]);
+  // Resolve timeframe bounds for the server. resolveTimeframeBounds returns { start, end }
+  // (end is end-of-day); send full ISO so the final day is included inclusively.
+  const { start: timeframeFrom, end: timeframeTo } = useMemo(() => resolveTimeframeBounds(timeframe), [timeframe]);
 
   const listParams = useMemo<LeadsListParams>(() => ({
     clientId: clientFilter !== ALL_FILTER_VALUE ? clientFilter : undefined,
     campaignId: campaignFilter !== ALL_FILTER_VALUE ? campaignFilter : undefined,
     stage: stageFilter !== "all" ? stageFilter : undefined,
     replyScope,
-    dateFrom: timeframeFrom?.toISOString().slice(0, 10),
-    dateTo: timeframeTo?.toISOString().slice(0, 10),
+    dateFrom: timeframeFrom?.toISOString(),
+    dateTo: timeframeTo?.toISOString(),
     search: committedSearch || undefined,
     sortField: leadSort.key,
     sortDir: leadSort.direction,
@@ -347,12 +330,21 @@ function InternalLeadsPage() {
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
 
   const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
+  const baseReportColumns = useMemo(
+    () => buildLeadReportColumns({ role: identity?.role, showClient: showClientColumn }),
+    [identity?.role, showClientColumn],
+  );
+  const customFields = useMemo(() => data?.customFields ?? [], [data]);
+  const customValues = useMemo(() => data?.customValues ?? [], [data]);
+  const customColumns = useLeadCustomColumns({ role: identity?.role, fields: customFields, values: customValues });
+  const reportColumns = useMemo(() => [...baseReportColumns, ...customColumns], [baseReportColumns, customColumns]);
+  const defaultColumnWidths = useMemo(() => reportColumns.map((c) => c.width), [reportColumns]);
+  const minColumnWidths = useMemo(() => reportColumns.map((c) => c.minWidth), [reportColumns]);
   const leadColumns = useResizableColumns({
-    storageKey: showClientColumn ? "table:leads:columns:v2:admin" : "table:leads:columns:v2",
-    defaultWidths: showClientColumn ? [340, 200, 280, 200, 180] : [380, 300, 220, 200],
-    minWidths: showClientColumn ? [220, 140, 180, 140, 120] : [240, 200, 150, 140],
+    storageKey: `table:leads-report:columns:${showClientColumn ? "admin" : "internal"}:${reportColumns.length}`,
+    defaultWidths: defaultColumnWidths,
+    minWidths: minColumnWidths,
   });
-  const leadTableStyle = useMemo(() => ({ "--leads-table-columns": leadColumns.template }) as CSSProperties, [leadColumns.template]);
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const totalCount = data?.totalCount ?? 0;
@@ -431,7 +423,9 @@ function InternalLeadsPage() {
         job_title: d.jobTitle.trim() || null,
         source: "manual",
         qualification: null,
-        comments: null,
+        client_note: null,
+        coldunicorn_note: null,
+        highlight: null,
         meeting_booked: false,
         meeting_held: false,
         offer_sent: false,
@@ -445,6 +439,23 @@ function InternalLeadsPage() {
       refresh();
     },
     [refresh],
+  );
+
+  const [exporting, setExporting] = useState(false);
+  const handleExportReport = useCallback(
+    async (format: "csv" | "xlsx") => {
+      setExporting(true);
+      try {
+        const { page: _page, pageSize: _pageSize, ...base } = listParams;
+        void _page; void _pageSize;
+        await downloadLeadReport(reportColumns, base, format, `leads-${timeframeLabel.toLowerCase().replace(/\s+/g, "-")}`);
+      } catch {
+        toast.error("Export failed. Try narrowing the filters and retry.");
+      } finally {
+        setExporting(false);
+      }
+    },
+    [listParams, reportColumns, timeframeLabel],
   );
 
   useEffect(() => {
@@ -541,6 +552,27 @@ function InternalLeadsPage() {
         actions={
           <div className="flex items-center gap-3">
             <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
+            <button
+              onClick={() => void handleExportReport("csv")}
+              disabled={rows.length === 0 || exporting}
+              className="rounded-full border border-[#242424] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+            <button
+              onClick={() => void handleExportReport("xlsx")}
+              disabled={rows.length === 0 || exporting}
+              className="rounded-full border border-[#242424] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Export XLSX
+            </button>
+            {showClientColumn ? (
+              <LeadCustomColumnsManager
+                clientsLite={clientsLite}
+                defaultClientId={clientFilter !== ALL_FILTER_VALUE ? clientFilter : undefined}
+                onChanged={() => void refresh()}
+              />
+            ) : null}
             <CreateLeadSheetHost
               clientsLite={clientsLite}
               campaignsLite={campaignsLite}
@@ -643,108 +675,32 @@ function InternalLeadsPage() {
             </div>
           )}
           <div className="overflow-hidden rounded-2xl border border-border">
-            <div className="overflow-x-auto" style={leadTableStyle}>
-              <div className="hidden min-w-[980px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:grid-cols-[1.2fr_1fr_auto] lg:[grid-template-columns:var(--leads-table-columns)]">
-                {([
-                  { key: "lead" as const, label: "Lead", lgOnly: false },
-                  ...(showClientColumn ? [{ key: "client" as const, label: "Client", lgOnly: true }] : []),
-                  { key: "company" as const, label: "Company", lgOnly: false },
-                  { key: "status" as const, label: "Status", lgOnly: false },
-                  { key: "created" as const, label: "Created", lgOnly: true },
-                ]).map((column, index, collection) => (
-                  <div key={column.key} className={cn("relative min-w-0", column.lgOnly ? "hidden lg:block" : "")}>
-                    <button
-                      onClick={() => {
-                        setCurrentPage(1);
-                        setLeadSort((current) =>
-                          current.key === column.key
-                            ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                            : { key: column.key, direction: column.key === "created" ? "desc" : "asc" },
-                        );
-                      }}
-                      className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
-                    >
-                      {column.label} ({sortIndicator(leadSort.key === column.key, leadSort.direction)})
-                    </button>
-                    {column.key !== "created" && index < collection.length - 1 ? (
-                      <div
-                        onMouseDown={leadColumns.getResizeMouseDown(index)}
-                        className="absolute -right-1 top-0 hidden h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20 lg:block"
-                      />
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-
-              {isMobile ? (
-                <div className="space-y-3 p-3">
-                  {rows.map((lead) => {
-                    const stage = getLeadStage(lead);
-                    const color = getStageColor(stage as PipelineStage);
-                    return (
-                      <button
-                        key={lead.id}
-                        onClick={() => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
-                        aria-label={`Open details for ${getFullName(lead.first_name, lead.last_name)}`}
-                        className="w-full rounded-2xl border border-border bg-black/20 p-4 text-left transition hover:border-[#3a3a3a]"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm text-white">{getFullName(lead.first_name, lead.last_name)}</p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">{lead.email ?? "No email"}</p>
-                          </div>
-                          <span className="inline-flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${color}55`, backgroundColor: `${color}18`, color }}>
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                            {getStageLabel(stage as PipelineStage)}
-                          </span>
-                        </div>
-                        <p className="mt-3 truncate text-xs text-neutral-300">{lead.company_name ?? "—"}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">{lead.campaignName ?? "No campaign linked"}</p>
-                        <p className="mt-3 text-xs text-muted-foreground">Added {formatDate(lead.created_at, { day: "2-digit", month: "short" })}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="divide-y divide-border md:min-w-[980px]">
-                  {rows.map((lead) => {
-                    const active = selectedLead?.id === lead.id;
-                    const stage = getLeadStage(lead);
-                    const stageColor = getStageColor(stage as PipelineStage);
-                    return (
-                      <button
-                        key={lead.id}
-                        onClick={() => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
-                        aria-label={`Open details for ${getFullName(lead.first_name, lead.last_name)}`}
-                        className={`grid w-full gap-3 px-4 py-4 text-left transition md:grid-cols-[1.2fr_1fr_auto] lg:[grid-template-columns:var(--leads-table-columns)] ${active ? "bg-sky-500/10" : "hover:bg-white/5"}`}
-                      >
-                        <div>
-                          <p className="text-sm">{getFullName(lead.first_name, lead.last_name)}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{lead.email ?? "No email"}</p>
-                        </div>
-                        {showClientColumn ? (
-                          <div className="hidden text-sm text-neutral-300 lg:block">{lead.clientName ?? "—"}</div>
-                        ) : null}
-                        <div>
-                          <p className="text-sm">{lead.company_name ?? "—"}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{lead.campaignName ?? "No campaign linked"}</p>
-                          <p className="mt-1 text-xs text-muted-foreground lg:hidden">Added {formatDate(lead.created_at, { day: "2-digit", month: "short" })}</p>
-                        </div>
-                        <div>
-                          <span className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${stageColor}55`, backgroundColor: `${stageColor}18`, color: stageColor }}>
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stageColor }} />
-                            {getStageLabel(stage as PipelineStage)}
-                          </span>
-                        </div>
-                        <div className="hidden text-sm text-muted-foreground lg:block">
-                          {formatDate(lead.created_at, { day: "2-digit", month: "short" })}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <LeadReportTable
+              rows={rows}
+              columns={reportColumns}
+              template={leadColumns.template}
+              getResizeMouseDown={leadColumns.getResizeMouseDown}
+              sort={leadSort}
+              onSortChange={(serverField) => {
+                setCurrentPage(1);
+                setLeadSort((current) =>
+                  current.key === serverField
+                    ? { key: serverField as LeadSortKey, direction: current.direction === "asc" ? "desc" : "asc" }
+                    : { key: serverField as LeadSortKey, direction: serverField === "created" || serverField === "lastReply" ? "desc" : "asc" },
+                );
+              }}
+              onRowClick={(lead) => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
+              selectedId={selectedLead?.id ?? null}
+              rowAriaLabel={(lead) => `Open details for ${getFullName(lead.first_name, lead.last_name)}`}
+              onHighlightChange={async (lead, value) => {
+                try {
+                  await repository.updateLead(lead.id, { highlight: value });
+                } catch (reason) {
+                  toast.error(reason instanceof Error ? reason.message : "Could not update highlight.");
+                  throw reason; // let the table roll back its optimistic colour
+                }
+              }}
+            />
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

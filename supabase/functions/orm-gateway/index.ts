@@ -221,7 +221,9 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     external_domain_blacklist_id: row.externalDomainBlacklistId,
     source: row.source,
     reply_text: row.replyText,
-    comments: row.comments,
+    client_note: row.clientNote,
+    coldunicorn_note: row.coldunicornNote,
+    highlight: row.highlight,
   };
 }
 
@@ -394,7 +396,11 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   if ("meeting_held" in patch) mapped.meetingHeld = patch.meeting_held;
   if ("offer_sent" in patch) mapped.offerSent = patch.offer_sent;
   if ("won" in patch) mapped.won = patch.won;
-  if ("comments" in patch) mapped.comments = patch.comments;
+  // Report notes + manual row highlight (Batch 4). client_note is the renamed legacy
+  // `comments` field (client-facing); coldunicorn_note is internal-only.
+  if ("client_note" in patch) mapped.clientNote = patch.client_note;
+  if ("coldunicorn_note" in patch) mapped.coldunicornNote = patch.coldunicorn_note;
+  if ("highlight" in patch) mapped.highlight = patch.highlight;
   // Identity (ADR-0004 v2: manager/admin may correct enriched data)
   if ("email" in patch) mapped.email = patch.email;
   if ("first_name" in patch) mapped.firstName = patch.first_name;
@@ -528,7 +534,7 @@ function mapLeadInsert(input: Record<string, unknown>) {
     won: input.won ?? false,
     addedToOooCampaign: input.added_to_ooo_campaign ?? false,
     source: input.source ?? "manual",
-    comments: input.comments ?? null,
+    clientNote: input.client_note ?? null,
   };
 }
 
@@ -606,6 +612,32 @@ function toClientCustomFieldRecord(row: Record<string, unknown>) {
       row.created_at instanceof Date
         ? row.created_at.toISOString()
         : String(row.created_at ?? ""),
+  };
+}
+
+function toLeadCustomFieldRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    client_id: String(row.client_id),
+    name: String(row.name),
+    field_type: String(row.field_type) as "text" | "checkbox" | "droplist" | "link" | "number" | "currency",
+    options: row.options === null || row.options === undefined ? null : (row.options as string[]),
+    position: Number(row.position ?? 0),
+    editable_by: Array.isArray(row.editable_by) ? (row.editable_by as string[]) : ["admin", "master_admin"],
+    created_by: row.created_by === null || row.created_by === undefined ? null : String(row.created_by),
+    created_at:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
+  };
+}
+
+function toLeadCustomFieldValueRecord(row: Record<string, unknown>) {
+  return {
+    lead_id: String(row.lead_id),
+    field_id: String(row.field_id),
+    value: row.value === null || row.value === undefined ? null : String(row.value),
+    updated_at:
+      row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at ?? ""),
+    updated_by: row.updated_by === null || row.updated_by === undefined ? null : String(row.updated_by),
   };
 }
 
@@ -1129,7 +1161,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
             l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
             l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
-            l.source, l.reply_text, l.comments,
+            l.source, l.reply_text, l.client_note, l.coldunicorn_note, l.highlight,
             c.name AS client_name,
             camp.name AS campaign_name,
             COALESCE(r.reply_count, 0)::int AS reply_count,
@@ -1214,7 +1246,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
         source: r.source ? String(r.source) : "smartlead",
         reply_text: r.reply_text ? String(r.reply_text) : null,
-        comments: r.comments ? String(r.comments) : null,
+        client_note: r.client_note ? String(r.client_note) : null,
+        coldunicorn_note: r.coldunicorn_note ? String(r.coldunicorn_note) : null,
+        highlight: r.highlight ? String(r.highlight) : null,
         clientName: String(r.client_name ?? ""),
         campaignName: r.campaign_name ? String(r.campaign_name) : null,
         replyCount: Number(r.reply_count ?? 0),
@@ -1751,7 +1785,15 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
         l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
         l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
-        l.source, l.reply_text, l.comments,
+        l.source, l.reply_text, l.client_note, l.highlight,
+        -- coldunicorn_note is internal-only: never expose it to the client role. We resolve the
+        -- caller role via a public.users self-lookup (RLS returns only the caller own row).
+        -- NOTE: do NOT call private.current_app_role() here - the authenticated role has no USAGE
+        -- on the private schema for direct (non-RLS-predicate) calls, which throws 42501.
+        CASE WHEN (
+          SELECT u.role FROM public.users u
+          WHERE u.id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+        ) = 'client' THEN NULL ELSE l.coldunicorn_note END AS coldunicorn_note,
         c.name AS client_name,
         camp.name AS campaign_name,
         COALESCE(r.reply_count, 0)::int AS reply_count,
@@ -1811,7 +1853,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
       source: r.source ? String(r.source) : "smartlead",
       reply_text: r.reply_text ? String(r.reply_text) : null,
-      comments: r.comments ? String(r.comments) : null,
+      client_note: r.client_note ? String(r.client_note) : null,
+      coldunicorn_note: r.coldunicorn_note ? String(r.coldunicorn_note) : null,
+      highlight: r.highlight ? String(r.highlight) : null,
       // JOINed fields
       clientName: String(r.client_name ?? ""),
       campaignName: r.campaign_name ? String(r.campaign_name) : null,
@@ -1819,15 +1863,49 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
     }));
 
+    // Custom columns (Batch 4, Task 4F): definitions for the clients owning the returned rows,
+    // and values for the returned leads only — keeps the payload scoped to what is on screen.
+    const pageClientIds = Array.from(new Set(rows.map((r) => r.client_id)));
+    const pageLeadIds = rows.map((r) => r.id);
+    let customFields: Record<string, unknown>[] = [];
+    let customValues: Record<string, unknown>[] = [];
+    if (pageClientIds.length > 0) {
+      customFields = await safeRawSelect(
+        tx,
+        sql`select id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+            from public.lead_custom_fields
+            where client_id in (${sql.join(pageClientIds.map((id) => sql`${id}`), sql`, `)})
+            order by position asc, created_at asc`,
+      );
+    }
+    if (pageLeadIds.length > 0) {
+      customValues = await safeRawSelect(
+        tx,
+        sql`select lead_id, field_id, value from public.lead_custom_field_values
+            where lead_id in (${sql.join(pageLeadIds.map((id) => sql`${id}`), sql`, `)})`,
+      );
+    }
+
     const totalHandlerMs = performance.now() - t0;
     console.log(
       `[PERF][orm-gateway] loadLeadsList: totalHandlerMs=${totalHandlerMs.toFixed(1)} ` +
         `stageCountsQueryMs=${stageCountMs.toFixed(1)} dataPageQueryMs=${dataMs.toFixed(1)} ` +
         `rows=${rows.length} totalCount=${totalCount} stageBuckets=${stageCountRows.length} ` +
+        `customFields=${customFields.length} customValues=${customValues.length} ` +
         `page=${p.page} pageSize=${pageSize}`,
     );
 
-    return { rows, totalCount, stageCounts };
+    return {
+      rows,
+      totalCount,
+      stageCounts,
+      customFields: customFields.map(toLeadCustomFieldRecord),
+      customValues: customValues.map((r) => ({
+        lead_id: String(r.lead_id),
+        field_id: String(r.field_id),
+        value: r.value === null || r.value === undefined ? null : String(r.value),
+      })),
+    };
   }
 
   if (payload.action === "loadLeadsFilterOptions") {
@@ -2492,6 +2570,89 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
     if (!result[0]) fail(500, "Client custom field value upsert failed.");
     return toClientCustomFieldValueRecord(result[0]);
+  }
+
+  // --- Lead custom fields (Batch 4, Task 4F) — per-client report columns. RLS enforces scope. ---
+  if (payload.action === "loadLeadCustomFields") {
+    const rows = payload.clientId
+      ? await safeRawSelect(tx, sql`
+          select id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+          from public.lead_custom_fields where client_id = ${payload.clientId}
+          order by position asc, created_at asc`)
+      : await safeRawSelect(tx, sql`
+          select id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+          from public.lead_custom_fields order by position asc, created_at asc`);
+    return rows.map(toLeadCustomFieldRecord);
+  }
+
+  if (payload.action === "createLeadCustomField") {
+    const input = payload.input;
+    const optionsJson = input.options ?? null;
+    const editableBy = JSON.stringify(input.editable_by ?? ["admin", "master_admin"]);
+    const rows = await tx.execute(sql`
+      insert into public.lead_custom_fields (client_id, name, field_type, options, position, editable_by, created_by)
+      values (
+        ${input.client_id},
+        ${input.name},
+        ${input.field_type},
+        ${optionsJson === null ? null : JSON.stringify(optionsJson)}::jsonb,
+        ${input.position ?? 0},
+        array(select jsonb_array_elements_text(${editableBy}::jsonb)),
+        nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      )
+      returning id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(500, "Lead custom field could not be created.");
+    return toLeadCustomFieldRecord(result[0]);
+  }
+
+  if (payload.action === "updateLeadCustomField") {
+    const patch = payload.patch ?? {};
+    const setName = "name" in patch;
+    const setType = "field_type" in patch;
+    const setOptions = "options" in patch;
+    const setPosition = "position" in patch;
+    const setEditableBy = "editable_by" in patch;
+    const rows = await tx.execute(sql`
+      update public.lead_custom_fields set
+        name = case when ${setName} then ${patch.name ?? null} else name end,
+        field_type = case when ${setType} then ${patch.field_type ?? null} else field_type end,
+        options = case when ${setOptions} then ${patch.options === undefined || patch.options === null ? null : JSON.stringify(patch.options)}::jsonb else options end,
+        position = case when ${setPosition} then ${patch.position ?? 0} else position end,
+        editable_by = case when ${setEditableBy} then array(select jsonb_array_elements_text(${patch.editable_by === undefined ? JSON.stringify(["admin", "master_admin"]) : JSON.stringify(patch.editable_by)}::jsonb)) else editable_by end
+      where id = ${payload.fieldId}
+      returning id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(404, "Lead custom field was not found.");
+    return toLeadCustomFieldRecord(result[0]);
+  }
+
+  if (payload.action === "deleteLeadCustomField") {
+    await tx.execute(sql`delete from public.lead_custom_fields where id = ${payload.fieldId}`);
+    return { ok: true };
+  }
+
+  if (payload.action === "upsertLeadCustomFieldValue") {
+    const rows = await tx.execute(sql`
+      insert into public.lead_custom_field_values (lead_id, field_id, value, updated_at, updated_by)
+      values (
+        ${payload.leadId},
+        ${payload.fieldId},
+        ${payload.value},
+        now(),
+        nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      )
+      on conflict (lead_id, field_id) do update set
+        value = excluded.value,
+        updated_at = excluded.updated_at,
+        updated_by = excluded.updated_by
+      returning lead_id, field_id, value, updated_at, updated_by
+    `);
+    const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+    if (!result[0]) fail(500, "Lead custom field value upsert failed.");
+    return toLeadCustomFieldValueRecord(result[0]);
   }
 
   if (payload.action === "loadIdentity") {

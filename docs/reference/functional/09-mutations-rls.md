@@ -60,7 +60,8 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Allowed roles:** admin, super_admin, manager (assigned). UI blocks the client role.
 - **Called from:** Leads page drawer save.
 - **Fields (ADR-0004 whitelist, enforced server-side in [`supabase/functions/orm-gateway/index.ts` `mapLeadPatch`](../../../supabase/functions/orm-gateway/index.ts)):**
-  - Pipeline: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`
+  - Pipeline: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`
+  - Report (Batch 4): `client_note` (renamed from `comments`), `coldunicorn_note` (internal — gateway nulls it for the client role in `loadLeadsList`), `highlight` (`green|yellow|red|null`)
   - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
   - Firmographics: `country`, `industry`, `headcount_range`, `website`
   - OOO: `expected_return_date`, `added_to_ooo_campaign`
@@ -147,6 +148,16 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Called from:** Domains page "New domain" Sheet.
 - **Fields:** `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date` (all required), `exchange_cost`, `status` (optional).
 - **Update pattern:** no optimistic update; prepend to `snapshot.domains` in `startTransition`.
+
+### 2.13b Lead custom fields (Batch 4, Task 4F) — [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)
+
+Per-client custom columns on the Leads report. Repository methods → orm-gateway actions:
+
+- `loadLeadCustomFields(clientId?)` — select; RLS `lcf_select_scoped` (accessible clients, client role included).
+- `createLeadCustomField(input)` / `updateLeadCustomField(fieldId, patch)` / `deleteLeadCustomField(fieldId)` — table `lead_custom_fields`; RLS `lcf_write_admin` (**super_admin/admin/master_admin only** — managers cannot define).
+- `upsertLeadCustomFieldValue(leadId, fieldId, value)` — table `lead_custom_field_values`; RLS `lcfv_write_scoped` requires accessible client **and** role ∈ field `editable_by` (default `{admin,master_admin}`).
+- **Read path:** `loadLeadsList` returns `customFields` (definitions for the page's clients) + `customValues` (values for the returned rows only) — no global fetch.
+- **UI:** internal Leads page "Manage columns" sheet (admin-only) for definitions; inline cell editing in the report for values (optimistic via `useLeadCustomColumns`).
 
 ### 2.14 `loadConditionRules()`
 

@@ -1,7 +1,7 @@
 # ADR 0004: Lead State Boundaries
 
 ## Status
-Accepted (revised 2026-05-19)
+Accepted (revised 2026-06-18)
 
 ## Decision
 
@@ -9,10 +9,14 @@ The `leads` row is the editable source of truth for **manager/admin** through th
 
 **Editable by manager/admin** (whitelisted in `mapLeadPatch`):
 
-- **Pipeline state:** `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`
+- **Pipeline state:** `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`
+- **Report notes (Batch 4, 2026-06-18):** `client_note` (renamed from `comments`; client-facing), `coldunicorn_note` (internal-only — gateway nulls it for the client role in `loadLeadsList`)
+- **Report highlight (Batch 4):** `highlight` — manual row colour `green` | `yellow` | `red` | null
 - **Identity:** `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
 - **Firmographics:** `country`, `industry`, `headcount_range`, `website`
 - **OOO state:** `expected_return_date`, `added_to_ooo_campaign`
+
+> **2026-06-18 (Batch 4 — Leads report).** The legacy `comments` column was renamed to `client_note` (data preserved; it was already the client-facing note surfaced in the portal drawer). `coldunicorn_note` and `highlight` were added. The micro-CRM **booleans and `qualification` semantics are unchanged this batch** — the report's "Status" column is derived read-only from `getLeadStage()`. A future status-model change (qualification as single source of truth) is deferred pending client confirmation. Per-client custom lead columns are governed separately — see [ADR-0007](0007-per-client-lead-custom-fields.md).
 
 **Never editable from the portal** (ingestion-owned, n8n-derived, or integration foreign keys):
 

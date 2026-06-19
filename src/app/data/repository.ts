@@ -16,6 +16,8 @@ import type {
   InviteRecord,
   InviteRequest,
   InvoiceRecord,
+  LeadCustomFieldRecord,
+  LeadCustomFieldValueRecord,
   LeadRecord,
   ManagedUserRecord,
   UserRecord,
@@ -99,6 +101,11 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateClientCustomField: { table: "client_custom_fields", operation: "update" },
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
   upsertClientCustomFieldValue: { table: "client_custom_field_values", operation: "upsert" },
+  loadLeadCustomFields: { table: "lead_custom_fields", operation: "select" },
+  createLeadCustomField: { table: "lead_custom_fields", operation: "insert" },
+  updateLeadCustomField: { table: "lead_custom_fields", operation: "update" },
+  deleteLeadCustomField: { table: "lead_custom_fields", operation: "delete" },
+  upsertLeadCustomFieldValue: { table: "lead_custom_field_values", operation: "upsert" },
 };
 
 export class RepositoryError extends Error {
@@ -619,6 +626,32 @@ export interface Repository {
     fieldId: string,
     value: string | null,
   ): Promise<ClientCustomFieldValueRecord>;
+  // Lead custom fields (Batch 4, Task 4F) — per-client report columns.
+  loadLeadCustomFields(clientId?: string): Promise<LeadCustomFieldRecord[]>;
+  createLeadCustomField(input: {
+    client_id: string;
+    name: string;
+    field_type: ClientCustomFieldType;
+    options?: string[] | null;
+    position?: number;
+    editable_by?: string[];
+  }): Promise<LeadCustomFieldRecord>;
+  updateLeadCustomField(
+    fieldId: string,
+    patch: {
+      name?: string;
+      field_type?: ClientCustomFieldType;
+      options?: string[] | null;
+      position?: number;
+      editable_by?: string[];
+    },
+  ): Promise<LeadCustomFieldRecord>;
+  deleteLeadCustomField(fieldId: string): Promise<void>;
+  upsertLeadCustomFieldValue(
+    leadId: string,
+    fieldId: string,
+    value: string | null,
+  ): Promise<LeadCustomFieldValueRecord>;
 }
 
 export const repository: Repository = {
@@ -949,5 +982,25 @@ export const repository: Repository = {
 
   async upsertClientCustomFieldValue(clientId, fieldId, value) {
     return invokeOrmGatewayAction("upsertClientCustomFieldValue", { clientId, fieldId, value });
+  },
+
+  async loadLeadCustomFields(clientId) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadCustomFields", { clientId });
+  },
+
+  async createLeadCustomField(input) {
+    return invokeOrmGatewayAction("createLeadCustomField", { input });
+  },
+
+  async updateLeadCustomField(fieldId, patch) {
+    return invokeOrmGatewayAction("updateLeadCustomField", { fieldId, patch });
+  },
+
+  async deleteLeadCustomField(fieldId) {
+    await invokeOrmGatewayAction("deleteLeadCustomField", { fieldId });
+  },
+
+  async upsertLeadCustomFieldValue(leadId, fieldId, value) {
+    return invokeOrmGatewayAction("upsertLeadCustomFieldValue", { leadId, fieldId, value });
   },
 };

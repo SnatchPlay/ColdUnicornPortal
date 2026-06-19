@@ -47,7 +47,9 @@ export const leads = pgTable("leads", {
 	externalDomainBlacklistId: integer("external_domain_blacklist_id"),
 	source: varchar({ length: 30 }).default('cold_email').notNull(),
 	replyText: text("reply_text"),
-	comments: text(),
+	clientNote: text("client_note"),
+	coldunicornNote: text("coldunicorn_note"),
+	highlight: text(),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),

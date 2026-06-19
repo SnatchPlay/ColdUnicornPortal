@@ -93,25 +93,13 @@ Client's lead workspace. Read-only (ADR-0004 + UI also disables edits). Full rep
 - Pipeline stage chips (`FilterChip`): "All" + one chip per `PIPELINE_STAGES` entry (see [04-metrics §4](./04-metrics-catalog.md#4-lead-stage-lifecycle)) with counts.
 - CSV export button (top-right): serialises current filtered rows via `toCsvCell()` inline helper.
 
-### 2.3 Lead table
+### 2.3 Lead table (dense report — Batch 4)
 
-Custom CSS-grid table (not `<table>`). Resizable columns via `useResizableColumns()` with localStorage key `table:client-leads:columns`.
+As of Batch 4 this is the dense, spreadsheet-style **report table** (`LeadReportTable`) that replaces the client's external Google-Sheets report. Both the client portal and the internal Leads page render from one shared column registry [`buildLeadReportColumns`](../../../src/app/lib/lead-report-columns.tsx). Small font, narrow resizable columns (`useResizableColumns`, key `table:client-leads-report:columns:<n>`), sticky header, horizontal scroll, truncation + native tooltips.
 
-| Column | Key | Sort |
-|--------|-----|------|
-| Lead (name + initials avatar) | `lead` | by `fullName` |
-| Email | `email` | — (display) |
-| Company | `company` | by `company_name` |
-| Job title | `title` | — |
-| Campaign | `campaign` | by `campaign.name` |
-| Step | `step` | by `message_number` / latest reply's `sequence_step` |
-| Replies | `replies` | by reply count |
-| Last reply | `lastReply` | by `received_at` |
-| Added | `added` | by `created_at` |
+Columns (client view): Full name, Job title, Email, Phone, Phone source, Company, Industry, Headcount, Lead received, Campaign, Message title, Msg #, Website (link), Qualification, Response time, **Status** (read-only badge from `getLeadStage`), Replies, Last reply, Mail from lead (preview), **Client note**, LinkedIn, then any **per-client custom columns** ([ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)). The internal **ColdUnicorn note** column is **never** shown to the client (gateway nulls it). Sort is server-side on base columns that map to a `serverSortField`.
 
-Row data from `getClientLeadRows(leads, campaigns, replies)` at [client-view-models.ts:145-181](../../../src/app/lib/client-view-models.ts#L145-L181). Each row attaches its `replies` array sorted by received date descending.
-
-Pagination: lazy "Load more" button; `visibleRowsCount` increments by `PAGE_SIZE` (50) on click. Resets when filters/search change.
+Pagination: lazy "Load more" (`PAGE_SIZE` 50); rows + custom values accumulate across pages. **Export:** CSV / XLSX of all rows matching the current filters/sort (paged server-side); excludes the internal note.
 
 ### 2.4 Lead drawer
 

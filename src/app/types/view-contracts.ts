@@ -17,6 +17,7 @@ import type {
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
+  LeadCustomFieldRecord,
   LeadRecord,
   ReplyRecord,
 } from "./core";
@@ -459,6 +460,10 @@ export interface LeadsListResponse {
   totalCount: number;
   /** Row counts per stage after applying all filters EXCEPT the stage filter. */
   stageCounts: Partial<Record<LeadStageKey, number>>;
+  /** Custom column definitions for the clients owning the returned rows (Batch 4, Task 4F). */
+  customFields: LeadCustomFieldRecord[];
+  /** Custom values for the returned rows only (compact: lead_id + field_id + value). */
+  customValues: Array<{ lead_id: string; field_id: string; value: string | null }>;
 }
 
 /** Reply thread for a single lead, loaded lazily when the drawer opens. */

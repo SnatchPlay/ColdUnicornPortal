@@ -23,6 +23,8 @@ export type ReplyClassification =
   | "Spam_Inbound"
   | "other";
 export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
+/** Manual report row highlight colour (Batch 4). `null` = no highlight. */
+export type LeadHighlight = "green" | "yellow" | "red";
 export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";
 export type ConditionApplyTo = "row" | "cell" | "badge" | "section";
@@ -144,7 +146,12 @@ export interface LeadRecord {
   external_domain_blacklist_id: number | null;
   source: string;
   reply_text: string | null;
-  comments: string | null;
+  /** Client-facing note (renamed from the legacy `comments` column in Batch 4). */
+  client_note: string | null;
+  /** Internal note — never returned to the client role by the gateway. */
+  coldunicorn_note: string | null;
+  /** Manual report row highlight; `null` when unset. */
+  highlight: LeadHighlight | null;
 }
 
 export interface ReplyRecord {
@@ -315,6 +322,30 @@ export interface ClientCustomFieldRecord {
 
 export interface ClientCustomFieldValueRecord {
   client_id: string;
+  field_id: string;
+  value: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+/** Per-client custom column on the Leads report (Batch 4, Task 4F). */
+export interface LeadCustomFieldRecord {
+  id: string;
+  /** Owning client — custom columns never leak across clients. */
+  client_id: string;
+  name: string;
+  field_type: ClientCustomFieldType;
+  options: string[] | null;
+  position: number;
+  /** Roles that may write values for this field (default ['admin','master_admin']). */
+  editable_by: string[];
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Per-lead value for a LeadCustomFieldRecord. */
+export interface LeadCustomFieldValueRecord {
+  lead_id: string;
   field_id: string;
   value: string | null;
   updated_at: string;

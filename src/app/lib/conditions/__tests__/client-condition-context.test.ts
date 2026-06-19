@@ -61,7 +61,9 @@ describe("buildClientConditionContext", () => {
         external_domain_blacklist_id: null,
         source: "test",
         reply_text: null,
-        comments: null,
+        client_note: null,
+        coldunicorn_note: null,
+        highlight: null,
       },
     ];
 

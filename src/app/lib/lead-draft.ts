@@ -21,7 +21,8 @@ export const LEAD_GENDER_UNSET = "__lead_gender_unset__";
 
 export interface LeadDraft {
   qualification: LeadQualification | "";
-  comments: string;
+  clientNote: string;
+  coldunicornNote: string;
   meetingBooked: boolean;
   meetingHeld: boolean;
   offerSent: boolean;
@@ -46,7 +47,8 @@ export interface LeadDraft {
 export function toLeadDraft(lead: LeadRecord): LeadDraft {
   return {
     qualification: lead.qualification ?? "",
-    comments: lead.comments ?? "",
+    clientNote: lead.client_note ?? "",
+    coldunicornNote: lead.coldunicorn_note ?? "",
     meetingBooked: lead.meeting_booked,
     meetingHeld: lead.meeting_held,
     offerSent: lead.offer_sent,
@@ -79,7 +81,8 @@ export function buildLeadPatch(lead: LeadRecord, draft: LeadDraft): Partial<Lead
 
   const nextQualification = draft.qualification || null;
   if ((lead.qualification ?? null) !== nextQualification) patch.qualification = nextQualification;
-  if ((lead.comments ?? "") !== draft.comments) patch.comments = draft.comments;
+  if ((lead.client_note ?? "") !== draft.clientNote) patch.client_note = draft.clientNote;
+  if ((lead.coldunicorn_note ?? "") !== draft.coldunicornNote) patch.coldunicorn_note = draft.coldunicornNote;
   if (lead.meeting_booked !== draft.meetingBooked) patch.meeting_booked = draft.meetingBooked;
   if (lead.meeting_held !== draft.meetingHeld) patch.meeting_held = draft.meetingHeld;
   if (lead.offer_sent !== draft.offerSent) patch.offer_sent = draft.offerSent;

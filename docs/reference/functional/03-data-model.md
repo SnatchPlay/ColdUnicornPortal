@@ -256,7 +256,9 @@ Columns of note:
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
 | `source` | varchar(30) default `'cold_email'` | |
 | `reply_text` | text | Denormalised latest reply for quick lead-list rendering. |
-| `comments` | text | Free-form notes by the manager (editable). |
+| `client_note` | text | Client-facing report note (renamed from `comments` in Batch 4, `20260618b`). Editable by manager/admin; visible to the client. |
+| `coldunicorn_note` | text | Internal report note (Batch 4). Editable by manager/admin; **nulled for the client role** in `loadLeadsList`. |
+| `highlight` | text `green\|yellow\|red` | Manual report row colour (Batch 4, Task 4E). `null` = none. |
 | `created_at` / `updated_at` | timestamptz | |
 
 RLS:
@@ -288,6 +290,19 @@ RLS:
 - `replies_select_scoped` — **set-based** (since `20260601b`): `client_id IS NOT NULL AND client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`. The earlier per-row form used `private.can_access_reply(client_id, lead_id)` which also handled orphan replies (null client_id, non-null lead_id). The new form requires `client_id IS NOT NULL`; n8n always sets `client_id` on ingestion so this is safe in practice.
 
 No write policies from the portal.
+
+#### `lead_custom_fields` / `lead_custom_field_values` — migration [`20260618c_lead_custom_fields.sql`](../../../supabase/migrations/20260618c_lead_custom_fields.sql)
+
+Per-client custom columns on the Leads report (Batch 4, Task 4F; [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)). Mirrors the client custom-field shape but scopes definitions to a `client_id` and keys values on `lead_id`.
+
+`lead_custom_fields`: `id`, `client_id` (→ clients, cascade), `name`, `field_type` (`text|checkbox|droplist|link|number|currency`), `options` (jsonb, required for droplist), `position`, `editable_by` text[] (default `{admin,master_admin}`), `created_by`, `created_at`.
+`lead_custom_field_values`: PK `(lead_id, field_id)`, both FKs cascade-delete; `value` text (raw; numeric parse/sort is frontend-only), `updated_at`, `updated_by`.
+
+RLS (all set-based, ADR-0006):
+- `lcf_select_scoped` — definitions readable when `client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))` (client role included — report is client-facing).
+- `lcf_write_admin` — definitions writable only by `super_admin/admin/master_admin`.
+- `lcfv_select_scoped` — values readable when the lead's `client_id` is accessible.
+- `lcfv_write_scoped` — values writable when the actor can access the lead's client **and** `private.current_app_role()` ∈ the field's `editable_by`.
 
 ### 2.5 Daily stats (client-level rollup)
 
@@ -509,6 +524,14 @@ Earlier Drizzle migrations live in `supabase/drizzle/migrations/0000_stiff_fixer
 
 - **2C user management:** adds `users.is_active` / `deactivated_at` / `deactivated_by`; makes `private.current_app_role()` is_active-aware; adds SECURITY DEFINER RPCs `admin_list_users`, `admin_update_user_role`, `admin_set_user_active`, `current_account_active` (all `grant execute to authenticated`, with internal-admin + self/super-admin/last-admin guards). See [09-mutations-rls.md §3.6](09-mutations-rls.md).
 - **3G custom field types:** relaxes the `client_custom_fields_field_type_check` CHECK to allow `'number'` and `'currency'` in addition to `text/checkbox/droplist/link`. No data migration — values stay raw text in `client_custom_field_values`; parsing/sorting is frontend-only.
+
+### `supabase/migrations/20260618b_leads_report_columns.sql`
+
+Client Feedback Batch 4 (Leads report). Renames `leads.comments` → `client_note` (data preserved), adds `coldunicorn_note` and `highlight` (`green|yellow|red` CHECK). No status-semantics change — the legacy micro-CRM booleans and `qualification` are untouched.
+
+### `supabase/migrations/20260618c_lead_custom_fields.sql`
+
+Batch 4 Task 4F: adds `lead_custom_fields` + `lead_custom_field_values` with set-based RLS (see §2.4 and [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)).
 
 ---
 

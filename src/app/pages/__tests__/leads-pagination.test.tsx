@@ -56,7 +56,7 @@ function makeRows(count: number, startIndex = 0) {
       message_title: null, message_number: 1, response_time_hours: null, response_time_label: null,
       meeting_booked: false, meeting_held: false, offer_sent: false, won: false,
       added_to_ooo_campaign: false, external_blacklist_id: null, external_domain_blacklist_id: null,
-      source: "test", reply_text: null, comments: null,
+      source: "test", reply_text: null, client_note: null, coldunicorn_note: null, highlight: null,
       clientName: "Acme", campaignName: "Campaign 1", replyCount: 0, lastReplyAt: null,
     };
   });

@@ -242,18 +242,13 @@ Editable lead workspace. Change qualification, mark milestones (meeting booked/h
 - Pipeline stage chips (same as client pipeline; click to filter).
 - URL state contract: `q`, `campaign`, `stage`, `replyScope`, `sort`, `dir`, `range`, `from`, `to`, `page`.
 
-### 3.3 Lead table
+### 3.3 Lead table (dense report — Batch 4)
 
-Resizable columns, storage key `table:leads:columns`, defaults `[380, 300, 220, 200]`.
+As of Batch 4 this is the shared dense **report table** (`LeadReportTable`) driven by [`buildLeadReportColumns`](../../../src/app/lib/lead-report-columns.tsx) — the same registry the client portal uses ([05 §2.3](05-client-portal.md)). Small font, narrow resizable columns (storage key `table:leads-report:columns:<admin|internal>:<n>`), sticky header, horizontal scroll, truncation.
 
-| Column | Source |
-|--------|--------|
-| Lead (name + avatar) | `leads.first_name + last_name` |
-| Company | `leads.company_name` |
-| Status | `getLeadStage(lead)` with `PipelineBadge` |
-| Updated | `leads.updated_at` |
+Columns mirror the Google-Sheets report: Full name, **Client** (admin/master only), Job title, Email, Phone/source, Company, Industry, Headcount, Lead received, Campaign, Message title/#, Website, Qualification, Response time, **Status** (read-only badge from `getLeadStage`), Replies, Last reply, Mail-from-lead preview, **Client note**, **ColdUnicorn note** (internal-only), LinkedIn, then per-client **custom columns** (admin/master only, [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)). Server-side sort on base columns (`lead/client/company/campaign/step/status/replies/lastReply/created`).
 
-Sorting keys: `lead`, `company`, `status` (by stage position in `PIPELINE_STAGES`), `updated`. Default: `updated` DESC.
+**Row highlight (4E):** a trailing colour menu sets `leads.highlight` (`green/yellow/red/none`) with optimistic update; the row paints a semi-transparent background. **Notes** are edited in the lead drawer (Client note / ColdUnicorn note). **Custom columns:** values edited inline; definitions managed via the header **"Manage columns"** sheet (admin/master_admin only). **Export:** CSV / XLSX of all filtered/sorted rows.
 
 Pagination: `PAGE_SIZE = 50` with numbered pagination, persisted in URL via `page`.
 
@@ -268,7 +263,8 @@ Opens on row click. Editable fields (disabled for client role, enabled here):
 | Meeting held | checkbox | `leads.meeting_held` |
 | Offer sent | checkbox | `leads.offer_sent` |
 | Won | checkbox | `leads.won` |
-| Comments | textarea | `leads.comments` |
+| Client note | textarea | `leads.client_note` (renamed from `comments`; client-facing) |
+| ColdUnicorn note | textarea | `leads.coldunicorn_note` (internal-only) |
 
 Metadata (read-only): Email, job title, company, campaign name, step (`message_number` or latest reply's `sequence_step`), reply count, country, industry, headcount, website, LinkedIn URL, response time label.
 

@@ -79,10 +79,14 @@ export function LeadEditForm({ draft, updateDraft, readOnly }: {
             </Select>
           </label>
           <label className="space-y-2">
-            <EditLabel>Comments</EditLabel>
-            <textarea value={draft.comments} onChange={(event) => set("comments", event.target.value)} disabled={readOnly} rows={3} className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none disabled:opacity-60" />
+            <EditLabel>Client note</EditLabel>
+            <textarea value={draft.clientNote} onChange={(event) => set("clientNote", event.target.value)} disabled={readOnly} rows={3} className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none disabled:opacity-60" />
           </label>
         </div>
+        <label className="block space-y-2">
+          <EditLabel>ColdUnicorn note (internal)</EditLabel>
+          <textarea value={draft.coldunicornNote} onChange={(event) => set("coldunicornNote", event.target.value)} disabled={readOnly} rows={2} placeholder="Internal — not visible to the client" className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-white outline-none placeholder:text-muted-foreground disabled:opacity-60" />
+        </label>
         <div className="grid gap-3 md:grid-cols-4">
           {[
             { label: "Meeting booked", key: "meetingBooked" as const, value: draft.meetingBooked },
