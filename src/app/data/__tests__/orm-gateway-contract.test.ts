@@ -55,4 +55,36 @@ describe("parseOrmGatewayRequest", () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.value.action).toBe("upsertLeadCustomFieldValue");
   });
+
+  it("accepts updateProfileAvatar with a path and with null (clear)", () => {
+    const withPath = parseOrmGatewayRequest({
+      action: "updateProfileAvatar",
+      sessionUserId: "u1",
+      avatarPath: "avatars/u1/abc.webp",
+    });
+    expect(withPath.ok).toBe(true);
+    if (withPath.ok && withPath.value.action === "updateProfileAvatar") {
+      expect(withPath.value.avatarPath).toBe("avatars/u1/abc.webp");
+    }
+
+    const cleared = parseOrmGatewayRequest({
+      action: "updateProfileAvatar",
+      sessionUserId: "u1",
+      avatarPath: null,
+    });
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok && cleared.value.action === "updateProfileAvatar") {
+      expect(cleared.value.avatarPath).toBeNull();
+    }
+  });
+
+  it("rejects updateProfileAvatar with a non-string, non-null avatarPath", () => {
+    const parsed = parseOrmGatewayRequest({
+      action: "updateProfileAvatar",
+      sessionUserId: "u1",
+      avatarPath: 42,
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("updateProfileAvatar");
+  });
 });

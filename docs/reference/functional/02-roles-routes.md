@@ -214,7 +214,7 @@ From top to bottom ([`app-shell.tsx:133-286`](../../../src/app/components/app-sh
 3. **Nav list** — `NAV_BY_ROLE[role]` rendered as `NavLink` with active styling (`border-[#3a3a3a] bg-[#232323]`).
 4. **Contract KPI mini-card** (client only, when `identity.clientId` resolves to a client) — `kpi_leads`/mo and `kpi_meetings`/mo. These are read from `clients.kpi_leads` and `clients.kpi_meetings`.
 5. **Impersonation panel** — only for `actorIdentity.role === "super_admin"` when `runtimeConfig.allowInternalImpersonation` is truthy. See §7.
-6. **User footer** — initials avatar, `fullName`, `getRoleLabel(role)`, sign-out icon button.
+6. **User footer** — [`UserAvatar`](../../../src/app/components/ui/user-avatar.tsx) (profile photo or initials fallback), `fullName`, `getRoleLabel(role)`, theme-toggle, and sign-out icon buttons. When the sidebar is **collapsed**, the footer shows the avatar (click → role Settings) above the sign-out button; the theme toggle appears only in the expanded footer. Photos are managed in Settings (self) / User Management (admins) — see [09 §3.7](./09-mutations-rls.md).
 
 Desktop sidebar state is binary and persisted in `localStorage`:
 

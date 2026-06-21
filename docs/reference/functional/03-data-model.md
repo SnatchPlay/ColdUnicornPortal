@@ -57,14 +57,25 @@ Agency-facing user profile. Created on invite acceptance by the `send-invite` ed
 | `is_active` | boolean not null default true | Soft-deactivate flag (migration `20260618`). `false` → `private.current_app_role()` returns NULL → no role-gated RLS access. |
 | `deactivated_at` | timestamptz nullable | Set when deactivated, cleared on reactivate. |
 | `deactivated_by` | uuid FK > `users.id` nullable | Audit: who deactivated the account. |
+| `avatar_path` | text nullable | Storage object path in the `user-avatars` bucket (migration `20260619`). Convention `avatars/{user_id}/{uuid}.{ext}`. **Stores the path only — never a URL.** The public URL is derived at render via `getAvatarPublicUrl` ([avatar-storage.ts](../../../src/app/lib/avatar-storage.ts)). NULL → UI shows initials. |
+| `avatar_updated_at` | timestamptz nullable | Audit: bumped on every avatar change. No cache-busting needed — each upload uses a fresh UUID filename, so the URL always changes. |
 
 RLS:
 
 - `users_select_self` — `auth.uid() = id` (everyone reads their own row).
 - `users_select_internal` — visible to internal users (admin/manager) for dropdowns and attribution. The policy body is `to ["authenticated"]` without an explicit `using` in the Drizzle declaration; actual predicate lives in the SQL migration at `docs/reference/supabase-production-rls.sql`.
-- `users_update_self` — `auth.uid() = id` for both `using` and `with check`; supports profile-name updates through `orm-gateway`.
+- `users_update_self` — `auth.uid() = id` for both `using` and `with check`; supports profile-name **and self avatar** updates through `orm-gateway`.
 
-No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-service updates go through `users_update_self`; **admin role changes and deactivation go through SECURITY DEFINER RPCs** (`admin_update_user_role`, `admin_set_user_active`) that enforce their own permission checks and bypass the self-only UPDATE policy. See [09-mutations-rls.md](09-mutations-rls.md).
+No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-service updates go through `users_update_self`; **admin role changes, deactivation, and avatar edits on other users go through SECURITY DEFINER RPCs** (`admin_update_user_role`, `admin_set_user_active`, `admin_set_user_avatar`) that enforce their own permission checks and bypass the self-only UPDATE policy. See [09-mutations-rls.md](09-mutations-rls.md).
+
+#### `user-avatars` storage bucket — migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql)
+
+**Public** Supabase Storage bucket (5 MB limit, `image/jpeg|png|webp`). Holds user profile photos at `avatars/{user_id}/{uuid}.{ext}`. `storage.objects` RLS:
+
+- **read** — any `authenticated` user (also served over the public CDN).
+- **insert / update / delete** — only inside the caller's own folder (`(storage.foldername(name))[2] = auth.uid()::text`) **or** `private.is_admin_user()`. No anonymous writes; the app never lists the bucket.
+
+**Why public (not private + signed):** avatars are low-sensitivity face photos with unguessable UUID object names; public read removes per-render signing latency and list-batching complexity. The DB still stores only the path. See the decision-log entry in [BUSINESS_LOGIC.md](../../BUSINESS_LOGIC.md).
 
 #### `client_users` — mapping user > client(s) — [schema.ts:313-339](../../../supabase/drizzle/schema.ts#L313-L339)
 

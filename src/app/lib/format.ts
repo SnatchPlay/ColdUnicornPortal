@@ -29,3 +29,21 @@ export function getFullName(firstName?: string | null, lastName?: string | null)
 export function slugify(value: string) {
   return value.toLowerCase().replace(/\s+/g, "-");
 }
+
+/**
+ * Up-to-two-letter initials for a user identity. Falls back to the first letter
+ * of the email, then "?". Centralizes the inline `split(" ").map(i=>i[0])…` logic.
+ */
+export function getInitials(name?: string | null, email?: string | null) {
+  const fromName = (name ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  if (fromName) return fromName;
+  const fromEmail = (email ?? "").trim().charAt(0).toUpperCase();
+  return fromEmail || "?";
+}

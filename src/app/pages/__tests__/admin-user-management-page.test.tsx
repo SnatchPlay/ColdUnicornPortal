@@ -54,6 +54,7 @@ vi.mock("../../data/repository", () => ({
     listManagedUsers: vi.fn(),
     updateUserRole: vi.fn(),
     setUserActive: vi.fn(),
+    setUserAvatar: vi.fn(),
   },
 }));
 
@@ -140,7 +141,8 @@ describe("admin user management", () => {
 
   async function findUserRow(email: string) {
     const emailEl = await screen.findByText(email);
-    return emailEl.closest("div.min-w-0")!.parentElement as HTMLElement;
+    // The grid row is the nearest ancestor with the CSS-grid layout class.
+    return emailEl.closest("div.grid") as HTMLElement;
   }
 
   it("changes a user's role (2C)", async () => {

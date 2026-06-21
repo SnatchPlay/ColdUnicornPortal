@@ -229,9 +229,18 @@ User-management writes (2B/2C) call **SECURITY DEFINER functions** directly via 
 | `listManagedUsers()` | `public.admin_list_users()` | Caller must be `super_admin`/`admin`/`master_admin`; returns all users incl. `is_active`/`deactivated_at`. |
 | `updateUserRole(userId, role)` | `public.admin_update_user_role(target, new_role)` | Internal-admin only · cannot change own role · only `super_admin` may assign/modify `super_admin` · last-admin guard (can't demote the last active admin-tier user). |
 | `setUserActive(userId, active)` | `public.admin_set_user_active(target, active)` | Internal-admin only · cannot deactivate self · only `super_admin` may toggle a `super_admin` · last-admin guard. Sets `deactivated_at`/`deactivated_by`. |
+| `setUserAvatar(userId, avatarPath)` | `public.admin_set_user_avatar(target, new_avatar_path)` | Internal-admin only. Sets/clears another user's `avatar_path` (+ `avatar_updated_at`). Migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql). Self avatar edits do **not** use this — they go through the gateway `updateProfileAvatar` action under `users_update_self`. |
 | `isCurrentAccountActive()` | `public.current_account_active()` | Auth gate — the auth provider signs out a deactivated user. Fails open on RPC error. |
 
-All four are `revoke all from public; grant execute to authenticated`. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
+All admin user-management RPCs are `revoke all from public; grant execute to authenticated`. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
+
+### 3.7 Avatars — gateway action + storage writes (Batch 10D)
+
+Self-service avatar updates use the `orm-gateway` action **`updateProfileAvatar(sessionUserId, avatarPath|null)`** (`repository.updateProfileAvatar`), which writes `users.avatar_path` + `avatar_updated_at` under `users_update_self` RLS — the same path as `updateProfileName`. Admins editing another user use the `admin_set_user_avatar` RPC above.
+
+The image bytes are written to the **public** `user-avatars` Storage bucket from the browser via the publishable client ([avatar-storage.ts](../../../src/app/lib/avatar-storage.ts)) — never the DB. The upload flow is transactional-enough: upload object → write DB → best-effort delete the previous object; if the DB write fails, the just-uploaded object is removed. `storage.objects` RLS restricts writes to the caller's own `avatars/{uid}/…` folder (or `private.is_admin_user()`).
+
+**Why public bucket (not private + signed URLs):** avatars are low-sensitivity face photos with unguessable UUID object names; public read removes per-render signing latency and list-batching complexity, and the DB stores only the object path. Decision logged in [BUSINESS_LOGIC.md](../../BUSINESS_LOGIC.md). Migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql).
 
 ---
 
@@ -241,7 +250,7 @@ Canonical authorization per entity. "Own" = the subject's own row (e.g. a user u
 
 | Entity | Client | Manager | Admin / Super-admin |
 |--------|:------:|:-------:|:-------------------:|
-| `users` (profile name, password via Auth) | Own | Own | Own (+ admin promotion via SQL) |
+| `users` (profile name, **avatar**, password via Auth) | Own | Own | Own (+ admin role/avatar mgmt via SQL) |
 | `clients` | ✖ | ✓ assigned | ✓ all |
 | `client_users` | ✖ | ✖ | ✓ |
 | `campaigns` | ✖ | ✓ assigned | ✓ all |

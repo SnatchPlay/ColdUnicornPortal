@@ -41,6 +41,7 @@ import { useShellData } from "../providers/shell-data";
 import type { AppRole, Identity } from "../types/core";
 import type { ClientLite, UserLite } from "../types/view-contracts";
 import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
+import { UserAvatar } from "./ui/user-avatar";
 import coldUnicornLogo from "../../imports/logo white with name.png";
 
 interface NavItem {
@@ -99,6 +100,12 @@ function roleHomePath(role: AppRole) {
   if (isInternalAdmin(role)) return "/admin/dashboard";
   if (role === "manager") return "/manager/dashboard";
   return "/client/dashboard";
+}
+
+function settingsPathFor(role: AppRole) {
+  if (isInternalAdmin(role)) return "/admin/settings";
+  if (role === "manager") return "/manager/settings";
+  return "/client/settings";
 }
 
 function readInitialSidebarCollapsed() {
@@ -199,16 +206,15 @@ const SidebarPanel = memo(function SidebarPanel({
         </nav>
         <div className="flex flex-col items-center gap-2 border-t border-[#1f1f1f] px-2 py-4">
           <button
-            onClick={toggleTheme}
-            title={isContrast ? "Switch to default colours" : "Switch to contrast colours (colorblind-friendly)"}
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg transition",
-              isContrast
-                ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-                : "text-neutral-400 hover:bg-[#111] hover:text-white",
-            )}
+            onClick={() => {
+              onNavigate();
+              startNavTransition(() => navigate(settingsPathFor(identity.role)));
+            }}
+            title="Open settings"
+            aria-label="Open settings"
+            className="rounded-full ring-2 ring-transparent transition hover:ring-[#2b2b2b]"
           >
-            <Contrast className="h-4 w-4" />
+            <UserAvatar name={identity.fullName} email={identity.email} avatarPath={identity.avatarPath} className="size-10" />
           </button>
           <button
             onClick={() => { onNavigate(); void signOut(); }}
@@ -395,14 +401,7 @@ const SidebarPanel = memo(function SidebarPanel({
         )}
 
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-fuchsia-500 text-sm">
-            {identity.fullName
-              .split(" ")
-              .map((item) => item[0])
-              .join("")
-              .slice(0, 2)
-              .toUpperCase()}
-          </div>
+          <UserAvatar name={identity.fullName} email={identity.email} avatarPath={identity.avatarPath} className="size-10" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm text-white">{identity.fullName}</p>
             <p className="truncate text-xs text-neutral-500">{getRoleLabel(identity.role)}</p>

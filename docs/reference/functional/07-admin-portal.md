@@ -122,7 +122,11 @@ List data comes from `repository.listInvites()` on mount and after each mutation
 
 When a `client` invitation is accepted, the backend edge function creates both the `users` row and the `client_users` mapping. `AdminUserManagementPage` doesn't directly manage mappings in the common flow, but `useCoreData().upsertClientUserMapping(userId, clientId)` is exposed via the repository for programmatic reassignment if ever needed.
 
-### 2.5 Feature availability
+### 2.5 Avatars (photos)
+
+Each row in the Team users list shows a [`UserAvatar`](../../../src/app/components/ui/user-avatar.tsx) (photo or initials fallback) with a camera overlay button. Admin/master_admin/super_admin can **upload/replace** any user's photo (validated to jpeg/png/webp ≤ 5 MB) and **Remove photo** to revert to initials. Image bytes go to the public `user-avatars` Storage bucket; the path is persisted via the `admin_set_user_avatar` RPC. See [09-mutations-rls.md §3.6/§3.7](./09-mutations-rls.md). Users edit their own photo in Settings.
+
+### 2.6 Feature availability
 
 - Admin and super_admin can invite `admin`, `manager`, `client`.
 - Invitations for `super_admin` are **not** offered вЂ” that role must be promoted directly in SQL.

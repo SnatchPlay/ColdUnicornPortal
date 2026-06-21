@@ -214,6 +214,7 @@ File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.t
 
 | Section | Fields | Action | Handler (AuthProvider) |
 |---------|--------|--------|------------------------|
+| **Profile photo** | file picker (jpeg/png/webp ≤ 5 MB) | "Upload/Replace photo" / "Remove" | `updateProfileAvatar(path \| null)` (upload via [avatar-storage.ts](../../../src/app/lib/avatar-storage.ts)) |
 | Profile name | `displayName` text input | "Update name" | `updateProfileName(normalizedName)` |
 | Change password | `password`, `confirmPassword` | "Update password" | `updatePassword(password)` |
 | Sign out | _(button)_ | "Sign out" | `signOut()` |

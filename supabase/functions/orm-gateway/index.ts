@@ -126,6 +126,7 @@ function toUserRecord(row: typeof schema.users.$inferSelect) {
     first_name: row.firstName,
     last_name: row.lastName,
     role: row.role,
+    avatar_path: row.avatarPath ?? null,
   };
 }
 
@@ -2673,6 +2674,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         fullName: `${publicUser.firstName} ${publicUser.lastName}`.trim(),
         email: publicUser.email,
         role: publicUser.role,
+        avatarPath: publicUser.avatarPath ?? null,
       } as Record<string, unknown>;
 
       if (publicUser.role === "client") {
@@ -2732,6 +2734,26 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       .set({
         firstName,
         lastName: lastName || "",
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.users.id, payload.sessionUserId))
+      .returning();
+
+    if (!rows[0]) fail(404, "User profile was not found.");
+
+    return {
+      user: toUserRecord(rows[0]),
+    };
+  }
+
+  if (payload.action === "updateProfileAvatar") {
+    const nextPath = payload.avatarPath === null ? null : payload.avatarPath.trim() || null;
+
+    const rows = await tx
+      .update(schema.users)
+      .set({
+        avatarPath: nextPath,
+        avatarUpdatedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.users.id, payload.sessionUserId))

@@ -518,6 +518,18 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 
 Append-only. Each entry: date, decision, rationale, references.
 
+### Decision (2026-06-19): User profile photos (avatars) with initials fallback (Batch 10D)
+
+Users (admin/manager/client) can now have a **profile photo** shown in place of the initials avatar wherever their identity appears — the lower-left sidebar identity block (expanded **and** collapsed), the Settings profile section, and the admin User Management list. If no photo exists or the image fails to load, the UI falls back to the existing initials. A new shared [`UserAvatar`](../src/app/components/ui/user-avatar.tsx) component is the single source of truth for the photo/initials decision.
+
+- **Self-service:** any user uploads/replaces/removes their own photo in **Settings** (gateway action `updateProfileAvatar`, under `users_update_self`).
+- **Admin management:** admin/master_admin/super_admin can set/clear photos for any user from **User Management** (`admin_set_user_avatar` SECURITY DEFINER RPC). Managers and clients can only edit their own.
+- **Collapsed sidebar:** the bottom item is now the user's avatar (click → role Settings), replacing the theme toggle; the theme toggle remains in the expanded sidebar.
+
+**Storage model — public bucket, path-only:** images live in a **public** `user-avatars` Storage bucket (5 MB, jpeg/png/webp) at `avatars/{user_id}/{uuid}.{ext}`; the DB stores only `users.avatar_path` (never a URL — the public URL is derived at render). We deliberately chose a public bucket over the private+signed-URL pattern: avatars are low-sensitivity face photos with unguessable UUID names, and public read removes per-render signing latency and list-batching complexity. `storage.objects` RLS still restricts writes to the caller's own folder (or admins). Type/size are validated client-side **and** enforced by the bucket.
+
+**Rationale:** Client feedback — *"add our photos/faces instead of letters (e.g. 'ŁK') in the lower-left corner; if no photo, initials are fine."* **References:** migration `20260619_user_avatars.sql`, [03-data-model.md §2.1](reference/functional/03-data-model.md), [09-mutations-rls.md §3.6/§3.7](reference/functional/09-mutations-rls.md), [07-admin-portal.md](reference/functional/07-admin-portal.md).
+
 ### Decision (2026-06-18): Leads report replaces the Google-Sheets client report (Batch 4)
 
 The Leads tab became a dense, spreadsheet-style **report table** designed to replace the client's external Google-Sheets lead report. Shipped this batch:
