@@ -95,6 +95,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   deleteEmailExcludeDomain: { table: "email_exclude_list", operation: "delete" },
   loadIdentity: { table: "users", operation: "select" },
   updateProfileName: { table: "users", operation: "update" },
+  updateProfileAvatar: { table: "users", operation: "update" },
   upsertColumnOverride: { table: "client_table_column_overrides", operation: "upsert" },
   setColumnOrder: { table: "client_table_column_overrides", operation: "update" },
   createClientCustomField: { table: "client_custom_fields", operation: "insert" },
@@ -239,7 +240,7 @@ function mapRepositoryError(reason: unknown, table: string, operation: Repositor
 // Shared envelope for the admin user-management RPCs (SECURITY DEFINER functions
 // called directly, not via the gateway). Throws a RepositoryError on failure.
 async function invokeUserRpc(
-  fn: "admin_list_users" | "admin_update_user_role" | "admin_set_user_active",
+  fn: "admin_list_users" | "admin_update_user_role" | "admin_set_user_active" | "admin_set_user_avatar",
   params: Record<string, unknown>,
   operation: RepositoryOperation,
 ): Promise<unknown> {
@@ -257,6 +258,7 @@ function toManagedUserRecord(row: Record<string, unknown>): ManagedUserRecord {
     first_name: String(row.first_name ?? ""),
     last_name: String(row.last_name ?? ""),
     role: row.role as AppRole,
+    avatar_path: row.avatar_path == null ? null : String(row.avatar_path),
     is_active: Boolean(row.is_active),
     deactivated_at: row.deactivated_at == null ? null : String(row.deactivated_at),
     deactivated_by: row.deactivated_by == null ? null : String(row.deactivated_by),
@@ -591,11 +593,15 @@ export interface Repository {
   deleteEmailExcludeDomain(domain: string): Promise<void>;
   loadIdentity(sessionUserId: string): Promise<LoadIdentityResult>;
   updateProfileName(sessionUserId: string, fullName: string): Promise<UserRecord>;
+  /** Self-service avatar update (all roles); null clears the photo. */
+  updateProfileAvatar(sessionUserId: string, avatarPath: string | null): Promise<UserRecord>;
   // Admin user management (2B/2C). Backed by SECURITY DEFINER RPCs that enforce
   // role/deactivation invariants server-side; the publishable key + RLS apply.
   listManagedUsers(): Promise<ManagedUserRecord[]>;
   updateUserRole(userId: string, role: AppRole): Promise<ManagedUserRecord>;
   setUserActive(userId: string, active: boolean): Promise<ManagedUserRecord>;
+  /** Admin-tier only: set/clear another user's avatar path (admin_set_user_avatar RPC). */
+  setUserAvatar(userId: string, avatarPath: string | null): Promise<ManagedUserRecord>;
   /** True when the *current* signed-in account is still active (not deactivated). */
   isCurrentAccountActive(): Promise<boolean>;
   upsertColumnOverride(
@@ -938,6 +944,11 @@ export const repository: Repository = {
     return user;
   },
 
+  async updateProfileAvatar(sessionUserId, avatarPath) {
+    const { user } = await invokeOrmGatewayAction("updateProfileAvatar", { sessionUserId, avatarPath });
+    return user;
+  },
+
   async listManagedUsers() {
     const data = await invokeUserRpc("admin_list_users", {}, "select");
     return (Array.isArray(data) ? data : []).map((row) => toManagedUserRecord(row as Record<string, unknown>));
@@ -950,6 +961,15 @@ export const repository: Repository = {
 
   async setUserActive(userId, active) {
     const data = await invokeUserRpc("admin_set_user_active", { target_user_id: userId, active }, "update");
+    return toManagedUserRecord(data as Record<string, unknown>);
+  },
+
+  async setUserAvatar(userId, avatarPath) {
+    const data = await invokeUserRpc(
+      "admin_set_user_avatar",
+      { target_user_id: userId, new_avatar_path: avatarPath },
+      "update",
+    );
     return toManagedUserRecord(data as Record<string, unknown>);
   },
 

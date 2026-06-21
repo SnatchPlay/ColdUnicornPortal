@@ -50,6 +50,8 @@ export interface UserRecord {
   first_name: string;
   last_name: string;
   role: AppRole;
+  /** Supabase Storage object path in the user-avatars bucket; null when no photo. */
+  avatar_path: string | null;
 }
 
 // Full user row for the admin User Management page (includes soft-deactivate status).
@@ -268,6 +270,8 @@ export interface Identity {
   email: string;
   role: AppRole;
   clientId?: string;
+  /** Storage object path in the user-avatars bucket; null/undefined when no photo. */
+  avatarPath?: string | null;
 }
 
 export interface InviteRequest {

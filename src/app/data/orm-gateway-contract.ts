@@ -266,6 +266,13 @@ export interface UpdateProfileNamePayload {
   fullName: string;
 }
 
+export interface UpdateProfileAvatarPayload {
+  action: "updateProfileAvatar";
+  sessionUserId: string;
+  /** Storage object path (avatars/{user_id}/{uuid}.{ext}); null clears the avatar. */
+  avatarPath: string | null;
+}
+
 export interface UpsertColumnOverridePayload {
   action: "upsertColumnOverride";
   columnKey: string;
@@ -393,6 +400,7 @@ export type OrmGatewayRequest =
   | DeleteEmailExcludeDomainPayload
   | LoadIdentityPayload
   | UpdateProfileNamePayload
+  | UpdateProfileAvatarPayload
   | UpsertColumnOverridePayload
   | SetColumnOrderPayload
   | CreateClientCustomFieldPayload
@@ -455,6 +463,7 @@ export interface OrmGatewayResponseMap {
   deleteEmailExcludeDomain: { ok: true };
   loadIdentity: LoadIdentityResult;
   updateProfileName: UpdateProfileNameResult;
+  updateProfileAvatar: UpdateProfileNameResult;
   upsertColumnOverride: ColumnOverrideRecord;
   setColumnOrder: ColumnOverrideRecord[];
   createClientCustomField: ClientCustomFieldRecord;
@@ -804,6 +813,21 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         action,
         sessionUserId: String(payload.sessionUserId),
         fullName: String(payload.fullName),
+      },
+    };
+  }
+
+  if (action === "updateProfileAvatar") {
+    const avatarPathRaw = (payload as Record<string, unknown>).avatarPath;
+    if (!hasStringField(payload, "sessionUserId") || (avatarPathRaw !== null && typeof avatarPathRaw !== "string")) {
+      return { ok: false, error: "updateProfileAvatar requires sessionUserId and avatarPath (string or null)." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        sessionUserId: String(payload.sessionUserId),
+        avatarPath: avatarPathRaw === null ? null : String(avatarPathRaw),
       },
     };
   }

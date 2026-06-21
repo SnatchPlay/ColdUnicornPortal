@@ -3,7 +3,9 @@ import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { CrmIntegrationCard } from "../components/crm-integration-card";
 import { Badge } from "../components/ui/badge";
+import { UserAvatar } from "../components/ui/user-avatar";
 import { cn } from "../components/ui/utils";
+import { removeAvatarObject, uploadUserAvatar, validateAvatarFile } from "../lib/avatar-storage";
 import {
   createDefaultBranch,
   createDefaultComparisonNode,
@@ -169,6 +171,7 @@ export function SettingsPage() {
     error,
     isImpersonating,
     updateProfileName,
+    updateProfileAvatar,
     updatePassword,
     requestPasswordReset,
     signOut,
@@ -197,6 +200,8 @@ export function SettingsPage() {
   const [recoveryEmail, setRecoveryEmail] = useState(identity?.email ?? "");
   const [message, setMessage] = useState<SettingsMessage | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [isSendingResetLink, setIsSendingResetLink] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -328,6 +333,51 @@ export function SettingsPage() {
     const result = await updateProfileName(normalizedName);
     setMessage({ tone: result.ok ? "info" : "danger", text: result.message });
     setIsSavingProfile(false);
+  }
+
+  async function handleAvatarFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same file
+    // Self-service edits the *real* signed-in account, not the impersonated one,
+    // so the upload folder and the DB write (updateProfileAvatar → session.user.id) agree.
+    const sessionUserId = session?.user?.id;
+    if (!file || !sessionUserId) return;
+
+    const validation = validateAvatarFile(file);
+    if (!validation.ok) {
+      setMessage({ tone: "warning", text: validation.message });
+      return;
+    }
+
+    setIsSavingAvatar(true);
+    const previousPath = identity?.avatarPath ?? null;
+    try {
+      const path = await uploadUserAvatar(sessionUserId, file);
+      const result = await updateProfileAvatar(path);
+      if (!result.ok) {
+        await removeAvatarObject(path); // DB write failed → don't leak the upload
+        setMessage({ tone: "danger", text: result.message });
+        return;
+      }
+      void removeAvatarObject(previousPath); // best-effort cleanup of the old photo (non-blocking)
+      setMessage({ tone: "info", text: result.message });
+    } catch (reason) {
+      setMessage({ tone: "danger", text: reason instanceof Error ? reason.message : "Avatar upload failed." });
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    if (!identity?.avatarPath) return;
+    setIsSavingAvatar(true);
+    const previousPath = identity.avatarPath;
+    const result = await updateProfileAvatar(null);
+    if (result.ok) {
+      void removeAvatarObject(previousPath);
+    }
+    setMessage({ tone: result.ok ? "info" : "danger", text: result.message });
+    setIsSavingAvatar(false);
   }
 
   async function handleSendResetLink(event: React.FormEvent<HTMLFormElement>) {
@@ -561,6 +611,49 @@ export function SettingsPage() {
 
         <Surface title="Security controls" subtitle="Update password, issue reset links, and manage active session.">
           <div className="space-y-6">
+            <div className="space-y-4 rounded-2xl border border-border bg-black/10 p-4">
+              <div className="space-y-1">
+                <p className="text-sm">Profile photo</p>
+                <p className="text-xs text-muted-foreground">Shown in the sidebar and across your workspace. JPEG, PNG, or WebP up to 5 MB.</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <UserAvatar
+                  name={identity?.fullName}
+                  email={identity?.email}
+                  avatarPath={identity?.avatarPath}
+                  className="size-16"
+                  fallbackClassName="text-lg"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleAvatarFileChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={isSavingAvatar}
+                    className="rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingAvatar ? "Saving..." : identity?.avatarPath ? "Replace photo" : "Upload photo"}
+                  </button>
+                  {identity?.avatarPath ? (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      disabled={isSavingAvatar}
+                      className="rounded-full border border-white/10 px-4 py-2 text-sm text-muted-foreground transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
             <form className="space-y-4 rounded-2xl border border-border bg-black/10 p-4" onSubmit={handleUpdateProfileName}>
               <div className="space-y-1">
                 <p className="text-sm">Profile name</p>

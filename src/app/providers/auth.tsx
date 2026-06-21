@@ -38,6 +38,7 @@ interface AuthContextValue {
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; message: string }>;
   updatePassword: (password: string) => Promise<{ ok: boolean; message: string }>;
   updateProfileName: (fullName: string) => Promise<{ ok: boolean; message: string }>;
+  updateProfileAvatar: (avatarPath: string | null) => Promise<{ ok: boolean; message: string }>;
   impersonate: (nextIdentity: Identity) => void;
   stopImpersonation: () => void;
   signOut: () => Promise<void>;
@@ -360,6 +361,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session?.user.id],
   );
 
+  const updateProfileAvatar = useCallback(
+    async (avatarPath: string | null) => {
+      const sessionUserId = session?.user.id;
+      if (!sessionUserId) {
+        return { ok: false, message: "No active authenticated session found." };
+      }
+
+      try {
+        await repository.updateProfileAvatar(sessionUserId, avatarPath);
+      } catch (reason) {
+        if (reason instanceof RepositoryError) {
+          return { ok: false, message: toSafeAuthMessage(reason.message) };
+        }
+        const fallbackMessage = reason instanceof Error ? reason.message : "Avatar update failed.";
+        return { ok: false, message: toSafeAuthMessage(fallbackMessage) };
+      }
+
+      setActorIdentity((current) =>
+        current && current.id === sessionUserId ? { ...current, avatarPath } : current,
+      );
+      setImpersonatedIdentity((current) =>
+        current && current.id === sessionUserId ? { ...current, avatarPath } : current,
+      );
+      return { ok: true, message: avatarPath ? "Photo updated." : "Photo removed." };
+    },
+    [session?.user.id],
+  );
+
   const impersonate = useCallback((nextIdentity: Identity) => {
     if (!runtimeConfig.allowInternalImpersonation) return;
     setImpersonatedIdentity(nextIdentity);
@@ -394,6 +423,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestPasswordReset,
       updatePassword,
       updateProfileName,
+      updateProfileAvatar,
       impersonate,
       stopImpersonation,
       signOut,
@@ -415,6 +445,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       stopImpersonation,
       updatePassword,
       updateProfileName,
+      updateProfileAvatar,
     ],
   );
 

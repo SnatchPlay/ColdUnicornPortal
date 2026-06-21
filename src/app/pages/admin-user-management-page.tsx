@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, EmptyState, LoadingState, MetricCard, Surface } from "../components/app-ui";
-import { Info } from "lucide-react";
+import { Camera, Info } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import { UserAvatar } from "../components/ui/user-avatar";
+import { removeAvatarObject, uploadUserAvatar, validateAvatarFile } from "../lib/avatar-storage";
 import { formatDate, formatNumber } from "../lib/format";
 import { getRoleLabel, isInternalAdmin } from "../lib/selectors";
 import { repository, RepositoryError } from "../data/repository";
@@ -65,6 +67,9 @@ export function AdminUserManagementPage() {
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [showInactiveUsers, setShowInactiveUsers] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [avatarPendingId, setAvatarPendingId] = useState<string | null>(null);
+  const [avatarTargetUser, setAvatarTargetUser] = useState<ManagedUserRecord | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const usersLoadIdRef = useRef(0);
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -173,6 +178,66 @@ export function AdminUserManagementPage() {
       nextActive ? `${user.email} reactivated.` : `${user.email} deactivated.`,
       "Could not change the user's status.",
     );
+  }
+
+  function openAvatarPicker(user: ManagedUserRecord) {
+    setAvatarTargetUser(user);
+    avatarInputRef.current?.click();
+  }
+
+  async function handleAvatarFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same file
+    const user = avatarTargetUser;
+    setAvatarTargetUser(null);
+    if (!file || !user) return;
+
+    const validation = validateAvatarFile(file);
+    if (!validation.ok) {
+      setMessage({ tone: "warning", text: validation.message });
+      return;
+    }
+
+    setAvatarPendingId(user.id);
+    setMessage(null);
+    const previousPath = user.avatar_path;
+    try {
+      const path = await uploadUserAvatar(user.id, file);
+      let updated: ManagedUserRecord;
+      try {
+        updated = await repository.setUserAvatar(user.id, path);
+      } catch (reason) {
+        await removeAvatarObject(path); // DB write failed → don't leak the upload
+        throw reason;
+      }
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      void removeAvatarObject(previousPath); // best-effort cleanup of the old photo (non-blocking)
+      setMessage({ tone: "info", text: `Photo updated for ${user.email}.` });
+    } catch (reason) {
+      setMessage({
+        tone: "danger",
+        text: reason instanceof RepositoryError ? reason.message : reason instanceof Error ? reason.message : "Could not update the photo.",
+      });
+    } finally {
+      setAvatarPendingId(null);
+    }
+  }
+
+  async function handleAvatarClear(user: ManagedUserRecord) {
+    if (!user.avatar_path) return;
+    setAvatarPendingId(user.id);
+    setMessage(null);
+    const previousPath = user.avatar_path;
+    try {
+      const updated = await repository.setUserAvatar(user.id, null);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      void removeAvatarObject(previousPath);
+      setMessage({ tone: "info", text: `Photo removed for ${user.email}.` });
+    } catch (reason) {
+      setMessage({ tone: "danger", text: reason instanceof RepositoryError ? reason.message : "Could not remove the photo." });
+    } finally {
+      setAvatarPendingId(null);
+    }
   }
 
   const filteredInvites = useMemo(() => {
@@ -294,6 +359,13 @@ export function AdminUserManagementPage() {
           />
         ) : (
           <div className="space-y-2">
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleAvatarFileChange}
+            />
             {visibleUsers.map((user) => {
               const isSelf = actorIdentity?.id === user.id;
               const isProtectedSuperAdmin = user.role === "super_admin" && !canAssignSuperAdmin;
@@ -308,12 +380,42 @@ export function AdminUserManagementPage() {
                   key={user.id}
                   className="grid grid-cols-[1.4fr_auto_auto_auto] items-center gap-3 rounded-2xl border border-[#242424] bg-[#080808] px-4 py-3"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-white">
-                      {fullName || user.email}
-                      {isSelf && <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">you</span>}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="relative shrink-0">
+                      <UserAvatar
+                        name={fullName}
+                        email={user.email}
+                        avatarPath={user.avatar_path}
+                        className="size-9"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => openAvatarPicker(user)}
+                        disabled={avatarPendingId === user.id}
+                        title="Upload photo"
+                        aria-label={`Upload photo for ${user.email}`}
+                        className="absolute -bottom-1 -right-1 rounded-full border border-[#242424] bg-[#050505] p-1 text-neutral-300 transition hover:text-white disabled:opacity-50"
+                      >
+                        <Camera className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-white">
+                        {fullName || user.email}
+                        {isSelf && <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">you</span>}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                      {user.avatar_path ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleAvatarClear(user)}
+                          disabled={avatarPendingId === user.id}
+                          className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-white disabled:opacity-50"
+                        >
+                          {avatarPendingId === user.id ? "…" : "Remove photo"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <Select
