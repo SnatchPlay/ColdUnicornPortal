@@ -538,7 +538,7 @@ function InternalCampaignsPage() {
         title="Campaigns"
         subtitle="Shared campaign workspace with table overview and drawer-based campaign details."
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <DateRangeButton value={timeframe} onChange={setTimeframe} />
             <CreateCampaignSheetHost
               clientsLite={clientsLite}
@@ -646,39 +646,56 @@ function InternalCampaignsPage() {
               <div className="divide-y divide-border md:min-w-[1200px]">
                 {accumulatedRows.map((campaign) => {
                   const isActive = selectedCampaign?.id === campaign.id;
+                  const statusColor = getCampaignStatusColor(campaign.status);
+                  const statusBadge = (
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
+                      style={{ borderColor: `${statusColor}55`, backgroundColor: `${statusColor}18`, color: statusColor }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
+                      {campaign.status}
+                    </span>
+                  );
                   return (
                     <button
                       key={campaign.id}
                       onClick={() => { markInteractionStart("campaign-drawer:click"); setSelectedCampaignId(campaign.id); }}
                       aria-label={`Open details for ${campaign.name}`}
-                      className={`grid w-full gap-3 px-4 py-4 text-left transition md:min-w-[1200px] md:[grid-template-columns:var(--campaign-table-columns)] ${
+                      className={`block w-full px-4 py-4 text-left transition ${
                         isActive ? "bg-sky-500/10" : "hover:bg-white/5"
                       }`}
                     >
-                      <div>
-                        <p className="text-sm">{campaign.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{campaign.external_id}</p>
+                      {/* Mobile card */}
+                      <div className="md:hidden">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm">{campaign.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">{campaign.external_id}</p>
+                          </div>
+                          {statusBadge}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span>{campaign.type}</span>
+                          <span>·</span>
+                          <span>{formatNumber(campaign.positive_responses)} positive</span>
+                          <span>·</span>
+                          <span>{formatDate(campaign.start_date)}</span>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">{campaign.type}</p>
-                      <div>
-                        {(() => {
-                          const color = getCampaignStatusColor(campaign.status);
-                          return (
-                            <span
-                              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
-                              style={{ borderColor: `${color}55`, backgroundColor: `${color}18`, color }}
-                            >
-                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-                              {campaign.status}
-                            </span>
-                          );
-                        })()}
+                      {/* Desktop table row */}
+                      <div className="hidden min-w-[1200px] items-center gap-3 [grid-template-columns:var(--campaign-table-columns)] md:grid">
+                        <div>
+                          <p className="text-sm">{campaign.name}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{campaign.external_id}</p>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{campaign.type}</p>
+                        <div>{statusBadge}</div>
+                        <p className="text-sm text-muted-foreground">{formatNumber(campaign.positive_responses)}</p>
+                        <p className="text-sm text-muted-foreground">{formatDate(campaign.start_date)}</p>
                       </div>
-                      <p className="text-sm text-muted-foreground">{formatNumber(campaign.positive_responses)}</p>
-                      <p className="text-sm text-muted-foreground">{formatDate(campaign.start_date)}</p>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

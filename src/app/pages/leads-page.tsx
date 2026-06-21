@@ -550,7 +550,7 @@ function InternalLeadsPage() {
         title="Leads"
         subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
             <button
               onClick={() => void handleExportReport("csv")}

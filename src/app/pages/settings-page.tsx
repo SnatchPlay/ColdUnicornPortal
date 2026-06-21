@@ -1124,8 +1124,9 @@ function ClientsTableCustomization({
           <p className="mb-3 text-[10px] text-muted-foreground">
             Drag rows to reorder all columns — built-in and custom together. For built-in columns you can also override the display label, reassign the column to another <strong>section</strong>, or hide it entirely. Reassigning only changes the band a column sits under — drag it next to that section's other columns so the band stays contiguous. Bucket-named columns (e.g. <code className="text-neutral-300">−1</code>) include a human translation like <code className="text-neutral-300">yesterday</code>.
           </p>
-          {/* Table header */}
-          <div className="grid grid-cols-[24px_1.3fr_1.5fr_1.1fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          {/* Table header + rows: overflow-x-auto so 5-column layout scrolls on narrow screens */}
+          <div className="overflow-x-auto">
+          <div className="min-w-[520px] grid grid-cols-[24px_1.3fr_1.5fr_1.1fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             <span />
             <span>Column</span>
             <span>Display label (override)</span>
@@ -1133,7 +1134,7 @@ function ClientsTableCustomization({
             <span>Visibility</span>
           </div>
           <div
-            className="max-h-96 divide-y divide-white/5 overflow-auto pr-1"
+            className="min-w-[520px] max-h-96 divide-y divide-white/5 overflow-y-auto pr-1"
             onDragLeave={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node)) {
                 setDragOverIdx(null);
@@ -1205,6 +1206,7 @@ function ClientsTableCustomization({
               );
             })}
           </div>
+          </div>{/* end overflow-x-auto */}
         </div>
 
         <div className="rounded-2xl border border-border bg-black/10 p-4">
@@ -1212,12 +1214,13 @@ function ClientsTableCustomization({
           <p className="mb-3 text-[10px] text-muted-foreground">
             Rename the section bands that group the columns above (the top header row in the clients table), or create your own section. Assign columns to a section in the <strong>Section</strong> dropdown of the Column order list above. Leave the name blank to keep the default. A created section appears in the table only once at least one column is assigned to it.
           </p>
-          <div className="grid grid-cols-[1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="overflow-x-auto">
+          <div className="min-w-[340px] grid grid-cols-[1.4fr_2fr_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             <span>Section</span>
             <span>Display name (override)</span>
             <span />
           </div>
-          <div className="divide-y divide-white/5">
+          <div className="min-w-[340px] divide-y divide-white/5">
             {MEGA_SECTIONS.map((section) => {
               const override = overrideMap.get(`section:${section}`);
               return (
@@ -1271,6 +1274,7 @@ function ClientsTableCustomization({
               );
             })}
           </div>
+          </div>{/* end overflow-x-auto */}
           <div className="mt-3 flex items-center gap-2">
             <input
               type="text"

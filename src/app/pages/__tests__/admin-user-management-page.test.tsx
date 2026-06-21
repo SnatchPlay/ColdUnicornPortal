@@ -141,8 +141,7 @@ describe("admin user management", () => {
 
   async function findUserRow(email: string) {
     const emailEl = await screen.findByText(email);
-    // The grid row is the nearest ancestor with the CSS-grid layout class.
-    return emailEl.closest("div.grid") as HTMLElement;
+    return emailEl.closest('[data-testid="user-row"]') as HTMLElement;
   }
 
   it("changes a user's role (2C)", async () => {

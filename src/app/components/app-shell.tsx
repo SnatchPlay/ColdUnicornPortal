@@ -498,24 +498,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     pathParts[pathParts.length - 1]?.replace(/-/g, " ") ??
     "Page";
 
-  const sidebarPanelNode = (
-    <SidebarPanel
-      homePath={homePath}
-      navItems={navItems}
-      identity={identity}
-      activeClient={activeClient}
-      actorIdentity={actorIdentity}
-      managerOptions={managerOptions}
-      clientOptions={clientOptions}
-      isImpersonating={isImpersonating}
-      impersonate={impersonate}
-      stopImpersonation={stopImpersonation}
-      signOut={signOut}
-      onNavigate={closeMenu}
-      isCollapsed={isDesktopSidebarCollapsed}
-      onToggleCollapse={() => setIsDesktopSidebarCollapsed((c) => !c)}
-    />
-  );
+  const sharedPanelProps = {
+    homePath,
+    navItems,
+    identity,
+    activeClient,
+    actorIdentity,
+    managerOptions,
+    clientOptions,
+    isImpersonating,
+    impersonate,
+    stopImpersonation,
+    signOut,
+    onNavigate: closeMenu,
+    onToggleCollapse: () => setIsDesktopSidebarCollapsed((c) => !c),
+  };
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
@@ -526,7 +523,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             isDesktopSidebarCollapsed ? "w-16" : "w-[300px]",
           )}
         >
-          {sidebarPanelNode}
+          <SidebarPanel {...sharedPanelProps} isCollapsed={isDesktopSidebarCollapsed} />
         </aside>
 
         <LightweightSheet
@@ -538,7 +535,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           {/* sr-only accessible label for the dialog */}
           <h2 id="mobile-nav-title" className="sr-only">Navigation</h2>
-          <div className="flex h-full flex-col overflow-y-auto">{sidebarPanelNode}</div>
+          {/* Mobile menu always shows expanded (labels visible), regardless of desktop sidebar state */}
+          <div className="flex h-full flex-col overflow-y-auto">
+            <SidebarPanel {...sharedPanelProps} isCollapsed={false} />
+          </div>
         </LightweightSheet>
 
         <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">

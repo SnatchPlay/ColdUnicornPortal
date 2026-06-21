@@ -530,14 +530,25 @@ export function DomainsPage() {
                       <button
                         key={domain.id}
                         onClick={() => setSelectedDomainId(domain.id)}
-                        className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:min-w-[1200px] md:[grid-template-columns:var(--domains-table-columns)] md:items-center md:gap-3 ${
+                        className={`block w-full px-4 py-3 text-left transition ${
                           active ? "bg-white/5" : "hover:bg-white/3"
                         }`}
                       >
-                        <span className="truncate text-sm text-white">{domain.domain_name}</span>
-                        <span className="truncate text-sm text-neutral-300">{clientName}</span>
-                        <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
-                        <span className="truncate text-sm text-neutral-300">{domain.reputation ?? "—"}</span>
+                        {/* Mobile card */}
+                        <div className="md:hidden">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm text-white">{domain.domain_name}</span>
+                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-neutral-500">{clientName}{domain.reputation ? ` · ${domain.reputation}` : ""}</p>
+                        </div>
+                        {/* Desktop table row */}
+                        <div className="hidden min-w-[1200px] items-center gap-3 [grid-template-columns:var(--domains-table-columns)] md:grid">
+                          <span className="truncate text-sm text-white">{domain.domain_name}</span>
+                          <span className="truncate text-sm text-neutral-300">{clientName}</span>
+                          <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
+                          <span className="truncate text-sm text-neutral-300">{domain.reputation ?? "—"}</span>
+                        </div>
                       </button>
                     );
                   })}
