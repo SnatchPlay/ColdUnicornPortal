@@ -307,14 +307,25 @@ export function InvoicesPage() {
                       <button
                         key={invoice.id}
                         onClick={() => setSelectedInvoiceId(invoice.id)}
-                        className={`grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition md:min-w-[1100px] md:[grid-template-columns:var(--invoices-table-columns)] md:items-center md:gap-3 ${
+                        className={`block w-full px-4 py-3 text-left transition ${
                           active ? "bg-white/5" : "hover:bg-white/3"
                         }`}
                       >
-                        <span className="truncate text-sm text-white">{clientName}</span>
-                        <span className="text-sm text-neutral-300">{formatDate(invoice.issue_date)}</span>
-                        <span className="text-sm text-neutral-300">{formatMoney(invoice.amount)}</span>
-                        <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
+                        {/* Mobile card */}
+                        <div className="md:hidden">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm text-white">{clientName}</span>
+                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-neutral-500">{formatDate(invoice.issue_date)} · {formatMoney(invoice.amount)}</p>
+                        </div>
+                        {/* Desktop table row */}
+                        <div className="hidden min-w-[1100px] items-center gap-3 [grid-template-columns:var(--invoices-table-columns)] md:grid">
+                          <span className="truncate text-sm text-white">{clientName}</span>
+                          <span className="text-sm text-neutral-300">{formatDate(invoice.issue_date)}</span>
+                          <span className="text-sm text-neutral-300">{formatMoney(invoice.amount)}</span>
+                          <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
+                        </div>
                       </button>
                     );
                   })}

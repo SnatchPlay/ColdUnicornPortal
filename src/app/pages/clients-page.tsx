@@ -1094,32 +1094,34 @@ export function ClientsPage() {
           <div className="mb-4 space-y-3">
             <div className="flex items-center gap-2">
               <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
-              <ToggleGroup
-                type="single"
-                value={healthFilter}
-                onValueChange={(value) => {
-                  if (!value) return;
-                  setHealthFilter(value as HealthFilter);
-                }}
-                variant="outline"
-                className="flex-1 flex-wrap rounded-xl border border-border bg-black/10 p-1 md:flex-nowrap"
-              >
-                {HEALTH_FILTERS.map((filter) => (
-                  <ToggleGroupItem key={filter} value={filter} className="h-8 flex-1 text-xs">
-                    {filter === "all"
-                      ? `All (${healthFilterCounts.get("all") ?? 0})`
-                      : `${
-                          filter === "healthy"
-                            ? "Healthy"
-                            : filter === "critical"
-                            ? "Critical"
-                            : filter === "danger"
-                            ? "Danger"
-                            : "Warning"
-                        } (${healthFilterCounts.get(filter) ?? 0})`}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
+              <div className="min-w-0 flex-1 overflow-x-auto">
+                <ToggleGroup
+                  type="single"
+                  value={healthFilter}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setHealthFilter(value as HealthFilter);
+                  }}
+                  variant="outline"
+                  className="min-w-max flex-nowrap rounded-xl border border-border bg-black/10 p-1"
+                >
+                  {HEALTH_FILTERS.map((filter) => (
+                    <ToggleGroupItem key={filter} value={filter} className="h-8 shrink-0 text-xs">
+                      {filter === "all"
+                        ? `All (${healthFilterCounts.get("all") ?? 0})`
+                        : `${
+                            filter === "healthy"
+                              ? "Healthy"
+                              : filter === "critical"
+                              ? "Critical"
+                              : filter === "danger"
+                              ? "Danger"
+                              : "Warning"
+                          } (${healthFilterCounts.get(filter) ?? 0})`}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">

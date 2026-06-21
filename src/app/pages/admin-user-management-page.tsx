@@ -378,7 +378,8 @@ export function AdminUserManagementPage() {
               return (
                 <div
                   key={user.id}
-                  className="grid grid-cols-[1.4fr_auto_auto_auto] items-center gap-3 rounded-2xl border border-[#242424] bg-[#080808] px-4 py-3"
+                  data-testid="user-row"
+                  className="flex flex-col gap-3 rounded-2xl border border-[#242424] bg-[#080808] px-4 py-3 sm:grid sm:grid-cols-[1.4fr_auto_auto_auto] sm:items-center"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="relative shrink-0">
@@ -418,52 +419,56 @@ export function AdminUserManagementPage() {
                     </div>
                   </div>
 
-                  <Select
-                    value={user.role}
-                    onValueChange={(value) => void handleRoleChange(user, value as AppRole)}
-                    disabled={roleLocked || isPending}
-                  >
-                    <SelectTrigger className="h-auto w-40 rounded-xl border-white/10 bg-black/20 px-3 py-2 text-xs text-white disabled:opacity-50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-                      {options.map((role) => (
-                        <SelectItem key={role} value={role} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                          {getRoleLabel(role)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* On mobile these 3 controls sit in a flex row; on sm+ they become
+                      direct grid children via sm:contents so the parent grid takes over. */}
+                  <div className="flex flex-wrap items-center gap-2 sm:contents">
+                    <Select
+                      value={user.role}
+                      onValueChange={(value) => void handleRoleChange(user, value as AppRole)}
+                      disabled={roleLocked || isPending}
+                    >
+                      <SelectTrigger className="h-auto w-36 rounded-xl border-white/10 bg-black/20 px-3 py-2 text-xs text-white disabled:opacity-50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                        {options.map((role) => (
+                          <SelectItem key={role} value={role} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+                            {getRoleLabel(role)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
-                  <span
-                    className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] ${
-                      user.is_active
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                        : "border-neutral-500/30 bg-neutral-500/10 text-neutral-300"
-                    }`}
-                  >
-                    {user.is_active ? "active" : "deactivated"}
-                  </span>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] ${
+                        user.is_active
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                          : "border-neutral-500/30 bg-neutral-500/10 text-neutral-300"
+                      }`}
+                    >
+                      {user.is_active ? "active" : "deactivated"}
+                    </span>
 
-                  <button
-                    type="button"
-                    onClick={() => void handleToggleActive(user)}
-                    disabled={isSelf || isProtectedSuperAdmin || isPending}
-                    title={
-                      isSelf
-                        ? "You cannot deactivate your own account"
-                        : isProtectedSuperAdmin
-                          ? "Only a super admin can change a super admin account"
-                          : undefined
-                    }
-                    className={`rounded-full border px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                      user.is_active
-                        ? "border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/20"
-                        : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
-                    }`}
-                  >
-                    {isPending ? "…" : user.is_active ? "Deactivate" : "Reactivate"}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleActive(user)}
+                      disabled={isSelf || isProtectedSuperAdmin || isPending}
+                      title={
+                        isSelf
+                          ? "You cannot deactivate your own account"
+                          : isProtectedSuperAdmin
+                            ? "Only a super admin can change a super admin account"
+                            : undefined
+                      }
+                      className={`rounded-full border px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        user.is_active
+                          ? "border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/20"
+                          : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                      }`}
+                    >
+                      {isPending ? "…" : user.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </div>
                 </div>
               );
             })}
