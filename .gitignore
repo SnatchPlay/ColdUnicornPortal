@@ -22,6 +22,12 @@ pnpm-debug.log*
 # Test artifacts
 playwright-report/
 test-results/
+.playwright-mcp/
+
+# Debug screenshots (Playwright MCP output)
+*.png
+*.jpeg
+*.jpg
 
 # OS files
 .DS_Store
