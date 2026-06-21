@@ -10,7 +10,7 @@ import {
   type CrmProvider,
 } from "../lib/crm-integration";
 import { runtimeConfig } from "../lib/env";
-import { useCoreData } from "../providers/core-data";
+import { repository } from "../data/repository";
 import type { ClientRecord, CrmIntegrationConfig, CrmIntegrationStatus } from "../types/core";
 
 interface CrmIntegrationCardProps {
@@ -61,7 +61,6 @@ function statusLabel(status: CrmIntegrationStatus) {
 }
 
 export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
-  const { updateClient } = useCoreData();
   const [providersState, setProvidersState] = useState<ProvidersState>({
     data: [],
     loading: true,
@@ -176,7 +175,7 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
       updated_at: new Date().toISOString(),
     };
     try {
-      await updateClient(client.id, { crm_config: payload as unknown as Record<string, unknown> });
+      await repository.updateClient(client.id, { crm_config: payload as unknown as Record<string, unknown> });
     } catch {
       // updateClient already surfaces an error toast.
     }
@@ -353,7 +352,7 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
     if (!client) return;
     setIsSubmitting(true);
     try {
-      await updateClient(client.id, { crm_config: null });
+      await repository.updateClient(client.id, { crm_config: null });
       toast.success("CRM integration disconnected.");
     } finally {
       setIsSubmitting(false);

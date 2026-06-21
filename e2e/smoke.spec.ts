@@ -115,6 +115,58 @@ async function mockSupabase(page: Page, options: { role?: Role; missingClientMap
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
 
+  // loadIdentity + all per-page loaders go through the orm-gateway edge function
+  // (POST /functions/v1/orm-gateway with { action }). Responses use the envelope
+  // { ok: true, data: <result> }. The shell-data provider degrades to empty lists
+  // on error, so only loadIdentity must return a real shape for the app to render.
+  await page.route(`${supabaseUrl}/functions/v1/**`, async (route) => {
+    let action = "";
+    try {
+      action = (JSON.parse(route.request().postData() ?? "{}") as { action?: string }).action ?? "";
+    } catch {
+      /* non-JSON body */
+    }
+
+    const ok = (data: unknown) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data }) });
+
+    if (action === "loadIdentity") {
+      if (!sessionRole) {
+        await ok({ identity: null, error: "no profile", errorCode: "profile_missing" });
+        return;
+      }
+      const fullName = `${sessionRole === "admin" ? "Admin" : sessionRole === "manager" ? "Manager" : "Client"} User`;
+      const base = { id: `${sessionRole}-user-1`, fullName, email: `${sessionRole}@test.local`, role: sessionRole, avatarPath: null };
+      if (sessionRole === "client") {
+        if (options.missingClientMapping) {
+          await ok({ identity: base, error: "no client mapping", errorCode: "client_mapping_missing" });
+          return;
+        }
+        await ok({ identity: { ...base, clientId: "client-1" }, error: null, errorCode: null });
+        return;
+      }
+      await ok({ identity: base, error: null, errorCode: null });
+      return;
+    }
+
+    if (action === "loadShellData") {
+      await ok({ usersLite: [], clientsLite: [], clientUsers: [] });
+      return;
+    }
+
+    // Dashboard pages read `data?.metrics.<x>` (metrics must be an object) and
+    // all list fields via `?? []`, so a `{ metrics: {} }` shape renders the page
+    // chrome (heading) with zeroed cards.
+    if (action === "loadManagerDashboardOverview" || action === "loadAdminDashboardOverview") {
+      await ok({ metrics: {} });
+      return;
+    }
+
+    // Other list loaders: pages guard with `data?.…`, so an empty object keeps
+    // them in an empty state while the page chrome renders.
+    await ok({});
+  });
+
   await page.route(`${supabaseUrl}/auth/v1/**`, async (route) => {
     await route.fulfill({
       status: 200,
@@ -162,6 +214,8 @@ test("manager and admin protected routes render with a provisioned session", asy
   await seedSession(adminPage, "admin");
   await mockSupabase(adminPage, { role: "admin" });
   await adminPage.goto("/admin/dashboard");
-  await expect(adminPage.getByText("Admin Dashboard")).toBeVisible();
+  // The admin dashboard page has no "Admin Dashboard" heading; assert the admin
+  // shell rendered via the admin-only "User management" nav link (absent for managers).
+  await expect(adminPage.getByRole("link", { name: "User management" })).toBeVisible();
   await adminPage.close();
 });
