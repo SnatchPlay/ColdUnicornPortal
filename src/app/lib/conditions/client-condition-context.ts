@@ -19,6 +19,18 @@ export interface BuildClientConditionContextInput {
    * (checkbox → "true"/"false"; droplist → selected option; text → raw).
    */
   customFieldValues?: ReadonlyMap<string, string | null>;
+  /**
+   * Sequencer credentials from client_sequencers (ADR-0008). These keep the
+   * legacy metric paths alive after the clients.* credential columns were
+   * dropped — live rules depend on them: `spreadsheet_or_workspace_ids_present`
+   * reads `client.external_workspace_id`, `auto_li_api_key_present` reads
+   * `auto_li_api_key`.
+   */
+  sequencerCredentials?: {
+    emailbisonWorkspaceId?: string | null;
+    emailbisonApiKey?: string | null;
+    aimfoxApiKey?: string | null;
+  };
 }
 
 export interface ClientConditionContext {
@@ -36,7 +48,9 @@ export interface ClientConditionContext {
     prospects_added: number | null;
     auto_ooo_enabled: boolean | null;
     bi_setup_done: boolean | null;
-    external_workspace_id: string | number | null;
+    // Sequencer credential paths (ADR-0008): sourced from client_sequencers,
+    // names kept for live-rule compatibility (metric_key = 'client.external_workspace_id').
+    external_workspace_id: string | null;
     external_api_key: string | null;
     linkedin_api_key: string | null;
     setup_info: string | null;
@@ -144,9 +158,9 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
       prospects_added: metricsOverview.latestProspectsCount || (client.prospects_added ?? null),
       auto_ooo_enabled: client.auto_ooo_enabled,
       bi_setup_done: client.bi_setup_done,
-      external_workspace_id: client.external_workspace_id ?? null,
-      external_api_key: client.external_api_key ?? null,
-      linkedin_api_key: client.linkedin_api_key ?? null,
+      external_workspace_id: input.sequencerCredentials?.emailbisonWorkspaceId ?? null,
+      external_api_key: input.sequencerCredentials?.emailbisonApiKey ?? null,
+      linkedin_api_key: input.sequencerCredentials?.aimfoxApiKey ?? null,
       setup_info: client.setup_info ?? null,
       notes: client.notes ?? null,
     },
@@ -201,7 +215,7 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
     folder_link: null,
     issues: null,
     bi_setup: client.bi_setup_done,
-    auto_li_api_key: client.linkedin_api_key ?? null,
+    auto_li_api_key: input.sequencerCredentials?.aimfoxApiKey ?? null,
 
     custom,
   };

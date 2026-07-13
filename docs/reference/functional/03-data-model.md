@@ -109,16 +109,13 @@ The business entity whose outreach we run.
 | `kpi_meetings` | smallint | Contract target meetings/month. |
 | `contracted_amount` | numeric | For billing context; not displayed in main UI. |
 | `contract_due_date` | date | |
-| `external_workspace_id` | integer UNIQUE | Link to the ingestion tool's workspace. |
 | `status` | `client_status` not null | Drives filters and dashboard "non-active clients" surface (formerly "at-risk"). |
-| `external_api_key` | text | |
 | `min_daily_sent` | smallint default 0 | Shown in `ClientsPage` Overview column "Schedule". |
 | `inboxes_count` | smallint default 0 | |
 | `crm_config` | jsonb default `{}` | Reserved for per-client CRM integration settings. |
 | `sms_phone_numbers` | text[] | Notification targets. |
 | `notification_emails` | text[] | Notification targets. |
 | `auto_ooo_enabled` | boolean default false | Whether OOO auto-routing is on. |
-| `linkedin_api_key` | text | |
 | `prospects_signed` | integer default 0 | Contracted prospect cap. |
 | `prospects_added` | integer default 0 | Actual loaded; fallback source for `getClientKpis.prospects` when `campaigns.database_size` sums to zero. |
 | `setup_info` | text | Free-form setup notes. |
@@ -127,10 +124,62 @@ The business entity whose outreach we run.
 | `notes` | text | |
 | `updated_at` | timestamptz | |
 
+> Sequencer credentials (formerly `external_workspace_id` integer UNIQUE, `external_api_key`, `linkedin_api_key`) moved to [`client_sequencers`](#22a-sequencers-adr-0008) on 2026-07-04 (ADR-0008); the columns are dropped by `20260704b_drop_client_sequencer_credentials.sql`.
+
 RLS:
 
 - `clients_select_scoped` using `private.can_access_client(id)`.
 - `clients_update_scoped` — drizzle declares `for: "update" to: ["authenticated"]`; the actual predicate is in the production RLS SQL and effectively mirrors `can_manage_client(id)`. See `docs/reference/supabase-production-rls.sql`.
+
+### 2.2a Sequencers (ADR-0008)
+
+Migrations [`20260704_sequencers_catalog.sql`](../../../supabase/migrations/20260704_sequencers_catalog.sql) + [`20260705_sequencer_daily_stats_schedule.sql`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql). Fixed catalog UUIDs are load-bearing (column defaults on `campaigns`/`leads` + n8n constants): smartlead `…-a000-000000000001`, emailbison `…-0002`, aimfox `…-0003`.
+
+#### `sequencers` — global catalog
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK (fixed, seeded) | |
+| `key` | text UNIQUE, `^[a-z0-9_]+$` | `smartlead` / `emailbison` / `aimfox`. |
+| `name` | text not null | Display name. |
+| `channel` | text, check `email`/`linkedin` | |
+| `enabled` | boolean default true | |
+| `created_at` | timestamptz | |
+
+RLS: `sequencers_select_authenticated` (`using true` — 3 rows, no secrets); `sequencers_write_master` (`for all`, master_admin only).
+
+#### `client_sequencers` — per-client connection settings
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK | |
+| `client_id` | uuid FK > `clients.id` on delete cascade, not null | |
+| `sequencer_id` | uuid FK > `sequencers.id` on delete restrict, not null | UNIQUE (`client_id`, `sequencer_id`). |
+| `api_key` | text | Secret — never visible to the client role. |
+| `external_workspace_id` | text | Text on purpose (platform-agnostic). Partial-unique per sequencer. |
+| `settings` | jsonb default `{}` | Future per-sequencer options. |
+| `enabled` | boolean default true | |
+| `created_at` / `updated_at` | timestamptz | |
+
+RLS: all four commands gated `private.can_manage_client(client_id)` (manager-own / admin; **client role sees zero rows**). Written by the portal via `upsertClientSequencer`; read by n8n (service role).
+
+#### `sequencer_daily_stats` — ingestion-only LinkedIn/Aimfox PDCA counters
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK | |
+| `client_id` | uuid FK not null, cascade | |
+| `sequencer_id` | uuid FK not null, restrict | |
+| `profile_id` | text not null default `''` | Aimfox LinkedIn profile/seat id; `''` = account-level rollup. |
+| `report_date` | date not null | UNIQUE (`client_id`, `sequencer_id`, `profile_id`, `report_date`). |
+| `invites_sent` / `invites_accepted` | integer default 0 | Daily counters (n8n derives from `/analytics/interactions` buckets). |
+| `remaining_database_size` | integer | Snapshot: Σ over active campaigns of `audience_size − sent_connections`. |
+| `invite_limit` | integer | **Weekly** connect-cap snapshot: Σ of the client's Aimfox accounts' `limit.connect` (≈195/account). |
+| `invite_limit_remaining` | integer | Invites still available today (`invite_limit/5 −` today's sent buckets). Snapshot per 2-hourly run. |
+| `schedule_today` / `schedule_tomorrow` / `schedule_day_after` | integer default 0 | Aimfox planned invite volumes (`min(daily_limit, …)` formulas; `daily_limit = invite_limit/5`). Mirrors the sheet's "(Aimfox)" schedule columns. |
+| `created_at` | timestamptz | |
+
+RLS: SELECT-only, set-based per ADR-0006 (`client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`); no write policies — n8n service role UPSERTs on the unique key. Index on `report_date DESC`.
 
 #### `condition_rules` — [schema.ts:286-335](../../../supabase/drizzle/schema.ts#L286-L335)
 
@@ -204,6 +253,7 @@ RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not cur
 | `positive_responses` | integer default 0 | Editable in drawer for managers/admins. |
 | `start_date` | date | |
 | `gender_target` | varchar(10) | |
+| `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. Set at creation (gateway `mapCampaignInsert`); immutable via portal. |
 | `created_at` / `updated_at` | timestamptz | |
 
 RLS:
@@ -265,7 +315,8 @@ Columns of note:
 | `meeting_booked`, `meeting_held`, `offer_sent`, `won` | booleans default false | **Editable by internal roles; drive `getLeadStage`**. |
 | `added_to_ooo_campaign` | boolean | Routing flag. |
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
-| `source` | varchar(30) default `'cold_email'` | |
+| `source` | varchar(30) default `'cold_email'` | Channel provenance (free text; gateway reply-path fallback `"smartlead"`). **Not** the sequencer link — see `sequencer_id`. |
+| `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. n8n/ingestion-owned; NOT in the portal lead-patch whitelist (ADR-0004). Index `idx_leads_client_sequencer (client_id, sequencer_id)`. |
 | `reply_text` | text | Denormalised latest reply for quick lead-list rendering. |
 | `client_note` | text | Client-facing report note (renamed from `comments` in Batch 4, `20260618b`). Editable by manager/admin; visible to the client. |
 | `coldunicorn_note` | text | Internal report note (Batch 4). Editable by manager/admin; **nulled for the client role** in `loadLeadsList`. |

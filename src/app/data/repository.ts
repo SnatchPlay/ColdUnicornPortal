@@ -7,6 +7,7 @@ import type {
   ClientCustomFieldType,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
@@ -50,6 +51,7 @@ import type {
   OrmGatewayEnvelope,
   OrmGatewayRequest,
   OrmGatewayResponseMap,
+  SequencerCredentialInput,
 } from "./orm-gateway-contract";
 
 type RepositoryOperation = "select" | "insert" | "update" | "upsert" | "delete";
@@ -102,6 +104,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateClientCustomField: { table: "client_custom_fields", operation: "update" },
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
   upsertClientCustomFieldValue: { table: "client_custom_field_values", operation: "upsert" },
+  upsertClientSequencer: { table: "client_sequencers", operation: "upsert" },
   loadLeadCustomFields: { table: "lead_custom_fields", operation: "select" },
   createLeadCustomField: { table: "lead_custom_fields", operation: "insert" },
   updateLeadCustomField: { table: "lead_custom_fields", operation: "update" },
@@ -566,8 +569,14 @@ export interface Repository {
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
-  createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
-  createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
+  createClient(
+    input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
+    sequencerCredentials?: SequencerCredentialInput[],
+  ): Promise<ClientRecord>;
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0008) applies. */
+  createCampaign(
+    input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string },
+  ): Promise<CampaignRecord>;
   createLead(input: Omit<LeadRecord, "id" | "created_at" | "updated_at">): Promise<LeadRecord>;
   createDomain(input: Omit<DomainRecord, "id" | "created_at" | "updated_at">): Promise<DomainRecord>;
   updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
@@ -632,6 +641,12 @@ export interface Repository {
     fieldId: string,
     value: string | null,
   ): Promise<ClientCustomFieldValueRecord>;
+  /** ADR-0008: upsert one client↔sequencer settings row, keyed by sequencers.key. */
+  upsertClientSequencer(
+    clientId: string,
+    sequencerKey: string,
+    patch: Omit<SequencerCredentialInput, "sequencer_key">,
+  ): Promise<ClientSequencerRecord>;
   // Lead custom fields (Batch 4, Task 4F) — per-client report columns.
   loadLeadCustomFields(clientId?: string): Promise<LeadCustomFieldRecord[]>;
   createLeadCustomField(input: {
@@ -817,8 +832,8 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadConditionRules", {});
   },
 
-  async createClient(input) {
-    return invokeOrmGatewayAction("createClient", { input });
+  async createClient(input, sequencerCredentials) {
+    return invokeOrmGatewayAction("createClient", { input, sequencerCredentials });
   },
 
   async createCampaign(input) {
@@ -1002,6 +1017,10 @@ export const repository: Repository = {
 
   async upsertClientCustomFieldValue(clientId, fieldId, value) {
     return invokeOrmGatewayAction("upsertClientCustomFieldValue", { clientId, fieldId, value });
+  },
+
+  async upsertClientSequencer(clientId, sequencerKey, patch) {
+    return invokeOrmGatewayAction("upsertClientSequencer", { clientId, sequencerKey, patch });
   },
 
   async loadLeadCustomFields(clientId) {

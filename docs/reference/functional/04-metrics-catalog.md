@@ -651,7 +651,7 @@ Runtime mapping for dynamic condition rules is built in `buildClientConditionCon
 | `monthly_sql_kpi` | `clients.kpi_leads` |
 | `monthly_meeting_kpi` | `clients.kpi_meetings` |
 | `monthly_won_kpi` | `null` in current build (dependent rule seeded disabled) |
-| `auto_li_api_key` | `clients.linkedin_api_key` |
+| `auto_li_api_key` | aimfox `client_sequencers.api_key` (via `ClientsOverviewPayload.clientSequencers`; was `clients.linkedin_api_key` — ADR-0008) |
 | `bi_setup` | `clients.bi_setup_done` |
 
 ### 15.2 DoD dynamic bucket evaluation

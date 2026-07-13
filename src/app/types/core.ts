@@ -73,16 +73,13 @@ export interface ClientRecord {
   kpi_meetings: number | null;
   contracted_amount: number | null;
   contract_due_date: string | null;
-  external_workspace_id: number | null;
   status: ClientStatus;
-  external_api_key: string | null;
   min_daily_sent: number;
   inboxes_count: number;
   crm_config: Record<string, unknown> | null;
   sms_phone_numbers: string[] | null;
   notification_emails: string[] | null;
   auto_ooo_enabled: boolean;
-  linkedin_api_key: string | null;
   prospects_signed: number;
   prospects_added: number;
   setup_info: string | null;
@@ -98,6 +95,37 @@ export interface ClientUserRecord {
   user_id: string;
 }
 
+// ── Sequencers (ADR-0008) ─────────────────────────────────────────────────────
+// External sending tools (Smartlead / EmailBison / Aimfox). Catalog rows carry
+// fixed load-bearing UUIDs (column defaults + n8n constants); per-client
+// credentials live in client_sequencers (replaced clients.external_api_key /
+// external_workspace_id / linkedin_api_key).
+
+export type SequencerChannel = "email" | "linkedin";
+
+export interface SequencerRecord {
+  id: string;
+  /** Stable machine key: 'smartlead' | 'emailbison' | 'aimfox' | future additions. */
+  key: string;
+  name: string;
+  channel: SequencerChannel;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface ClientSequencerRecord {
+  id: string;
+  client_id: string;
+  sequencer_id: string;
+  api_key: string | null;
+  /** Text on purpose — workspace id formats differ per platform. */
+  external_workspace_id: string | null;
+  settings: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CampaignRecord {
   id: string;
   created_at: string;
@@ -111,6 +139,8 @@ export interface CampaignRecord {
   positive_responses: number;
   start_date: string | null;
   gender_target: string | null;
+  /** ADR-0008: owning sequencer. Set at creation (DB default = EmailBison); immutable via portal. */
+  sequencer_id: string;
 }
 
 export interface LeadRecord {

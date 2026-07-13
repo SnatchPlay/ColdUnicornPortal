@@ -141,16 +141,13 @@ function toClientRecord(row: typeof schema.clients.$inferSelect) {
     kpi_meetings: row.kpiMeetings,
     contracted_amount: normalizeNumeric(row.contractedAmount),
     contract_due_date: row.contractDueDate,
-    external_workspace_id: row.externalWorkspaceId,
     status: row.status,
-    external_api_key: row.externalApiKey,
     min_daily_sent: row.minDailySent,
     inboxes_count: row.inboxesCount,
     crm_config: row.crmConfig,
     sms_phone_numbers: row.smsPhoneNumbers,
     notification_emails: row.notificationEmails,
     auto_ooo_enabled: row.autoOooEnabled,
-    linkedin_api_key: row.linkedinApiKey,
     prospects_signed: row.prospectsSigned,
     prospects_added: row.prospectsAdded,
     setup_info: row.setupInfo,
@@ -183,6 +180,7 @@ function toCampaignRecord(row: typeof schema.campaigns.$inferSelect) {
     positive_responses: row.positiveResponses,
     start_date: row.startDate,
     gender_target: row.genderTarget,
+    sequencer_id: row.sequencerId,
   };
 }
 
@@ -359,16 +357,13 @@ function mapClientPatch(patch: Record<string, unknown>) {
   if ("kpi_meetings" in patch) mapped.kpiMeetings = patch.kpi_meetings;
   if ("contracted_amount" in patch) mapped.contractedAmount = patch.contracted_amount;
   if ("contract_due_date" in patch) mapped.contractDueDate = patch.contract_due_date;
-  if ("external_workspace_id" in patch) mapped.externalWorkspaceId = patch.external_workspace_id;
   if ("status" in patch) mapped.status = patch.status;
-  if ("external_api_key" in patch) mapped.externalApiKey = patch.external_api_key;
   if ("min_daily_sent" in patch) mapped.minDailySent = patch.min_daily_sent;
   if ("inboxes_count" in patch) mapped.inboxesCount = patch.inboxes_count;
   if ("crm_config" in patch) mapped.crmConfig = patch.crm_config;
   if ("sms_phone_numbers" in patch) mapped.smsPhoneNumbers = patch.sms_phone_numbers;
   if ("notification_emails" in patch) mapped.notificationEmails = patch.notification_emails;
   if ("auto_ooo_enabled" in patch) mapped.autoOooEnabled = patch.auto_ooo_enabled;
-  if ("linkedin_api_key" in patch) mapped.linkedinApiKey = patch.linkedin_api_key;
   if ("prospects_signed" in patch) mapped.prospectsSigned = patch.prospects_signed;
   if ("prospects_added" in patch) mapped.prospectsAdded = patch.prospects_added;
   if ("setup_info" in patch) mapped.setupInfo = patch.setup_info;
@@ -479,15 +474,12 @@ function mapClientInsert(input: Record<string, unknown>) {
     kpiMeetings: input.kpi_meetings ?? null,
     contractedAmount: input.contracted_amount ?? null,
     contractDueDate: input.contract_due_date ?? null,
-    externalWorkspaceId: input.external_workspace_id ?? null,
-    externalApiKey: input.external_api_key ?? null,
     minDailySent: input.min_daily_sent ?? 0,
     inboxesCount: input.inboxes_count ?? 0,
     crmConfig: input.crm_config ?? null,
     smsPhoneNumbers: input.sms_phone_numbers ?? null,
     notificationEmails: input.notification_emails ?? null,
     autoOooEnabled: input.auto_ooo_enabled ?? false,
-    linkedinApiKey: input.linkedin_api_key ?? null,
     prospectsSigned: input.prospects_signed ?? 0,
     prospectsAdded: input.prospects_added ?? 0,
     setupInfo: input.setup_info ?? null,
@@ -508,6 +500,8 @@ function mapCampaignInsert(input: Record<string, unknown>) {
     positiveResponses: input.positive_responses ?? 0,
     startDate: input.start_date ?? null,
     genderTarget: input.gender_target ?? null,
+    // ADR-0008: omit when not provided → DB default (EmailBison) applies.
+    sequencerId: (input.sequencer_id as string | null | undefined) ?? undefined,
   };
 }
 
@@ -653,6 +647,76 @@ function toClientCustomFieldValueRecord(row: Record<string, unknown>) {
         : String(row.updated_at ?? ""),
     updated_by: row.updated_by === null || row.updated_by === undefined ? null : String(row.updated_by),
   };
+}
+
+// ADR-0008 sequencer tables (raw SQL — not in drizzle schema).
+
+function toSequencerRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    key: String(row.key),
+    name: String(row.name),
+    channel: String(row.channel) as "email" | "linkedin",
+    enabled: Boolean(row.enabled),
+    created_at:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
+  };
+}
+
+function toClientSequencerRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    client_id: String(row.client_id),
+    sequencer_id: String(row.sequencer_id),
+    api_key: row.api_key === null || row.api_key === undefined ? null : String(row.api_key),
+    external_workspace_id:
+      row.external_workspace_id === null || row.external_workspace_id === undefined
+        ? null
+        : String(row.external_workspace_id),
+    settings: (row.settings ?? {}) as Record<string, unknown>,
+    enabled: Boolean(row.enabled),
+    created_at:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
+    updated_at:
+      row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at ?? ""),
+  };
+}
+
+// Upsert one client↔sequencer settings row, resolving the sequencer by catalog key.
+// Only fields present in `patch` overwrite existing values (upsertColumnOverride pattern).
+async function upsertClientSequencerRow(
+  tx: any,
+  clientId: string,
+  sequencerKey: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const apiKeyProvided = "api_key" in patch;
+  const workspaceProvided = "external_workspace_id" in patch;
+  const settingsProvided = "settings" in patch;
+  const enabledProvided = "enabled" in patch;
+  const rows = await tx.execute(sql`
+    insert into public.client_sequencers (client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, updated_at)
+    select
+      ${clientId},
+      s.id,
+      ${apiKeyProvided ? (patch.api_key as string | null) ?? null : null},
+      ${workspaceProvided ? (patch.external_workspace_id as string | null) ?? null : null},
+      ${settingsProvided ? JSON.stringify(patch.settings ?? {}) : "{}"}::jsonb,
+      ${enabledProvided ? Boolean(patch.enabled) : true},
+      now()
+    from public.sequencers s
+    where s.key = ${sequencerKey}
+    on conflict (client_id, sequencer_id) do update set
+      api_key = case when ${apiKeyProvided} then excluded.api_key else public.client_sequencers.api_key end,
+      external_workspace_id = case when ${workspaceProvided} then excluded.external_workspace_id else public.client_sequencers.external_workspace_id end,
+      settings = case when ${settingsProvided} then excluded.settings else public.client_sequencers.settings end,
+      enabled = case when ${enabledProvided} then excluded.enabled else public.client_sequencers.enabled end,
+      updated_at = excluded.updated_at
+    returning id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
+  `);
+  const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+  if (!result[0]) fail(400, `Unknown sequencer key "${sequencerKey}" or upsert rejected by RLS.`);
+  return result[0];
 }
 
 // Generic typed raw-SQL executor. Rows are returned as plain objects; caller is responsible for
@@ -1375,7 +1439,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer.
         tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
@@ -1417,6 +1481,20 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           SELECT client_id, field_id, value, updated_at, updated_by
           FROM public.client_custom_field_values
         `),
+
+        // Sequencer catalog (ADR-0008; 3 rows, no secrets).
+        safeRawSelect(tx, sql`
+          SELECT id, key, name, channel, enabled, created_at
+          FROM public.sequencers
+          ORDER BY key ASC
+        `),
+
+        // Per-client sequencer credentials — RLS (can_manage_client) already scopes
+        // rows to manager-own/admin; the client role gets zero rows.
+        safeRawSelect(tx, sql`
+          SELECT id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
+          FROM public.client_sequencers
+        `),
       ]);
 
     const durationMs = performance.now() - t0;
@@ -1424,7 +1502,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       `[PERF][orm-gateway] loadClientsOverview (shell): ${durationMs.toFixed(1)}ms ` +
         `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
-        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length})`,
+        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
+        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length})`,
     );
 
     return {
@@ -1435,6 +1514,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       columnOverrides: (columnOverrideRows as Record<string, unknown>[]).map(toColumnOverrideRecord),
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
+      sequencers: (sequencerRows as Record<string, unknown>[]).map(toSequencerRecord),
+      clientSequencers: (clientSequencerRows as Record<string, unknown>[]).map(toClientSequencerRecord),
     };
   }
 
@@ -2024,7 +2105,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         camp.id, camp.created_at, camp.updated_at, camp.client_id,
         camp.external_id, camp.type, camp.name, camp.status,
         camp.database_size, camp.positive_responses, camp.start_date,
-        camp.gender_target,
+        camp.gender_target, camp.sequencer_id,
         c.name AS client_name
       FROM campaigns camp
       JOIN clients c ON c.id = camp.client_id
@@ -2051,6 +2132,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       positive_responses: r.positive_responses != null ? Number(r.positive_responses) : 0,
       start_date: r.start_date ? String(r.start_date) : null,
       gender_target: r.gender_target ? String(r.gender_target) : null,
+      sequencer_id: String(r.sequencer_id ?? ""),
       clientName: String(r.client_name ?? ""),
     }));
 
@@ -2348,7 +2430,23 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       .values({ id: crypto.randomUUID(), ...mapClientInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
       .returning();
     if (!rows[0]) fail(500, "Client could not be created.");
-    return toClientRecord(rows[0]);
+    const client = toClientRecord(rows[0]);
+    // ADR-0008: optional per-sequencer credentials created alongside the client
+    // (new-client sheet sends EmailBison workspace/key + Aimfox key here).
+    for (const cred of payload.sequencerCredentials ?? []) {
+      await upsertClientSequencerRow(tx, client.id, cred.sequencer_key, cred);
+    }
+    return client;
+  }
+
+  if (payload.action === "upsertClientSequencer") {
+    const row = await upsertClientSequencerRow(
+      tx,
+      payload.clientId,
+      payload.sequencerKey,
+      payload.patch as Record<string, unknown>,
+    );
+    return toClientSequencerRecord(row);
   }
 
   if (payload.action === "createCampaign") {

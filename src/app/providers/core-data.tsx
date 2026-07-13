@@ -40,7 +40,7 @@ interface CoreDataContextValue extends CoreSnapshot {
   refresh: () => Promise<void>;
   metricsByClientId: ReadonlyMap<string, ClientMetricsPack>;
   createClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
-  createCampaign: (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  createCampaign: (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string }) => Promise<void>;
   createLead: (input: Omit<LeadRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
   createDomain: (input: Omit<DomainRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
   updateClient: (clientId: string, patch: Partial<ClientRecord>) => Promise<void>;
@@ -283,7 +283,7 @@ export function CoreDataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const createCampaign = useCallback(async (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">) => {
+  const createCampaign = useCallback(async (input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string }) => {
     try {
       const created = await repository.createCampaign(input);
       startTransition(() => {

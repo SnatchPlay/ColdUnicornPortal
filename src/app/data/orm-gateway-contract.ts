@@ -4,6 +4,7 @@
   ClientCustomFieldType,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
@@ -198,14 +199,29 @@ export interface UpdateInvoicePayload {
   patch: Partial<InvoiceRecord>;
 }
 
+/**
+ * Per-sequencer credential patch (ADR-0008). Only present fields overwrite;
+ * `sequencer_key` is the sequencers catalog key ('smartlead' | 'emailbison' | 'aimfox' | …).
+ */
+export interface SequencerCredentialInput {
+  sequencer_key: string;
+  api_key?: string | null;
+  external_workspace_id?: string | null;
+  settings?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
 export interface CreateClientPayload {
   action: "createClient";
   input: Omit<ClientRecord, "id" | "created_at" | "updated_at">;
+  /** Optional client_sequencers rows created alongside the client (ADR-0008). */
+  sequencerCredentials?: SequencerCredentialInput[];
 }
 
 export interface CreateCampaignPayload {
   action: "createCampaign";
-  input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">;
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0008) applies. */
+  input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string };
 }
 
 export interface CreateLeadPayload {
@@ -320,6 +336,14 @@ export interface UpsertClientCustomFieldValuePayload {
   value: string | null;
 }
 
+export interface UpsertClientSequencerPayload {
+  action: "upsertClientSequencer";
+  clientId: string;
+  /** Sequencers catalog key; resolved to sequencer_id server-side. */
+  sequencerKey: string;
+  patch: Omit<SequencerCredentialInput, "sequencer_key">;
+}
+
 export interface LoadLeadCustomFieldsPayload {
   action: "loadLeadCustomFields";
   /** Restrict to a single client; omit to load all accessible clients' definitions. */
@@ -407,6 +431,7 @@ export type OrmGatewayRequest =
   | UpdateClientCustomFieldPayload
   | DeleteClientCustomFieldPayload
   | UpsertClientCustomFieldValuePayload
+  | UpsertClientSequencerPayload
   | LoadLeadCustomFieldsPayload
   | CreateLeadCustomFieldPayload
   | UpdateLeadCustomFieldPayload
@@ -470,6 +495,7 @@ export interface OrmGatewayResponseMap {
   updateClientCustomField: ClientCustomFieldRecord;
   deleteClientCustomField: { ok: true };
   upsertClientCustomFieldValue: ClientCustomFieldValueRecord;
+  upsertClientSequencer: ClientSequencerRecord;
   loadLeadCustomFields: LeadCustomFieldRecord[];
   createLeadCustomField: LeadCustomFieldRecord;
   updateLeadCustomField: LeadCustomFieldRecord;
@@ -723,7 +749,21 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     if (!hasObjectField(payload, "input")) {
       return { ok: false, error: "createClient requires input object." };
     }
-    return { ok: true, value: { action, input: payload.input as CreateClientPayload["input"] } };
+    if (payload.sequencerCredentials !== undefined && !Array.isArray(payload.sequencerCredentials)) {
+      return { ok: false, error: "createClient.sequencerCredentials must be an array when provided." };
+    }
+    const credentialObjects = (payload.sequencerCredentials as unknown[] | undefined)?.filter(isObject);
+    if (credentialObjects?.some((cred) => !hasStringField(cred, "sequencer_key"))) {
+      return { ok: false, error: "createClient.sequencerCredentials entries require sequencer_key." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        input: payload.input as CreateClientPayload["input"],
+        sequencerCredentials: credentialObjects as SequencerCredentialInput[] | undefined,
+      },
+    };
   }
 
   if (action === "createCampaign") {
@@ -897,6 +937,24 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         clientId: String(payload.clientId),
         fieldId: String(payload.fieldId),
         value: value as string | null,
+      },
+    };
+  }
+
+  if (action === "upsertClientSequencer") {
+    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "sequencerKey")) {
+      return { ok: false, error: "upsertClientSequencer requires clientId and sequencerKey." };
+    }
+    if (!hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertClientSequencer requires a patch object." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        clientId: String(payload.clientId),
+        sequencerKey: String(payload.sequencerKey),
+        patch: payload.patch as UpsertClientSequencerPayload["patch"],
       },
     };
   }

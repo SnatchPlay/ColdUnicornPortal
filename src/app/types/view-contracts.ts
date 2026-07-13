@@ -14,12 +14,14 @@ import type {
   ClientCustomFieldRecord,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
   LeadCustomFieldRecord,
   LeadRecord,
   ReplyRecord,
+  SequencerRecord,
 } from "./core";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
@@ -261,6 +263,10 @@ export interface ClientsOverviewPayload {
   clientCustomFields: ClientCustomFieldRecord[];
   /** Per-client custom field values. */
   clientCustomFieldValues: ClientCustomFieldValueRecord[];
+  /** Sequencer catalog (ADR-0008; 3 rows, no secrets). */
+  sequencers: SequencerRecord[];
+  /** Per-client sequencer credentials. RLS-scoped: manager-own/admin; empty for client role. */
+  clientSequencers: ClientSequencerRecord[];
 }
 
 /**
@@ -498,9 +504,9 @@ export interface AnalyticsDailyStatInput {
 
 /**
  * Lite client shape for the Analytics overview — only what InternalStatisticsPage reads.
- * Drops: external_workspace_id, external_api_key, min_daily_sent, inboxes_count, crm_config,
- * sms_phone_numbers, notification_emails, auto_ooo_enabled, linkedin_api_key, prospects_signed,
- * prospects_added, setup_info, bi_setup_done, lost_reason, notes, and audit timestamps.
+ * Drops: min_daily_sent, inboxes_count, crm_config, sms_phone_numbers, notification_emails,
+ * auto_ooo_enabled, prospects_signed, prospects_added, setup_info, bi_setup_done, lost_reason,
+ * notes, and audit timestamps. (Sequencer credentials live in client_sequencers — ADR-0008.)
  */
 export interface AnalyticsClientLite {
   id: string;

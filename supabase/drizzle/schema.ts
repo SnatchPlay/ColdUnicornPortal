@@ -136,6 +136,8 @@ export const campaigns = pgTable("campaigns", {
 	positiveResponses: integer("positive_responses").default(0).notNull(),
 	startDate: date("start_date"),
 	genderTarget: varchar("gender_target", { length: 10 }),
+	// ADR-0008: sequencer attribution. DB default = EmailBison (fixed load-bearing UUID).
+	sequencerId: uuid("sequencer_id").default(sql`'00000000-0000-4000-a000-000000000002'::uuid`).notNull(),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -184,17 +186,14 @@ export const clients = pgTable("clients", {
 	kpiMeetings: smallint("kpi_meetings"),
 	contractedAmount: numeric("contracted_amount"),
 	contractDueDate: date("contract_due_date"),
-	externalWorkspaceId: integer("external_workspace_id"),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: clientStatus().notNull(),
-	externalApiKey: text("external_api_key"),
 	minDailySent: smallint("min_daily_sent").default(0).notNull(),
 	inboxesCount: smallint("inboxes_count").default(0).notNull(),
 	crmConfig: jsonb("crm_config").default({}),
 	smsPhoneNumbers: text("sms_phone_numbers").array(),
 	notificationEmails: text("notification_emails").array(),
 	autoOooEnabled: boolean("auto_ooo_enabled").default(false).notNull(),
-	linkedinApiKey: text("linkedin_api_key"),
 	prospectsSigned: integer("prospects_signed").default(0).notNull(),
 	prospectsAdded: integer("prospects_added").default(0).notNull(),
 	setupInfo: text("setup_info"),
@@ -207,7 +206,6 @@ export const clients = pgTable("clients", {
 			foreignColumns: [users.id],
 			name: "clients_manager_id_fkey"
 		}),
-	unique("clients_external_workspace_id_key").on(table.externalWorkspaceId),
 	pgPolicy("clients_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: sql`private.can_access_client(id)` }),
 	pgPolicy("clients_update_scoped", { as: "permissive", for: "update", to: ["authenticated"] }),
 ]);

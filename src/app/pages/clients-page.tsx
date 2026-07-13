@@ -16,14 +16,18 @@ import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator"
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
-import type { ClientCustomFieldRecord, ClientRecord, InviteRequest } from "../types/core";
+import type { ClientCustomFieldRecord, ClientRecord, ClientSequencerRecord, InviteRequest } from "../types/core";
+import type { SequencerCredentialInput } from "../data/orm-gateway-contract";
 import { getCustomFieldSortValue } from "../lib/custom-field-sort";
 import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
 import {
   ClientDrawer,
   buildClientPatch,
+  buildSequencerPatches,
+  EMPTY_SEQUENCER_CREDS,
   toClientDraft,
   type ClientDraft,
+  type ClientSequencerCreds,
 } from "./clients-page/client-drawer";
 import {
   ClientsMegaTable,
@@ -44,7 +48,8 @@ interface CreateClientDraft {
   name: string;
   managerId: string;
   status: ClientStatus | "";
-  externalWorkspaceId: number | null;
+  // Sequencer credentials — saved to client_sequencers, not clients (ADR-0008).
+  externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
   kpiLeads: number | null;
@@ -240,13 +245,42 @@ function useClientsOverview() {
   // ── Mutations with optimistic update / rollback ──────────────────────────────────────────────
 
   const createClient = useCallback(
-    async (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => {
+    async (
+      input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
+      sequencerCredentials?: SequencerCredentialInput[],
+    ) => {
       try {
-        const created = await repository.createClient(input);
+        const created = await repository.createClient(input, sequencerCredentials);
         setData((prev) => {
           if (!prev) return prev;
           return { ...prev, clients: [created, ...prev.clients] };
         });
+        // Server also created client_sequencers rows — refresh the shell to pull them
+        // (rare op; keeps drawer credentials in sync without hand-building rows).
+        if (sequencerCredentials?.length) void load();
+      } catch (reason) {
+        const msg = mapClientsError(reason);
+        toast.error(msg);
+        throw reason;
+      }
+    },
+    [load],
+  );
+
+  const upsertClientSequencer = useCallback(
+    async (clientId: string, sequencerKey: string, patch: Omit<SequencerCredentialInput, "sequencer_key">) => {
+      try {
+        const updated = await repository.upsertClientSequencer(clientId, sequencerKey, patch);
+        setData((prev) => {
+          if (!prev) return prev;
+          const idx = prev.clientSequencers.findIndex((row) => row.id === updated.id);
+          const clientSequencers =
+            idx >= 0
+              ? prev.clientSequencers.map((row, i) => (i === idx ? updated : row))
+              : [...prev.clientSequencers, updated];
+          return { ...prev, clientSequencers };
+        });
+        return updated;
       } catch (reason) {
         const msg = mapClientsError(reason);
         toast.error(msg);
@@ -368,6 +402,7 @@ function useClientsOverview() {
     refresh: load,
     createClient,
     updateClient,
+    upsertClientSequencer,
     sendInvite,
     upsertClientUserMapping,
     deleteClientUserMapping,
@@ -382,7 +417,10 @@ interface CreateClientSheetProps {
   onOpenChange: (open: boolean) => void;
   managerUsers: UserLite[];
   canEditAssignments: boolean;
-  onCreateClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  onCreateClient: (
+    input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
+    sequencerCredentials?: SequencerCredentialInput[],
+  ) => Promise<void>;
   defaultManagerId: string;
 }
 
@@ -415,7 +453,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
         name: "",
         managerId: defaultManagerId,
         status: "Active",
-        externalWorkspaceId: null,
+        externalWorkspaceId: "",
         externalApiKey: "",
         linkedinApiKey: "",
         kpiLeads: null,
@@ -433,30 +471,41 @@ const CreateClientSheet = memo(function CreateClientSheet({
     if (!draft || !draft.name.trim() || !draft.managerId || !draft.status) return;
     setIsSubmitting(true);
     try {
-      await onCreateClient({
-        name: draft.name.trim(),
-        manager_id: draft.managerId,
-        status: draft.status as ClientStatus,
-        kpi_leads: draft.kpiLeads,
-        kpi_meetings: draft.kpiMeetings,
-        contracted_amount: draft.contractedAmount,
-        contract_due_date: draft.contractDueDate || null,
-        external_workspace_id: draft.externalWorkspaceId,
-        external_api_key: draft.externalApiKey.trim() || null,
-        min_daily_sent: 0,
-        inboxes_count: 0,
-        crm_config: null,
-        sms_phone_numbers: null,
-        notification_emails: null,
-        auto_ooo_enabled: false,
-        linkedin_api_key: draft.linkedinApiKey.trim() || null,
-        prospects_signed: 0,
-        prospects_added: 0,
-        setup_info: null,
-        bi_setup_done: false,
-        lost_reason: null,
-        notes: null,
-      });
+      // Sequencer credentials become client_sequencers rows server-side (ADR-0008).
+      const sequencerCredentials: SequencerCredentialInput[] = [];
+      const workspaceId = draft.externalWorkspaceId.trim() || null;
+      const emailbisonKey = draft.externalApiKey.trim() || null;
+      if (workspaceId !== null || emailbisonKey !== null) {
+        sequencerCredentials.push({ sequencer_key: "emailbison", api_key: emailbisonKey, external_workspace_id: workspaceId });
+      }
+      const aimfoxKey = draft.linkedinApiKey.trim() || null;
+      if (aimfoxKey !== null) {
+        sequencerCredentials.push({ sequencer_key: "aimfox", api_key: aimfoxKey });
+      }
+      await onCreateClient(
+        {
+          name: draft.name.trim(),
+          manager_id: draft.managerId,
+          status: draft.status as ClientStatus,
+          kpi_leads: draft.kpiLeads,
+          kpi_meetings: draft.kpiMeetings,
+          contracted_amount: draft.contractedAmount,
+          contract_due_date: draft.contractDueDate || null,
+          min_daily_sent: 0,
+          inboxes_count: 0,
+          crm_config: null,
+          sms_phone_numbers: null,
+          notification_emails: null,
+          auto_ooo_enabled: false,
+          prospects_signed: 0,
+          prospects_added: 0,
+          setup_info: null,
+          bi_setup_done: false,
+          lost_reason: null,
+          notes: null,
+        },
+        sequencerCredentials.length > 0 ? sequencerCredentials : undefined,
+      );
       onOpenChange(false);
     } catch {
       // error shown via toast from useClientsOverview
@@ -527,21 +576,17 @@ const CreateClientSheet = memo(function CreateClientSheet({
               </Select>
             </label>
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace ID</span>
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">EmailBison workspace ID</span>
               <input
-                type="number"
-                value={draft.externalWorkspaceId ?? ""}
-                onChange={(e) =>
-                  setDraft((d) =>
-                    d ? { ...d, externalWorkspaceId: e.target.value === "" ? null : Number(e.target.value) } : d,
-                  )
-                }
+                type="text"
+                value={draft.externalWorkspaceId}
+                onChange={(e) => setDraft((d) => (d ? { ...d, externalWorkspaceId: e.target.value } : d))}
                 placeholder="EmailBison workspace ID"
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
               />
             </label>
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspace API key</span>
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">EmailBison API key</span>
               <input
                 value={draft.externalApiKey}
                 onChange={(e) => setDraft((d) => (d ? { ...d, externalApiKey: e.target.value } : d))}
@@ -550,11 +595,11 @@ const CreateClientSheet = memo(function CreateClientSheet({
               />
             </label>
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">LinkedIn API key</span>
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Aimfox API key</span>
               <input
                 value={draft.linkedinApiKey}
                 onChange={(e) => setDraft((d) => (d ? { ...d, linkedinApiKey: e.target.value } : d))}
-                placeholder="Paste LinkedIn key…"
+                placeholder="Paste Aimfox key…"
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
               />
             </label>
@@ -632,7 +677,10 @@ const CreateClientSheet = memo(function CreateClientSheet({
 interface CreateClientSheetHostProps {
   managerUsers: UserLite[];
   canEditAssignments: boolean;
-  onCreateClient: (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => Promise<void>;
+  onCreateClient: (
+    input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
+    sequencerCredentials?: SequencerCredentialInput[],
+  ) => Promise<void>;
   defaultManagerId: string;
 }
 
@@ -684,6 +732,7 @@ export function ClientsPage() {
     refresh,
     createClient,
     updateClient,
+    upsertClientSequencer,
     sendInvite,
     upsertClientUserMapping,
     deleteClientUserMapping,
@@ -701,6 +750,22 @@ export function ClientsPage() {
   const columnOverrides = useMemo(() => data?.columnOverrides ?? [], [data]);
   const clientCustomFields = useMemo(() => data?.clientCustomFields ?? [], [data]);
   const clientCustomFieldValues = useMemo(() => data?.clientCustomFieldValues ?? [], [data]);
+  const sequencers = useMemo(() => data?.sequencers ?? [], [data]);
+  const clientSequencers = useMemo(() => data?.clientSequencers ?? [], [data]);
+
+  // Per-client sequencer credential rows keyed by catalog key (ADR-0008).
+  const credsByClientId = useMemo<ReadonlyMap<string, ClientSequencerCreds>>(() => {
+    const keyBySequencerId = new Map(sequencers.map((s) => [s.id, s.key] as const));
+    const out = new Map<string, ClientSequencerCreds>();
+    for (const row of clientSequencers) {
+      const key = keyBySequencerId.get(row.sequencer_id);
+      if (key !== "emailbison" && key !== "aimfox") continue;
+      const creds = out.get(row.client_id) ?? { ...EMPTY_SEQUENCER_CREDS };
+      creds[key] = row as ClientSequencerRecord;
+      out.set(row.client_id, creds);
+    }
+    return out;
+  }, [sequencers, clientSequencers]);
 
   // ── Derived per-client metrics (Phase 5C: summary path) ──────────────────────────────────────
 
@@ -806,11 +871,16 @@ export function ClientsPage() {
         leads: [],
         dailyStats: [],
         customFieldValues: customFieldValuesByClient.get(client.id),
+        sequencerCredentials: {
+          emailbisonWorkspaceId: credsByClientId.get(client.id)?.emailbison?.external_workspace_id ?? null,
+          emailbisonApiKey: credsByClientId.get(client.id)?.emailbison?.api_key ?? null,
+          aimfoxApiKey: credsByClientId.get(client.id)?.aimfox?.api_key ?? null,
+        },
       });
       packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
     }
     return packs;
-  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient]);
+  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient, credsByClientId]);
 
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return timeSyncOp(`[perf][clients] mega-rows (${scopedClients.length} rows)`, () =>
@@ -919,12 +989,12 @@ export function ClientsPage() {
       const client = scopedClients.find((c) => c.id === id) ?? null;
       selectionStore.set({ clientId: id, colId: null });
       setSelectedClientId(id);
-      setDraft(client ? toClientDraft(client) : null);
+      setDraft(client ? toClientDraft(client, credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS) : null);
       setMappingUserId("");
       setInviteEmail("");
       setInviteMessage(null);
     },
-    [scopedClients, selectionStore],
+    [scopedClients, selectionStore, credsByClientId],
   );
 
   const closeClient = useCallback(() => {
@@ -974,27 +1044,41 @@ export function ClientsPage() {
     // tableColsRef is a ref — not a dep; selectionStore is stable
   }, [closeClient, selectionStore]);
 
+  const selectedClientCreds = useMemo(
+    () => (selectedClient ? credsByClientId.get(selectedClient.id) ?? EMPTY_SEQUENCER_CREDS : EMPTY_SEQUENCER_CREDS),
+    [credsByClientId, selectedClient],
+  );
+
   const draftPatch = useMemo(() => {
     if (!selectedClient || !draft) return {};
     return buildClientPatch(selectedClient, draft, canEditAssignments);
   }, [canEditAssignments, draft, selectedClient]);
-  const isDraftDirty = Object.keys(draftPatch).length > 0;
+  const sequencerPatches = useMemo(
+    () => (selectedClient && draft ? buildSequencerPatches(selectedClientCreds, draft) : []),
+    [draft, selectedClient, selectedClientCreds],
+  );
+  const isDraftDirty = Object.keys(draftPatch).length > 0 || sequencerPatches.length > 0;
 
   const handleSave = useCallback(async () => {
     if (!selectedClient || !draft || !isDraftDirty) return;
     setIsSavingDraft(true);
     try {
-      await updateClient(selectedClient.id, draftPatch);
+      if (Object.keys(draftPatch).length > 0) {
+        await updateClient(selectedClient.id, draftPatch);
+      }
+      for (const { sequencerKey, patch } of sequencerPatches) {
+        await upsertClientSequencer(selectedClient.id, sequencerKey, patch);
+      }
       setDraft((current) => (current ? { ...current } : current));
     } finally {
       setIsSavingDraft(false);
     }
-  }, [draft, draftPatch, isDraftDirty, selectedClient, updateClient]);
+  }, [draft, draftPatch, isDraftDirty, selectedClient, sequencerPatches, updateClient, upsertClientSequencer]);
 
   const handleCancel = useCallback(() => {
     if (!selectedClient) return;
-    setDraft(toClientDraft(selectedClient));
-  }, [selectedClient]);
+    setDraft(toClientDraft(selectedClient, selectedClientCreds));
+  }, [selectedClient, selectedClientCreds]);
 
   const handleAssignClientUser = useCallback(async () => {
     if (!selectedClient || !mappingUserId) return;
@@ -1044,7 +1128,8 @@ export function ClientsPage() {
 
   // Stable callback for the create mutation passed into the memoized sheet.
   const handleCreateClientStable = useCallback(
-    (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">) => createClient(input),
+    (input: Omit<ClientRecord, "id" | "created_at" | "updated_at">, sequencerCredentials?: SequencerCredentialInput[]) =>
+      createClient(input, sequencerCredentials),
     [createClient],
   );
 

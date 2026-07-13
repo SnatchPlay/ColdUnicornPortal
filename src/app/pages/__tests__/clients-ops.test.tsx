@@ -103,15 +103,12 @@ function makeClient(overrides?: Record<string, unknown>) {
     kpi_meetings: null,
     contracted_amount: 1000,
     contract_due_date: "2026-12-01",
-    external_workspace_id: null,
-    external_api_key: null,
     min_daily_sent: 20,
     inboxes_count: 3,
     crm_config: null,
     sms_phone_numbers: ["+48123456789"],
     notification_emails: ["ops@acme.test"],
     auto_ooo_enabled: true,
-    linkedin_api_key: null,
     prospects_signed: 0,
     prospects_added: 0,
     setup_info: "Setup complete",
@@ -135,6 +132,8 @@ function makeClientsOverview(overrides?: Record<string, unknown>) {
     columnOverrides: [],
     clientCustomFields: [],
     clientCustomFieldValues: [],
+    sequencers: [],
+    clientSequencers: [],
   };
   return { ...base, ...overrides };
 }

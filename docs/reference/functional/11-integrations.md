@@ -18,7 +18,7 @@ Where the portal ends and n8n / Smartlead / Bison begin. This file is the implem
 ## 1. Topology
 
 ```
-Smartlead / Bison ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
+Smartlead / Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
                                     │                    │
                                     │ webhooks           │
                                     ▼                    ▼
@@ -31,7 +31,7 @@ Three actors that touch Supabase:
 - **Portal** — anon-key writes through RLS. Owns configuration + qualification.
 - **Edge functions** (`send-invite`, `manage-invites`) — service-role inside Supabase, invoked by the portal with a JWT, used only for invitation flows.
 
-The portal **never** reaches Smartlead/Bison directly. n8n is the only system that talks to those vendors.
+The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
 
 ---
 
@@ -44,6 +44,7 @@ The portal must **never** issue INSERT or UPDATE against these. They are populat
 | `replies` | n8n: insert + classify | full history (no window in `loadSnapshot`) | scoped via RLS |
 | `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** ([repository.ts:29](../../../src/app/data/repository.ts#L29)) | scoped via set-based RLS |
 | `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** ([repository.ts:30](../../../src/app/data/repository.ts#L30)); **skipped for client role** | scoped via RLS |
+| `sequencer_daily_stats` | n8n ("Get Metrics from Aimfox", 2-hourly): UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas). `profile_id` = Aimfox account id, `''` = client rollup (current workflow) | not in snapshot yet (phase-2 UI) | scoped via set-based RLS |
 
 The `domains` and `invoices` tables sit in the middle: rows arrive from ingestion, but the portal **mutates operational fields** (status, reputation, dates for domains; status, amount, issue date for invoices). New row creation is ingestion-only.
 
@@ -65,10 +66,24 @@ These exist primarily so the portal can write configuration that downstream syst
 | `clients.sms_phone_numbers` (text[]) | Where n8n sends SMS alerts | n8n |
 | `clients.auto_ooo_enabled` (bool) | Is OOO auto-routing on? | n8n (gate) |
 | `client_ooo_routing` (table) | Mapping of `(client, gender?)` → follow-up `campaign_id` | n8n (rule source) |
-| `clients.linkedin_api_key` | Authenticator for LinkedIn outreach automation | n8n / future LinkedIn integration |
+| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (smartlead / emailbison / aimfox — fixed UUIDs `…0001`/`…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
 | `email_exclude_list` | Agency-wide domain blacklist | n8n (pre-send filter) |
 
 Editing these in the portal does not produce immediate side-effects. n8n picks up changes on its next run (timing depends on n8n flow schedule).
+
+### n8n cutover for the 2026-07-04 sequencer migration
+
+Between `20260704_sequencers_catalog.sql` (applied) and `20260704b_drop_client_sequencer_credentials.sql` (deferred), both the old `clients.*` columns and `client_sequencers` are readable. Before the drop is applied, every n8n workflow reading the old columns must switch to:
+
+```sql
+select cs.client_id, cs.api_key, cs.external_workspace_id, cs.settings
+from client_sequencers cs join sequencers s on s.id = cs.sequencer_id
+where s.key = 'emailbison' and cs.enabled;  -- aimfox: s.key = 'aimfox'
+```
+
+Notes for n8n: `external_workspace_id` is now **text** (cast if an int is needed); email campaign/lead inserts keep working unchanged (`sequencer_id` defaults to EmailBison) but Aimfox flows **must** set `sequencer_id = '00000000-0000-4000-a000-000000000003'`; new write target `sequencer_daily_stats` (see §2). The Aimfox token moves from the PDCA sheet's `col_105` to the aimfox `client_sequencers.api_key`; the sheet's `col_5` workspace id maps to the emailbison row's `external_workspace_id` for client resolution.
+
+Known workflow quirk to fix at cutover: the sheet's "Invitations limit" cell stores `daily_limit − buckets[1] − buckets[0]` while `sent_today = buckets[1] − buckets[0]` — the remaining-limit formula double-subtracts and can understate the limit; in `sequencer_daily_stats` the two quantities are separate columns (`invite_limit` weekly cap vs `invite_limit_remaining`).
 
 ---
 

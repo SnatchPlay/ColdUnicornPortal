@@ -44,6 +44,7 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Allowed roles:** admin, super_admin, manager (assigned).
 - **Called from:** Clients page drawer save.
 - **Fields usually written:** `name`, `status`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`.
+- **ADR-0008:** the credential fields (`external_workspace_id`, `external_api_key`, `linkedin_api_key`) were removed from `mapClientPatch` — sequencer credentials now go through `upsertClientSequencer` (§2.15).
 
 ### 2.2 `updateCampaign(campaignId, patch)` — [repository.ts:401-411](../../../src/app/data/repository.ts#L401-L411)
 
@@ -117,6 +118,7 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **Allowed roles:** admin, super_admin, manager.
 - **Called from:** Clients page "New client" Sheet.
 - **Fields:** `name` (required), `manager_id` (required; auto-set to `identity.userId` for manager), `status` (required), `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`.
+- **ADR-0008:** optional `sequencerCredentials` array (`{sequencer_key, api_key?, external_workspace_id?}`) — the gateway upserts `client_sequencers` rows in the same transaction after the client insert (New-client sheet sends EmailBison workspace/key + Aimfox key this way).
 - **Update pattern:** no optimistic update; server returns created row → prepend to `snapshot.clients` in `startTransition`.
 
 ### 2.11 `createCampaign(input)` — [repository.ts](../../../src/app/data/repository.ts)
@@ -126,7 +128,7 @@ All runtime data reads/writes in `repository.ts` now call `/functions/v1/orm-gat
 - **RLS policy:** `campaigns_insert_internal` — admin/super_admin any client; manager scoped to own `clients.manager_id`. Migration: `20260517_entity_insert_policies.sql`.
 - **Allowed roles:** admin, super_admin, manager (scoped).
 - **Called from:** Campaigns page "New campaign" Sheet.
-- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`.
+- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`, optional `sequencer_id` (omitted → DB default EmailBison; ADR-0008). `sequencer_id` is NOT in `mapCampaignPatch` — immutable via portal after creation.
 - **Update pattern:** no optimistic update; prepend to `snapshot.campaigns` in `startTransition`.
 
 ### 2.12 `createLead(input)` — [repository.ts](../../../src/app/data/repository.ts)
@@ -158,6 +160,14 @@ Per-client custom columns on the Leads report. Repository methods → orm-gatewa
 - `upsertLeadCustomFieldValue(leadId, fieldId, value)` — table `lead_custom_field_values`; RLS `lcfv_write_scoped` requires accessible client **and** role ∈ field `editable_by` (default `{admin,master_admin}`).
 - **Read path:** `loadLeadsList` returns `customFields` (definitions for the page's clients) + `customValues` (values for the returned rows only) — no global fetch.
 - **UI:** internal Leads page "Manage columns" sheet (admin-only) for definitions; inline cell editing in the report for values (optimistic via `useLeadCustomColumns`).
+
+### 2.15 `upsertClientSequencer(clientId, sequencerKey, patch)` — ADR-0008
+
+- **Table:** `client_sequencers`.
+- **Statement:** raw-SQL `INSERT … SELECT` resolving `sequencer_key` → `sequencers.id`, `ON CONFLICT (client_id, sequencer_id) DO UPDATE` — only fields present in `patch` overwrite (`api_key`, `external_workspace_id`, `settings`, `enabled`); `updated_at = now()`.
+- **RLS:** `client_sequencers_{select,insert,update,delete}_scoped` — all gated `private.can_manage_client(client_id)`. Client role has zero visibility (API keys).
+- **Allowed roles:** admin, super_admin, master_admin, manager (assigned).
+- **Called from:** Clients page drawer save (`buildSequencerPatches` diffs the EmailBison workspace/key + Aimfox key fields against the loaded rows).
 
 ### 2.14 `loadConditionRules()`
 
@@ -261,6 +271,9 @@ Canonical authorization per entity. "Own" = the subject's own row (e.g. a user u
 | `domains` | ✖ | ✓ assigned | ✓ all |
 | `invoices` | ✖ | ✓ assigned | ✓ all |
 | `email_exclude_list` | ✖ | ✖ | ✓ |
+| `sequencers` (catalog) | read-only | read-only | read-only (writes master_admin) |
+| `client_sequencers` | ✖ (invisible) | ✓ assigned | ✓ all |
+| `sequencer_daily_stats` | ✖ | ✖ | ✖ (ingestion only) |
 | `client_ooo_routing` | ✖ | ✓ assigned (not in UI) | ✓ |
 | `agency_crm_deals` | ✖ | ✓ own `salesperson_id` (not in UI) | ✓ |
 | Invite edge functions | ✖ | ✖ | ✓ |
@@ -319,6 +332,8 @@ Before any new SELECT action on a table with >1 k rows goes to production:
 | `campaign_daily_stats` | Set-based: `campaign_id IN (SELECT ...)` | `20260421` |
 | `daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260421` |
 | `clients` | Per-row: `can_access_client(id)` | — (48 rows — acceptable) |
+| `sequencer_daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260704` |
+| `sequencers`, `client_sequencers` | Per-row helper (tiny tables) | `20260704` |
 | `domains`, `invoices`, `condition_rules` | Per-row helper | Phase 7 audit pending |
 
 ### 5.4 `_serverMs` response field
