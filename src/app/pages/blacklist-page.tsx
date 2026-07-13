@@ -102,9 +102,9 @@ export function BlacklistPage() {
         title="Blacklist"
         subtitle="Global exclude-domain list used to block sending to restricted domains."
         actions={
-          <div className="rounded-2xl border border-border bg-black/10 px-4 py-3 text-sm">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Entries</p>
-            <p className="mt-1 text-xl">{formatNumber(emailExcludeList.length)}</p>
+          <div className="rounded-2xl border border-[#242424] bg-[#080808] px-4 py-3 text-sm">
+            <p className="text-xs uppercase tracking-[0.16em] text-neutral-300">Entries</p>
+            <p className="mt-1 text-xl text-white">{formatNumber(emailExcludeList.length)}</p>
           </div>
         }
       />

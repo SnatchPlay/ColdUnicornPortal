@@ -128,6 +128,8 @@ Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns`
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
+**Notes (Basic band)** is inline-editable directly in the grid: a plain text input, blur-to-save via `useCoreData().updateClient(client.id, { notes })` (same optimistic-update/rollback path as the drawer, §2.3). Mirrors the existing inline-edit pattern already used for custom columns (`customFieldColumn` in `mega-table.tsx`). Editing the drawer's "Internal notes" field updates the same `clients.notes` column and vice versa.
+
 ### 2.3 Detail drawer (editable)
 
 Opens on row click. Draft pattern: local `draft` state deviates from `selectedClient`; "Save" and "Cancel" buttons appear when `isDraftDirty`. `Escape` key closes the drawer discarding the draft. Defined in [`src/app/pages/clients-page/client-drawer.tsx`](../../../src/app/pages/clients-page/client-drawer.tsx).
@@ -174,7 +176,7 @@ Editable fields — **Client configuration** section:
 | Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` | manager + admin |
 | BI setup done | checkbox | `clients.bi_setup_done` | manager + admin |
 | Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Abo}` |
-| Internal notes | textarea | `clients.notes` | Always visible |
+| Internal notes | textarea | `clients.notes` | Always visible; also inline-editable from the mega-table (§2.2) |
 | Setup notes | textarea | `clients.setup_info` | manager + admin |
 
 Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations §2](./09-mutations-rls.md).

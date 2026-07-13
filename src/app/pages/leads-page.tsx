@@ -186,7 +186,7 @@ const CreateLeadSheetHost = memo(function CreateLeadSheetHost({
     <>
       <button
         onClick={openSheet}
-        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+        className="rounded-full border border-emerald-500/40 bg-[#06120d] px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
       >
         New lead
       </button>
@@ -555,14 +555,14 @@ function InternalLeadsPage() {
             <button
               onClick={() => void handleExportReport("csv")}
               disabled={rows.length === 0 || exporting}
-              className="rounded-full border border-[#242424] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+              className="rounded-full border border-[#242424] bg-[#0f0f0f] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               {exporting ? "Exporting…" : "Export CSV"}
             </button>
             <button
               onClick={() => void handleExportReport("xlsx")}
               disabled={rows.length === 0 || exporting}
-              className="rounded-full border border-[#242424] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+              className="rounded-full border border-[#242424] bg-[#0f0f0f] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               Export XLSX
             </button>

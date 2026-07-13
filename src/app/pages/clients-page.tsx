@@ -652,7 +652,7 @@ const CreateClientSheetHost = memo(function CreateClientSheetHost({
           markInteractionStart("new-client-sheet:click");
           setIsOpen(true);
         }}
-        className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
+        className="rounded-full border border-sky-400/30 bg-[#050e18] px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20"
       >
         New client
       </button>
@@ -749,6 +749,14 @@ export function ClientsPage() {
       void upsertClientCustomFieldValue(clientId, fieldId, value);
     },
     [upsertClientCustomFieldValue],
+  );
+
+  // Stable callback for onNotesChange — same memoization requirement as above.
+  const handleNotesChange = useCallback(
+    (clientId: string, value: string | null) => {
+      void updateClient(clientId, { notes: value });
+    },
+    [updateClient],
   );
 
   // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
@@ -1208,6 +1216,7 @@ export function ClientsPage() {
               customFieldValuesByClient={customFieldValuesByClient}
               canEditCustomField={canEditCustomField}
               onCustomFieldValueChange={handleCustomFieldValueChange}
+              onNotesChange={handleNotesChange}
             />
           </DevProfiler>
 

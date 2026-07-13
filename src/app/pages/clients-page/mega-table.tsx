@@ -665,6 +665,8 @@ export interface ClientsMegaTableProps {
   canEditCustomField?: (fieldId: string) => boolean;
   /** Called when a custom-field cell value changes. */
   onCustomFieldValueChange?: (clientId: string, fieldId: string, value: string | null) => void;
+  /** Called when the inline Notes cell is edited (blur-to-save). Read-only when omitted. */
+  onNotesChange?: (clientId: string, value: string | null) => void;
 }
 
 function parseSafeHref(raw: string | null | undefined): string | null {
@@ -772,6 +774,27 @@ function LinkCell({
       )}
     </span>
   );
+}
+
+function notesCellRender(onChange: (clientId: string, value: string | null) => void) {
+  return (row: ClientMegaRow) => {
+    const text = row.client.notes;
+    return (
+      <input
+        type="text"
+        defaultValue={text ?? ""}
+        title={text ?? undefined}
+        onClick={(event) => event.stopPropagation()}
+        onBlur={(event) => {
+          const next = event.target.value.trim();
+          if (next === (text ?? "")) return;
+          onChange(row.client.id, next || null);
+        }}
+        className="w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500"
+        placeholder="—"
+      />
+    );
+  };
 }
 
 function customFieldColumn(
@@ -975,6 +998,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     customFieldValuesByClient,
     canEditCustomField,
     onCustomFieldValueChange,
+    onNotesChange,
     colsRef,
   } = props;
   useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
@@ -990,7 +1014,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
-      const labelled = override?.label_override ? { ...col, label: override.label_override } : col;
+      const editable = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
+      const labelled = override?.label_override ? { ...editable, label: override.label_override } : editable;
       const homed = applySectionAssignment(labelled, overrideMap);
       return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
     });
@@ -1026,7 +1051,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
       return sectionLabel ? { ...col, sub: sectionLabel } : col;
     });
-  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange]);
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);
@@ -1161,7 +1186,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           {/* Sticky header — three rows stay pinned on vertical scroll */}
           <div className="sticky top-0 z-20 bg-[#080808]">
           {/* Sub bands */}
-          <div className="flex h-8 border-b border-white/15 bg-black/30 text-[10px] font-bold uppercase tracking-[0.14em] text-foreground">
+          <div className="flex h-8 border-b border-white/15 bg-black/30 text-[10px] font-bold tracking-[0.14em] text-foreground">
             {subSegments.map((seg, i) => (
               <div
                 key={`s-${seg.from}-${i}`}

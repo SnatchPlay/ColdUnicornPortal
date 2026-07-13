@@ -215,18 +215,18 @@ export function InvoicesPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-border bg-black/10 p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Invoices</p>
-          <p className="mt-2 text-2xl">{formatNumber(sortedInvoices.length)}</p>
+        <div className="rounded-2xl border border-[#242424] bg-[#080808] p-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-neutral-300">Invoices</p>
+          <p className="mt-2 text-2xl text-white">{formatNumber(sortedInvoices.length)}</p>
         </div>
-        <div className="rounded-2xl border border-border bg-black/10 p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Paid</p>
-          <p className="mt-2 text-2xl">{formatNumber(paidCount)}</p>
+        <div className="rounded-2xl border border-[#242424] bg-[#080808] p-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-neutral-300">Paid</p>
+          <p className="mt-2 text-2xl text-white">{formatNumber(paidCount)}</p>
         </div>
-        <div className="rounded-2xl border border-border bg-black/10 p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Overdue</p>
-          <p className="mt-2 text-2xl">{formatNumber(overdueCount)}</p>
-          <p className="mt-2 text-xs text-muted-foreground">Scope total: {formatMoney(totalAmount)}</p>
+        <div className="rounded-2xl border border-[#242424] bg-[#080808] p-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-neutral-300">Overdue</p>
+          <p className="mt-2 text-2xl text-white">{formatNumber(overdueCount)}</p>
+          <p className="mt-2 text-xs text-neutral-300">Scope total: {formatMoney(totalAmount)}</p>
         </div>
       </div>
 

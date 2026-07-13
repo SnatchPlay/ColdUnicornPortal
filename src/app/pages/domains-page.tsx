@@ -160,7 +160,7 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
     <>
       <button
         onClick={openSheet}
-        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+        className="rounded-full border border-emerald-500/40 bg-[#06120d] px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
       >
         New domain
       </button>
