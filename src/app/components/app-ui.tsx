@@ -14,8 +14,8 @@ export function PageHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0 space-y-1">
-        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white sm:text-[30px] sm:leading-none">{title}</h1>
-        <p className="mt-2 text-sm text-neutral-400 sm:mt-3 sm:text-base">{subtitle}</p>
+        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)] sm:text-[30px] sm:leading-none">{title}</h1>
+        <p className="mt-2 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:mt-3 sm:text-base">{subtitle}</p>
       </div>
       {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
     </div>
@@ -87,17 +87,17 @@ export function MetricCard({
 }) {
   const toneClass =
     tone === "success"
-      ? "border-emerald-500/20 bg-emerald-500/[0.06]"
+      ? "border-emerald-500/20 bg-[#06120d]"
       : tone === "warning"
-        ? "border-amber-500/20 bg-amber-500/[0.06]"
+        ? "border-amber-500/20 bg-[#120d04]"
         : tone === "info"
-          ? "border-blue-500/20 bg-blue-500/[0.06]"
+          ? "border-blue-500/20 bg-[#050e18]"
           : "border-[#242424] bg-[#080808]";
   return (
     <div className={cn("rounded-2xl border p-5", toneClass)}>
-      <p className="text-xs uppercase tracking-[0.16em] text-neutral-500">{label}</p>
-      <p className="mt-2 text-xl font-medium sm:text-2xl">{value}</p>
-      <p className="mt-2 text-sm text-neutral-400">{hint}</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{label}</p>
+      <p className="mt-2 text-xl font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:text-2xl">{value}</p>
+      <p className="mt-2 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{hint}</p>
     </div>
   );
 }

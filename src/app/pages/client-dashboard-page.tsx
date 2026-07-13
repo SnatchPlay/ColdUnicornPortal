@@ -145,11 +145,11 @@ function DashboardKpiCard({
   tone: "green" | "purple" | "amber" | "blue" | "indigo";
 }) {
   const toneClasses = {
-    green: "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-400",
-    purple: "border-violet-500/30 bg-violet-500/[0.06] text-violet-400",
-    amber: "border-amber-500/30 bg-amber-500/[0.06] text-amber-400",
-    blue: "border-blue-500/30 bg-blue-500/[0.06] text-blue-400",
-    indigo: "border-indigo-500/30 bg-indigo-500/[0.06] text-indigo-400",
+    green: "border-emerald-500/30 bg-[#06120d] text-emerald-400",
+    purple: "border-violet-500/30 bg-[#0d0714] text-violet-400",
+    amber: "border-amber-500/30 bg-[#120d04] text-amber-400",
+    blue: "border-blue-500/30 bg-[#050e18] text-blue-400",
+    indigo: "border-indigo-500/30 bg-[#08071a] text-indigo-400",
   };
 
   const deltaTone = percent === null ? "text-neutral-500" : percent >= 0 ? "text-emerald-400" : "text-red-400";

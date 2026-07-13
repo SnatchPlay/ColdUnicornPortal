@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useColorTheme } from "../providers/color-theme";
 import { cn } from "./ui/utils";
+import gradientTop from "../../imports/backgrounds/gradient-top.jpg";
 import {
   Select,
   SelectContent,
@@ -516,6 +517,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 bg-cover bg-top bg-no-repeat"
+        style={{ backgroundImage: `url(${gradientTop})` }}
+      />
       <div className="flex min-h-screen">
         <aside
           className={cn(
@@ -541,7 +547,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </LightweightSheet>
 
-        <main className="min-w-0 flex-1 overflow-x-hidden bg-[#030303] px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">
+        <main className="relative min-w-0 flex-1 overflow-x-hidden px-3 py-4 pb-24 sm:px-4 sm:py-6 sm:pb-24 lg:px-10 lg:py-8 lg:pb-8">
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#1f1f1f] pb-4 lg:hidden">
             <button
               onClick={() => {

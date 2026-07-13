@@ -191,7 +191,7 @@ export function ClientLeadsPage() {
             <button
               onClick={() => void handleExport("csv")}
               disabled={totalCount === 0 || exporting}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#242424] px-4 py-2.5 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex items-center gap-2 rounded-xl border border-[#242424] bg-[#0f0f0f] px-4 py-2.5 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               <Download className="h-4 w-4" />
               {exporting ? "Exporting…" : "CSV"}
@@ -199,7 +199,7 @@ export function ClientLeadsPage() {
             <button
               onClick={() => void handleExport("xlsx")}
               disabled={totalCount === 0 || exporting}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#242424] px-4 py-2.5 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex items-center gap-2 rounded-xl border border-[#242424] bg-[#0f0f0f] px-4 py-2.5 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               <Download className="h-4 w-4" />
               XLSX

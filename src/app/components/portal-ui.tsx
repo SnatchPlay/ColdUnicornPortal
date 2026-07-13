@@ -131,8 +131,8 @@ export function PortalPageHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white sm:text-[30px] sm:leading-none">{title}</h1>
-        <p className="mt-2 text-sm text-neutral-400 sm:mt-3 sm:text-base">{subtitle}</p>
+        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)] sm:text-[30px] sm:leading-none">{title}</h1>
+        <p className="mt-2 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:mt-3 sm:text-base">{subtitle}</p>
       </div>
       {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
     </div>
@@ -182,11 +182,11 @@ export function KpiTile({
   icon?: ReactNode;
 }) {
   const toneMap = {
-    green: "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-400",
-    purple: "border-violet-500/25 bg-violet-500/[0.06] text-violet-400",
-    amber: "border-amber-500/25 bg-amber-500/[0.06] text-amber-400",
-    blue: "border-blue-500/20 bg-blue-500/[0.06] text-blue-400",
-    indigo: "border-indigo-500/20 bg-indigo-500/[0.06] text-indigo-400",
+    green: "border-emerald-500/20 bg-[#06120d] text-emerald-400",
+    purple: "border-violet-500/25 bg-[#0d0714] text-violet-400",
+    amber: "border-amber-500/25 bg-[#120d04] text-amber-400",
+    blue: "border-blue-500/20 bg-[#050e18] text-blue-400",
+    indigo: "border-indigo-500/20 bg-[#08071a] text-indigo-400",
   };
   return (
     <div className={cn("rounded-2xl border p-5", toneMap[tone])}>
@@ -194,9 +194,9 @@ export function KpiTile({
         <div className="rounded-xl bg-current/10 p-2 text-current">{icon}</div>
         <span className="text-xs text-emerald-400">↑ live</span>
       </div>
-      <p className="mt-5 text-2xl font-medium text-current sm:text-3xl">{value}</p>
-      <p className="mt-1 text-sm text-neutral-300">{label}</p>
-      <p className="mt-3 text-xs text-neutral-500">{hint}</p>
+      <p className="mt-5 text-2xl font-medium text-current drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:text-3xl">{value}</p>
+      <p className="mt-1 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{label}</p>
+      <p className="mt-3 text-xs text-neutral-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{hint}</p>
     </div>
   );
 }

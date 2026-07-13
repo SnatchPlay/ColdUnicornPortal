@@ -106,7 +106,7 @@ export const LeadCustomColumnsManager = memo(function LeadCustomColumnsManager({
     <>
       <button
         onClick={openSheet}
-        className="rounded-full border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 transition hover:bg-sky-500/20"
+        className="rounded-full border border-sky-500/40 bg-[#050e18] px-4 py-2 text-sm text-sky-200 transition hover:bg-sky-500/20"
       >
         Manage columns
       </button>
