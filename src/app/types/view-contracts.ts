@@ -1,4 +1,4 @@
-// View contracts for the per-page data architecture that replaces the universal CoreSnapshot.
+// View contracts for the per-page data architecture (ADR-0009). One payload type per page.
 //
 // Rule (see memory: snapshot-refactor-no-legacy-fallback): the server computes FACTS — primitive
 // aggregates (count/sum/min/max, GROUP BY) and column PROJECTIONS that reduce payload. The frontend

@@ -25,7 +25,7 @@ const appBaseUrl =
 // Which deployed edge function the data gateway calls. Defaults to the stable production function
 // `orm-gateway`. During the snapshot→per-page migration, set VITE_ORM_GATEWAY_FUNCTION (e.g.
 // `orm-gateway-next`) in dev to target a separately-deployed WIP function so production traffic
-// never hits unreviewed gateway changes. See docs/reference/snapshot-migration.md.
+// never hits unreviewed gateway changes. See docs/adr/0008-orm-gateway-edge-function.md.
 const ormGatewayFunction = import.meta.env.VITE_ORM_GATEWAY_FUNCTION?.trim() || "orm-gateway";
 
 const authInviteOnly = parseBooleanFlag(import.meta.env.VITE_AUTH_INVITE_ONLY, true);
