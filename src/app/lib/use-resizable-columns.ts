@@ -13,6 +13,17 @@ interface UseResizableColumnsOptions {
    * Omit for tables with a fixed column set — those keep the positional array.
    */
   columnIds?: readonly string[];
+  /**
+   * Externally-owned widths (e.g. per-user preferences stored in Postgres). When present,
+   * this hook stops touching localStorage and becomes a view over the supplied record:
+   * it renders `savedWidths[id] ?? default`, and hands the new record back through
+   * `onWidthsCommit` when a drag ends. Requires `columnIds`.
+   *
+   * `undefined` = uncontrolled (the hook persists to localStorage itself).
+   */
+  savedWidths?: Record<string, number> | null;
+  /** Called once per drag, on mouseup — not on every mousemove. */
+  onWidthsCommit?: (widthsById: Record<string, number>) => void;
 }
 
 interface UseResizableColumnsResult {
@@ -77,37 +88,72 @@ function serializeWidths(widths: number[], columnIds?: readonly string[]) {
   return JSON.stringify(byId);
 }
 
+function widthsFromRecord(
+  saved: Record<string, number> | null | undefined,
+  columnIds: readonly string[],
+  defaultWidths: number[],
+) {
+  return columnIds.map((id, index) => {
+    const width = saved?.[id];
+    return isUsableWidth(width) ? Number(width) : defaultWidths[index];
+  });
+}
+
 export function useResizableColumns(options: UseResizableColumnsOptions): UseResizableColumnsResult {
-  const { storageKey, defaultWidths, columnIds } = options;
+  const { storageKey, defaultWidths, columnIds, savedWidths, onWidthsCommit } = options;
+  const controlled = savedWidths !== undefined && Boolean(columnIds);
+
   const minWidths = useMemo(
     () => (options.minWidths && options.minWidths.length === defaultWidths.length ? options.minWidths : defaultWidths.map(() => 120)),
     [defaultWidths, options.minWidths],
   );
 
-  const [widths, setWidths] = useState<number[]>(() => readStoredWidths(storageKey, defaultWidths, columnIds));
+  const [widths, setWidths] = useState<number[]>(() =>
+    controlled && columnIds
+      ? widthsFromRecord(savedWidths, columnIds, defaultWidths)
+      : readStoredWidths(storageKey, defaultWidths, columnIds),
+  );
+
+  // A drag owns the widths while it lasts: an external update landing mid-drag (a debounced
+  // save echoing back, say) must not yank the column out from under the cursor.
+  const draggingRef = useRef(false);
 
   // Re-read whenever the identity of the column set changes — the storage key, or (for a
   // dynamic table) the ids themselves. The one-shot useState initializer runs before the
   // async data that determines the column set has landed, so without this the settled
-  // layout would never be restored and would look like a reset.
+  // layout would never be restored and would look like a reset. In controlled mode the
+  // external record is another such trigger: it arrives after the server round-trip.
   const signature = `${storageKey}|${columnIds ? columnIds.join(",") : defaultWidths.length}`;
+  const externalSignature = controlled ? JSON.stringify(savedWidths ?? {}) : "";
   const prevSignatureRef = useRef(signature);
-  useEffect(() => {
-    if (prevSignatureRef.current === signature) return;
-    prevSignatureRef.current = signature;
-    setWidths(readStoredWidths(storageKey, defaultWidths, columnIds));
-    // `signature` already covers storageKey + columnIds; defaultWidths tracks cols.
-  }, [signature, storageKey, defaultWidths, columnIds]);
+  const prevExternalRef = useRef(externalSignature);
 
-  // Persist only once the widths belong to the current column set. On the render where
-  // the set changed, `widths` still holds the previous layout — writing it here would
-  // stamp the old widths onto the new columns before the re-read lands.
   useEffect(() => {
+    const setChanged = prevSignatureRef.current !== signature;
+    const externalChanged = prevExternalRef.current !== externalSignature;
+    if (!setChanged && !externalChanged) return;
+    if (draggingRef.current) return;
+
+    prevSignatureRef.current = signature;
+    prevExternalRef.current = externalSignature;
+
+    setWidths(
+      controlled && columnIds
+        ? widthsFromRecord(savedWidths, columnIds, defaultWidths)
+        : readStoredWidths(storageKey, defaultWidths, columnIds),
+    );
+  }, [signature, externalSignature, controlled, storageKey, defaultWidths, columnIds, savedWidths]);
+
+  // Uncontrolled only: the hook owns persistence. Persist just once the widths belong to the
+  // current column set — on the render where the set changed, `widths` still holds the
+  // previous layout, and writing it here would stamp old widths onto the new columns.
+  useEffect(() => {
+    if (controlled) return;
     if (typeof window === "undefined") return;
     if (prevSignatureRef.current !== signature) return;
     if (columnIds && widths.length !== columnIds.length) return;
     window.localStorage.setItem(storageKey, serializeWidths(widths, columnIds));
-  }, [storageKey, widths, columnIds, signature]);
+  }, [controlled, storageKey, widths, columnIds, signature]);
 
   const getResizeMouseDown = useCallback(
     (index: number) => (event: ReactMouseEvent<HTMLElement>) => {
@@ -116,6 +162,8 @@ export function useResizableColumns(options: UseResizableColumnsOptions): UseRes
 
       const startX = event.clientX;
       const startWidth = widths[index] ?? defaultWidths[index];
+      let latest = widths;
+      draggingRef.current = true;
 
       function onMouseMove(moveEvent: MouseEvent) {
         const deltaX = moveEvent.clientX - startX;
@@ -123,6 +171,7 @@ export function useResizableColumns(options: UseResizableColumnsOptions): UseRes
           const next = current.slice();
           const minWidth = minWidths[index] ?? 120;
           next[index] = Math.max(minWidth, Math.round(startWidth + deltaX));
+          latest = next;
           return next;
         });
       }
@@ -130,12 +179,24 @@ export function useResizableColumns(options: UseResizableColumnsOptions): UseRes
       function onMouseUp() {
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", onMouseUp);
+        draggingRef.current = false;
+
+        // Commit once, at the end of the drag — not once per mousemove, which for a
+        // DB-backed store would be a write per pixel.
+        if (controlled && columnIds && onWidthsCommit) {
+          const byId: Record<string, number> = {};
+          columnIds.forEach((id, i) => {
+            if (isUsableWidth(latest[i])) byId[id] = Math.round(latest[i]);
+          });
+          prevExternalRef.current = JSON.stringify(byId);
+          onWidthsCommit(byId);
+        }
       }
 
       window.addEventListener("mousemove", onMouseMove);
       window.addEventListener("mouseup", onMouseUp);
     },
-    [defaultWidths, minWidths, widths],
+    [columnIds, controlled, defaultWidths, minWidths, onWidthsCommit, widths],
   );
 
   const template = useMemo(() => widths.map((value) => `${Math.max(1, Math.round(value))}px`).join(" "), [widths]);

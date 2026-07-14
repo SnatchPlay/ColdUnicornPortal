@@ -658,3 +658,16 @@ export interface LeadsFilterOptions {
   /** Distinct campaigns that have at least one visible lead. Sorted by name. */
   campaignsLite: Array<{ id: string; name: string; clientId: string }>;
 }
+
+/**
+ * Per-user preferences for one table (column widths, filters, sort). Personal to the
+ * caller — the gateway keys the row on the JWT subject, so no user id crosses the wire.
+ * `preferences` is opaque jsonb: the UI owns its shape and must tolerate a stale or
+ * unknown key rather than break the page.
+ */
+export interface TablePreferencesPayload {
+  tableKey: string;
+  /** null when the user has never saved preferences for this table. */
+  preferences: Record<string, unknown> | null;
+  updatedAt: string | null;
+}

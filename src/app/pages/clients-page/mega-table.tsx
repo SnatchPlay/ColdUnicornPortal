@@ -642,6 +642,13 @@ export interface ClientsMegaTableProps {
   /** Parent ref that receives the ordered visible column id array after each render. */
   colsRef?: MutableRefObject<string[]>;
   storageKey?: string;
+  /**
+   * Column widths from the caller's per-user preferences (`user_table_preferences`). When
+   * supplied, the table renders these instead of its own localStorage copy and reports a
+   * resize back through `onWidthsChange` — see `useTablePreferences`.
+   */
+  savedWidths?: Record<string, number> | null;
+  onWidthsChange?: (widthsById: Record<string, number>) => void;
   /** Master-admin label/visibility overrides keyed by column id. */
   columnOverrides?: ColumnOverrideRecord[];
   /** Master-admin custom columns (text / checkbox / droplist). */
@@ -986,6 +993,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     onHighlight,
     selectionStore,
     storageKey = "table:clients:mega-columns",
+    savedWidths,
+    onWidthsChange,
     columnOverrides,
     customFields,
     customFieldValuesByClient,
@@ -1066,6 +1075,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     defaultWidths,
     minWidths,
     columnIds,
+    savedWidths,
+    onWidthsCommit: onWidthsChange,
   });
 
   const widths = useMemo(() => {
