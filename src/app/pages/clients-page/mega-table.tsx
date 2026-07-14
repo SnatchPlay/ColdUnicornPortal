@@ -1056,14 +1056,16 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     [cols],
   );
 
-  // Bump the storage key when the column set changes so resize layouts from a
-  // different column count don't get re-used.
-  const dynamicStorageKey = `${storageKey}:${cols.length}`;
+  // Widths persist per column id, not per position: this table's column set is dynamic
+  // (custom fields, hidden columns, master-admin reordering), and a positional array
+  // would hand a saved width to whichever column happens to sit at that index.
+  const columnIds = useMemo(() => cols.map((c) => c.id), [cols]);
 
   const resizable = useResizableColumns({
-    storageKey: dynamicStorageKey,
+    storageKey,
     defaultWidths,
     minWidths,
+    columnIds,
   });
 
   const widths = useMemo(() => {
