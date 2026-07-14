@@ -18,8 +18,6 @@ const corsHeaders = {
 
 const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
 const DAILY_STATS_WINDOW_DAYS = 180;
-const REPLIES_WINDOW_DAYS = 180;
-const REPLIES_LIMIT = 5_000;
 const databaseUrl = Deno.env.get("DATABASE_URL")?.trim() ?? Deno.env.get("SUPABASE_DB_URL")?.trim() ?? "";
 const pgClient = databaseUrl
   ? postgres(databaseUrl, {
@@ -225,65 +223,6 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     client_note: row.clientNote,
     coldunicorn_note: row.coldunicornNote,
     highlight: row.highlight,
-  };
-}
-
-function toReplyRecord(row: typeof schema.replies.$inferSelect) {
-  return {
-    id: row.id,
-    created_at: row.createdAt,
-    lead_id: row.leadId,
-    external_id: row.externalId,
-    sequence_step: row.sequenceStep,
-    message_subject: row.messageSubject,
-    message_text: row.messageText,
-    received_at: row.receivedAt,
-    client_id: row.clientId,
-    from_email_address: row.fromEmailAddress,
-    is_automated_reply: row.isAutomatedReply,
-    classification: row.classification,
-    short_reason: row.shortReason,
-    language_detected: row.languageDetected,
-    is_forwarded: row.isForwarded,
-  };
-}
-
-// Snapshot DTO — fields trimmed to what the frontend reads. Dropped from the
-// wire payload (unused in production source as of payload audit, see
-// CampaignDailyStatRecord in src/app/types/core.ts):
-//   id, createdAt, inboxesActive
-function toCampaignDailyStatRecord(row: typeof schema.campaignDailyStats.$inferSelect) {
-  return {
-    campaign_id: row.campaignId,
-    report_date: row.reportDate,
-    sent_count: row.sentCount,
-    reply_count: row.replyCount,
-    bounce_count: row.bounceCount,
-    unique_open_count: row.uniqueOpenCount,
-    positive_replies_count: row.positiveRepliesCount,
-  };
-}
-
-// Snapshot DTO — fields trimmed to what the frontend reads. Dropped from the
-// wire payload (unused in production source as of payload audit, see
-// DailyStatRecord in src/app/types/core.ts):
-//   id, createdAt, meCount, wonCount, prospectsInBase, inboxesCount,
-//   weekNumber, monthNumber, year
-function toDailyStatRecord(row: typeof schema.dailyStats.$inferSelect) {
-  return {
-    client_id: row.clientId,
-    report_date: row.reportDate,
-    emails_sent: row.emailsSent,
-    mql_count: row.mqlCount,
-    response_count: row.responseCount,
-    bounce_count: row.bounceCount,
-    negative_count: row.negativeCount,
-    ooo_count: row.oooCount,
-    human_replies_count: row.humanRepliesCount,
-    prospects_count: row.prospectsCount,
-    schedule_today: row.scheduleToday,
-    schedule_tomorrow: row.scheduleTomorrow,
-    schedule_day_after: row.scheduleDayAfter,
   };
 }
 
@@ -769,127 +708,6 @@ interface PerfContext {
 }
 
 async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfContext) {
-  if (payload.action === "loadSnapshot") {
-    const includeDailyStats = payload.includeDailyStats ?? true;
-    const leadsLimit = payload.leadsLimit;
-    // [TEMP PERF] mark start of loadSnapshot handler (after RLS context is set)
-    const tHandlerStart = performance.now();
-    console.log(`[TEMP PERF][orm-gateway] loadSnapshot start (includeDailyStats=${includeDailyStats}, leadsLimit=${leadsLimit ?? "unbounded"})`);
-    // [TEMP PERF] /end
-
-    const campaignStatsSince = isoDaysAgo(CAMPAIGN_DAILY_STATS_WINDOW_DAYS);
-    const dailyStatsSince = isoDaysAgo(DAILY_STATS_WINDOW_DAYS);
-
-    const usersQuery = tx.select().from(schema.users).orderBy(desc(schema.users.createdAt));
-    const clientsQuery = tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt));
-    const clientUsersQuery = tx.select().from(schema.clientUsers).orderBy(desc(schema.clientUsers.createdAt));
-    const campaignsQuery = tx.select().from(schema.campaigns).orderBy(desc(schema.campaigns.createdAt));
-
-    let leadsQuery = tx.select().from(schema.leads).orderBy(desc(schema.leads.updatedAt));
-    if (typeof leadsLimit === "number") {
-      leadsQuery = leadsQuery.limit(Math.max(1, Math.trunc(leadsLimit)));
-    }
-
-    const repliesQuery = tx
-      .select()
-      .from(schema.replies)
-      .where(gte(schema.replies.receivedAt, isoDaysAgo(REPLIES_WINDOW_DAYS)))
-      .orderBy(desc(schema.replies.receivedAt))
-      .limit(REPLIES_LIMIT);
-    const campaignStatsQuery = tx
-      .select()
-      .from(schema.campaignDailyStats)
-      .where(gte(schema.campaignDailyStats.reportDate, campaignStatsSince))
-      .orderBy(desc(schema.campaignDailyStats.reportDate));
-
-    const dailyStatsQuery = includeDailyStats
-      ? tx
-          .select()
-          .from(schema.dailyStats)
-          .where(gte(schema.dailyStats.reportDate, dailyStatsSince))
-          .orderBy(desc(schema.dailyStats.reportDate))
-      : Promise.resolve([]);
-
-    const domainsQuery = tx.select().from(schema.domains).orderBy(desc(schema.domains.updatedAt));
-    const invoicesQuery = tx.select().from(schema.invoices).orderBy(desc(schema.invoices.issueDate));
-    const emailExcludeQuery = tx.select().from(schema.emailExcludeList).orderBy(desc(schema.emailExcludeList.createdAt));
-
-    const columnOverridesQuery = safeRawSelect(
-      tx,
-      sql`select column_key, label_override, hidden, position, updated_at, updated_by from public.client_table_column_overrides`,
-    );
-    const clientCustomFieldsQuery = safeRawSelect(
-      tx,
-      sql`select id, name, field_type, options, position, editable_by, created_by, created_at
-          from public.client_custom_fields
-          order by position asc, created_at asc`,
-    );
-    const clientCustomFieldValuesQuery = safeRawSelect(
-      tx,
-      sql`select client_id, field_id, value, updated_at, updated_by from public.client_custom_field_values`,
-    );
-
-    const [users, clients, clientUsers, campaigns, leads, replies, campaignDailyStats, dailyStats, domains, invoices, emailExcludeList, columnOverrides, clientCustomFields, clientCustomFieldValues] =
-      // [TEMP PERF] wrap each query for per-table duration + row count
-      await Promise.all([
-        timedQuery("users", usersQuery),
-        timedQuery("clients", clientsQuery),
-        timedQuery("clientUsers", clientUsersQuery),
-        timedQuery("campaigns", campaignsQuery),
-        timedQuery("leads", leadsQuery),
-        timedQuery("replies", repliesQuery),
-        timedQuery("campaignDailyStats", campaignStatsQuery),
-        timedQuery("dailyStats", dailyStatsQuery as Promise<any[]>),
-        timedQuery("domains", domainsQuery),
-        timedQuery("invoices", invoicesQuery),
-        timedQuery("emailExcludeList", emailExcludeQuery),
-        timedQuery("columnOverrides", columnOverridesQuery),
-        timedQuery("clientCustomFields", clientCustomFieldsQuery),
-        timedQuery("clientCustomFieldValues", clientCustomFieldValuesQuery),
-      ]);
-      // [TEMP PERF] /end
-
-    const usersById = new Map(users.map((user) => [user.id, user] as const));
-    const missingManagerIds = Array.from(
-      new Set(
-        clients
-          .map((client) => client.managerId)
-          .filter((managerId): managerId is string => Boolean(managerId) && !usersById.has(managerId)),
-      ),
-    );
-    if (missingManagerIds.length > 0) {
-      const managerRows = await timedQuery(
-        "managerUsersFallback",
-        tx.select().from(schema.users).where(inArray(schema.users.id, missingManagerIds)),
-      );
-      for (const manager of managerRows) {
-        usersById.set(manager.id, manager);
-      }
-    }
-    const snapshotUsers = Array.from(usersById.values());
-
-    // [TEMP PERF] log total handler duration (excludes auth + RLS setup)
-    console.log(`[TEMP PERF][orm-gateway] loadSnapshot handler total: ${(performance.now() - tHandlerStart).toFixed(1)}ms`);
-    // [TEMP PERF] /end
-
-    return {
-      users: snapshotUsers.map(toUserRecord),
-      clients: clients.map(toClientRecord),
-      clientUsers: clientUsers.map(toClientUserRecord),
-      campaigns: campaigns.map(toCampaignRecord),
-      leads: leads.map(toLeadRecord),
-      replies: replies.map(toReplyRecord),
-      campaignDailyStats: campaignDailyStats.map(toCampaignDailyStatRecord),
-      dailyStats: (dailyStats as Array<typeof schema.dailyStats.$inferSelect>).map(toDailyStatRecord),
-      domains: domains.map(toDomainRecord),
-      invoices: invoices.map(toInvoiceRecord),
-      emailExcludeList: emailExcludeList.map(toEmailExcludeRecord),
-      conditionRules: [],
-      columnOverrides: (columnOverrides as Record<string, unknown>[]).map(toColumnOverrideRecord),
-      clientCustomFields: (clientCustomFields as Record<string, unknown>[]).map(toClientCustomFieldRecord),
-      clientCustomFieldValues: (clientCustomFieldValues as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
-    };
-  }
 
   if (payload.action === "loadShellData") {
     // Tiny global boot payload: projected lite columns only. No leads/replies/stats/etc.

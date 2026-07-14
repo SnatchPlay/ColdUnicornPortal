@@ -7,7 +7,6 @@
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
-  CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
   Identity,
@@ -66,12 +65,6 @@ export interface OrmGatewayFailure {
 }
 
 export type OrmGatewayEnvelope<T> = OrmGatewaySuccess<T> | OrmGatewayFailure;
-
-export interface LoadSnapshotPayload {
-  action: "loadSnapshot";
-  includeDailyStats?: boolean;
-  leadsLimit?: number;
-}
 
 export interface LoadConditionRulesPayload {
   action: "loadConditionRules";
@@ -363,7 +356,6 @@ export interface UpsertLeadCustomFieldValuePayload {
 }
 
 export type OrmGatewayRequest =
-  | LoadSnapshotPayload
   | LoadConditionRulesPayload
   | LoadShellDataPayload
   | LoadAdminDashboardPayload
@@ -426,7 +418,6 @@ export interface UpdateProfileNameResult {
 }
 
 export interface OrmGatewayResponseMap {
-  loadSnapshot: CoreSnapshot;
   loadShellData: ShellData;
   loadAdminDashboardOverview: AdminDashboardOverview;
   loadManagerDashboardOverview: ManagerDashboardOverview;
@@ -497,14 +488,6 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function isOptionalBoolean(value: unknown): value is boolean | undefined {
-  return value === undefined || typeof value === "boolean";
-}
-
-function isOptionalNumber(value: unknown): value is number | undefined {
-  return value === undefined || (typeof value === "number" && Number.isFinite(value));
-}
-
 function hasStringField(obj: Record<string, unknown>, key: string) {
   return isString(obj[key]) && obj[key].trim().length > 0;
 }
@@ -521,23 +504,6 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   const action = payload.action;
   if (!isString(action) || action.trim().length === 0) {
     return { ok: false, error: "Request action is required." };
-  }
-
-  if (action === "loadSnapshot") {
-    if (!isOptionalBoolean(payload.includeDailyStats)) {
-      return { ok: false, error: "loadSnapshot.includeDailyStats must be a boolean when provided." };
-    }
-    if (!isOptionalNumber(payload.leadsLimit)) {
-      return { ok: false, error: "loadSnapshot.leadsLimit must be a number when provided." };
-    }
-    return {
-      ok: true,
-      value: {
-        action,
-        includeDailyStats: payload.includeDailyStats,
-        leadsLimit: payload.leadsLimit,
-      },
-    };
   }
 
   if (action === "loadConditionRules") {

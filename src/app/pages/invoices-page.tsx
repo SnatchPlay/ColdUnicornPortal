@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
-import { scopeClients, scopeInvoices } from "../lib/selectors";
+import { isInternalAdmin, scopeClients, scopeInvoices } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useInvoicesPage } from "../lib/use-invoices";
 import { repository } from "../data/repository";
@@ -97,6 +97,11 @@ export function InvoicesPage() {
     [invoiceColumns.template],
   );
 
+  // Invoice writes are admin-only in RLS (`invoices_update/insert/delete_admin` = private.is_admin_user()).
+  // Managers can read their clients' invoices but any write returns 42501 — so the edit controls are
+  // hidden for them rather than failing on save. See 09-mutations-rls.md §4.
+  const canEditInvoices = identity ? isInternalAdmin(identity.role) : false;
+
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const scopedInvoices = useMemo(
     () => (identity ? scopeInvoices(identity, clients, invoices) : []),
@@ -157,7 +162,7 @@ export function InvoicesPage() {
   const totalAmount = sortedInvoices.reduce((sum, item) => sum + item.amount, 0);
 
   async function saveDraft() {
-    if (!selectedInvoice || !isDraftDirty) return;
+    if (!selectedInvoice || !isDraftDirty || !canEditInvoices) return;
     setIsSavingDraft(true);
     try {
       await repository.updateInvoice(selectedInvoice.id, draftPatch);
@@ -334,32 +339,41 @@ export function InvoicesPage() {
             </div>
           </Surface>
 
-          <Surface title="Invoice detail" subtitle="Review and update invoice status and amount.">
+          <Surface
+            title="Invoice detail"
+            subtitle={
+              canEditInvoices
+                ? "Review and update invoice status and amount."
+                : "Review invoice details. Editing invoices is restricted to admins."
+            }
+          >
             {!selectedInvoice || !draft ? (
               <EmptyState
                 title="Select an invoice"
-                description="Select a row from the list to inspect and update invoice metadata."
+                description="Select a row from the list to inspect invoice metadata."
               />
             ) : (
               <div className="space-y-5">
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={() => cancelDraft()}
-                    disabled={!isDraftDirty || isSavingDraft}
-                    className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Cancel changes
-                  </button>
-                  <button
-                    onClick={() => {
-                      void saveDraft();
-                    }}
-                    disabled={!isDraftDirty || isSavingDraft}
-                    className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isSavingDraft ? "Saving..." : "Save changes"}
-                  </button>
-                </div>
+                {canEditInvoices && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => cancelDraft()}
+                      disabled={!isDraftDirty || isSavingDraft}
+                      className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Cancel changes
+                    </button>
+                    <button
+                      onClick={() => {
+                        void saveDraft();
+                      }}
+                      disabled={!isDraftDirty || isSavingDraft}
+                      className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSavingDraft ? "Saving..." : "Save changes"}
+                    </button>
+                  </div>
+                )}
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
@@ -380,10 +394,12 @@ export function InvoicesPage() {
                     <input
                       type="date"
                       value={draft.issueDate}
+                      readOnly={!canEditInvoices}
+                      disabled={!canEditInvoices}
                       onChange={(event) =>
                         setDraft((current) => (current ? { ...current, issueDate: event.target.value } : current))
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     />
                   </label>
 
@@ -392,6 +408,8 @@ export function InvoicesPage() {
                     <input
                       type="number"
                       value={draft.amount}
+                      readOnly={!canEditInvoices}
+                      disabled={!canEditInvoices}
                       onChange={(event) =>
                         setDraft((current) => {
                           if (!current) return current;
@@ -402,7 +420,7 @@ export function InvoicesPage() {
                           };
                         })
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     />
                   </label>
 
@@ -410,13 +428,14 @@ export function InvoicesPage() {
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
                     <Select
                       value={draft.status === "" ? INVOICE_UNSET_VALUE : draft.status}
+                      disabled={!canEditInvoices}
                       onValueChange={(value) =>
                         setDraft((current) =>
                           current ? { ...current, status: value === INVOICE_UNSET_VALUE ? "" : value } : current,
                         )
                       }
                     >
-                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60">
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                       <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">

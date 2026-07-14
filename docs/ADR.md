@@ -1,0 +1,56 @@
+# Architectural Decision Records
+
+## Purpose
+
+ADRs capture structural decisions that affect how the portal is built and why. They exist so
+future work does not have to reverse-engineer architectural intent from git history.
+
+An ADR is the answer to "why is it like this?" — not "how does it work?" (that is the
+[functional reference](reference/functional/INDEX.md)) and not "what is the product?" (that is
+[BUSINESS_LOGIC.md](BUSINESS_LOGIC.md)).
+
+## Location
+
+- Index: `docs/ADR.md` (this file)
+- Records: `docs/adr/NNNN-*.md`
+
+## Format
+
+Each record contains: title, status (+ date), context, decision, alternatives considered,
+consequences. Do not renumber published ADRs.
+
+## When to create or update an ADR
+
+Create one when a change affects:
+
+- the data path (how the frontend reaches Postgres)
+- the trust/security boundary (RLS, auth, role model, credentials)
+- role topology or route shells
+- what the portal is allowed to write vs what an external system owns
+- a cross-cutting engine (conditions, custom fields, metrics)
+- performance policy that constrains future work (query shape, windows, indexes)
+
+Do **not** write one for a UI tweak, a new chart, or an isolated bug fix. Those belong in the
+functional reference and [design-system.md](reference/design-system.md).
+
+## Index
+
+| ADR | Title | Status | Rule in one line |
+|-----|-------|--------|------------------|
+| [0001](adr/0001-live-supabase-source-of-truth.md) | Live Supabase is the runtime source of truth | Accepted | No alternative backend, no local-first mode, no mock-mode runtime branch. One exception: [0010](adr/0010-legacy-crm-integration.md). |
+| [0002](adr/0002-route-based-role-shells.md) | Route-based role shells | Accepted | Each role owns a URL prefix (`/client`, `/manager`, `/admin`). No runtime role switcher — use impersonation. |
+| [0003](adr/0003-client-campaign-visibility.md) | Client campaign visibility | Accepted | Clients see only `campaigns.type='outreach'`. Enforced in BOTH RLS and `scopeCampaigns`. |
+| [0004](adr/0004-lead-state-boundaries.md) | Lead state boundaries | Accepted (rev. 2026-06-18) | Only `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments` are editable. Replies are read-only. |
+| [0005](adr/0005-master-admin-role.md) | `master_admin` role | Accepted 2026-05-22 | A fifth role above `admin` for cross-tenant configuration. |
+| [0006](adr/0006-set-based-rls-predicates.md) | Set-based RLS predicates for high-volume tables | Accepted 2026-06-01 | `USING (id IN (SELECT …))`, never a per-row `private.fn(col)` call on >1k-row tables. |
+| [0007](adr/0007-per-client-lead-custom-fields.md) | Per-client custom lead-report columns | Accepted 2026-06-18 | Lead custom fields are per-client, not global. |
+| [0008](adr/0008-orm-gateway-edge-function.md) | ORM gateway edge function | Accepted 2026-07-14 | The frontend reaches Postgres through one Deno edge function (Drizzle + postgres.js) with transaction-local RLS passthrough — not PostgREST. |
+| [0009](adr/0009-per-page-data-contracts.md) | Per-page data contracts (snapshot retired) | Accepted 2026-07-14 | No universal snapshot. One gateway select action per page + `loadShellData`. No legacy fallback. |
+| [0010](adr/0010-legacy-crm-integration.md) | Legacy CRM as a read-only second Supabase project | Accepted 2026-07-14 | The single documented exception to ADR-0001. Read-only, config-surface only. |
+| [0011](adr/0011-conditions-rules-engine.md) | Conditions rules engine (JSON DSL) | Accepted 2026-07-14 | Client-health rules are a stored JSON DSL evaluated client-side — not free-form formulas, not SQL. |
+
+## Superseded / amended
+
+- ADR-0001's "only data system" clause is **narrowed** by ADR-0010 (legacy CRM read path).
+- ADR-0009 **supersedes** the bulk-snapshot loading strategy described in pre-2026-07 revisions
+  of `10-nfr.md` and `01-overview.md`.

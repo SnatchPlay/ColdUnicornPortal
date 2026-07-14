@@ -2,6 +2,8 @@
 
 Authoritative source: [`supabase/drizzle/schema.ts`](../../../supabase/drizzle/schema.ts), regenerated with `pnpm db:introspect` against the live project. RLS is applied via `pgPolicy(...)` declarations and supplemented by SQL in [`supabase/migrations/*`](../../../supabase/migrations) and [`docs/reference/supabase-production-rls.sql`](../supabase-production-rls.sql).
 
+> **The same `schema.ts` is imported by the `orm-gateway` edge function** (`import * as schema from "../../drizzle/schema.ts"`, [index.ts:5](../../../supabase/functions/orm-gateway/index.ts#L5)). A stale introspection therefore breaks the server, not just the types. Three customization tables are *not* in `schema.ts` and are handled with raw SQL — see [§2.8](#28-customization-tables--not-in-schemats).
+
 ## Contents
 
 1. [Enums](#1-enums)
@@ -27,10 +29,11 @@ All `CREATE TYPE ... AS ENUM` definitions, [schema.ts:4-12](../../../supabase/dr
 | `lead_gender` | `male`, `female` |
 | `lead_qualification` | `preMQL`, `MQL`, `meeting_scheduled`, `meeting_held`, `offer_sent`, `won`, `rejected`, `OOO`, `NRR` |
 | `reply_classification` | `OOO`, `Interested`, `NRR`, `Left_Company`, `Spam_Inbound`, `other` |
-| `user_role` | `super_admin`, `admin`, `manager`, `client` |
+| `user_role` | `super_admin`, `admin`, **`master_admin`**, `manager`, `client` |
 
 Notes:
 
+- **`master_admin` is a real enum value** — added by [`20260520_master_admin_role.sql`](../../../supabase/migrations/20260520_master_admin_role.sql) (ADR-0005) and present in [schema.ts:12](../../../supabase/drizzle/schema.ts#L12). It is admin-tier in `private.is_admin_user()` / `is_internal_user()` / `can_access_client()` / `can_manage_client()` (migrations `20260520_master_admin_rls.sql`, `20260526_master_admin_private_is_internal_user.sql`, `20260528_fix_insert_policies_master_admin.sql`, `20260616b_can_manage_client_master_admin.sql`). Accounts are seeded manually; there is no UI to mint one.
 - `lead_qualification.won` and `leads.won` (boolean column) are separate signals; `getLeadStage()` prefers the boolean ([selectors.ts:70-77](../../../src/app/lib/selectors.ts#L70-L77)). In practice, when a lead becomes `won`, the boolean is set and `qualification` may remain at its last value.
 - `client_status` has capitalised literals (`"On hold"`, `"Offboarding"`, `"Sales"`) — strings pass through to UI verbatim.
 - `crm_pipeline_stage` is used only by `agency_crm_deals` (the agency's own sales funnel), not by lead records.
@@ -41,7 +44,7 @@ Notes:
 
 ### 2.1 Auth & users
 
-#### `users` — [schema.ts:104-116](../../../supabase/drizzle/schema.ts#L104-L116)
+#### `users` — [schema.ts:106-125](../../../supabase/drizzle/schema.ts#L106-L125)
 
 Agency-facing user profile. Created on invite acceptance by the `send-invite` edge function.
 
@@ -77,7 +80,7 @@ No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-servi
 
 **Why public (not private + signed):** avatars are low-sensitivity face photos with unguessable UUID object names; public read removes per-render signing latency and list-batching complexity. The DB still stores only the path. See the decision-log entry in [BUSINESS_LOGIC.md](../../BUSINESS_LOGIC.md).
 
-#### `client_users` — mapping user > client(s) — [schema.ts:313-339](../../../supabase/drizzle/schema.ts#L313-L339)
+#### `client_users` — mapping user > client(s) — [schema.ts:370-397](../../../supabase/drizzle/schema.ts#L370-L397)
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -95,7 +98,7 @@ RLS:
 
 ### 2.2 Clients & ops config
 
-#### `clients` — [schema.ts:170-205](../../../supabase/drizzle/schema.ts#L170-L205)
+#### `clients` — [schema.ts:178-214](../../../supabase/drizzle/schema.ts#L178-L214)
 
 The business entity whose outreach we run.
 
@@ -129,10 +132,11 @@ The business entity whose outreach we run.
 
 RLS:
 
-- `clients_select_scoped` using `private.can_access_client(id)`.
-- `clients_update_scoped` — drizzle declares `for: "update" to: ["authenticated"]`; the actual predicate is in the production RLS SQL and effectively mirrors `can_manage_client(id)`. See `docs/reference/supabase-production-rls.sql`.
+- `clients_select_scoped` — `private.can_access_client(id)`.
+- `clients_update_scoped` — **verified live:** `using`/`with check` = `private.can_manage_client(id)` (manager of the client + admin tier).
+- `clients_insert_internal` — role ∈ `{super_admin, admin, manager, master_admin}` (set-based subselect on `users`), migration `20260517_entity_insert_policies.sql`.
 
-#### `condition_rules` — [schema.ts:286-335](../../../supabase/drizzle/schema.ts#L286-L335)
+#### `condition_rules` — [schema.ts:294-342](../../../supabase/drizzle/schema.ts#L294-L342)
 
 Dynamic condition rules used to evaluate client operational-health states across Clients surfaces.
 
@@ -174,7 +178,7 @@ RLS:
 - `condition_rules_admin_insert` / `condition_rules_admin_update` / `condition_rules_admin_delete`: admin + super_admin only
 
 See [14 · Condition rules](./14-condition-rules.md) for DSL and runtime evaluation behavior.
-#### `client_ooo_routing` — [schema.ts:207-229](../../../supabase/drizzle/schema.ts#L207-L229)
+#### `client_ooo_routing` — [schema.ts:215-238](../../../supabase/drizzle/schema.ts#L215-L238)
 
 Maps OOO replies to a follow-up campaign, optionally per gender.
 
@@ -190,7 +194,7 @@ RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not cur
 
 ### 2.3 Campaigns
 
-#### `campaigns` — [schema.ts:118-140](../../../supabase/drizzle/schema.ts#L118-L140)
+#### `campaigns` — [schema.ts:126-149](../../../supabase/drizzle/schema.ts#L126-L149)
 
 | Column | Type | Meaning |
 |--------|------|---------|
@@ -211,7 +215,7 @@ RLS:
 - `campaigns_select_scoped` — **set-based** (since `20260601b`): `client_id IN (SELECT id FROM clients WHERE private.can_access_client(id)) AND (current_app_role() <> 'client' OR type = 'outreach')`. Preserves ADR-0003 (client role sees only outreach campaigns).
 - `campaigns_update_scoped` — `using/withCheck: private.can_manage_client(client_id)`. Manager or admin.
 
-#### `campaign_daily_stats` — [schema.ts:231-254](../../../supabase/drizzle/schema.ts#L231-L254)
+#### `campaign_daily_stats` — [schema.ts:239-263](../../../supabase/drizzle/schema.ts#L239-L263)
 
 Per-campaign per-day send/reply counters. **This is the most frequently queried table** — ingestion writes one row per campaign per day.
 
@@ -245,7 +249,7 @@ The set-based form was the subject of `supabase/migrations/20260421_fix_rls_perf
 
 ### 2.4 Leads & replies
 
-#### `leads` — [schema.ts:15-66](../../../supabase/drizzle/schema.ts#L15-L66)
+#### `leads` — [schema.ts:15-69](../../../supabase/drizzle/schema.ts#L15-L69)
 
 The central row. Holds enrichment (company, title, industry, country), qualification state, and reply denormalisation.
 
@@ -275,9 +279,9 @@ Columns of note:
 RLS:
 
 - `leads_select_scoped` — **set-based** (since `20260601b`): `client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`. The earlier per-row form called `can_access_client` 3972 times per query (once per lead row), costing ~400ms of RLS overhead measured 2026-06-01. The subquery reduces this to 48 calls (once per unique client).
-- `leads_update_scoped` — policy declared but predicate lives in the SQL migrations; effectively restricted to internal roles with `can_manage_client(client_id)`. **Clients are write-blocked at the RLS layer** (ADR-0004); the drawer also gates editability by `identity.role !== "client"` in the UI.
+- `leads_update_scoped` — **verified live:** `using`/`with check` = `private.can_manage_client(client_id)`. **Clients are write-blocked in Postgres** (ADR-0004); the drawer additionally gates editability by `identity.role !== "client"`, and the gateway's `mapLeadPatch` whitelist bounds which columns any role may touch.
 
-#### `replies` — [schema.ts:142-168](../../../supabase/drizzle/schema.ts#L142-L168)
+#### `replies` — [schema.ts:150-177](../../../supabase/drizzle/schema.ts#L150-L177)
 
 Append-only history. Populated by ingestion; the portal never writes.
 
@@ -317,7 +321,7 @@ RLS (all set-based, ADR-0006):
 
 ### 2.5 Daily stats (client-level rollup)
 
-#### `daily_stats` — [schema.ts:68-102](../../../supabase/drizzle/schema.ts#L68-L102)
+#### `daily_stats` — [schema.ts:70-105](../../../supabase/drizzle/schema.ts#L70-L105)
 
 Pre-aggregated per-client per-day snapshot. Populated by ingestion. **Drives DoD / 3-DoD / WoW / MoM metrics** (`client-metrics.ts`).
 
@@ -350,11 +354,11 @@ RLS `daily_stats_select_scoped`:
 client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))
 ```
 
-The snapshot loader skips this table for client role: `loadSnapshot({ includeDailyStats: identity?.role !== "client" })` ([`core-data.tsx`](../../../src/app/providers/core-data.tsx)). Clients get their pre-computed equivalents from `campaign_daily_stats` aggregation and from lead-based counts.
+**Read path.** No page reads this table wholesale any more. The gateway windows it to **180 days** (`DAILY_STATS_WINDOW_DAYS`, [index.ts:20](../../../supabase/functions/orm-gateway/index.ts#L20)) and ships only the columns a given action needs: `loadClientsStats` / `loadClientsMetricsSummary` (Clients page metric tabs), `loadAnalyticsOverview` (Statistics), `loadClientDashboard` (single client). The `AnalyticsDailyStatInput` / `ClientsLeadInput` projections in [`view-contracts.ts`](../../../src/app/types/view-contracts.ts) define exactly which columns cross the wire; `createClientMetrics` then computes DoD/3-DoD/WoW/MoM in the browser.
 
 ### 2.6 Domains, invoices, blacklist
 
-#### `domains` — [schema.ts:341-365](../../../supabase/drizzle/schema.ts#L341-L365)
+#### `domains` — [schema.ts:398-422](../../../supabase/drizzle/schema.ts#L398-L422)
 
 Outreach sending domains.
 
@@ -370,9 +374,9 @@ Outreach sending domains.
 | `campaign_verified_at`, `warmup_verified_at` | date |
 | `updated_at` | timestamptz |
 
-RLS: all four policies (`select`, `insert`, `update`, `delete`) scoped via `private.can_access_client(client_id)` > admin + assigned manager.
+RLS (verified live): `domains_select_scoped` = `private.can_access_client(client_id)` (client role can read its own domains); `domains_insert_scoped` / `_update_scoped` / `_delete_scoped` = `private.can_manage_client(client_id)` (assigned manager + admin tier). `domains_insert_internal` (`20260517`) is the additional permissive INSERT policy used by the "New domain" sheet.
 
-#### `invoices` — [schema.ts:256-274](../../../supabase/drizzle/schema.ts#L256-L274)
+#### `invoices` — [schema.ts:264-283](../../../supabase/drizzle/schema.ts#L264-L283)
 
 | Column | Type |
 |--------|------|
@@ -385,9 +389,9 @@ RLS: all four policies (`select`, `insert`, `update`, `delete`) scoped via `priv
 RLS:
 
 - `invoices_select_scoped` — `private.can_access_client(client_id)` (client, manager, admin).
-- `invoices_insert_admin` / `update_admin` / `delete_admin` — policies named admin-only; actual predicate in production SQL; managers can also update per `mutation-ownership-matrix.md` in practice.
+- `invoices_insert_admin` / `update_admin` / `delete_admin` — **`private.is_admin_user()`, verified live**. Managers can read invoices but **cannot write them**; the Invoices drawer does not yet reflect that ([09 §4](09-mutations-rls.md#4-mutation-ownership-matrix)).
 
-#### `email_exclude_list` — [schema.ts:276-284](../../../supabase/drizzle/schema.ts#L276-L284)
+#### `email_exclude_list` — [schema.ts:284-293](../../../supabase/drizzle/schema.ts#L284-L293)
 
 Agency-wide domain blacklist.
 
@@ -403,7 +407,7 @@ RLS:
 
 ### 2.7 Agency CRM (internal pipeline)
 
-#### `agency_crm_deals` — [schema.ts:286-311](../../../supabase/drizzle/schema.ts#L286-L311)
+#### `agency_crm_deals` — [schema.ts:343-369](../../../supabase/drizzle/schema.ts#L343-L369)
 
 Not surfaced in the current UI, but present in the schema. Tracks the agency's own sales pipeline for prospective clients.
 
@@ -425,11 +429,23 @@ RLS `agency_crm_deals_select_scoped`:
 private.is_admin_user() OR (private.current_app_role() = 'manager' AND salesperson_id = auth.uid())
 ```
 
+### 2.8 Customization tables — **not in `schema.ts`**
+
+Three tables exist in migrations only; the introspected Drizzle schema does not include them, so the gateway reads/writes them with raw SQL through `safeRawSelect`, which returns `[]` when the table is absent ([index.ts:671-686](../../../supabase/functions/orm-gateway/index.ts#L671-L686)) — a portal running against an un-migrated database degrades instead of 500-ing.
+
+| Table | Migration | Shape | RLS |
+|---|---|---|---|
+| `client_table_column_overrides` | [`20260520_client_table_overrides.sql`](../../../supabase/migrations/20260520_client_table_overrides.sql), `20260524_column_override_position.sql` | `column_key` PK, `label_override`, `hidden`, `position`, `updated_at/by` | select: `public.is_admin_user()`; write: `current_app_role() = 'master_admin'` |
+| `client_custom_fields` | [`20260520_client_custom_fields.sql`](../../../supabase/migrations/20260520_client_custom_fields.sql) (+ `20260527_custom_field_editable_by.sql`, `20260616_custom_field_link_type.sql`, `20260618`) | `name`, `field_type` (`text\|checkbox\|droplist\|link\|number\|currency`), `options` jsonb, `position`, `editable_by` text[] default `{master_admin}` | `ccf_select` — internal roles incl. manager; `ccf_write_master` — `master_admin` only |
+| `client_custom_field_values` | same | PK (`client_id`, `field_id`), `value` text (raw; parsing is frontend-only) | `ccfv_select_scoped` — `can_access_client(client_id)`; `ccfv_write_scoped` — accessible client **and** role ∈ field `editable_by` |
+
+The lead-level equivalents (`lead_custom_fields` / `lead_custom_field_values`, §2.4) follow the same pattern but scope definitions per client.
+
 ---
 
 ## 3. Views
 
-### `admin_dashboard_daily` — [schema.ts:366-373](../../../supabase/drizzle/schema.ts#L366-L373) · migration [`20260421b_admin_dashboard_view.sql`](../../../supabase/migrations/20260421b_admin_dashboard_view.sql)
+### `admin_dashboard_daily` — [schema.ts:423-431](../../../supabase/drizzle/schema.ts#L423-L431) · migration [`20260421b_admin_dashboard_view.sql`](../../../supabase/migrations/20260421b_admin_dashboard_view.sql)
 
 ```sql
 CREATE VIEW public.admin_dashboard_daily
@@ -449,8 +465,8 @@ GROUP BY cds.report_date, c.client_id;
 ```
 
 - `security_invoker = on` — caller's RLS applies, so the view respects the same per-role visibility as `campaign_daily_stats`.
-- Hard-coded **21-day** window feeds the Admin Dashboard campaign momentum charts (sent/replies/positive) and manager capacity surface.
-- Not directly queried by the portal at the time of writing; the portal aggregates from `campaign_daily_stats` client-side. The view is kept for future server-side rollups and for BI tools.
+- Hard-coded **21-day** window, matching the Admin Dashboard momentum charts.
+- **Not queried by anything today.** The `orm-gateway` computes the admin/manager dashboard rollups with its own raw SQL over `campaign_daily_stats` (`loadAdminDashboardOverview`, [index.ts:946](../../../supabase/functions/orm-gateway/index.ts#L946); `loadManagerDashboardOverview`, [index.ts:1047](../../../supabase/functions/orm-gateway/index.ts#L1047)) because those handlers need client/campaign/lead facts in the same round-trip. The view is retained for BI tools.
 
 ---
 
@@ -543,6 +559,24 @@ Client Feedback Batch 4 (Leads report). Renames `leads.comments` → `client_not
 ### `supabase/migrations/20260618c_lead_custom_fields.sql`
 
 Batch 4 Task 4F: adds `lead_custom_fields` + `lead_custom_field_values` with set-based RLS (see §2.4 and [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)).
+
+### Master-admin series (ADR-0005)
+
+| Migration | Effect |
+|---|---|
+| `20260520_master_admin_role.sql` | `alter type public.user_role add value 'master_admin'`. |
+| `20260520_master_admin_rls.sql` | Admin-tier helpers accept `master_admin`. |
+| `20260526_master_admin_private_is_internal_user.sql` | Keeps `private.is_internal_user` and `public.is_internal_user` in lockstep. |
+| `20260528_fix_insert_policies_master_admin.sql` | Adds `master_admin` to the `*_insert_internal` policies. |
+| `20260616b_can_manage_client_master_admin.sql` | Adds `master_admin` to `private.can_manage_client`. |
+
+### `supabase/migrations/20260517_entity_insert_policies.sql`
+
+Adds `clients_insert_internal`, `campaigns_insert_internal`, `leads_insert_internal`, `domains_insert_internal` — admin-tier for any client, manager scoped to `clients.manager_id = auth.uid()`. These back the "New …" sheets ([09 §2](09-mutations-rls.md#2-orm-gateway-mutations)).
+
+### `supabase/migrations/20260428_users_update_self_policy.sql`
+
+`users_update_self` (`auth.uid() = id`, using + with check) — the policy behind `updateProfileName` / `updateProfileAvatar` through the gateway.
 
 ---
 

@@ -284,7 +284,7 @@ Capabilities in current build:
   - base filter editor
   - JSON preview
 - Validation before save (`conditions/validation.ts`)
-- CRUD operations via `useCoreData()` and repository
+- CRUD via `repository.createConditionRule` / `updateConditionRule` / `deleteConditionRule`, called directly from the Settings page ([settings-page.tsx:427](../../../src/app/pages/settings-page.tsx#L427), [:431](../../../src/app/pages/settings-page.tsx#L431), [:446](../../../src/app/pages/settings-page.tsx#L446)); rules are read as part of the `loadAdminSettings` payload via `useAdminSettings()` ([`lib/use-settings.ts`](../../../src/app/lib/use-settings.ts)), and `refresh()` re-loads them after each mutation ([ADR-0009](../../adr/0009-per-page-data-contracts.md))
 
 Manager/client roles:
 
