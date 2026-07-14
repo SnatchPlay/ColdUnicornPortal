@@ -18,37 +18,66 @@ Cross-cutting concerns: data loading, auth, RLS performance, UI states, responsi
 
 ## 1. Data loading strategy
 
-### 1.1 Bulk snapshot
+### 1.1 Shell boot + per-page loads (ADR-0009)
 
-On `CoreDataProvider` mount and after a session change, the app loads snapshot data via `repository.loadSnapshot()` ([09 §7](./09-mutations-rls.md#7-snapshot-reload-strategy)). Repository dispatches an action to `orm-gateway`, where Drizzle executes the snapshot query set under RLS passthrough.
+There is **no global snapshot**. Boot loads a small shell payload; every page then owns exactly one gateway action.
 
-Constants in [repository.ts](../../../src/app/data/repository.ts):
+| Stage | Who | What |
+|---|---|---|
+| Auth | `AuthProvider` | `supabase.auth.getSession()` → `repository.loadIdentity` (+ `current_account_active`) |
+| Shell | `ShellDataProvider` | `loadShellData` → `usersLite`, `clientsLite`, `clientUsers` only ([shell-data.tsx:48-81](../../../src/app/providers/shell-data.tsx#L48-L81)) |
+| Page | per-page hook (`lib/use-*.ts` or co-located) | one select action, guarded by a `loadIdRef` counter |
+
+The action → page map and the stale-guard rule are in [09 §8](./09-mutations-rls.md#8-read-strategy-after-the-snapshot-cutover).
+
+### 1.2 Server-side aggregation
+
+The gateway computes **facts** — counts, sums, `GROUP BY` rollups, top-N rows, and full filter/sort/pagination for the leads list. The frontend computes **interpretation** — rates, stages, health and KPI progress ([view-contracts.ts:3-6](../../../src/app/types/view-contracts.ts#L3-L6)).
+
+| Action | Server-side work | Handler |
+|---|---|---|
+| `loadAdminDashboardOverview` | client/campaign counts, pipeline groups, 21-day momentum, manager capacity | [index.ts:946](../../../supabase/functions/orm-gateway/index.ts#L946) |
+| `loadManagerDashboardOverview` | same, scoped to `manager_id`, with client/status/date filters | [index.ts:1047](../../../supabase/functions/orm-gateway/index.ts#L1047) |
+| `loadClientDashboard` | single-client stats + campaign series | [index.ts:1261](../../../supabase/functions/orm-gateway/index.ts#L1261) |
+| `loadClientsMetricsSummary` | per-client DoD/WoW/MoM input summaries | [index.ts:1491](../../../supabase/functions/orm-gateway/index.ts#L1491) |
+| `loadLeadsList` | WHERE filters + ORDER BY + LIMIT/OFFSET + custom-field values | [index.ts:1675](../../../supabase/functions/orm-gateway/index.ts#L1675) |
+| `loadCampaignStats` / `loadAnalyticsOverview` | windowed stat series + lead groups | [index.ts:2068](../../../supabase/functions/orm-gateway/index.ts#L2068) / [2115](../../../supabase/functions/orm-gateway/index.ts#L2115) |
+
+`loadClientsOverview` / `loadClientsStats` are deliberately **split**: the ~85 KB shell paints the table, the ~1.4 MB stats payload is deferred ([view-contracts.ts:237-248](../../../src/app/types/view-contracts.ts#L237-L248)).
+
+### 1.3 Time windows
+
+The window constants live in the **edge function**, not the frontend ([index.ts:19-22](../../../supabase/functions/orm-gateway/index.ts#L19-L22)):
 
 ```ts
-const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;   // line 29
-const DAILY_STATS_WINDOW_DAYS           = 180; // line 30
+const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;    // line 19
+const DAILY_STATS_WINDOW_DAYS           = 180;  // line 20
+const REPLIES_WINDOW_DAYS               = 180;  // line 21
+const REPLIES_LIMIT                     = 5_000;// line 22
 ```
 
-Rationale (comments in source): "the dashboard only renders the last 21 days, so we cap at 90 to leave headroom for drill-down views. Shipping the full history on every mount blows past the authenticated-role statement_timeout once seed volumes cross ~10k rows."
+They cap the fact tables so queries stay well inside the authenticated-role `statement_timeout` (dashboards render 21 days; 90/180 is drill-down headroom). Widening any of them requires a perf plan (§3). Dashboards additionally hard-code a 21-day window (`isoDaysAgo(21)`, [index.ts:948](../../../supabase/functions/orm-gateway/index.ts#L948) and [1055](../../../supabase/functions/orm-gateway/index.ts#L1055)).
 
-`daily_stats` is fetched only for non-client roles (`includeDailyStats: identity?.role !== "client"`) to save bandwidth — clients compute their visible metrics from `campaign_daily_stats` and `leads` alone.
+### 1.4 Retry policy
 
-The `orm-gateway` snapshot also performs a manager-user completion pass: after visible clients load, any `clients.manager_id` missing from the first `users` result is re-selected and merged into `users`. This keeps admin/master-admin analytics attribution stable when the general users snapshot is incomplete, while preserving RLS passthrough.
+- `select` actions with `kind ∈ {network, timeout}` retry up to twice (`SNAPSHOT_RETRY_DELAYS_MS = [250, 600]`, [repository.ts:57](../../../src/app/data/repository.ts#L57)).
+- **Any** gateway/invite call retries once on HTTP 401 after `refreshSession()`.
+- Mutations are never auto-retried — see [09 §7.2](./09-mutations-rls.md#72-retry-behaviour).
 
-### 1.2 Retry policy
+### 1.5 Connection handling in the gateway
 
-Repository retries `orm-gateway` `select` actions with `kind ∈ {network, timeout}` up to twice (delays `250 ms` and `600 ms`). Mutations are **not** retried — see [09 §6.2](./09-mutations-rls.md#62-retry-behaviour).
+The function keeps a small `postgres.js` pool against the transaction pooler (`max: 3`, `prepare: false`, `idle_timeout: 60`, [index.ts:23-32](../../../supabase/functions/orm-gateway/index.ts#L23-L32)). Cold starts and pooler reconnects cost ~1 s; that shows up as `[GATEWAY_OVERHEAD]` in the browser console (§9.4) and is **not** something to work around in page code.
 
-### 1.3 No realtime
+### 1.6 No realtime
 
-The app does **not** subscribe to Supabase Realtime channels. A `grep` for `supabase.channel(` / `.on(` in the source confirms no live subscriptions. Trade-offs:
+The app does **not** subscribe to Supabase Realtime channels. Trade-offs:
 
 - ✅ Simpler mental model, predictable network usage, no connection churn.
 - ❌ Concurrent edits by two managers silently overwrite each other; fresh ingestion rows don't appear until the next `refresh()` or reload.
 
-Re-fetching is explicit: retry banners, invite list post-mutation, or browser refresh.
+Re-fetching is explicit: per-page `refresh()`, error-state retry buttons, or browser reload.
 
-### 1.4 Three-system topology
+### 1.7 Three-system topology
 
 The portal is one of three cooperating systems. Smartlead/Bison send and receive; **n8n** ingests counters/replies and dispatches notifications + OOO routing; the portal is a thin read+config surface. The portal **never**:
 
@@ -59,10 +88,6 @@ The portal is one of three cooperating systems. Smartlead/Bison send and receive
 
 Full topology and table ownership: [11-integrations.md](./11-integrations.md). Product-level statement of the boundaries: [BUSINESS_LOGIC.md §2](../../BUSINESS_LOGIC.md#2-system-boundaries).
 
-### 1.4 Leads limit (optional)
-
-`loadSnapshot({ leadsLimit })` can cap the initial leads set. Not currently exercised by the UI (no page passes the option), but the repository supports it for future pagination.
-
 ---
 
 ## 2. Auth flow
@@ -71,47 +96,51 @@ Implemented in [`providers/auth.tsx`](../../../src/app/providers/auth.tsx).
 
 ### 2.1 Bootstrap sequence
 
-1. AuthProvider calls `supabase.auth.getSession()` on mount.
-2. If a session exists, call `repository.loadIdentity(session.user.id)`, which invokes `orm-gateway`.
-3. In `orm-gateway`, Drizzle reads `public.users` and (for `client` role) `client_users` under RLS passthrough to resolve `clientId`.
-4. Compose `Identity` and set it on context.
+1. `AuthProvider` calls `supabase.auth.getSession()` on mount and subscribes to `onAuthStateChange` ([auth.tsx:220-245](../../../src/app/providers/auth.tsx#L220-L245)).
+2. If a session exists, `loadIdentity()` fires **two calls in parallel** ([auth.tsx:96-99](../../../src/app/providers/auth.tsx#L96-L99)): `repository.loadIdentity(session.user.id)` (gateway action, [index.ts:2659](../../../supabase/functions/orm-gateway/index.ts#L2659)) and `repository.isCurrentAccountActive()` (`current_account_active` RPC).
+3. In the gateway, Drizzle reads `public.users` and (for `client` role) `client_users` under RLS passthrough to resolve `clientId`.
+4. A deactivated-but-still-authenticated user is rejected with `errorCode: "account_deactivated"` ([auth.tsx:100-106](../../../src/app/providers/auth.tsx#L100-L106)).
+5. Compose `Identity`, set it on context; `ShellDataProvider` then loads the shell.
 
-Result state exposed by `useAuth()`:
+A session-signature ref (`${user.id}:${access_token}`) de-duplicates concurrent identity loads triggered by `getSession()` and `onAuthStateChange` firing together ([auth.tsx:147-205](../../../src/app/providers/auth.tsx#L147-L205)). A failure rolls the signature back so the load can be retried.
 
-- `session: Session | null`
-- `actorIdentity: Identity | null` (real user)
-- `identity: Identity | null` (effective user; differs from actor when impersonating)
-- `loading: boolean`
-- `error: string | null`
-- `errorCode`: one of the codes in [02 §6](./02-roles-routes.md#6-blockers--error-screens)
-- `isImpersonating: boolean`
+Result state exposed by `useAuth()` ([auth.tsx:27-45](../../../src/app/providers/auth.tsx#L27-L45)):
+
+- `session`, `loading`, `error`, `errorCode`
+- `actorIdentity` (real user) vs `identity` (effective user under impersonation), `isImpersonating`
+- actions: `refreshIdentity`, `signInWithPassword`, `signInWithOtp`, `requestPasswordReset`, `updatePassword`, `updateProfileName`, `updateProfileAvatar`, `impersonate`, `stopImpersonation`, `signOut`
 
 ### 2.2 Error codes
 
+`AuthErrorCode` — [auth.tsx:17-25](../../../src/app/providers/auth.tsx#L17-L25):
+
 | Code | Trigger |
 |------|---------|
+| `runtime_config` | Supabase client could not be constructed (missing env). |
 | `profile_missing` | Session valid but no `public.users` row — typically first signin after invite before backend sync. |
 | `client_mapping_missing` | `client` role without a `client_users` row. |
-| `permission` | RLS denied the initial query. |
+| `account_deactivated` | `users.is_active = false`; the account keeps a valid JWT but is denied the workspace. |
+| `permission` | RLS denied the identity query. |
 | `session_invalid` | Supabase reports the session token is no longer usable. |
 | `network` | Connection failure during bootstrap. |
+| `unknown` | Anything else. |
 
-Each code maps to a message in [`App.tsx:40-56`](../../../src/app/App.tsx#L40-L56), rendered by `SessionAccessBlocker`.
+Each code maps to a message in [`App.tsx:41-61`](../../../src/app/App.tsx#L41-L61), rendered by `SessionAccessBlocker` ([App.tsx:63](../../../src/app/App.tsx#L63)).
 
 ### 2.3 Auth actions
 
 - `signInWithPassword(email, password)` — standard Supabase password login.
 - `signInWithOtp(email)` — magic link; only when `VITE_AUTH_ALLOW_MAGIC_LINK`.
-- `requestPasswordReset(email)` — uses `VITE_APP_BASE_URL + "/reset-password"` as `redirectTo`.
+- `requestPasswordReset(email)` — uses `appBaseUrl + "/reset-password"` as `redirectTo`.
 - `updatePassword(password)` — post-signin change.
-- `updateProfileName(fullName)` — updates `public.users.first_name/last_name` through `orm-gateway` (RLS-scoped to current user).
+- `updateProfileName(fullName)` / `updateProfileAvatar(path)` — write `public.users` through `orm-gateway` under `users_update_self` ([auth.tsx:322-390](../../../src/app/providers/auth.tsx#L322-L390)).
 - `signOut()` — clears the session and resets context.
-- `refreshIdentity()` — re-runs the identity load (binds to the "Retry" buttons in blockers).
-- `impersonate(identity)` / `stopImpersonation()` — super-admin only.
+- `refreshIdentity()` — re-runs the identity load (bound to the "Retry" buttons in blockers).
+- `impersonate(identity)` / `stopImpersonation()` — super-admin only, **and only outside production** (`allowInternalImpersonation = !isProduction`, [env.ts:34](../../../src/app/lib/env.ts#L34); gate at [auth.tsx:137-141](../../../src/app/providers/auth.tsx#L137-L141)).
 
 ### 2.4 Session hygiene
 
-Before every edge-function call, the repository compares `session.expires_at * 1000` to `Date.now() + 60_000` and refreshes if within a minute of expiry — preempting 401s. A failed refresh raises `RepositoryError({ kind: "permission" })` with the message "Your session expired and could not be refreshed."
+Before every edge-function call, `getSessionAccessToken()` compares `session.expires_at * 1000` to `Date.now() + 60_000` and refreshes if within a minute of expiry — preempting 401s ([repository.ts:297-308](../../../src/app/data/repository.ts#L297-L308)). A failed refresh raises `RepositoryError({ kind: "permission" })` with "Your session expired and could not be refreshed." A 401 that slips through still triggers one refresh-and-retry.
 
 ---
 
@@ -133,6 +162,8 @@ USING (
 
 Postgres can now evaluate the subquery once and apply it as a bitmap filter. Measured improvement: **10.48 s → 0.30 s** for the same workload.
 
+`supabase/migrations/20260601b_leads_campaigns_replies_rls_set_based.sql` extended the same rewrite to `leads`, `campaigns` and `replies` (leads: 446 ms → 22 ms). The rule is now ADR-0006 and applies to **every** new policy on a >1 k-row table — see [09 §5](./09-mutations-rls.md#5-rls-performance-rules-adr-0006).
+
 Lessons:
 
 - Prefer set-based predicates over function-per-row checks.
@@ -151,7 +182,8 @@ Shared component patterns across the app:
 
 - Internal pages: `<LoadingState />` from [`app-ui.tsx`](../../../src/app/components/app-ui.tsx) — compact spinner + label.
 - Client portal pages: `<PortalLoadingState />` from [`portal-ui.tsx`](../../../src/app/components/portal-ui.tsx) — larger block "Loading workspace data".
-- Route-level: `<Suspense fallback={<LoadingState />}>` wrapping lazy chunks ([App.tsx:169](../../../src/app/App.tsx#L169)).
+- Route-level: `<Suspense fallback={<LoadingState />}>` wrapping lazy chunks ([App.tsx:173](../../../src/app/App.tsx#L173)).
+- Per-page: every hook returns `{ data, loading, error, refresh }`; pages render the loading state until the first gateway response lands (no data is available from a snapshot any more).
 
 ### 4.2 Empty
 
@@ -204,29 +236,29 @@ Non-secret UI preferences persist per-browser:
 
 | Key | Source | Purpose |
 |-----|--------|---------|
-| `app_shell_sidebar_hidden` | `app-shell.tsx:78` | Hide/show sidebar on desktop |
-| `table:campaigns:columns` | `campaigns-page.tsx` | Column widths |
-| `table:leads:columns` | `leads-page.tsx` | Column widths |
-| `table:clients:overview:columns` | `clients-page.tsx` | Overview tab column widths (other tabs have their own keys where applicable) |
-| `table:client-leads:columns` | `client-leads-page.tsx` | Column widths |
+| `app_shell_sidebar_mode` | [app-shell.tsx:98](../../../src/app/components/app-shell.tsx#L98) | `expanded` / `collapsed` desktop sidebar. `app_shell_sidebar_hidden` is the legacy boolean key, still read for migration ([app-shell.tsx:97](../../../src/app/components/app-shell.tsx#L97)). |
+| `pdca-color-theme` | [color-theme.tsx:17](../../../src/app/providers/color-theme.tsx#L17) | `contrast` (default) vs `default` palette; sets `data-color-theme` on the root element. |
+| `crm_oauth_data` | [crm-integration-card.tsx:26](../../../src/app/components/crm-integration-card.tsx#L26) | In-flight Zoho OAuth handshake state (cleared on completion). |
+| `table:campaigns:columns` | [campaigns-page.tsx:387](../../../src/app/pages/campaigns-page.tsx#L387) | Column widths |
+| `table:domains:columns` | [domains-page.tsx:302](../../../src/app/pages/domains-page.tsx#L302) | Column widths |
+| `table:invoices:columns` | [invoices-page.tsx:88](../../../src/app/pages/invoices-page.tsx#L88) | Column widths |
+| `table:leads-report:columns:{admin\|internal}:{n}` | [leads-page.tsx:344](../../../src/app/pages/leads-page.tsx#L344) | Column widths, keyed by variant **and column count** so adding a custom column doesn't restore a stale width array. |
+| `table:client-leads-report:columns:{n}` | [client-leads-page.tsx:132](../../../src/app/pages/client-leads-page.tsx#L132) | Same, client portal. |
+| `table:clients:mega-columns:{n}` | [clients-page/mega-table.tsx:995,1068](../../../src/app/pages/clients-page/mega-table.tsx#L995) | Clients mega-table column widths. |
 
-`useResizableColumns(defaults, mins, storageKey)` at [`use-resizable-columns.ts`](../../../src/app/lib/use-resizable-columns.ts) loads from `localStorage` on mount, clamps to mins, and writes back on resize.
+`useResizableColumns({ defaults, mins, storageKey })` at [`use-resizable-columns.ts`](../../../src/app/lib/use-resizable-columns.ts) loads from `localStorage` on mount, clamps to mins, and writes back on resize.
 
 ---
 
 ## 7. Defence in depth
 
-Two overlapping access-control layers:
+Three overlapping layers:
 
-1. **RLS** — primary, enforced by Postgres. Bypass requires the service role (only used by edge functions, never in the browser).
-2. **Client-side scope functions** (`scopeClients`, `scopeCampaigns`, …) — reapplied by pages before rendering. These filter the snapshot to "what this identity can see".
+1. **RLS** — primary, enforced by Postgres. The `orm-gateway` connects with a pooler credential but immediately switches the transaction to the caller's JWT role, so its statements are subject to the same policies as a PostgREST call. Only `send-invite` / `manage-invites` use the service role, and they run server-side.
+2. **Server-side field whitelists** — the gateway's `map*Patch` functions drop any column not on the allow-list (ADR-0004 for leads), so a crafted request cannot write `client_id`, `external_id`, reply fields, etc.
+3. **Client-side scope functions** (`scopeClients`, `scopeCampaigns`, …) — reapplied by pages before rendering, for UI consistency under impersonation. Not a security boundary.
 
-Why both?
-
-- RLS rows out anything the user can't read, guaranteeing no leakage through the browser.
-- Client-side scope provides consistent filtering when the snapshot contains rows that *are* readable but logically belong to another scope (e.g. during super-admin impersonation when the actor's RLS returns more than the impersonated role should see).
-
-Similarly, UI disables inputs by role for ergonomics (e.g. client sees a read-only drawer). RLS then blocks the mutation if the user somehow dispatches one.
+UI disables inputs by role for ergonomics (e.g. client sees a read-only drawer). RLS then blocks the mutation if the user somehow dispatches one.
 
 ---
 
@@ -241,7 +273,7 @@ pnpm test:run   # single-pass (used in CI)
 
 Configuration in `vite.config.ts` under `test: { environment: "jsdom" }`. Test setup files under `src/app/test/`.
 
-Focus: pure functions (`client-metrics`, `client-view-models`, `selectors`, `timeframe`, `format`). Component tests are sparse — the app is mostly a thin presentation layer over the snapshot.
+Focus: pure functions (`client-metrics`, `client-view-models`, `selectors`, `timeframe`, `format`, `conditions/*`), the gateway contract ([`data/__tests__/repository-orm-gateway.test.ts`](../../../src/app/data/__tests__/repository-orm-gateway.test.ts)), and a few page-level tests that mock `repository`. One **architecture guard** test enforces the cutover: [`snapshot-cutover-guard.test.ts`](../../../src/app/data/__tests__/snapshot-cutover-guard.test.ts) fails if any runtime file reintroduces the deleted bulk-snapshot loader.
 
 ### 8.2 E2E / smoke — Playwright
 
@@ -284,21 +316,40 @@ pnpm db:diagnose     # scripts/db-diagnose.mjs
 From [`docs/reference/production-release.md`](../production-release.md) (summarised):
 
 - Point `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_BASE_URL` to production.
-- Set `VITE_APP_ENV=production` (affects labels only).
-- Keep `VITE_AUTH_ALLOW_SELF_SIGNUP=false`.
+- Set `VITE_APP_ENV=production` — this also **disables impersonation** (§2.3).
+- **Leave `VITE_ORM_GATEWAY_FUNCTION` unset** so the app talks to the stable `orm-gateway`, and deploy the reviewed gateway code to that function.
+- Keep `VITE_AUTH_INVITE_ONLY=true` (self-signup off).
 - Decide on `VITE_AUTH_ALLOW_MAGIC_LINK`.
 - Ensure RLS policies match `docs/reference/supabase-production-rls.sql`.
 - Host the static bundle with **SPA rewrites** to `index.html` so client-side routes resolve.
-- Serve over HTTPS. Never ship the service_role key to the browser.
+- Serve over HTTPS. Never ship the service_role key or `DATABASE_URL` to the browser.
 - Run `pnpm build` and `pnpm test:smoke` against the production URL before cutover.
 
 ### 9.3 Secrets hygiene
 
-The browser only ever holds the **publishable** (anon) Supabase key. The edge functions (`send-invite`, `manage-invites`) hold the service role inside Supabase infrastructure. No secrets live in the git repository (the committed `.env` is the developer template; real values go in Vite env at build time).
+| Secret | Lives in | Never in |
+|---|---|---|
+| Publishable (anon) key | browser bundle | — (safe by design) |
+| `DATABASE_URL` (transaction pooler) | `orm-gateway` function env ([index.ts:23](../../../supabase/functions/orm-gateway/index.ts#L23)) | browser, repo |
+| Service role | `send-invite`, `manage-invites` function env | browser, repo |
+| Legacy-CRM publishable key | browser bundle (`VITE_LEGACY_CRM_PUBLISHABLE_KEY`) | — (publishable, read-only project) |
+
+The gateway's pooler credential is the most sensitive value in the system: it is a direct Postgres connection. It is only safe because `executeAsCaller` downgrades the transaction to the caller's role before running any handler — never add a code path that queries `db` outside that transaction.
 
 ### 9.4 Observability
 
-No dedicated instrumentation is built in. Supabase's own logs cover auth and RLS denials; browser DevTools and `sonner` toasts cover the frontend. Non-fatal snapshot errors surface as a warning banner with the current role and a retry button ([App.tsx:164-168](../../../src/app/App.tsx#L164-L168)).
+Instrumentation exists and is deliberate:
+
+| Signal | Where | What |
+|---|---|---|
+| `_serverMs` / `_requestId` | every gateway response ([index.ts:2810-2820](../../../supabase/functions/orm-gateway/index.ts#L2810-L2820)) | `total` / `setup` / `handler` + per-query timings; `_requestId` correlates browser ↔ function logs. |
+| `[PERF][gateway]` | [repository.ts:426-450](../../../src/app/data/repository.ts#L426-L450) | Per-action fetch time, body size, server breakdown (all 14 tracked select actions). |
+| `[GATEWAY_OVERHEAD]` | [repository.ts:444-449](../../../src/app/data/repository.ts#L444-L449) | Warns when `fetchMs - serverMs.total > 1500 ms` — cold start or pooler stall. |
+| `[PERF][orm-gateway]` / `[TEMP PERF]` | function logs ([index.ts:756-763](../../../supabase/functions/orm-gateway/index.ts#L756-L763), [2805-2809](../../../supabase/functions/orm-gateway/index.ts#L2805-L2809)) | Per-action and per-query server timings; retrievable via Supabase function logs. |
+| Payload breakdowns | `repository.loadClientsOverview` / `loadClientsStats` / `loadClientsMetricsSummary` / `loadAnalyticsOverview` (DEV only) | Per-section KB and row counts, so payload regressions are visible immediately. |
+| `perf-mark.ts` / `react-profiler-dev.tsx` | DEV only | Drawer shell-vs-content paint marks; React commit timings with interaction labels. |
+
+All of the above are no-ops or console-only; nothing is shipped to a third-party APM. Supabase's own logs still cover auth and RLS denials. A non-fatal identity error surfaces as a warning banner with the current role ([App.tsx:168-172](../../../src/app/App.tsx#L168-L172)).
 
 ---
 

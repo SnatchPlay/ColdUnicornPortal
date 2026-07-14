@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * Cutover ratchet for the universal-snapshot retirement (see plan goofy-riding-rabbit + memory
- * snapshot-refactor-no-legacy-fallback).
+ * Regression guard for the completed universal-snapshot retirement (ADR-0009).
  *
- * The universal `loadSnapshot` data contract is being replaced by per-page loaders. This test
- * fails if any app-runtime source file outside the explicit allowlist references `loadSnapshot`.
- * The intent is twofold:
- *   1. Prevent NEW code from depending on the snapshot during migration.
- *   2. Track migration progress — the allowlist shrinks each phase and must be EMPTY at Phase 8
- *      (no-snapshot cutover), at which point `loadSnapshot` is deleted entirely.
- *
- * No `useLegacySnapshot()` fallback is permitted; that string is also banned outright.
+ * The universal `loadSnapshot` data contract has been fully replaced by per-page loaders
+ * (`loadShellData` + one gateway select action per route). The allowlist is now EMPTY and must
+ * stay that way: no app-runtime file may reference `loadSnapshot`, and no `useLegacySnapshot()`
+ * fallback may be reintroduced. New pages load their own data — see the `portal-page` skill.
  */
 
 // Raw source of every app-runtime TS/TSX file (tests excluded by the filter below).
@@ -22,14 +17,10 @@ const sources = import.meta.glob("/src/app/**/*.{ts,tsx}", {
 }) as Record<string, string>;
 
 /**
- * Files still permitted to reference `loadSnapshot` while the migration is in flight.
- * Remove entries as phases land; the list MUST be empty after the Phase 8 cutover.
+ * Empty since the cutover landed. Do NOT add entries — a new `loadSnapshot` reference means
+ * someone is rebuilding the universal snapshot instead of adding a per-page gateway action.
  */
-const LOAD_SNAPSHOT_ALLOWLIST = new Set<string>([
-  "/src/app/data/repository.ts", // defines + invokes the action (deleted in Phase 8)
-  "/src/app/data/orm-gateway-contract.ts", // payload/response/parse for the action (deleted in Phase 8)
-  "/src/app/providers/core-data.tsx", // legacy provider boot call (removed in Phase 8)
-]);
+const LOAD_SNAPSHOT_ALLOWLIST = new Set<string>([]);
 
 function appRuntimeFiles() {
   return Object.entries(sources).filter(([path]) => !path.includes("/__tests__/"));

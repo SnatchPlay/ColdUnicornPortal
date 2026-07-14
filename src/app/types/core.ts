@@ -356,20 +356,3 @@ export interface LeadCustomFieldValueRecord {
   updated_by: string | null;
 }
 
-export interface CoreSnapshot {
-  users: UserRecord[];
-  clients: ClientRecord[];
-  clientUsers: ClientUserRecord[];
-  campaigns: CampaignRecord[];
-  leads: LeadRecord[];
-  replies: ReplyRecord[];
-  campaignDailyStats: CampaignDailyStatRecord[];
-  dailyStats: DailyStatRecord[];
-  domains: DomainRecord[];
-  invoices: InvoiceRecord[];
-  emailExcludeList: EmailExcludeRecord[];
-  conditionRules: ConditionRuleRecord[];
-  columnOverrides: ColumnOverrideRecord[];
-  clientCustomFields: ClientCustomFieldRecord[];
-  clientCustomFieldValues: ClientCustomFieldValueRecord[];
-}

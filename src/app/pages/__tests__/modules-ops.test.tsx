@@ -7,11 +7,6 @@ import { InvoicesPage } from "../invoices-page";
 import { useAuth } from "../../providers/auth";
 import { repository } from "../../data/repository";
 
-// Prevent the heavy transitive module load from useCoreData (crm-integration-card etc.)
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(() => ({ clients: [], loading: false, error: null, refresh: vi.fn() })),
-}));
-
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
@@ -95,8 +90,9 @@ describe("Sprint B module operations", () => {
     expect(mockedRepo.updateDomain).toHaveBeenCalledWith("domain-1", expect.objectContaining({ status: "blocked" }));
   });
 
-  it("saves invoice draft changes", async () => {
-    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+  // Invoice writes are admin-only in RLS (invoices_update_admin = private.is_admin_user()).
+  it("saves invoice draft changes as admin", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("admin") as never);
 
     render(<MemoryRouter><InvoicesPage /></MemoryRouter>);
     await act(async () => {});
@@ -108,6 +104,23 @@ describe("Sprint B module operations", () => {
       expect(mockedRepo.updateInvoice).toHaveBeenCalledTimes(1);
     });
     expect(mockedRepo.updateInvoice).toHaveBeenCalledWith("invoice-1", expect.objectContaining({ amount: 1250 }));
+  });
+
+  // Regression guard: a manager can READ invoices but every write is rejected by RLS with 42501.
+  // The edit controls must not be offered at all — see 09-mutations-rls.md §4.
+  it("hides invoice edit controls from managers", async () => {
+    mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
+
+    render(<MemoryRouter><InvoicesPage /></MemoryRouter>);
+    await act(async () => {});
+
+    // The invoice is still visible (row + drawer both name the client)...
+    expect(screen.getAllByText("Acme").length).toBeGreaterThan(0);
+    // ...but it cannot be edited.
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel changes" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Amount")).toBeDisabled();
+    expect(screen.getByLabelText("Issue date")).toBeDisabled();
   });
 
   it("allows admin to add and remove blacklist domains", async () => {

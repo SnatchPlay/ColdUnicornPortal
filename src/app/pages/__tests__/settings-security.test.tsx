@@ -25,13 +25,6 @@ vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(() => ({
-    clients: [], conditionRules: [], columnOverrides: [], clientCustomFields: [],
-    createConditionRule: vi.fn(), updateConditionRule: vi.fn(), deleteConditionRule: vi.fn(),
-  })),
-}));
-
 vi.mock("../../providers/shell-data", () => ({
   useShellData: vi.fn(() => ({
     clientsLite: [], usersLite: [], clientUsers: [], loading: false, error: null, refresh: vi.fn(),
