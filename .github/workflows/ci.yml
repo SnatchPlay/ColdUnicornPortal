@@ -53,7 +53,14 @@ jobs:
             set -euo pipefail
             cd /opt/data/portal
             git fetch --all --prune
-            git checkout main
-            git pull --ff-only origin main
+            # Mirror the remote instead of merging into the server's clone. The checkout is a
+            # deploy artefact with no history worth preserving, and `git pull --ff-only` aborts
+            # outright whenever main is rewritten (a force-push leaves no common ancestor to
+            # fast-forward from), which wedges every deploy until someone SSHes in by hand.
+            # `reset --hard` discards local changes on the server — it must not be edited in
+            # place. Untracked files (the server's .env, docker volumes) are left alone: no
+            # `git clean` here, or a deploy would delete the environment it needs to run.
+            git checkout -f main
+            git reset --hard origin/main
             docker compose up -d --build
             docker image prune -f
