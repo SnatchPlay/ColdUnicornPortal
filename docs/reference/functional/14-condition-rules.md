@@ -188,7 +188,16 @@ Primary mappings:
 - `monthly_meeting_kpi` < `clients.kpi_meetings`
 - `monthly_won_kpi` < `null` (rule is seeded disabled)
 - `auto_li_api_key` < `clients.linkedin_api_key`
-- `bi_setup` < `clients.bi_setup_done`
+- `bi_setup` < `clients.bi_setup_done` (context key retained; the **Bi column was removed** from the
+  grid and the drawer, so `bi_setup_required` is now seeded disabled and the metric is no longer
+  offered in the guided builder)
+
+Per-cell sibling keys (only present while a cell is being coloured, see
+[client-condition-results.ts](../../../src/app/lib/conditions/client-condition-results.ts)):
+
+- `cell.bucket`, `cell.total_leads`, `cell.sql_leads` < the 3-DoD row of the bucket under
+  evaluation. Use these — **not** `three_dod_total` / `three_dod_sql`, which are the row-level
+  3-day rolling sums and are identical for all five buckets.
 
 Direct-mapping-only policy for ambiguous setup fields:
 
@@ -218,8 +227,8 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 - `mom_meetings_vs_meeting_kpi`
 - `min_sent_required`
 - `spreadsheet_or_workspace_ids_present`
-- `bi_setup_required`
 - `auto_li_api_key_present`
+- `setup_type_colour` (added by `20260714_pdca_cell_colour_rules.sql`)
 
 ### 7.2 Disabled (with notes)
 
@@ -229,6 +238,44 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 - `issues_ok`
 - `checkbox_true_green`
 - `bp_text_warning` (non-operational legacy formatting)
+- `bi_setup_required` (disabled by `20260714_pdca_cell_colour_rules.sql` — the Bi column no longer
+  exists, so the rule had no cell to paint)
+
+### 7.3 SQL-vs-KPI cell colouring (`20260714_pdca_cell_colour_rules.sql`)
+
+The 3-DoD / WoW / MoM SQL bands are graded against `monthly_sql_kpi` (= `clients.kpi_leads`,
+"KPI LEADS / MONTH" in the client drawer):
+
+| Band | Target per cell | good | warning | danger |
+|---|---|---|---|---|
+| 3-DoD SQL | KPI / 20 days | ≥ target | 80–99.99% | < 80% |
+| WoW SQL | KPI / 4 weeks | ≥ target | 80–99.99% | < 80% |
+| MoM SQL | KPI | ≥ target | 80–99.99% | < 80% |
+
+A client with `kpi_leads is null` matches no branch and stays uncoloured.
+
+**Why the comparisons scale the left side.** The branches read `value * 20 >= monthly_sql_kpi`
+rather than `value >= monthly_sql_kpi * 0.05`. Multiplying the KPI by `0.04` drifts in IEEE-754
+(`100 * 0.04 = 4.000000000000001`), which flips a client sitting exactly on the 80% boundary from
+yellow to red. Scaling the integer cell value keeps the boundary exact. Same reason the 2.51x ratio
+is written `value * 100 >= cell.sql_leads * 251`.
+
+`three_dod_total_too_high_vs_sql` colours a 3-DoD TOTAL cell **warning** when that day's total leads
+are ≥ 2.51x that *same day's* SQL leads (`cell.sql_leads`), and leaves it uncoloured otherwise. Its
+`base_filter` (`value > 0`) keeps empty days uncoloured — without it `0 >= 2.51 * 0` would hold.
+
+`setup_type_colour` colours the **Setup** custom droplist: `One` → danger (red), `BiS1` / `BiS2` →
+good (green). The field id is environment-specific, so the migration resolves it by name.
+
+`mom_meetings_vs_meeting_kpi` is graded the same way against `monthly_meeting_kpi`.
+
+> **Writing a rule for a bucketed surface (`clients_3dod` / `clients_wow` / `clients_mom`): the left
+> operand must be `value`.** The per-cell evaluator injects the bucket's own number as `value`;
+> the row-level keys (`three_dod_sql`, `wow_sql`, `mom_sql`, `mom_meetings`, `mom_won`) hold rolling
+> aggregates and are identical for all five buckets, so a rule reading them paints the whole band
+> from the current day/week/month. `mom_won_vs_won_kpi` still has this shape — harmless only because
+> `monthly_won_kpi` has no source and stays `null`, so no branch ever matches. Whoever wires up a
+> won-KPI source must switch its left operand to `value` first.
 
 ---
 

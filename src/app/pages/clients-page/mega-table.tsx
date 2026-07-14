@@ -310,19 +310,6 @@ function buildColumns(): MegaColumn[] {
     sortValue: (row) => row.client.kpi_meetings ?? null,
   });
   out.push({
-    id: "bi_setup",
-    group: "basic",
-    sub: "Basic",
-    label: "Bi",
-    width: 34,
-    minWidth: 28,
-    align: "center",
-    conditionKey: "bi_setup",
-    defaultDirection: "desc",
-    render: (row) => (row.client.bi_setup_done ? "✓" : "—"),
-    sortValue: (row) => (row.client.bi_setup_done ? 1 : 0),
-  });
-  out.push({
     id: "notes",
     group: "basic",
     sub: "Basic",
@@ -837,18 +824,24 @@ function customFieldColumn(
       if (field.field_type === "droplist") {
         const options = field.options ?? [];
         if (!canEdit) {
-          return <span className="truncate text-xs text-neutral-300">{value ?? "—"}</span>;
+          return <span className="truncate text-xs text-current">{value ?? "—"}</span>;
         }
         return (
+          // text-current, not a fixed neutral: a <select> does not inherit the colour of
+          // its container, so on a coloured condition cell (.cond-cell-good is black-on-
+          // bright-green in the contrast palette) a hard-coded light grey is unreadable.
           <select
             value={value ?? ""}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onChange?.(row.client.id, field.id, event.target.value || null)}
-            className="w-full bg-transparent text-xs text-neutral-200 outline-none"
+            className="w-full bg-transparent text-xs text-current outline-none"
           >
-            <option value="">—</option>
+            {/* The options render in the native popup, not on the coloured cell, so they
+                need their own dark-panel colours — inheriting text-current would paint
+                them black on the dark popup. */}
+            <option value="" className="bg-[#0d0d0d] text-neutral-200">—</option>
             {options.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
+              <option key={opt} value={opt} className="bg-[#0d0d0d] text-neutral-200">{opt}</option>
             ))}
           </select>
         );
@@ -864,7 +857,7 @@ function customFieldColumn(
       }
       if (!canEdit) {
         return (
-          <span className={cn("truncate text-xs text-neutral-300", isNumeric && "block text-right")}>
+          <span className={cn("truncate text-xs text-current", isNumeric && "block text-right")}>
             {value ?? "—"}
           </span>
         );
@@ -881,7 +874,7 @@ function customFieldColumn(
             onChange?.(row.client.id, field.id, next || null);
           }}
           className={cn(
-            "w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500",
+            "w-full bg-transparent text-xs text-current outline-none placeholder:text-neutral-500",
             isNumeric && "text-right",
           )}
           placeholder={field.field_type === "currency" ? "e.g. 8000 zł" : "—"}
@@ -1234,7 +1227,11 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
                       <button
                         type="button"
                         onClick={() => toggleSort(col)}
-                        className="truncate whitespace-nowrap hover:text-foreground"
+                        // A <button> does not inherit the header's font, so the size,
+                        // weight and uppercase have to be restated here — otherwise the
+                        // label falls back to the UA default (16px, mixed case) and the
+                        // column-header row reads larger than the sub-band row above it.
+                        className="truncate whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] hover:text-foreground"
                         aria-label={`Sort by ${col.sub} ${col.label}`.trim()}
                       >
                         {col.label}

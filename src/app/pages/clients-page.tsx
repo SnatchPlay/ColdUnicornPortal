@@ -1098,47 +1098,15 @@ export function ClientsPage() {
           title="Client PDCA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
         >
-          {/* ── Filter bar ─────────────────────────────────────── */}
-          <div className="mb-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
-              <div className="min-w-0 flex-1 overflow-x-auto">
-                <ToggleGroup
-                  type="single"
-                  value={healthFilter}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setHealthFilter(value as HealthFilter);
-                  }}
-                  variant="outline"
-                  className="min-w-max flex-nowrap rounded-xl border border-border bg-black/10 p-1"
-                >
-                  {HEALTH_FILTERS.map((filter) => (
-                    <ToggleGroupItem key={filter} value={filter} className="h-8 shrink-0 text-xs">
-                      {filter === "all"
-                        ? `All (${healthFilterCounts.get("all") ?? 0})`
-                        : `${
-                            filter === "healthy"
-                              ? "Healthy"
-                              : filter === "critical"
-                              ? "Critical"
-                              : filter === "danger"
-                              ? "Danger"
-                              : "Warning"
-                          } (${healthFilterCounts.get(filter) ?? 0})`}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            </div>
-
+          {/* ── Filter bar — single row: search · status · health · manager ─── */}
+          <div className="mb-4">
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="search"
                 value={nameSearch}
                 onChange={(e) => setNameSearch(e.target.value)}
                 placeholder="Search by name…"
-                className="h-8 min-w-[160px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
+                className="h-8 w-[132px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
               />
 
               <div className="flex flex-wrap gap-1.5">
@@ -1169,9 +1137,37 @@ export function ClientsPage() {
                 })}
               </div>
 
+              <ToggleGroup
+                type="single"
+                value={healthFilter}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setHealthFilter(value as HealthFilter);
+                }}
+                variant="outline"
+                className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
+                aria-label="Health filter"
+              >
+                {HEALTH_FILTERS.map((filter) => (
+                  <ToggleGroupItem key={filter} value={filter} className="h-6 shrink-0 px-1.5 text-[11px]">
+                    {filter === "all"
+                      ? `All (${healthFilterCounts.get("all") ?? 0})`
+                      : `${
+                          filter === "healthy"
+                            ? "Healthy"
+                            : filter === "critical"
+                            ? "Critical"
+                            : filter === "danger"
+                            ? "Danger"
+                            : "Warning"
+                        } (${healthFilterCounts.get(filter) ?? 0})`}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+
               {canEditAssignments && managerUsers.length > 0 && (
                 <Select value={managerFilter} onValueChange={setManagerFilter}>
-                  <SelectTrigger className="h-8 min-w-[140px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
+                  <SelectTrigger className="h-8 w-[136px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
                     <SelectValue placeholder="All managers" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1196,7 +1192,7 @@ export function ClientsPage() {
                   }}
                   className="h-8 rounded-lg border border-white/15 bg-black/20 px-3 text-xs text-white/50 transition hover:border-white/30 hover:text-white"
                 >
-                  Clear filters
+                  Clear
                 </button>
               )}
             </div>

@@ -652,7 +652,8 @@ Runtime mapping for dynamic condition rules is built in `buildClientConditionCon
 | `monthly_meeting_kpi` | `clients.kpi_meetings` |
 | `monthly_won_kpi` | `null` in current build (dependent rule seeded disabled) |
 | `auto_li_api_key` | `clients.linkedin_api_key` |
-| `bi_setup` | `clients.bi_setup_done` |
+| `bi_setup` | `clients.bi_setup_done` (context key only — the Bi column was removed from the grid and the drawer) |
+| `cell.total_leads`, `cell.sql_leads`, `cell.bucket` | the 3-DoD row of the bucket being coloured (per-cell evaluation only) |
 
 ### 15.2 DoD dynamic bucket evaluation
 
