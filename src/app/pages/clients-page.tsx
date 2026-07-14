@@ -32,6 +32,7 @@ import {
   type MegaSortState,
 } from "./clients-page/mega-table";
 import { createSelectionStore } from "./clients-page/selection-store";
+import { useTablePreferences } from "../lib/use-table-preferences";
 
 const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
@@ -39,6 +40,22 @@ type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
 const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
 type ClientStatus = (typeof CLIENT_STATUSES)[number];
+
+/** Row key in `user_table_preferences` for this grid. */
+const CLIENTS_TABLE_PREFS_KEY = "clients:mega";
+
+/**
+ * The caller's saved layout. Every field is optional and re-validated on read: a stale key
+ * (a column that no longer exists, a status that was renamed) must be ignored, never trusted.
+ */
+interface ClientsTablePreferences extends Record<string, unknown> {
+  /** Column width in px, keyed by column id. */
+  widths: Record<string, number>;
+  healthFilter: string;
+  statusFilter: string[];
+  managerFilter: string;
+  sort: MegaSortState;
+}
 
 interface CreateClientDraft {
   name: string;
@@ -776,6 +793,87 @@ export function ClientsPage() {
   const [managerFilter, setManagerFilter] = useState("all");
   const [sort, setSort] = useState<MegaSortState>({ key: "health", direction: "asc" });
 
+  // Per-user layout: column widths, filters and sort, stored in Postgres so the grid looks
+  // the same on any browser. The name search is deliberately *not* persisted — a stale
+  // search term silently hiding most of the table on next login is a trap, not a feature.
+  const { preferences: tablePrefs, loaded: prefsLoaded, update: updateTablePrefs } =
+    useTablePreferences<ClientsTablePreferences>(CLIENTS_TABLE_PREFS_KEY);
+
+  // Apply the stored layout once, when it lands. `prefsLoaded` flips exactly once per mount,
+  // so this cannot fight the user's later clicks.
+  const prefsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!prefsLoaded || prefsAppliedRef.current) return;
+    prefsAppliedRef.current = true;
+
+    if (tablePrefs.healthFilter && HEALTH_FILTERS.includes(tablePrefs.healthFilter as HealthFilter)) {
+      setHealthFilter(tablePrefs.healthFilter as HealthFilter);
+    }
+    if (Array.isArray(tablePrefs.statusFilter)) {
+      const valid = tablePrefs.statusFilter.filter((s): s is string => CLIENT_STATUSES.includes(s as never));
+      setStatusFilter(new Set(valid));
+    }
+    if (typeof tablePrefs.managerFilter === "string") {
+      setManagerFilter(tablePrefs.managerFilter);
+    }
+    if (tablePrefs.sort && typeof tablePrefs.sort.key === "string") {
+      setSort({
+        key: tablePrefs.sort.key,
+        direction: tablePrefs.sort.direction === "desc" ? "desc" : "asc",
+      });
+    }
+  }, [prefsLoaded, tablePrefs]);
+
+  const handleSortChange = useCallback(
+    (next: MegaSortState) => {
+      setSort(next);
+      updateTablePrefs({ sort: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleWidthsChange = useCallback(
+    (widths: Record<string, number>) => updateTablePrefs({ widths }),
+    [updateTablePrefs],
+  );
+
+  const handleHealthFilterChange = useCallback(
+    (next: HealthFilter) => {
+      setHealthFilter(next);
+      updateTablePrefs({ healthFilter: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleStatusToggle = useCallback(
+    (status: string) => {
+      setStatusFilter((prev) => {
+        const next = new Set(prev);
+        if (next.has(status)) next.delete(status);
+        else next.add(status);
+        updateTablePrefs({ statusFilter: [...next] });
+        return next;
+      });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleManagerFilterChange = useCallback(
+    (next: string) => {
+      setManagerFilter(next);
+      updateTablePrefs({ managerFilter: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleClearFilters = useCallback(() => {
+    setNameSearch("");
+    setStatusFilter(new Set());
+    setManagerFilter("all");
+    setHealthFilter("all");
+    updateTablePrefs({ healthFilter: "all", statusFilter: [], managerFilter: "all" });
+  }, [updateTablePrefs]);
+
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   const managerUsers = useMemo(() => users.filter((u) => u.role === "manager"), [users]);
   const clientRoleUsers = useMemo(() => users.filter((u) => u.role === "client"), [users]);
@@ -1098,47 +1196,15 @@ export function ClientsPage() {
           title="Client PDCA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
         >
-          {/* ── Filter bar ─────────────────────────────────────── */}
-          <div className="mb-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
-              <div className="min-w-0 flex-1 overflow-x-auto">
-                <ToggleGroup
-                  type="single"
-                  value={healthFilter}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setHealthFilter(value as HealthFilter);
-                  }}
-                  variant="outline"
-                  className="min-w-max flex-nowrap rounded-xl border border-border bg-black/10 p-1"
-                >
-                  {HEALTH_FILTERS.map((filter) => (
-                    <ToggleGroupItem key={filter} value={filter} className="h-8 shrink-0 text-xs">
-                      {filter === "all"
-                        ? `All (${healthFilterCounts.get("all") ?? 0})`
-                        : `${
-                            filter === "healthy"
-                              ? "Healthy"
-                              : filter === "critical"
-                              ? "Critical"
-                              : filter === "danger"
-                              ? "Danger"
-                              : "Warning"
-                          } (${healthFilterCounts.get(filter) ?? 0})`}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            </div>
-
+          {/* ── Filter bar — single row: search · status · health · manager ─── */}
+          <div className="mb-4">
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="search"
                 value={nameSearch}
                 onChange={(e) => setNameSearch(e.target.value)}
                 placeholder="Search by name…"
-                className="h-8 min-w-[160px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
+                className="h-8 w-[132px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
               />
 
               <div className="flex flex-wrap gap-1.5">
@@ -1148,14 +1214,7 @@ export function ClientsPage() {
                     <button
                       key={s}
                       type="button"
-                      onClick={() => {
-                        setStatusFilter((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(s)) next.delete(s);
-                          else next.add(s);
-                          return next;
-                        });
-                      }}
+                      onClick={() => handleStatusToggle(s)}
                       className={cn(
                         "rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition",
                         active
@@ -1169,9 +1228,37 @@ export function ClientsPage() {
                 })}
               </div>
 
+              <ToggleGroup
+                type="single"
+                value={healthFilter}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  handleHealthFilterChange(value as HealthFilter);
+                }}
+                variant="outline"
+                className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
+                aria-label="Health filter"
+              >
+                {HEALTH_FILTERS.map((filter) => (
+                  <ToggleGroupItem key={filter} value={filter} className="h-6 shrink-0 px-1.5 text-[11px]">
+                    {filter === "all"
+                      ? `All (${healthFilterCounts.get("all") ?? 0})`
+                      : `${
+                          filter === "healthy"
+                            ? "Healthy"
+                            : filter === "critical"
+                            ? "Critical"
+                            : filter === "danger"
+                            ? "Danger"
+                            : "Warning"
+                        } (${healthFilterCounts.get(filter) ?? 0})`}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+
               {canEditAssignments && managerUsers.length > 0 && (
-                <Select value={managerFilter} onValueChange={setManagerFilter}>
-                  <SelectTrigger className="h-8 min-w-[140px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
+                <Select value={managerFilter} onValueChange={handleManagerFilterChange}>
+                  <SelectTrigger className="h-8 w-[136px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
                     <SelectValue placeholder="All managers" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1188,15 +1275,10 @@ export function ClientsPage() {
               {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || healthFilter !== "all") && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setNameSearch("");
-                    setStatusFilter(new Set());
-                    setManagerFilter("all");
-                    setHealthFilter("all");
-                  }}
+                  onClick={handleClearFilters}
                   className="h-8 rounded-lg border border-white/15 bg-black/20 px-3 text-xs text-white/50 transition hover:border-white/30 hover:text-white"
                 >
-                  Clear filters
+                  Clear
                 </button>
               )}
             </div>
@@ -1206,11 +1288,13 @@ export function ClientsPage() {
             <ClientsMegaTable
               rows={visibleMegaRows}
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={handleSortChange}
               onRowClick={handleRowClick}
               onHighlight={handleCellHighlight}
               selectionStore={selectionStore}
               colsRef={tableColsRef}
+              savedWidths={(tablePrefs.widths as Record<string, number> | undefined) ?? null}
+              onWidthsChange={handleWidthsChange}
               columnOverrides={columnOverrides}
               customFields={clientCustomFields}
               customFieldValuesByClient={customFieldValuesByClient}

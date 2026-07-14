@@ -310,19 +310,6 @@ function buildColumns(): MegaColumn[] {
     sortValue: (row) => row.client.kpi_meetings ?? null,
   });
   out.push({
-    id: "bi_setup",
-    group: "basic",
-    sub: "Basic",
-    label: "Bi",
-    width: 34,
-    minWidth: 28,
-    align: "center",
-    conditionKey: "bi_setup",
-    defaultDirection: "desc",
-    render: (row) => (row.client.bi_setup_done ? "✓" : "—"),
-    sortValue: (row) => (row.client.bi_setup_done ? 1 : 0),
-  });
-  out.push({
     id: "notes",
     group: "basic",
     sub: "Basic",
@@ -655,6 +642,13 @@ export interface ClientsMegaTableProps {
   /** Parent ref that receives the ordered visible column id array after each render. */
   colsRef?: MutableRefObject<string[]>;
   storageKey?: string;
+  /**
+   * Column widths from the caller's per-user preferences (`user_table_preferences`). When
+   * supplied, the table renders these instead of its own localStorage copy and reports a
+   * resize back through `onWidthsChange` — see `useTablePreferences`.
+   */
+  savedWidths?: Record<string, number> | null;
+  onWidthsChange?: (widthsById: Record<string, number>) => void;
   /** Master-admin label/visibility overrides keyed by column id. */
   columnOverrides?: ColumnOverrideRecord[];
   /** Master-admin custom columns (text / checkbox / droplist). */
@@ -837,18 +831,24 @@ function customFieldColumn(
       if (field.field_type === "droplist") {
         const options = field.options ?? [];
         if (!canEdit) {
-          return <span className="truncate text-xs text-neutral-300">{value ?? "—"}</span>;
+          return <span className="truncate text-xs text-current">{value ?? "—"}</span>;
         }
         return (
+          // text-current, not a fixed neutral: a <select> does not inherit the colour of
+          // its container, so on a coloured condition cell (.cond-cell-good is black-on-
+          // bright-green in the contrast palette) a hard-coded light grey is unreadable.
           <select
             value={value ?? ""}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onChange?.(row.client.id, field.id, event.target.value || null)}
-            className="w-full bg-transparent text-xs text-neutral-200 outline-none"
+            className="w-full bg-transparent text-xs text-current outline-none"
           >
-            <option value="">—</option>
+            {/* The options render in the native popup, not on the coloured cell, so they
+                need their own dark-panel colours — inheriting text-current would paint
+                them black on the dark popup. */}
+            <option value="" className="bg-[#0d0d0d] text-neutral-200">—</option>
             {options.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
+              <option key={opt} value={opt} className="bg-[#0d0d0d] text-neutral-200">{opt}</option>
             ))}
           </select>
         );
@@ -864,7 +864,7 @@ function customFieldColumn(
       }
       if (!canEdit) {
         return (
-          <span className={cn("truncate text-xs text-neutral-300", isNumeric && "block text-right")}>
+          <span className={cn("truncate text-xs text-current", isNumeric && "block text-right")}>
             {value ?? "—"}
           </span>
         );
@@ -881,7 +881,7 @@ function customFieldColumn(
             onChange?.(row.client.id, field.id, next || null);
           }}
           className={cn(
-            "w-full bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500",
+            "w-full bg-transparent text-xs text-current outline-none placeholder:text-neutral-500",
             isNumeric && "text-right",
           )}
           placeholder={field.field_type === "currency" ? "e.g. 8000 zł" : "—"}
@@ -993,6 +993,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     onHighlight,
     selectionStore,
     storageKey = "table:clients:mega-columns",
+    savedWidths,
+    onWidthsChange,
     columnOverrides,
     customFields,
     customFieldValuesByClient,
@@ -1063,14 +1065,18 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     [cols],
   );
 
-  // Bump the storage key when the column set changes so resize layouts from a
-  // different column count don't get re-used.
-  const dynamicStorageKey = `${storageKey}:${cols.length}`;
+  // Widths persist per column id, not per position: this table's column set is dynamic
+  // (custom fields, hidden columns, master-admin reordering), and a positional array
+  // would hand a saved width to whichever column happens to sit at that index.
+  const columnIds = useMemo(() => cols.map((c) => c.id), [cols]);
 
   const resizable = useResizableColumns({
-    storageKey: dynamicStorageKey,
+    storageKey,
     defaultWidths,
     minWidths,
+    columnIds,
+    savedWidths,
+    onWidthsCommit: onWidthsChange,
   });
 
   const widths = useMemo(() => {
@@ -1234,7 +1240,11 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
                       <button
                         type="button"
                         onClick={() => toggleSort(col)}
-                        className="truncate whitespace-nowrap hover:text-foreground"
+                        // A <button> does not inherit the header's font, so the size,
+                        // weight and uppercase have to be restated here — otherwise the
+                        // label falls back to the UA default (16px, mixed case) and the
+                        // column-header row reads larger than the sub-band row above it.
+                        className="truncate whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.12em] hover:text-foreground"
                         aria-label={`Sort by ${col.sub} ${col.label}`.trim()}
                       >
                         {col.label}

@@ -2322,6 +2322,59 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     return all.map(toColumnOverrideRecord);
   }
 
+  // --- Per-user table preferences (column widths, filters, sort) ---------------
+  //
+  // The row is keyed on the JWT subject, never on a caller-supplied id: RLS only lets a
+  // user touch `user_id = auth.uid()`, and passing the id in the payload would just be a
+  // second place to get it wrong. Impersonation is client-side only, so the subject is
+  // always the real person doing the dragging.
+
+  if (payload.action === "loadTablePreferences") {
+    const rows = await rawQuery<{ preferences: unknown; updated_at: unknown }>(
+      tx,
+      sql`
+        select preferences, updated_at
+        from public.user_table_preferences
+        where table_key = ${payload.tableKey}
+          and user_id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+      `,
+    );
+
+    const row = rows[0];
+    return {
+      tableKey: payload.tableKey,
+      preferences: (row?.preferences as Record<string, unknown> | undefined) ?? null,
+      updatedAt: toIsoString(row?.updated_at),
+    };
+  }
+
+  if (payload.action === "saveTablePreferences") {
+    const rows = await rawQuery<{ preferences: unknown; updated_at: unknown }>(
+      tx,
+      sql`
+        insert into public.user_table_preferences (user_id, table_key, preferences, updated_at)
+        values (
+          nullif(current_setting('request.jwt.claim.sub', true), '')::uuid,
+          ${payload.tableKey},
+          ${JSON.stringify(payload.preferences)}::jsonb,
+          now()
+        )
+        on conflict (user_id, table_key) do update set
+          preferences = excluded.preferences,
+          updated_at = excluded.updated_at
+        returning preferences, updated_at
+      `,
+    );
+
+    const row = rows[0];
+    if (!row) fail(500, "Table preferences upsert failed.");
+    return {
+      tableKey: payload.tableKey,
+      preferences: (row.preferences as Record<string, unknown> | null) ?? null,
+      updatedAt: toIsoString(row.updated_at),
+    };
+  }
+
   if (payload.action === "createClientCustomField") {
     const input = payload.input;
     const optionsJson = input.options ?? null;

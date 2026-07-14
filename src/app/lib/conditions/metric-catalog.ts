@@ -266,15 +266,6 @@ export const BUILTIN_METRICS: MetricDescriptor[] = [
 
   // --- Setup ---
   {
-    path: "bi_setup",
-    label: "BI setup done",
-    surface: "clients_setup",
-    columnKey: "bi_setup",
-    valueType: "boolean",
-    operators: BOOLEAN_OPS,
-    group: "Setup",
-  },
-  {
     path: "client.setup_info",
     label: "Setup info note",
     surface: "clients_setup",

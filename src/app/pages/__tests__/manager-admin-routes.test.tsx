@@ -35,6 +35,10 @@ vi.mock("../../data/repository", () => ({
     loadManagerDashboardOverview: vi.fn(),
     loadClientDashboard: vi.fn(),
     loadClientsOverview: vi.fn(),
+    // The clients grid loads the caller's saved layout on mount; an unstubbed method here
+    // would throw synchronously inside the hook.
+    loadTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: null, updatedAt: null }),
+    saveTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: {}, updatedAt: null }),
     loadLeadsList: vi.fn(),
     loadLeadDetail: vi.fn(),
     loadLeadsFilterOptions: vi.fn(),
@@ -124,6 +128,9 @@ function renderRoute(Component: RouteCase["Component"]) {
 describe("manager/admin route states", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // useTablePreferences caches the saved layout in localStorage; without this a filter
+    // set by one test leaks into the next one and silently empties the grid.
+    window.localStorage.clear();
     // All per-page loaders hang indefinitely — keeps loading state for sync loading checks.
     mockedRepo.loadAdminDashboardOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadManagerDashboardOverview.mockReturnValue(new Promise(() => {}));

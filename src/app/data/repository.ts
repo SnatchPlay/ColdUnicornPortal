@@ -42,6 +42,7 @@ import type {
   ManagerDashboardOverview,
   ManagerDashboardParams,
   ShellData,
+  TablePreferencesPayload,
 } from "../types/view-contracts";
 import type {
   LoadIdentityResult,
@@ -96,6 +97,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateProfileAvatar: { table: "users", operation: "update" },
   upsertColumnOverride: { table: "client_table_column_overrides", operation: "upsert" },
   setColumnOrder: { table: "client_table_column_overrides", operation: "update" },
+  loadTablePreferences: { table: "user_table_preferences", operation: "select" },
+  saveTablePreferences: { table: "user_table_preferences", operation: "upsert" },
   createClientCustomField: { table: "client_custom_fields", operation: "insert" },
   updateClientCustomField: { table: "client_custom_fields", operation: "update" },
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
@@ -598,6 +601,12 @@ export interface Repository {
     patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
   ): Promise<ColumnOverrideRecord>;
   setColumnOrder(orderedKeys: string[]): Promise<ColumnOverrideRecord[]>;
+  /** The caller's own saved layout for one table. `preferences` is null when never saved. */
+  loadTablePreferences(tableKey: string): Promise<TablePreferencesPayload>;
+  saveTablePreferences(
+    tableKey: string,
+    preferences: Record<string, unknown>,
+  ): Promise<TablePreferencesPayload>;
   createClientCustomField(input: {
     name: string;
     field_type: ClientCustomFieldType;
@@ -954,6 +963,14 @@ export const repository: Repository = {
 
   async upsertColumnOverride(columnKey, patch) {
     return invokeOrmGatewayAction("upsertColumnOverride", { columnKey, patch });
+  },
+
+  async loadTablePreferences(tableKey) {
+    return invokeOrmGatewaySelectWithRetry("loadTablePreferences", { tableKey });
+  },
+
+  async saveTablePreferences(tableKey, preferences) {
+    return invokeOrmGatewayAction("saveTablePreferences", { tableKey, preferences });
   },
 
   async setColumnOrder(orderedKeys) {

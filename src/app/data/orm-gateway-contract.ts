@@ -36,6 +36,7 @@ import type {
   LeadsListResponse,
   ManagerDashboardOverview,
   ShellData,
+  TablePreferencesPayload,
 } from "../types/view-contracts";
 
 export type OrmGatewayAuthErrorCode =
@@ -278,6 +279,25 @@ export interface SetColumnOrderPayload {
   orderedKeys: string[];
 }
 
+/**
+ * Per-user table preferences (column widths, filters, sort). Personal — unlike
+ * `column_overrides`, which is the global master-admin layout. The row is always the
+ * caller's own: the gateway derives `user_id` from the JWT and RLS enforces it, so no
+ * user id crosses the wire.
+ */
+export interface LoadTablePreferencesPayload {
+  action: "loadTablePreferences";
+  /** Which table, e.g. "clients:mega". */
+  tableKey: string;
+}
+
+export interface SaveTablePreferencesPayload {
+  action: "saveTablePreferences";
+  tableKey: string;
+  /** Shape is owned by the UI; the gateway stores it as opaque jsonb. */
+  preferences: Record<string, unknown>;
+}
+
 export interface CreateClientCustomFieldPayload {
   action: "createClientCustomField";
   input: {
@@ -395,6 +415,8 @@ export type OrmGatewayRequest =
   | UpdateProfileAvatarPayload
   | UpsertColumnOverridePayload
   | SetColumnOrderPayload
+  | LoadTablePreferencesPayload
+  | SaveTablePreferencesPayload
   | CreateClientCustomFieldPayload
   | UpdateClientCustomFieldPayload
   | DeleteClientCustomFieldPayload
@@ -457,6 +479,8 @@ export interface OrmGatewayResponseMap {
   updateProfileAvatar: UpdateProfileNameResult;
   upsertColumnOverride: ColumnOverrideRecord;
   setColumnOrder: ColumnOverrideRecord[];
+  loadTablePreferences: TablePreferencesPayload;
+  saveTablePreferences: TablePreferencesPayload;
   createClientCustomField: ClientCustomFieldRecord;
   updateClientCustomField: ClientCustomFieldRecord;
   deleteClientCustomField: { ok: true };
@@ -818,6 +842,32 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     }
     const orderedKeys = payload.orderedKeys.filter((k): k is string => typeof k === "string");
     return { ok: true, value: { action, orderedKeys } };
+  }
+
+  if (action === "loadTablePreferences" || action === "saveTablePreferences") {
+    if (!hasStringField(payload, "tableKey")) {
+      return { ok: false, error: `${action} requires tableKey.` };
+    }
+    const tableKey = String(payload.tableKey).trim();
+    if (tableKey.length === 0 || tableKey.length > 64) {
+      return { ok: false, error: "tableKey must be 1–64 characters." };
+    }
+
+    if (action === "loadTablePreferences") {
+      return { ok: true, value: { action, tableKey } };
+    }
+
+    if (!hasObjectField(payload, "preferences") || Array.isArray(payload.preferences)) {
+      return { ok: false, error: "saveTablePreferences requires a preferences object." };
+    }
+    // The column matches a 64 KB check constraint; reject early so a runaway client gets a
+    // clear error instead of a constraint violation. 32 KB is ~10x any real layout.
+    const preferences = payload.preferences as Record<string, unknown>;
+    if (JSON.stringify(preferences).length > 32_768) {
+      return { ok: false, error: "preferences payload is too large (max 32 KB)." };
+    }
+
+    return { ok: true, value: { action, tableKey, preferences } };
   }
 
   if (action === "createClientCustomField") {

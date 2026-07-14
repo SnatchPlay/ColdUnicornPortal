@@ -104,6 +104,18 @@ export interface ClientConditionContext {
   custom: Record<string, string | null>;
 
   value?: unknown;
+
+  /**
+   * Sibling metrics of the bucket currently being coloured. Only present on the
+   * per-cell evaluation path (see `evaluateThreeDodCells`), where the row-level
+   * `three_dod_*` keys hold rolling sums and are therefore identical across all
+   * five buckets. Rules reference these as `cell.sql_leads` / `cell.total_leads`.
+   */
+  cell?: {
+    bucket: string;
+    total_leads: number;
+    sql_leads: number;
+  };
 }
 
 function rowByBucket<T extends { bucket: string }>(rows: T[], bucket: string): T | null {

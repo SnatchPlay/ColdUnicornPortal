@@ -115,7 +115,7 @@ One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/meg
 | Group band | Sub band | Columns |
 |-----------|----------|---------|
 | **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
-| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Bi-setup ✓, Auto-OOO ✓, CRM ✓, Updated |
+| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
 | **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
 | **3-Day rolling** | 3-DoD TOTAL leads | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads` |
@@ -174,7 +174,6 @@ Editable fields — **Client configuration** section:
 | Prospects signed | number input | `clients.prospects_signed` | manager + admin |
 | Prospects added | number input | `clients.prospects_added` | manager + admin |
 | Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` | manager + admin |
-| BI setup done | checkbox | `clients.bi_setup_done` | manager + admin |
 | Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Abo}` |
 | Internal notes | textarea | `clients.notes` | Always visible; also inline-editable from the mega-table (§2.2) |
 | Setup notes | textarea | `clients.setup_info` | manager + admin |
@@ -460,7 +459,7 @@ The manager drawer on Clients page now covers all `clients` columns except `crm_
 - **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
 
-`linkedin_api_key`, `external_workspace_id`, `external_api_key`, `bi_setup_done`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are now editable in the drawer (BL-3 shipped).
+`linkedin_api_key`, `external_workspace_id`, `external_api_key`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are now editable in the drawer (BL-3 shipped). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
 
 ---
 

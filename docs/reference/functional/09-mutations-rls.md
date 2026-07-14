@@ -194,6 +194,26 @@ Admin-configurable Clients table, surfaced in the Settings page ([settings-page.
 
 Definitions are admin-tier only; values are gated by the field's `editable_by` array. Migrations: `20260520_client_custom_fields.sql`, `20260520_client_table_overrides.sql`, `20260524_column_override_position.sql`, `20260527_custom_field_editable_by.sql`, `20260616_custom_field_link_type.sql`.
 
+### Per-user table preferences
+
+| Repository method | Table | Gateway |
+|---|---|---|
+| `loadTablePreferences(tableKey)` | `user_table_preferences` | `loadTablePreferences` action |
+| `saveTablePreferences(tableKey, preferences)` | `user_table_preferences` | `saveTablePreferences` action |
+
+Personal layout — column widths, filters and sort — **not** the global `column_overrides` layout
+(see [03-data-model §4](./03-data-model.md)). The row is keyed on the JWT subject inside the
+gateway; no user id crosses the wire, and RLS allows a caller to touch only `user_id = auth.uid()`.
+`preferences` is opaque jsonb: the UI owns the shape and must ignore stale keys rather than trust
+them. The payload is capped at 32 KB in `parseOrmGatewayRequest`, backed by a 64 KB CHECK on the
+column.
+
+Consumed by [`useTablePreferences`](../../../src/app/lib/use-table-preferences.ts), which treats
+localStorage as a first-paint cache and Postgres as the source of truth, debounces writes (a drag
+must not be a gateway call per mousemove), and **degrades instead of failing**: if the action is
+rejected — an older gateway build, say — the table keeps working off the cache. Migration:
+`20260714b_user_table_preferences.sql`.
+
 ---
 
 ## 3. Edge functions

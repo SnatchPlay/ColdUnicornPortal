@@ -49,7 +49,6 @@ export interface ClientDraft {
   // prospects & setup
   prospectsSigned: number;
   prospectsAdded: number;
-  biSetupDone: boolean;
   // notes & lost reason
   notes: string;
   lostReason: string;
@@ -271,7 +270,6 @@ export function toClientDraft(client: ClientRecord): ClientDraft {
     linkedinApiKey: client.linkedin_api_key ?? "",
     prospectsSigned: client.prospects_signed,
     prospectsAdded: client.prospects_added,
-    biSetupDone: client.bi_setup_done,
     notes: client.notes ?? "",
     lostReason: client.lost_reason ?? "",
     kpiLeads: client.kpi_leads != null ? String(client.kpi_leads) : "",
@@ -328,10 +326,9 @@ export function buildClientPatch(
   const nextLinkedinKey = draft.linkedinApiKey.trim() || null;
   if ((client.linkedin_api_key ?? null) !== nextLinkedinKey) patch.linkedin_api_key = nextLinkedinKey;
 
-  // prospects & setup flags
+  // prospects
   if (client.prospects_signed !== draft.prospectsSigned) patch.prospects_signed = draft.prospectsSigned;
   if (client.prospects_added !== draft.prospectsAdded) patch.prospects_added = draft.prospectsAdded;
-  if (client.bi_setup_done !== draft.biSetupDone) patch.bi_setup_done = draft.biSetupDone;
 
   // notes & lost reason
   const nextNotes = draft.notes.trim() || null;
@@ -847,22 +844,6 @@ export function ClientDrawer({
                     onCheckedChange={(checked) =>
                       setDraft((current) =>
                         current ? { ...current, autoOooEnabled: checked === true } : current,
-                      )
-                    }
-                    className="h-4 w-4"
-                  />
-                </div>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup done</span>
-                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <span className="text-sm">{draft.biSetupDone ? "Done" : "Not done"}</span>
-                  <Checkbox
-                    checked={draft.biSetupDone}
-                    onCheckedChange={(checked) =>
-                      setDraft((current) =>
-                        current ? { ...current, biSetupDone: checked === true } : current,
                       )
                     }
                     className="h-4 w-4"

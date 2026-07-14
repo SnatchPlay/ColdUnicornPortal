@@ -438,8 +438,16 @@ Three tables exist in migrations only; the introspected Drizzle schema does not 
 | `client_table_column_overrides` | [`20260520_client_table_overrides.sql`](../../../supabase/migrations/20260520_client_table_overrides.sql), `20260524_column_override_position.sql` | `column_key` PK, `label_override`, `hidden`, `position`, `updated_at/by` | select: `public.is_admin_user()`; write: `current_app_role() = 'master_admin'` |
 | `client_custom_fields` | [`20260520_client_custom_fields.sql`](../../../supabase/migrations/20260520_client_custom_fields.sql) (+ `20260527_custom_field_editable_by.sql`, `20260616_custom_field_link_type.sql`, `20260618`) | `name`, `field_type` (`text\|checkbox\|droplist\|link\|number\|currency`), `options` jsonb, `position`, `editable_by` text[] default `{master_admin}` | `ccf_select` — internal roles incl. manager; `ccf_write_master` — `master_admin` only |
 | `client_custom_field_values` | same | PK (`client_id`, `field_id`), `value` text (raw; parsing is frontend-only) | `ccfv_select_scoped` — `can_access_client(client_id)`; `ccfv_write_scoped` — accessible client **and** role ∈ field `editable_by` |
+| `user_table_preferences` | [`20260714b_user_table_preferences.sql`](../../../supabase/migrations/20260714b_user_table_preferences.sql) | PK (`user_id`, `table_key`), `preferences` jsonb (`{ widths, filters, sort }`, ≤64 KB CHECK), `updated_at` | own rows only, all verbs: `user_id = auth.uid()` |
 
 The lead-level equivalents (`lead_custom_fields` / `lead_custom_field_values`, §2.4) follow the same pattern but scope definitions per client.
+
+**`client_table_column_overrides` vs `user_table_preferences`** — easy to confuse, opposite scopes.
+The overrides table is the **global** layout a master_admin publishes to the whole team (labels,
+order, hidden columns). `user_table_preferences` is **personal**: column widths, filters and sort,
+keyed on `auth.uid()`, so one CS manager dragging a column edge cannot rebuild the grid for
+everyone else. Note that impersonation is client-side only — the JWT reaching the gateway still
+belongs to the real actor, so `auth.uid()` is the person actually doing the dragging.
 
 ---
 
