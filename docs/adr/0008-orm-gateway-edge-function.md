@@ -63,9 +63,11 @@ gateway: `supabase/functions/orm-gateway/` (Deno + Drizzle ORM + postgres.js).
 ([`rls-context.ts:20-34`](../../supabase/functions/orm-gateway/rls-context.ts#L20)). That looks
 alarming and is deliberate:
 
-- Supabase's Edge Function runtime **already verified the JWT** before our handler runs (the
-  function is deployed with JWT verification on). A request with a forged token never reaches
-  this code.
+- Supabase's Edge Function runtime **already verified the JWT** before our handler runs. This is
+  not an assumption — it is deployment state, verified 2026-07-14: `orm-gateway` and
+  `orm-gateway-next` are both deployed with **`verify_jwt: true`**
+  (`supabase functions list --project-ref bnetnuzxynmdftiadwef`). A request with a forged token
+  never reaches this code.
 - Even if it did, the claims are only ever used to *narrow* privilege — they are fed into
   `set_config` and Postgres then re-enforces **every** RLS policy against them. A forged `sub`
   would have to correspond to a real user row to see anything, and the role is clamped to the
@@ -77,6 +79,17 @@ into every cold start for a guarantee the platform already provides.
 level. If you ever deploy this function with `--no-verify-jwt`, you must add signature
 verification to `parseJwtClaims` in the same change. This is the single most important invariant
 in the file.
+
+**How to check it:** `supabase functions list --project-ref bnetnuzxynmdftiadwef` → `orm-gateway`
+must show `verify_jwt: true`. Re-check after any deploy that was not made from this repo.
+
+> **Contrast with the invite functions.** `send-invite` and `manage-invites` are deployed with
+> **`verify_jwt: false`** — deliberately, not by accident. They hold the service-role key, so they
+> do the verification *themselves*: reject a missing bearer token (401), call `auth.getUser()`
+> (which verifies the signature server-side via the Auth API), then re-read the actor's role from
+> `public.users` and gate on it (403). Two different, both-valid patterns — but never assume a
+> function is protected just because it is an edge function. Check `verify_jwt`, and if it is
+> `false`, read the handler.
 
 ## Alternatives considered
 

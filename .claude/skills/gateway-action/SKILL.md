@@ -66,6 +66,16 @@ even though the frontend types compile.
 `orm-gateway-next` is a thin twin that re-exports the same handler, for staging a deploy behind
 `VITE_ORM_GATEWAY_FUNCTION` without touching the live function.
 
+**After any deploy, confirm the security invariant still holds:**
+
+```bash
+supabase functions list --project-ref bnetnuzxynmdftiadwef   # orm-gateway must show verify_jwt: true
+```
+
+The gateway decodes the caller's JWT **without verifying its signature** — that is only safe because
+the platform verified it first. A deploy that turns `verify_jwt` off silently removes the entire
+authentication step. See [ADR-0008](../../../docs/adr/0008-orm-gateway-edge-function.md).
+
 ## Checklist
 
 - [ ] Contract: payload interface + union member + response-map entry + `parseOrmGatewayRequest` branch
