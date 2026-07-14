@@ -198,7 +198,15 @@ Definitions are admin-tier only; values are gated by the field's `editable_by` a
 
 ## 3. Edge functions
 
-Four functions are deployed:
+Four functions are deployed. **The `verify_jwt` column is load-bearing — read it before assuming a
+function is protected** (verified 2026-07-14 via `supabase functions list`):
+
+| Function | `verify_jwt` | Who enforces auth |
+|---|---|---|
+| `orm-gateway` | **`true`** | The platform, before the handler runs. This is what makes it safe for `parseJwtClaims` to decode the JWT **without** re-verifying the signature ([ADR-0008](../../adr/0008-orm-gateway-edge-function.md)). If this ever flips to `false`, the gateway must verify the signature itself. |
+| `orm-gateway-next` | **`true`** | same |
+| `send-invite` | **`false`** | **The handler itself**, deliberately: 401 on a missing bearer token → `auth.getUser()` (verifies the signature server-side via the Auth API) → re-reads the actor's role from `public.users` and gates on it (403). |
+| `manage-invites` | **`false`** | same pattern — 401 → `auth.getUser()` → `isAdminActor(role)` → 403. |
 
 | Function | Purpose | Privileges |
 |---|---|---|
