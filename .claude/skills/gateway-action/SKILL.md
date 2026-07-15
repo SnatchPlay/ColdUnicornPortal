@@ -58,10 +58,20 @@ In [`supabase/functions/orm-gateway/index.ts`](../../../supabase/functions/orm-g
 
 ## Deploy
 
-The edge function is **not** deployed by `pnpm build`. It ships separately, and there is no
-Supabase CLI wired into this repo — deploy via the Supabase MCP (`deploy_edge_function`) or the
-dashboard. Until it is deployed, the new action returns an "unknown action" error in production
-even though the frontend types compile.
+**Test it on the local stack before it ever reaches production.** The edge function is **not**
+deployed by `pnpm build` — it ships separately, so a new action type-checks locally but 400s
+("unknown action") until deployed. Run it end-to-end against local Supabase first:
+
+```bash
+supabase start                                                    # local Postgres + Auth + Edge
+supabase functions serve --env-file supabase/functions/.env.local # serve the gateway locally
+pnpm dev                                                           # app → local stack, exercise the action
+```
+
+See [reference/local-supabase.md](../../../docs/reference/local-supabase.md). Only after it works
+locally: deploy. On push to `main`, the CI `deploy-functions` job runs `supabase functions deploy`
+(gated behind `ENABLE_FUNCTION_DEPLOY`); for a one-off, `supabase functions deploy <name>
+--project-ref bnetnuzxynmdftiadwef`, the Supabase MCP (`deploy_edge_function`), or the dashboard.
 
 `orm-gateway-next` is a thin twin that re-exports the same handler, for staging a deploy behind
 `VITE_ORM_GATEWAY_FUNCTION` without touching the live function.
@@ -83,6 +93,7 @@ authentication step. See [ADR-0008](../../../docs/adr/0008-orm-gateway-edge-func
 - [ ] Handler queries via Drizzle; no hand-rolled row scoping; windows respected
 - [ ] `Repository` interface + implementation
 - [ ] Consumed by a per-page hook with `loadIdRef`
+- [ ] Exercised end-to-end on the **local Supabase stack** (`supabase functions serve`) before deploy
 - [ ] Edge function deployed (or the change is explicitly flagged as pending deploy)
 - [ ] Docs: [09-mutations-rls.md](../../../docs/reference/functional/09-mutations-rls.md) for a
       write, [03-data-model.md](../../../docs/reference/functional/03-data-model.md) if columns

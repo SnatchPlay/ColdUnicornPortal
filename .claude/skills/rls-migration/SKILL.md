@@ -50,8 +50,12 @@ node scripts/db-diagnose-rls-explain.mjs
 
 - Files live in `supabase/migrations/` named `YYYYMMDD[suffix]_description.sql`
   (e.g. `20260601b_leads_campaigns_replies_rls_set_based.sql`).
-- Apply with `node scripts/db-apply-migrations.mjs` (`pnpm db:migrate`).
-- Verify with `node scripts/db-verify.mjs`.
+- **Apply and test on the local Supabase stack first** — `pnpm db:migrate:local` against
+  `supabase start` (hydrated from a prod dump, so row counts are realistic; see
+  [reference/local-supabase.md](../../../docs/reference/local-supabase.md)). Never test a migration
+  by applying it straight to production. The cloud apply then happens via `pnpm db:migrate` (CI
+  `db-migrate` job on push to `main`).
+- Verify with `node scripts/db-verify.mjs` (set `SUPABASE_DB_URL` — local or cloud).
 - **Shipped migrations are immutable** — fix forward with a new file. Never edit a migration that
   has been applied.
 - Ask before anything destructive (drop/rename a column, drop a policy). Additive is the default.
@@ -80,6 +84,7 @@ variant.
 - [ ] Set-based predicate (no per-row `private.*` on hot tables)
 - [ ] EXPLAIN **after** → SubPlan/InitPlan confirmed
 - [ ] Before/after timings in the migration comment
+- [ ] Applied + tested on the **local Supabase stack** (`pnpm db:migrate:local`) before cloud
 - [ ] Migration applied + `db-verify` clean
 - [ ] Row counts sanity-checked **per role** (client / manager / admin)
 - [ ] Drizzle schema regenerated if columns changed

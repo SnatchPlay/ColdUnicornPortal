@@ -61,8 +61,10 @@ loading/empty/error states and the contrast theme axis (which defaults to **on**
 
 ### Database / RLS changes
 
-Use the `rls-migration` skill. The non-negotiable part: **`EXPLAIN (ANALYZE, BUFFERS)` as the
-`authenticated` role, not superuser** — superuser bypasses RLS and gives a false baseline.
+Use the `rls-migration` skill. **Apply and test the migration on the local Supabase stack first**
+(`pnpm db:migrate:local`) — never test a schema/RLS change by applying it straight to production.
+The non-negotiable part: **`EXPLAIN (ANALYZE, BUFFERS)` as the `authenticated` role, not superuser**
+— superuser bypasses RLS and gives a false baseline.
 
 ```bash
 node scripts/db-diagnose-rls-explain.mjs   # EXPLAIN under a real JWT context
@@ -78,8 +80,10 @@ comment.
 
 ### Gateway changes
 
-Use the `gateway-action` skill. Remember the edge function deploys **separately** from the
-frontend: until it is deployed, a new action type-checks locally but 400s in production.
+Use the `gateway-action` skill. **Test the function on the local Supabase stack**
+(`supabase functions serve` against `supabase start`) before deploying — never verify a function by
+deploying it to production. Remember the edge function deploys **separately** from the frontend:
+until it is deployed, a new action type-checks locally but 400s in production.
 
 ## 4. Documentation discipline
 
