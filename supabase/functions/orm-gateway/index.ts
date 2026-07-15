@@ -415,7 +415,7 @@ function mapConditionRulePatch(patch: Record<string, unknown>) {
 function mapClientInsert(input: Record<string, unknown>) {
   return {
     name: input.name,
-    managerId: input.manager_id,
+    managerId: input.manager_id ?? null,
     status: input.status,
     kpiLeads: input.kpi_leads ?? null,
     kpiMeetings: input.kpi_meetings ?? null,

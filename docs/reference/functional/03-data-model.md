@@ -107,7 +107,7 @@ The business entity whose outreach we run.
 | `id` | uuid PK | |
 | `created_at` | timestamptz | |
 | `name` | text not null | Displayed everywhere a client is named. |
-| `manager_id` | uuid FK > `users.id` not null | Determines manager scoping (`scopeClients`). |
+| `manager_id` | uuid FK > `users.id` **nullable** (`20260715_clients_manager_id_nullable.sql`) | Determines manager scoping (`scopeClients`). `null` = Unassigned; may reference an admin, not only a `manager`-role user. |
 | `kpi_leads` | smallint | Contract target leads/month (shown in sidebar mini-card & dashboards). |
 | `kpi_meetings` | smallint | Contract target meetings/month. |
 | `contracted_amount` | numeric | For billing context; not displayed in main UI. |

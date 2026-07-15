@@ -179,7 +179,7 @@ export const clients = pgTable("clients", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	name: text().notNull(),
-	managerId: uuid("manager_id").notNull(),
+	managerId: uuid("manager_id"),
 	kpiLeads: smallint("kpi_leads"),
 	kpiMeetings: smallint("kpi_meetings"),
 	contractedAmount: numeric("contracted_amount"),

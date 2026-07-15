@@ -120,7 +120,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **RLS policy:** `clients_insert_internal` — `role IN ('super_admin','admin','manager')` (set-based predicate). Migration: `supabase/migrations/20260517_entity_insert_policies.sql`.
 - **Allowed roles:** admin, super_admin, manager.
 - **Called from:** Clients page "New client" Sheet ([clients-page.tsx:245](../../../src/app/pages/clients-page.tsx#L245)).
-- **Fields:** `name` (required), `manager_id` (required; auto-set to `identity.userId` for manager), `status` (required), `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`.
+- **Fields:** `name` (required), `manager_id` (**optional** — `null` = Unassigned; pre-filled with `identity.userId` for the manager role, but an admin may leave it empty; the picker also offers admins, not just `manager`-role users), `status` (required), `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`. `clients.manager_id` is nullable since `20260715_clients_manager_id_nullable.sql`.
 - **Update pattern:** no optimistic update; the returned row is prepended to the page's local `clients` array.
 
 ### 2.11 `createCampaign(input)` — [repository.ts:796-798](../../../src/app/data/repository.ts#L796-L798) · gateway [index.ts:2354](../../../supabase/functions/orm-gateway/index.ts#L2354)
