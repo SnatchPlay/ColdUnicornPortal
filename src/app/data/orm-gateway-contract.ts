@@ -15,7 +15,7 @@
   LeadCustomFieldValueRecord,
   LeadRecord,
   UserRecord,
-} from "../types/core";
+} from "../types/core.ts";
 import type {
   AdminDashboardOverview,
   AdminSettingsPayload,
@@ -37,7 +37,7 @@ import type {
   ManagerDashboardOverview,
   ShellData,
   TablePreferencesPayload,
-} from "../types/view-contracts";
+} from "../types/view-contracts.ts";
 
 export type OrmGatewayAuthErrorCode =
   | "runtime_config"

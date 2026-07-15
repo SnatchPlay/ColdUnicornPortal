@@ -118,4 +118,13 @@ no-op (nothing to migrate / unchanged function code redeploys harmlessly).
 - **`orm-gateway-next`** runs identical code to `orm-gateway`; it exists so dev traffic can target a
   WIP function without touching production. Point `VITE_ORM_GATEWAY_FUNCTION` at it when needed.
 - **TLS.** `db:migrate` auto-disables TLS for localhost and requires it for the cloud pooler;
-  override with `SUPABASE_DB_SSL=require|disable` if your connection string is unusual.
+  override with `SUPABASE_DB_SSL=require|disable` if your connection string is unusual. The gateway
+  (`orm-gateway/index.ts`) applies the same rule to its own connection.
+- **`.ts` import extensions.** The shared contract chain the gateway pulls
+  (`data/orm-gateway-contract.ts` → `types/view-contracts.ts` ↔ `lib/client-metrics.ts`,
+  `types/core.ts`) uses explicit `.ts` extensions on its relative imports. That is **required** so
+  the local edge runtime (`supabase functions serve`, Deno) can resolve them — do not strip them.
+  Vite/esbuild accept them; there is no tsconfig to object.
+- **Verified end-to-end (2026-07-15):** `supabase start` + `scripts/supabase-local-reset.sh` +
+  `supabase functions serve` + `pnpm dev` → sign in with a real account and the Clients grid loads
+  from the local DB through the locally-served gateway.

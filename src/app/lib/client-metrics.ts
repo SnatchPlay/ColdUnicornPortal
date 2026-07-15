@@ -1,4 +1,4 @@
-import type { ClientMetricsSummary } from "../types/view-contracts";
+import type { ClientMetricsSummary } from "../types/view-contracts.ts";
 
 /**
  * Minimal lead field set read by createClientMetrics. Accepts full LeadRecord (backwards-compatible)

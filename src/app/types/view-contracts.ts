@@ -20,11 +20,11 @@ import type {
   LeadCustomFieldRecord,
   LeadRecord,
   ReplyRecord,
-} from "./core";
+} from "./core.ts";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
 // payload — only fields actually consumed by createClientMetrics are shipped).
-import type { DailyStatInput } from "../lib/client-metrics";
+import type { DailyStatInput } from "../lib/client-metrics.ts";
 
 // --- Lite shapes (navigation / filter options) ---------------------------------------------------
 
