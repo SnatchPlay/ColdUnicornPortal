@@ -46,30 +46,42 @@ stack.
    Both deploy jobs stay dormant until their variable is `true`, so merging this change does not
    disturb the current SSH frontend deploy.
 
+## Provisioning the local DB (one-time)
+
+The base schema (tables, `private.*` helpers, RLS, enums) lives **only in the cloud**.
+`supabase/migrations/` holds *delta* migrations on top of it — **not** a from-zero schema — and the
+Supabase CLI skips the `YYYYMMDD`**`b`**`_…`-style filenames it cannot parse. So the CLI must **not**
+build the schema (a plain `supabase start`/`db reset` fails with `relation … does not exist`).
+Instead, restore a **full cloud dump** and keep applying new deltas with the runner:
+
+```bash
+export CLOUD_DB_URL='postgresql://…pooler.supabase.com:5432/postgres'   # cloud pooler (kept secret)
+./scripts/supabase-local-reset.sh                                       # empty stack → full dump → new migrations
+```
+
+What the script does (do it by hand if you prefer): boot an **empty** stack with the delta
+migrations moved aside so the CLI does not try (and fail) to apply them → restore a full dump
+(schema + data) from the cloud into the local DB → restore the migrations → apply any *new* ones
+with `pnpm db:migrate:local`.
+
+> The dump holds **real data (PII)**. It lands under `supabase/.local/` (gitignored) and in your
+> Docker volume — never commit or copy it. It includes `auth.users`, so the same accounts (and
+> passwords) that work in production work locally.
+
 ## Daily local loop
 
 ```bash
-supabase start                                   # boots Postgres/Auth/Edge/Studio; prints the anon key + URLs
-cp .env.local.example .env.local                 # fill VITE_SUPABASE_PUBLISHABLE_KEY from the start output
+supabase start                                    # fast after the first boot — the DB volume persists
+cp .env.local.example .env.local                  # fill VITE_SUPABASE_PUBLISHABLE_KEY from the start output
 cp supabase/functions/.env.local.example supabase/functions/.env.local
-
-# Hydrate local data from a prod snapshot (real data — the dump is gitignored; never commit it):
-supabase db dump --db-url "$SUPABASE_DB_URL" --data-only -f supabase/.local/prod-data.sql
-supabase db reset                                # rebuild schema from supabase/migrations, then:
-psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -f supabase/.local/prod-data.sql
-#   No host psql? Pipe through the stack's DB container instead:
-#   docker exec -i supabase_db_bnetnuzxynmdftiadwef psql -U postgres -d postgres < supabase/.local/prod-data.sql
-
 supabase functions serve --env-file supabase/functions/.env.local   # serve the gateway + invite fns
-pnpm dev                                          # app at http://127.0.0.1:5173 → local stack
+pnpm dev                                           # app at http://127.0.0.1:5173 → local stack
 ```
 
-Because the dump is `--data-only`, the schema comes from `supabase/migrations` (via `supabase db
-reset`) and the rows come from prod — no schema/dump conflict. The dump includes `auth.users`, so
-the same accounts (and passwords) that work in production also work locally.
-
-**Studio** (DB browser, auth users, logs): http://127.0.0.1:54323 · **Inbucket** (captured invite /
-magic-link emails): http://127.0.0.1:54324.
+**Studio** (DB browser / auth users): http://127.0.0.1:54323 · **Inbucket** (captured invite /
+magic-link emails): http://127.0.0.1:54324. If another local Supabase project is already running,
+its containers already hold ports 54321-54327 — `supabase stop` it first, or bump the ports in
+`config.toml`.
 
 ## Writing a new migration locally
 

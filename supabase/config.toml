@@ -28,7 +28,8 @@ major_version = 17
 enabled = false
 
 [db.seed]
-# We hydrate local data from a prod dump (pnpm db:restore), not from a checked-in seed.
+# Local data is restored from a full cloud dump (scripts/supabase-local-reset.sh), not a checked-in
+# seed — and NOT from supabase/migrations, which is delta-only, not a from-zero schema.
 enabled = false
 
 [studio]
@@ -52,6 +53,11 @@ enable_signup = true
 [auth.email]
 enable_signup = true
 enable_confirmations = false
+
+# Not needed for local dev, and its container/port (54327) collides with any other running local
+# Supabase project — keep it off.
+[analytics]
+enabled = false
 
 [edge_runtime]
 enabled = true
