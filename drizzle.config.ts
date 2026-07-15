@@ -1,8 +1,9 @@
 import type { Config } from "drizzle-kit";
 
-const connectionString =
-  process.env.SUPABASE_DB_URL ??
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+const connectionString = process.env.SUPABASE_DB_URL?.trim();
+if (!connectionString) {
+  throw new Error("SUPABASE_DB_URL is required for drizzle-kit (no hardcoded credentials).");
+}
 
 export default {
   schema: "./supabase/drizzle/schema.ts",

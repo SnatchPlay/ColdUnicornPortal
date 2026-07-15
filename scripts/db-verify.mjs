@@ -1,7 +1,10 @@
 import postgres from "postgres";
 
-const CONNECTION =
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+const CONNECTION = process.env.SUPABASE_DB_URL?.trim();
+if (!CONNECTION) {
+  console.error("SUPABASE_DB_URL is required (no hardcoded credentials).");
+  process.exit(1);
+}
 
 const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });
 const superAdminId = "a46b2eaa-be36-4b8c-8559-82c74db778ac";

@@ -8,9 +8,11 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://bnetnuzxynmdftiadwef.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_6jbWFa2hOX-5U6TWS_KtrQ_5JXYCRG2";
-const CONNECTION =
-  process.env.SUPABASE_DB_URL ??
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+const CONNECTION = process.env.SUPABASE_DB_URL?.trim();
+if (!CONNECTION) {
+  console.error("SUPABASE_DB_URL is required (no hardcoded credentials).");
+  process.exit(1);
+}
 
 const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });
 
