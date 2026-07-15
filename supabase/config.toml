@@ -1,0 +1,79 @@
+# Supabase CLI config — LOCAL STACK ONLY.
+#
+# What the CLI is (and is NOT) responsible for in this repo:
+#   • Stack:     `supabase start` boots local Postgres + Auth (GoTrue) + Edge Runtime + Studio.
+#   • Functions: `supabase functions serve|deploy` runs/ships the Deno edge functions.
+#   • Migrations are NOT owned by the CLI. They are applied by `pnpm db:migrate`
+#     (scripts/db-apply-migrations.mjs), which tracks state in `private.schema_migrations`.
+#     The CLI still applies supabase/migrations on first `supabase start` to build the local
+#     schema; new migrations during dev are applied with `pnpm db:migrate` against the local DB.
+#
+# `project_id` links `supabase link` / `functions deploy` to the cloud project.
+project_id = "bnetnuzxynmdftiadwef"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# Match the cloud project (Postgres 17).
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[db.seed]
+# We hydrate local data from a prod dump (pnpm db:restore), not from a checked-in seed.
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+# Local email testing (invites, magic links) — captured, never sent.
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+# The local Vite dev server. Update if you run the app on another port.
+site_url = "http://127.0.0.1:5173"
+additional_redirect_urls = ["http://127.0.0.1:5173", "http://localhost:5173"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[edge_runtime]
+enabled = true
+# `oneshot` = restart the worker per request (best for local edit-reload).
+policy = "oneshot"
+inspector_port = 8083
+
+# ── Edge functions ────────────────────────────────────────────────────────────────────────────
+# verify_jwt drives BOTH local serve AND `supabase functions deploy`. Keep these values matching
+# production before enabling the CI functions-deploy — deploying flips the live setting.
+#
+# The gateways parse the Bearer token and re-establish JWT claims inside each transaction
+# themselves (ADR-0008 / rls-context.ts), so platform JWT verification is off for them.
+[functions.orm-gateway]
+verify_jwt = false
+
+[functions.orm-gateway-next]
+verify_jwt = false
+
+# Invite functions act for an authenticated admin caller — leave platform verification on.
+[functions.send-invite]
+verify_jwt = true
+
+[functions.manage-invites]
+verify_jwt = true
