@@ -2,13 +2,28 @@ import postgres from "postgres";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const CONNECTION =
-  process.env.SUPABASE_DB_URL ??
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+// Connection is REQUIRED via env — no hardcoded credentials. Point it at the cloud pooler
+// in CI (GitHub secret) or at the local stack for development:
+//   local:  postgresql://postgres:postgres@127.0.0.1:54322/postgres
+//   cloud:  the pooler URL from the Supabase dashboard (kept as a secret, never committed)
+const CONNECTION = process.env.SUPABASE_DB_URL?.trim();
+if (!CONNECTION) {
+  console.error(
+    "SUPABASE_DB_URL is required. Example (local): " +
+      "SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm db:migrate",
+  );
+  process.exit(1);
+}
 
 const MIGRATIONS_DIR = new URL("../supabase/migrations/", import.meta.url).pathname;
 
-const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });
+// Managed Supabase requires TLS; a local Postgres has none. Default to TLS and turn it off for
+// localhost, or force it explicitly with SUPABASE_DB_SSL=require|disable.
+const sslEnv = process.env.SUPABASE_DB_SSL?.trim().toLowerCase();
+const isLocal = /@(localhost|127\.0\.0\.1|host\.docker\.internal|db)[:/]/.test(CONNECTION);
+const ssl = sslEnv === "disable" ? false : sslEnv === "require" ? "require" : isLocal ? false : "require";
+
+const sql = postgres(CONNECTION, { prepare: false, ssl, max: 1 });
 
 async function ensureTable() {
   await sql`

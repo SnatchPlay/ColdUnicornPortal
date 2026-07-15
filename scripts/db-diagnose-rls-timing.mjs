@@ -6,9 +6,11 @@
  */
 import postgres from "postgres";
 
-const CONNECTION =
-  process.env.SUPABASE_DB_URL ??
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+const CONNECTION = process.env.SUPABASE_DB_URL?.trim();
+if (!CONNECTION) {
+  console.error("SUPABASE_DB_URL is required (no hardcoded credentials).");
+  process.exit(1);
+}
 
 // Use a pooler-compatible connection that mirrors what the edge function uses.
 const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });

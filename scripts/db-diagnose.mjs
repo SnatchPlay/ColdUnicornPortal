@@ -1,12 +1,19 @@
 import postgres from "postgres";
 
-const CONNECTION =
-  process.env.SUPABASE_DB_URL ??
-  "postgresql://postgres.bnetnuzxynmdftiadwef:kinjiz-wygde4-sIxnaz@aws-0-eu-west-1.pooler.supabase.com:5432/postgres";
+// Connection is REQUIRED via env — no hardcoded credentials (see db-apply-migrations.mjs).
+const CONNECTION = process.env.SUPABASE_DB_URL?.trim();
+if (!CONNECTION) {
+  console.error("SUPABASE_DB_URL is required (local: postgresql://postgres:postgres@127.0.0.1:54322/postgres).");
+  process.exit(1);
+}
+
+const sslEnv = process.env.SUPABASE_DB_SSL?.trim().toLowerCase();
+const isLocal = /@(localhost|127\.0\.0\.1|host\.docker\.internal|db)[:/]/.test(CONNECTION);
+const ssl = sslEnv === "disable" ? false : sslEnv === "require" ? "require" : isLocal ? false : "require";
 
 const sql = postgres(CONNECTION, {
   prepare: false,
-  ssl: "require",
+  ssl,
   idle_timeout: 5,
   max: 1,
 });
