@@ -16,7 +16,8 @@ import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator"
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
-import type { ClientCustomFieldRecord, ClientRecord, InviteRequest } from "../types/core";
+import { CLIENT_STATUSES } from "../types/core";
+import type { ClientCustomFieldRecord, ClientRecord, ClientStatus, InviteRequest } from "../types/core";
 import { getCustomFieldSortValue } from "../lib/custom-field-sort";
 import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
 import {
@@ -38,8 +39,9 @@ const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
-const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
-type ClientStatus = (typeof CLIENT_STATUSES)[number];
+// Radix <Select> forbids an empty-string item value, so the "no owner" choice needs a sentinel.
+// It maps to `manager_id = null` on submit.
+const UNASSIGNED_MANAGER = "__unassigned__";
 
 /** Row key in `user_table_preferences` for this grid. */
 const CLIENTS_TABLE_PREFS_KEY = "clients:mega";
@@ -447,12 +449,13 @@ const CreateClientSheet = memo(function CreateClientSheet({
   }, [open, defaultManagerId]);
 
   async function handleSubmit() {
-    if (!draft || !draft.name.trim() || !draft.managerId || !draft.status) return;
+    // Manager is optional — only name and status are required.
+    if (!draft || !draft.name.trim() || !draft.status) return;
     setIsSubmitting(true);
     try {
       await onCreateClient({
         name: draft.name.trim(),
-        manager_id: draft.managerId,
+        manager_id: draft.managerId || null,
         status: draft.status as ClientStatus,
         kpi_leads: draft.kpiLeads,
         kpi_meetings: draft.kpiMeetings,
@@ -503,15 +506,23 @@ const CreateClientSheet = memo(function CreateClientSheet({
             </label>
             {canEditAssignments && (
               <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager *</span>
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager</span>
                 <Select
-                  value={draft.managerId}
-                  onValueChange={(v) => setDraft((d) => (d ? { ...d, managerId: v } : d))}
+                  value={draft.managerId || UNASSIGNED_MANAGER}
+                  onValueChange={(v) =>
+                    setDraft((d) => (d ? { ...d, managerId: v === UNASSIGNED_MANAGER ? "" : v } : d))
+                  }
                 >
                   <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select manager" />
+                    <SelectValue placeholder="Unassigned" />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    <SelectItem
+                      value={UNASSIGNED_MANAGER}
+                      className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                    >
+                      Unassigned
+                    </SelectItem>
                     {managerUsers.map((m) => (
                       <SelectItem
                         key={m.id}
@@ -631,7 +642,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
               onClick={() => {
                 void handleSubmit();
               }}
-              disabled={isSubmitting || !draft.name.trim() || !draft.managerId || !draft.status}
+              disabled={isSubmitting || !draft.name.trim() || !draft.status}
               className="w-full rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? "Creating..." : "Create client"}
@@ -776,6 +787,14 @@ export function ClientsPage() {
     [updateClient],
   );
 
+  // Stable callback for inline status edits from the grid's Status column.
+  const handleStatusChange = useCallback(
+    (clientId: string, status: ClientStatus) => {
+      void updateClient(clientId, { status });
+    },
+    [updateClient],
+  );
+
   // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -875,7 +894,17 @@ export function ClientsPage() {
   }, [updateTablePrefs]);
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const managerUsers = useMemo(() => users.filter((u) => u.role === "manager"), [users]);
+  // Assignable owners for a client: CS Managers *and* admins (any internal, non-client user).
+  // Named `managerUsers` because it feeds the "Manager" picker/filter and the manager-name lookup.
+  const managerUsers = useMemo(
+    () =>
+      users
+        .filter((u) => u.role !== "client")
+        .sort((a, b) =>
+          `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`),
+        ),
+    [users],
+  );
   const clientRoleUsers = useMemo(() => users.filter((u) => u.role === "client"), [users]);
   const managerById = useMemo(() => new Map(managerUsers.map((m) => [m.id, m] as const)), [managerUsers]);
 
@@ -891,7 +920,7 @@ export function ClientsPage() {
     const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
     for (const client of scopedClients) {
       const metrics = metricsByClientId.get(client.id) ?? createClientMetricsFromSummary(EMPTY_METRICS_SUMMARY);
-      const manager = managerById.get(client.manager_id) ?? null;
+      const manager = managerById.get(client.manager_id ?? "") ?? null;
       const context = buildClientConditionContext({
         client,
         manager: manager as Parameters<typeof buildClientConditionContext>[0]["manager"],
@@ -913,7 +942,7 @@ export function ClientsPage() {
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return timeSyncOp(`[perf][clients] mega-rows (${scopedClients.length} rows)`, () =>
       scopedClients.map((client) => {
-        const manager = managerById.get(client.manager_id);
+        const manager = managerById.get(client.manager_id ?? "");
         const managerName = manager
           ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
           : "Unassigned";
@@ -1002,6 +1031,9 @@ export function ClientsPage() {
 
   const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
   const canInviteUsers = identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
+  // Inline status edit mirrors the drawer's status field, which is open to any internal user
+  // (managers manage their own clients' lifecycle). RLS remains the write gate.
+  const canEditStatus = identity ? identity.role !== "client" : false;
 
   // External store that broadcasts the selected-client id and column id to
   // per-row subscribers in the mega-table. Decouples the row/cell highlight
@@ -1175,26 +1207,30 @@ export function ClientsPage() {
     );
   }
 
+  const createClientButton = (
+    <CreateClientSheetHost
+      managerUsers={managerUsers}
+      canEditAssignments={canEditAssignments}
+      onCreateClient={handleCreateClientStable}
+      defaultManagerId={defaultManagerId}
+    />
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <CreateClientSheetHost
-          managerUsers={managerUsers}
-          canEditAssignments={canEditAssignments}
-          onCreateClient={handleCreateClientStable}
-          defaultManagerId={defaultManagerId}
-        />
-      </div>
-
       {scopedClients.length === 0 ? (
-        <EmptyState
-          title="No clients assigned"
-          description="The current identity does not have any visible clients."
-        />
+        <>
+          <div className="flex justify-end">{createClientButton}</div>
+          <EmptyState
+            title="No clients assigned"
+            description="The current identity does not have any visible clients."
+          />
+        </>
       ) : (
         <Surface
           title="Client PDCA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
+          actions={createClientButton}
         >
           {/* ── Filter bar — single row: search · status · health · manager ─── */}
           <div className="mb-4">
@@ -1301,6 +1337,8 @@ export function ClientsPage() {
               canEditCustomField={canEditCustomField}
               onCustomFieldValueChange={handleCustomFieldValueChange}
               onNotesChange={handleNotesChange}
+              canEditStatus={canEditStatus}
+              onStatusChange={handleStatusChange}
             />
           </DevProfiler>
 

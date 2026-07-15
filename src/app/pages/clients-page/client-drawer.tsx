@@ -18,17 +18,12 @@ import type { evaluateClientConditions } from "../../lib/conditions/client-condi
 import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatDate, formatMoney } from "../../lib/format";
+import { CLIENT_STATUSES } from "../../types/core";
 import type { ClientRecord, ClientUserRecord, UserRecord } from "../../types/core";
 
-const CLIENT_STATUSES: ClientRecord["status"][] = [
-  "Active",
-  "Abo",
-  "On hold",
-  "Offboarding",
-  "Inactive",
-  "Sales",
-];
 const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
+// Sentinel for the "no owner" choice — Radix <Select> forbids an empty-string item value.
+const UNASSIGNED_MANAGER = "__unassigned__";
 
 const LOST_REASON_STATUSES: ClientRecord["status"][] = ["Inactive", "Offboarding", "Abo"];
 
@@ -264,7 +259,7 @@ export function toClientDraft(client: ClientRecord): ClientDraft {
     smsPhoneNumbers: client.sms_phone_numbers ?? [],
     autoOooEnabled: client.auto_ooo_enabled,
     setupInfo: client.setup_info ?? "",
-    managerId: client.manager_id,
+    managerId: client.manager_id ?? "",
     externalWorkspaceId: client.external_workspace_id != null ? String(client.external_workspace_id) : "",
     externalApiKey: client.external_api_key ?? "",
     linkedinApiKey: client.linkedin_api_key ?? "",
@@ -310,8 +305,8 @@ export function buildClientPatch(
     patch.auto_ooo_enabled = draft.autoOooEnabled;
   }
 
-  if (canEditAssignments && client.manager_id !== draft.managerId) {
-    patch.manager_id = draft.managerId;
+  if (canEditAssignments && (client.manager_id ?? "") !== draft.managerId) {
+    patch.manager_id = draft.managerId || null;
   }
 
   // credentials
@@ -776,15 +771,25 @@ export function ClientDrawer({
                     Assigned manager
                   </span>
                   <Select
-                    value={draft.managerId || undefined}
+                    value={draft.managerId || UNASSIGNED_MANAGER}
                     onValueChange={(value) =>
-                      setDraft((current) => (current ? { ...current, managerId: value } : current))
+                      setDraft((current) =>
+                        current
+                          ? { ...current, managerId: value === UNASSIGNED_MANAGER ? "" : value }
+                          : current,
+                      )
                     }
                   >
                     <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                      <SelectValue placeholder="Select manager" />
+                      <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                      <SelectItem
+                        value={UNASSIGNED_MANAGER}
+                        className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                      >
+                        Unassigned
+                      </SelectItem>
                       {managerUsers.map((manager) => (
                         <SelectItem
                           key={manager.id}

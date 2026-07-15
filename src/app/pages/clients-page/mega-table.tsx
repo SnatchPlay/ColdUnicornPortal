@@ -14,9 +14,11 @@ import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/con
 import { formatNumber } from "../../lib/format";
 import { getCustomFieldSortValue } from "../../lib/custom-field-sort";
 import { useResizableColumns } from "../../lib/use-resizable-columns";
+import { CLIENT_STATUSES } from "../../types/core";
 import type {
   ClientCustomFieldRecord,
   ClientRecord,
+  ClientStatus,
   ColumnOverrideRecord,
 } from "../../types/core";
 
@@ -199,16 +201,8 @@ function buildColumns(): MegaColumn[] {
     defaultDirection: "asc",
     render: (row) => {
       const s = row.client.status ?? "—";
-      const cls =
-        s === "Active"     ? "status-badge-active" :
-        s === "Inactive"   ? "status-badge-inactive" :
-        s === "Abo"        ? "status-badge-abo" :
-        s === "Sales"      ? "status-badge-sales" :
-        s === "On hold"    ? "status-badge-onhold" :
-        s === "Offboarding"? "status-badge-offboard" :
-        "border-border bg-white/5 text-white";
       return (
-        <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", cls)}>
+        <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", statusBadgeClass(s))}>
           {s}
         </span>
       );
@@ -661,6 +655,10 @@ export interface ClientsMegaTableProps {
   onCustomFieldValueChange?: (clientId: string, fieldId: string, value: string | null) => void;
   /** Called when the inline Notes cell is edited (blur-to-save). Read-only when omitted. */
   onNotesChange?: (clientId: string, value: string | null) => void;
+  /** True when the Status cell may be edited inline. Falls back to a read-only badge otherwise. */
+  canEditStatus?: boolean;
+  /** Called when the inline Status cell is changed. */
+  onStatusChange?: (clientId: string, status: ClientStatus) => void;
 }
 
 function parseSafeHref(raw: string | null | undefined): string | null {
@@ -768,6 +766,45 @@ function LinkCell({
       )}
     </span>
   );
+}
+
+// Shared by the read-only badge and the inline editable Status cell so both stay in sync.
+function statusBadgeClass(s: string): string {
+  return s === "Active"     ? "status-badge-active" :
+         s === "Inactive"   ? "status-badge-inactive" :
+         s === "Abo"        ? "status-badge-abo" :
+         s === "Sales"      ? "status-badge-sales" :
+         s === "On hold"    ? "status-badge-onhold" :
+         s === "Offboarding"? "status-badge-offboard" :
+         "border-border bg-white/5 text-white";
+}
+
+// Inline Status editor: a native <select> wearing the same badge colours as the read-only cell.
+// Mirrors the droplist custom-field cell (stopPropagation so picking a value doesn't open the row).
+function statusCellRender(onChange: (clientId: string, status: ClientStatus) => void) {
+  return (row: ClientMegaRow) => {
+    const s = row.client.status;
+    return (
+      <select
+        value={s ?? ""}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          const next = event.target.value as ClientStatus;
+          if (next && next !== s) onChange(row.client.id, next);
+        }}
+        className={cn(
+          "w-full cursor-pointer rounded border px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide outline-none",
+          statusBadgeClass(s ?? "—"),
+        )}
+      >
+        {CLIENT_STATUSES.map((opt) => (
+          <option key={opt} value={opt} className="bg-[#0d0d0d] text-neutral-200">
+            {opt}
+          </option>
+        ))}
+      </select>
+    );
+  };
 }
 
 function notesCellRender(onChange: (clientId: string, value: string | null) => void) {
@@ -1001,6 +1038,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     canEditCustomField,
     onCustomFieldValueChange,
     onNotesChange,
+    canEditStatus,
+    onStatusChange,
     colsRef,
   } = props;
   useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
@@ -1016,7 +1055,11 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
-      const editable = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
+      const withNotes = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
+      const editable =
+        withNotes.id === "status" && canEditStatus && onStatusChange
+          ? { ...withNotes, render: statusCellRender(onStatusChange) }
+          : withNotes;
       const labelled = override?.label_override ? { ...editable, label: override.label_override } : editable;
       const homed = applySectionAssignment(labelled, overrideMap);
       return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
@@ -1053,7 +1096,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
       return sectionLabel ? { ...col, sub: sectionLabel } : col;
     });
-  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange]);
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);
