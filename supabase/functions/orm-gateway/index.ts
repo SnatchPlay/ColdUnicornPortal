@@ -19,10 +19,13 @@ const corsHeaders = {
 const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
 const DAILY_STATS_WINDOW_DAYS = 180;
 const databaseUrl = Deno.env.get("DATABASE_URL")?.trim() ?? Deno.env.get("SUPABASE_DB_URL")?.trim() ?? "";
+// Managed Supabase (the pooler) requires TLS; a local stack has none. Detect a local target and
+// turn TLS off there — production keeps `require` because its host is the pooler.
+const dbIsLocal = /@(localhost|127\.0\.0\.1|host\.docker\.internal|supabase_db|db)[:/]/.test(databaseUrl) || /sslmode=disable/.test(databaseUrl);
 const pgClient = databaseUrl
   ? postgres(databaseUrl, {
       prepare: false,
-      ssl: "require",
+      ssl: dbIsLocal ? false : "require",
       max: 3,
       idle_timeout: 60,  // keep connections alive longer — cold reconnect costs ~1s
       connect_timeout: 10,

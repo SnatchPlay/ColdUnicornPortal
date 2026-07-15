@@ -35,9 +35,63 @@ jobs:
       - name: Build production bundle
         run: pnpm build
 
-  deploy:
+  # ── Apply pending DB migrations to the cloud project ──────────────────────────────────────────
+  # Reuses the same runner as local dev (scripts/db-apply-migrations.mjs), tracking state in
+  # private.schema_migrations. Disabled until you set repo variable ENABLE_DB_MIGRATE=true and
+  # add the SUPABASE_DB_URL secret (the cloud pooler connection string — never committed).
+  db-migrate:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_DB_MIGRATE == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm db:migrate
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+  # ── Deploy edge functions to the cloud project ────────────────────────────────────────────────
+  # Runs AFTER migrations so function code never lands before the schema it depends on.
+  # `supabase functions deploy` applies each function's verify_jwt from supabase/config.toml —
+  # CONFIRM those values match production before enabling this job. Disabled until you set repo
+  # variable ENABLE_FUNCTION_DEPLOY=true and add the SUPABASE_ACCESS_TOKEN secret.
+  deploy-functions:
+    needs: [verify, db-migrate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_FUNCTION_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Deploy functions
+        run: |
+          supabase functions deploy orm-gateway orm-gateway-next send-invite manage-invites \
+            --project-ref bnetnuzxynmdftiadwef
+
+  # ── Deploy the frontend to the self-hosted server ─────────────────────────────────────────────
+  # Waits for migrations (success or skipped) and aborts if migrations FAILED, so a new bundle
+  # never ships against an un-migrated schema.
+  deploy:
+    needs: [verify, db-migrate]
+    if: >-
+      always()
+      && github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && needs.verify.result == 'success'
+      && needs.db-migrate.result != 'failure'
+      && needs.db-migrate.result != 'cancelled'
     runs-on: ubuntu-latest
     environment: production
     steps:

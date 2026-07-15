@@ -12,18 +12,27 @@ pnpm lint           # ESLint
 pnpm test:run       # Vitest, one-shot
 pnpm test           # Vitest, watch
 pnpm test:smoke     # Playwright smoke suite
-pnpm db:migrate     # node scripts/db-apply-migrations.mjs
-pnpm db:introspect  # drizzle-kit introspect → supabase/drizzle/schema.ts
-pnpm db:diagnose    # connectivity / schema sanity
+pnpm db:migrate       # apply pending migrations — needs SUPABASE_DB_URL (no hardcoded creds)
+pnpm db:migrate:local # same, pre-pointed at the local stack (127.0.0.1:54322)
+pnpm db:introspect    # drizzle-kit introspect → supabase/drizzle/schema.ts
+pnpm db:diagnose      # connectivity / schema sanity (needs SUPABASE_DB_URL)
 ```
+
+**Local Supabase + auto-deploy:** develop against a full local stack (Postgres + Auth + Edge
+Functions) and let a push to `main` deploy migrations + functions to the cloud. Setup and the
+one-time bootstrap (Docker, GitHub secrets, prod-dump restore, password rotation) live in
+[reference/local-supabase.md](reference/local-supabase.md).
 
 **Known gaps — do not be surprised by these:**
 
 - **`pnpm build` does not type-check.** It is `vite build`, and there is no `tsc --noEmit` script or
   root `tsconfig` wired for it. **Type errors surface in `pnpm test:run`, not the build.** Always
   run the tests.
-- **There is no Supabase CLI in this repo.** Edge functions are *not* deployed by any pnpm script.
-  Deploy via the Supabase MCP (`deploy_edge_function`) or the dashboard.
+- **Edge functions deploy via the Supabase CLI**, wired into CI (`deploy-functions` job, gated by
+  the `ENABLE_FUNCTION_DEPLOY` repo variable) or run by hand
+  (`supabase functions deploy <name> --project-ref bnetnuzxynmdftiadwef`). The Supabase MCP
+  (`deploy_edge_function`) and the dashboard still work for one-offs. See
+  [reference/local-supabase.md](reference/local-supabase.md).
 - `pnpm test:smoke` needs a rebuilt `dist/` and the env loader; a stale `dist` gives confusing
   failures.
 
@@ -52,8 +61,10 @@ loading/empty/error states and the contrast theme axis (which defaults to **on**
 
 ### Database / RLS changes
 
-Use the `rls-migration` skill. The non-negotiable part: **`EXPLAIN (ANALYZE, BUFFERS)` as the
-`authenticated` role, not superuser** — superuser bypasses RLS and gives a false baseline.
+Use the `rls-migration` skill. **Apply and test the migration on the local Supabase stack first**
+(`pnpm db:migrate:local`) — never test a schema/RLS change by applying it straight to production.
+The non-negotiable part: **`EXPLAIN (ANALYZE, BUFFERS)` as the `authenticated` role, not superuser**
+— superuser bypasses RLS and gives a false baseline.
 
 ```bash
 node scripts/db-diagnose-rls-explain.mjs   # EXPLAIN under a real JWT context
@@ -69,8 +80,10 @@ comment.
 
 ### Gateway changes
 
-Use the `gateway-action` skill. Remember the edge function deploys **separately** from the
-frontend: until it is deployed, a new action type-checks locally but 400s in production.
+Use the `gateway-action` skill. **Test the function on the local Supabase stack**
+(`supabase functions serve` against `supabase start`) before deploying — never verify a function by
+deploying it to production. Remember the edge function deploys **separately** from the frontend:
+until it is deployed, a new action type-checks locally but 400s in production.
 
 ## 4. Documentation discipline
 

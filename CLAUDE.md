@@ -41,7 +41,11 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
    what you found. A duplicate with no search trail is an incomplete task.
 2. **Prove it, don't assert it.** UI change → screenshots per affected role (`visual-verify`).
    Metric change → re-derive the number on a sample. RLS change → `EXPLAIN ANALYZE` as the
-   `authenticated` role. Types and tests are necessary, not sufficient.
+   `authenticated` role. **Edge-function or DB/migration change → exercise it against the local
+   Supabase stack first** (`supabase start` + `supabase functions serve` + `pnpm db:migrate:local`);
+   never test-by-deploying to production. See
+   [reference/local-supabase.md](docs/reference/local-supabase.md). Types and tests are necessary,
+   not sufficient.
 3. **`pnpm lint` + `pnpm test:run` + `pnpm build` clean.** Note: **`pnpm build` does not type-check**
    (it is `vite build`); type errors surface in `pnpm test:run`. Run the tests.
 4. **Docs updated in the same change** — see the table in

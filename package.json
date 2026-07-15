@@ -14,6 +14,7 @@
     "db:introspect": "drizzle-kit introspect",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-apply-migrations.mjs",
+    "db:migrate:local": "SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres node scripts/db-apply-migrations.mjs",
     "db:diagnose": "node scripts/db-diagnose.mjs"
   },
   "dependencies": {
