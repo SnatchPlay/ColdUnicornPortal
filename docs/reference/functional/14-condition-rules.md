@@ -23,7 +23,10 @@ Dynamic operational health layer for client surfaces. This system replaces sprea
 The condition system is for **read/evaluate/display only**:
 
 - It evaluates client operational metrics into explainable condition results.
-- It drives row/cell highlighting, row-level health rollups, and health filtering in `ClientsPage`.
+- It drives **per-cell** highlighting + tooltips in `ClientsPage`. As of
+  `20260717_client_satisfaction_and_status_rename.sql` it no longer produces a row-level health
+  rollup, a `healthScore`, or a health filter — those were replaced by the manual satisfaction
+  rating (`clients.satisfaction`; see [06-manager-portal §2.7](./06-manager-portal.md)).
 - It does not mutate ingestion counters or trigger external side effects.
 
 Hard boundaries:
@@ -44,7 +47,7 @@ raw Supabase snapshot
 > createClientMetrics() + client condition context
 > evaluate safe JSON DSL rules
 > condition results
-> row/cell styles + health rollups + filters + tooltip explanations
+> per-cell styles + tooltip explanations (no row rollup / no health filter — see §1)
 ```
 
 Runtime entry points:
@@ -295,20 +298,15 @@ good (green). The field id is environment-specific, so the migration resolves it
 
 ### 8.2 Explainability
 
-- Tooltip/popover per highlighted cell includes rule name, value, message, source sheet/range
-- Drawer groups matched results into:
-  - `Operational issues`
-  - `Setup gaps`
+- Tooltip/popover per highlighted cell includes rule name, value, message, source sheet/range — this
+  is now the **only** explainability surface. The drawer's `Operational issues` and `Setup gaps`
+  groupings were removed with the row rollup (`20260717_client_satisfaction_and_status_rename.sql`).
 
 ### 8.3 Filters
 
-Health filter (highest severity across any surface for the client):
-
-- `all`
-- `warning`
-- `danger`
-- `critical`
-- `healthy`
+The condition engine no longer drives a client-list filter. The Clients grid filters on the manual
+`clients.satisfaction` rating instead (`All` / `♥` / `♥♥` / `♥♥♥` / `Not rated`); see
+[06-manager-portal §2.5](./06-manager-portal.md).
 
 `healthy` includes rows with no non-positive severity (`none`/`good`/`info`).
 

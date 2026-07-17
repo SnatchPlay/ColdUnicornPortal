@@ -46,8 +46,8 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Statement:** `UPDATE clients SET <patch> WHERE id = :clientId RETURNING *`.
 - **RLS:** `clients_update_scoped` — production predicate allows admin and the client's assigned manager.
 - **Allowed roles:** admin, super_admin, manager (assigned).
-- **Called from:** Clients page drawer save ([clients-page.tsx:267](../../../src/app/pages/clients-page.tsx#L267)) and the CRM integration card ([crm-integration-card.tsx:178](../../../src/app/components/crm-integration-card.tsx#L178), writes `crm_config`).
-- **Fields (whitelist `mapClientPatch`, [index.ts:354-381](../../../supabase/functions/orm-gateway/index.ts#L354-L381)):** `name`, `status`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`, `crm_config`, contract fields.
+- **Called from:** Clients page drawer save ([clients-page.tsx:267](../../../src/app/pages/clients-page.tsx#L267)), the inline grid cells (Status, Notes, and the **satisfaction hearts** in the Client column), and the CRM integration card ([crm-integration-card.tsx:178](../../../src/app/components/crm-integration-card.tsx#L178), writes `crm_config`).
+- **Fields (whitelist `mapClientPatch`):** `name`, `status`, `satisfaction`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`, `crm_config`, contract fields. `satisfaction` is range-checked (1..3 or null) in the request contract (`parseOrmGatewayRequest`) before the UPDATE, and again by the `clients_satisfaction_range` DB CHECK.
 
 ### 2.2 `updateCampaign(campaignId, patch)` — [repository.ts:812-814](../../../src/app/data/repository.ts#L812-L814) · gateway [index.ts:2316](../../../supabase/functions/orm-gateway/index.ts#L2316)
 

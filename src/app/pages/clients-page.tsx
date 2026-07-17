@@ -10,14 +10,19 @@ import { logAfterRaf2, markInteractionStart, markPoint, measureAfterRaf2, measur
 import { createClientMetricsFromSummary, type ClientMetricsPack } from "../lib/client-metrics";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
+import { SatisfactionHearts, satisfactionLabel } from "../components/satisfaction-hearts";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
-import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator";
 import { toConditionRule } from "../lib/conditions/mapper";
-import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
 import { CLIENT_STATUSES } from "../types/core";
-import type { ClientCustomFieldRecord, ClientRecord, ClientStatus, InviteRequest } from "../types/core";
+import type {
+  ClientCustomFieldRecord,
+  ClientRecord,
+  ClientStatus,
+  InviteRequest,
+  SatisfactionLevel,
+} from "../types/core";
 import { getCustomFieldSortValue } from "../lib/custom-field-sort";
 import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
 import {
@@ -29,6 +34,7 @@ import {
 import {
   ClientsMegaTable,
   MEGA_COLUMNS,
+  statusBadgeClass,
   type ClientMegaRow,
   type MegaSortState,
 } from "./clients-page/mega-table";
@@ -36,8 +42,11 @@ import { createSelectionStore } from "./clients-page/selection-store";
 import { useTablePreferences } from "../lib/use-table-preferences";
 
 const PAGE_SIZE = 50;
-const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
-type HealthFilter = (typeof HEALTH_FILTERS)[number];
+// Manual satisfaction rating, not the condition engine: "1".."3" are heart counts and "unrated"
+// is `satisfaction IS NULL`, which is where every client starts — without its own chip a brand-new
+// client would be unreachable from this filter.
+const SATISFACTION_FILTERS = ["all", "1", "2", "3", "unrated"] as const;
+type SatisfactionFilter = (typeof SATISFACTION_FILTERS)[number];
 
 // Radix <Select> forbids an empty-string item value, so the "no owner" choice needs a sentinel.
 // It maps to `manager_id = null` on submit.
@@ -53,7 +62,7 @@ const CLIENTS_TABLE_PREFS_KEY = "clients:mega";
 interface ClientsTablePreferences extends Record<string, unknown> {
   /** Column width in px, keyed by column id. */
   widths: Record<string, number>;
-  healthFilter: string;
+  satisfactionFilter: string;
   statusFilter: string[];
   managerFilter: string;
   sort: MegaSortState;
@@ -72,22 +81,10 @@ interface CreateClientDraft {
   contractDueDate: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  Active: "status-badge-active",
-  Abo: "status-badge-abo",
-  Sales: "status-badge-sales",
-  "On hold": "status-badge-onhold",
-  Offboarding: "status-badge-offboard",
-  Inactive: "status-badge-inactive",
-};
-
-function matchesHealthFilter(filter: HealthFilter, severity: ConditionSeverity | null): boolean {
+function matchesSatisfactionFilter(filter: SatisfactionFilter, value: SatisfactionLevel | null): boolean {
   if (filter === "all") return true;
-  if (filter === "healthy") return !severity || severity === "good" || severity === "info";
-  if (!severity) return false;
-  if (filter === "critical") return severity === "critical_over";
-  if (filter === "danger") return severity === "danger";
-  return severity === "warning";
+  if (filter === "unrated") return value === null;
+  return value === Number(filter);
 }
 
 function isValidEmail(email: string): boolean {
@@ -795,6 +792,15 @@ export function ClientsPage() {
     [updateClient],
   );
 
+  // Inline satisfaction rating from the grid's Client column. Same optimistic-update/rollback path
+  // as Status and Notes — `updateClient` patches local state, then re-fetches on error.
+  const handleSatisfactionChange = useCallback(
+    (clientId: string, next: SatisfactionLevel | null) => {
+      void updateClient(clientId, { satisfaction: next });
+    },
+    [updateClient],
+  );
+
   // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -806,11 +812,14 @@ export function ClientsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
-  const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
+  const [satisfactionFilter, setSatisfactionFilter] = useState<SatisfactionFilter>("all");
   const [nameSearch, setNameSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["Active"]));
   const [managerFilter, setManagerFilter] = useState("all");
-  const [sort, setSort] = useState<MegaSortState>({ key: "health", direction: "asc" });
+  // Was `{ key: "health" }`, which no column ever defined — `compareMega` found no match and
+  // returned 0, so the documented "worst first" default silently did nothing. Triage now lives in
+  // the satisfaction filter chips, so the default sort is simply the Client column.
+  const [sort, setSort] = useState<MegaSortState>({ key: "name", direction: "asc" });
 
   // Per-user layout: column widths, filters and sort, stored in Postgres so the grid looks
   // the same on any browser. The name search is deliberately *not* persisted — a stale
@@ -825,8 +834,11 @@ export function ClientsPage() {
     if (!prefsLoaded || prefsAppliedRef.current) return;
     prefsAppliedRef.current = true;
 
-    if (tablePrefs.healthFilter && HEALTH_FILTERS.includes(tablePrefs.healthFilter as HealthFilter)) {
-      setHealthFilter(tablePrefs.healthFilter as HealthFilter);
+    if (
+      tablePrefs.satisfactionFilter &&
+      SATISFACTION_FILTERS.includes(tablePrefs.satisfactionFilter as SatisfactionFilter)
+    ) {
+      setSatisfactionFilter(tablePrefs.satisfactionFilter as SatisfactionFilter);
     }
     if (Array.isArray(tablePrefs.statusFilter)) {
       const valid = tablePrefs.statusFilter.filter((s): s is string => CLIENT_STATUSES.includes(s as never));
@@ -835,11 +847,14 @@ export function ClientsPage() {
     if (typeof tablePrefs.managerFilter === "string") {
       setManagerFilter(tablePrefs.managerFilter);
     }
+    // A stored sort key must still name a real column. Anyone who used the grid before the health
+    // rollup was removed has `"health"` saved here — restoring it would sort by nothing at all.
     if (tablePrefs.sort && typeof tablePrefs.sort.key === "string") {
-      setSort({
-        key: tablePrefs.sort.key,
-        direction: tablePrefs.sort.direction === "desc" ? "desc" : "asc",
-      });
+      const key = tablePrefs.sort.key;
+      const known = key.startsWith("cf:") || MEGA_COLUMNS.some((c) => c.id === key);
+      if (known) {
+        setSort({ key, direction: tablePrefs.sort.direction === "desc" ? "desc" : "asc" });
+      }
     }
   }, [prefsLoaded, tablePrefs]);
 
@@ -856,10 +871,10 @@ export function ClientsPage() {
     [updateTablePrefs],
   );
 
-  const handleHealthFilterChange = useCallback(
-    (next: HealthFilter) => {
-      setHealthFilter(next);
-      updateTablePrefs({ healthFilter: next });
+  const handleSatisfactionFilterChange = useCallback(
+    (next: SatisfactionFilter) => {
+      setSatisfactionFilter(next);
+      updateTablePrefs({ satisfactionFilter: next });
     },
     [updateTablePrefs],
   );
@@ -889,8 +904,8 @@ export function ClientsPage() {
     setNameSearch("");
     setStatusFilter(new Set());
     setManagerFilter("all");
-    setHealthFilter("all");
-    updateTablePrefs({ healthFilter: "all", statusFilter: [], managerFilter: "all" });
+    setSatisfactionFilter("all");
+    updateTablePrefs({ satisfactionFilter: "all", statusFilter: [], managerFilter: "all" });
   }, [updateTablePrefs]);
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
@@ -948,16 +963,10 @@ export function ClientsPage() {
           : "Unassigned";
         const metrics = metricsByClientId.get(client.id) ?? createClientMetricsFromSummary(EMPTY_METRICS_SUMMARY);
         const conditionPack = conditionPackByClientId.get(client.id) ?? null;
-        const allResults = conditionPack?.allResults ?? [];
-        const highestSeverity = getHighestSeverity(allResults);
-        const rollupCause = allResults.find((r) => r.severity === highestSeverity)?.label ?? "All KPIs on target";
         return {
           client,
           managerName,
           metrics,
-          highestSeverity,
-          healthScore: getHealthScore(allResults),
-          rollupCause,
           conditionPack,
         };
       }),
@@ -978,28 +987,25 @@ export function ClientsPage() {
   const filteredMegaRows = useMemo(
     () =>
       sortedMegaRows.filter((row) => {
-        if (!matchesHealthFilter(healthFilter, row.highestSeverity)) return false;
+        if (!matchesSatisfactionFilter(satisfactionFilter, row.client.satisfaction)) return false;
         if (nameSearchTrimmed && !row.client.name.toLowerCase().includes(nameSearchTrimmed)) return false;
         if (statusFilter.size > 0 && !statusFilter.has(row.client.status)) return false;
         if (managerFilter !== "all" && row.client.manager_id !== managerFilter) return false;
         return true;
       }),
-    [healthFilter, nameSearchTrimmed, statusFilter, managerFilter, sortedMegaRows],
+    [satisfactionFilter, nameSearchTrimmed, statusFilter, managerFilter, sortedMegaRows],
   );
 
-  const healthFilterCounts = useMemo(() => {
-    const counts = new Map<HealthFilter, number>([
-      ["all", sortedMegaRows.length],
-      ["critical", 0],
-      ["danger", 0],
-      ["warning", 0],
-      ["healthy", 0],
-    ]);
+  const satisfactionFilterCounts = useMemo(() => {
+    const counts = new Map<SatisfactionFilter, number>(SATISFACTION_FILTERS.map((f) => [f, 0]));
+    counts.set("all", sortedMegaRows.length);
     for (const row of sortedMegaRows) {
-      if (matchesHealthFilter("critical", row.highestSeverity)) counts.set("critical", (counts.get("critical") ?? 0) + 1);
-      if (matchesHealthFilter("danger", row.highestSeverity)) counts.set("danger", (counts.get("danger") ?? 0) + 1);
-      if (matchesHealthFilter("warning", row.highestSeverity)) counts.set("warning", (counts.get("warning") ?? 0) + 1);
-      if (matchesHealthFilter("healthy", row.highestSeverity)) counts.set("healthy", (counts.get("healthy") ?? 0) + 1);
+      for (const filter of SATISFACTION_FILTERS) {
+        if (filter === "all") continue;
+        if (matchesSatisfactionFilter(filter, row.client.satisfaction)) {
+          counts.set(filter, (counts.get(filter) ?? 0) + 1);
+        }
+      }
     }
     return counts;
   }, [sortedMegaRows]);
@@ -1077,7 +1083,7 @@ export function ClientsPage() {
     if (selectedClientId && !scopedClients.some((c) => c.id === selectedClientId)) {
       closeClient();
     }
-  }, [scopedClients, selectedClientId, healthFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
+  }, [scopedClients, selectedClientId, satisfactionFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1229,7 +1235,7 @@ export function ClientsPage() {
       ) : (
         <Surface
           title="Client PDCA grid"
-          subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
+          subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current filter${statsLoading ? " · loading metrics…" : ""}`}
           actions={createClientButton}
         >
           {/* ── Filter bar — single row: search · status · health · manager ─── */}
@@ -1254,7 +1260,7 @@ export function ClientsPage() {
                       className={cn(
                         "rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition",
                         active
-                          ? STATUS_COLORS[s]
+                          ? statusBadgeClass(s)
                           : "border-white/15 bg-transparent text-white/40 hover:border-white/30 hover:text-white/70",
                       )}
                     >
@@ -1266,30 +1272,38 @@ export function ClientsPage() {
 
               <ToggleGroup
                 type="single"
-                value={healthFilter}
+                value={satisfactionFilter}
                 onValueChange={(value) => {
                   if (!value) return;
-                  handleHealthFilterChange(value as HealthFilter);
+                  handleSatisfactionFilterChange(value as SatisfactionFilter);
                 }}
                 variant="outline"
                 className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
-                aria-label="Health filter"
+                aria-label="Satisfaction filter"
               >
-                {HEALTH_FILTERS.map((filter) => (
-                  <ToggleGroupItem key={filter} value={filter} className="h-6 shrink-0 px-1.5 text-[11px]">
-                    {filter === "all"
-                      ? `All (${healthFilterCounts.get("all") ?? 0})`
-                      : `${
-                          filter === "healthy"
-                            ? "Healthy"
-                            : filter === "critical"
-                            ? "Critical"
-                            : filter === "danger"
-                            ? "Danger"
-                            : "Warning"
-                        } (${healthFilterCounts.get(filter) ?? 0})`}
-                  </ToggleGroupItem>
-                ))}
+                {SATISFACTION_FILTERS.map((filter) => {
+                  const count = satisfactionFilterCounts.get(filter) ?? 0;
+                  const level = Number(filter);
+                  return (
+                    <ToggleGroupItem
+                      key={filter}
+                      value={filter}
+                      className="h-6 shrink-0 gap-1 px-1.5 text-[11px]"
+                      aria-label={
+                        filter === "all"
+                          ? `All (${count})`
+                          : `${filter === "unrated" ? "Not rated" : satisfactionLabel(level as SatisfactionLevel)} (${count})`
+                      }
+                    >
+                      {filter === "all" || filter === "unrated" ? (
+                        <span>{filter === "all" ? "All" : "Not rated"}</span>
+                      ) : (
+                        <SatisfactionHearts size="sm" value={level as SatisfactionLevel} />
+                      )}
+                      <span>({count})</span>
+                    </ToggleGroupItem>
+                  );
+                })}
               </ToggleGroup>
 
               {canEditAssignments && managerUsers.length > 0 && (
@@ -1308,7 +1322,7 @@ export function ClientsPage() {
                 </Select>
               )}
 
-              {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || healthFilter !== "all") && (
+              {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || satisfactionFilter !== "all") && (
                 <button
                   type="button"
                   onClick={handleClearFilters}
@@ -1339,6 +1353,8 @@ export function ClientsPage() {
               onNotesChange={handleNotesChange}
               canEditStatus={canEditStatus}
               onStatusChange={handleStatusChange}
+              // Same gate as inline Status: any internal user rates, clients never. RLS decides.
+              onSatisfactionChange={canEditStatus ? handleSatisfactionChange : undefined}
             />
           </DevProfiler>
 

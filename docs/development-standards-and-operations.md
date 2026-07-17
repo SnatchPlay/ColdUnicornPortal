@@ -6,7 +6,8 @@ this file says *how to run, verify, and ship*.
 ## 1. Commands
 
 ```bash
-pnpm dev            # Vite dev server (hot reload), against the live Supabase project
+pnpm dev            # full local stack: supabase start + migrations + functions serve + vite (see reference/local-supabase.md)
+pnpm dev:web        # just the Vite dev server (hot reload), against an already-running stack
 pnpm build          # production build
 pnpm lint           # ESLint
 pnpm test:run       # Vitest, one-shot

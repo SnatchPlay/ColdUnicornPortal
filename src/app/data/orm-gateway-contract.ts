@@ -678,6 +678,15 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     if (!hasStringField(payload, "clientId") || !hasObjectField(payload, "patch")) {
       return { ok: false, error: "updateClient requires clientId and patch object." };
     }
+    const patch = payload.patch as Record<string, unknown>;
+    // `satisfaction` is range-checked in Postgres (clients_satisfaction_range). Reject it here too
+    // so a bad value is a clean 400 rather than a 500 that echoes the constraint name back.
+    if ("satisfaction" in patch && patch.satisfaction !== null) {
+      const level = patch.satisfaction;
+      if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > 3) {
+        return { ok: false, error: "updateClient.patch.satisfaction must be 1, 2, 3, or null." };
+      }
+    }
     return { ok: true, value: { action, clientId: String(payload.clientId), patch: payload.patch as Partial<ClientRecord> } };
   }
 

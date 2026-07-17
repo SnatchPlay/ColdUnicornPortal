@@ -2,14 +2,14 @@ import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type 
 import { ExternalLink, Pencil } from "lucide-react";
 import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
-import { Badge } from "../../components/ui/badge";
+import { SatisfactionHearts } from "../../components/satisfaction-hearts";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
 import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../../lib/client-metrics";
 import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
 import { dodCellKey, momCellKey, threeDodCellKey, wowCellKey } from "../../lib/conditions/client-condition-results";
-import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
+import { getCellCondition } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatNumber } from "../../lib/format";
 import { getCustomFieldSortValue } from "../../lib/custom-field-sort";
@@ -20,6 +20,7 @@ import type {
   ClientRecord,
   ClientStatus,
   ColumnOverrideRecord,
+  SatisfactionLevel,
 } from "../../types/core";
 
 export type SortDirection = "asc" | "desc";
@@ -28,9 +29,6 @@ export interface ClientMegaRow {
   client: ClientRecord;
   managerName: string;
   metrics: ClientMetricsPack;
-  highestSeverity: ConditionSeverity | null;
-  healthScore: number;
-  rollupCause: string;
   conditionPack: ReturnType<typeof evaluateClientConditions> | null;
 }
 
@@ -142,36 +140,7 @@ function buildColumns(): MegaColumn[] {
     align: "left",
     sticky: true,
     defaultDirection: "asc",
-    render: (row) => {
-      const sev = row.highestSeverity;
-      const sevForBadge =
-        sev === "critical_over" || sev === "danger" || sev === "warning" ? sev : null;
-      return (
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="truncate text-sm text-foreground">{row.client.name}</span>
-          </div>
-          <div className="flex items-center gap-1.5 min-w-0">
-            {sevForBadge ? (
-              <Badge className={cn("shrink-0 text-[9px] px-1 py-0", getSeverityClassName(sevForBadge))}>
-                {sevForBadge === "critical_over" ? "Critical" : sevForBadge === "danger" ? "Danger" : "Warning"}
-              </Badge>
-            ) : (
-              <Badge className="shrink-0 border-emerald-400/60 bg-emerald-500/20 text-[9px] text-emerald-200 px-1 py-0">
-                Healthy
-              </Badge>
-            )}
-            {row.rollupCause && row.rollupCause !== "All KPIs on target" ? (
-              <span className="truncate text-[9px] text-muted-foreground">{row.rollupCause}</span>
-            ) : (
-              <span className="truncate text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                {row.client.status}
-              </span>
-            )}
-          </div>
-        </div>
-      );
-    },
+    render: nameCellRender(),
     sortValue: (row) => row.client.name.toLowerCase(),
   });
 
@@ -659,6 +628,8 @@ export interface ClientsMegaTableProps {
   canEditStatus?: boolean;
   /** Called when the inline Status cell is changed. */
   onStatusChange?: (clientId: string, status: ClientStatus) => void;
+  /** Called when the satisfaction hearts in the Client cell are clicked. Read-only when omitted. */
+  onSatisfactionChange?: (clientId: string, next: SatisfactionLevel | null) => void;
 }
 
 function parseSafeHref(raw: string | null | undefined): string | null {
@@ -768,14 +739,36 @@ function LinkCell({
   );
 }
 
-// Shared by the read-only badge and the inline editable Status cell so both stay in sync.
-function statusBadgeClass(s: string): string {
-  return s === "Active"     ? "status-badge-active" :
-         s === "Inactive"   ? "status-badge-inactive" :
-         s === "Abo"        ? "status-badge-abo" :
-         s === "Sales"      ? "status-badge-sales" :
-         s === "On hold"    ? "status-badge-onhold" :
-         s === "Offboarding"? "status-badge-offboard" :
+// Client cell: name over the manual satisfaction rating + lifecycle status. The hearts are the
+// Customer Success signal here — the condition engine still tints the metric cells to the right,
+// but it no longer summarises the row. Editable only when a change handler is supplied.
+function nameCellRender(onSatisfactionChange?: (clientId: string, next: SatisfactionLevel | null) => void) {
+  return (row: ClientMegaRow) => (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="truncate text-sm text-foreground">{row.client.name}</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <SatisfactionHearts
+          size="sm"
+          value={row.client.satisfaction}
+          onChange={onSatisfactionChange ? (next) => onSatisfactionChange(row.client.id, next) : undefined}
+        />
+        <span className="truncate text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">
+          {row.client.status}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Shared by the read-only badge, the inline editable Status cell, and the page's status filter
+// chips so all three stay in sync. Unknown values get a neutral fallback rather than no class.
+export function statusBadgeClass(s: string): string {
+  return s === "Onboarding"   ? "status-badge-onboarding" :
+         s === "Active"       ? "status-badge-active" :
+         s === "On hold"      ? "status-badge-onhold" :
+         s === "Offboarding"  ? "status-badge-offboard" :
+         s === "Inactive"     ? "status-badge-inactive" :
+         s === "Subscription" ? "status-badge-subscription" :
          "border-border bg-white/5 text-white";
 }
 
@@ -1040,6 +1033,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     onNotesChange,
     canEditStatus,
     onStatusChange,
+    onSatisfactionChange,
     colsRef,
   } = props;
   useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
@@ -1056,10 +1050,14 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
       const withNotes = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
-      const editable =
-        withNotes.id === "status" && canEditStatus && onStatusChange
-          ? { ...withNotes, render: statusCellRender(onStatusChange) }
+      const withHearts =
+        withNotes.id === "name" && onSatisfactionChange
+          ? { ...withNotes, render: nameCellRender(onSatisfactionChange) }
           : withNotes;
+      const editable =
+        withHearts.id === "status" && canEditStatus && onStatusChange
+          ? { ...withHearts, render: statusCellRender(onStatusChange) }
+          : withHearts;
       const labelled = override?.label_override ? { ...editable, label: override.label_override } : editable;
       const homed = applySectionAssignment(labelled, overrideMap);
       return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
@@ -1096,7 +1094,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
       return sectionLabel ? { ...col, sub: sectionLabel } : col;
     });
-  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange]);
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange, onSatisfactionChange]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);

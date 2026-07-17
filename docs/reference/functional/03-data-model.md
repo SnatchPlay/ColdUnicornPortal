@@ -23,7 +23,7 @@ All `CREATE TYPE ... AS ENUM` definitions, [schema.ts:4-12](../../../supabase/dr
 |------|--------|
 | `campaign_status` | `draft`, `launching`, `active`, `stopped`, `completed` |
 | `campaign_type` | `outreach`, `ooo`, `nurture`, `ooo_followup` |
-| `client_status` | `Active`, `Abo`, `On hold`, `Offboarding`, `Inactive`, `Sales` |
+| `client_status` | `Active`, `Subscription`, `On hold`, `Offboarding`, `Inactive`, `Onboarding` (enum label order; **display** order is the `CLIENT_STATUSES` tuple: Onboarding, Active, On hold, Offboarding, Inactive, Subscription) |
 | `crm_pipeline_stage` | `new`, `contacted`, `qualified`, `proposal`, `negotiation`, `won`, `lost` |
 | `domain_status` | `active`, `warmup`, `blocked`, `retired` |
 | `lead_gender` | `male`, `female` |
@@ -35,7 +35,7 @@ Notes:
 
 - **`master_admin` is a real enum value** — added by [`20260520_master_admin_role.sql`](../../../supabase/migrations/20260520_master_admin_role.sql) (ADR-0005) and present in [schema.ts:12](../../../supabase/drizzle/schema.ts#L12). It is admin-tier in `private.is_admin_user()` / `is_internal_user()` / `can_access_client()` / `can_manage_client()` (migrations `20260520_master_admin_rls.sql`, `20260526_master_admin_private_is_internal_user.sql`, `20260528_fix_insert_policies_master_admin.sql`, `20260616b_can_manage_client_master_admin.sql`). Accounts are seeded manually; there is no UI to mint one.
 - `lead_qualification.won` and `leads.won` (boolean column) are separate signals; `getLeadStage()` prefers the boolean ([selectors.ts:70-77](../../../src/app/lib/selectors.ts#L70-L77)). In practice, when a lead becomes `won`, the boolean is set and `qualification` may remain at its last value.
-- `client_status` has capitalised literals (`"On hold"`, `"Offboarding"`, `"Sales"`) — strings pass through to UI verbatim.
+- `client_status` has capitalised literals (`"On hold"`, `"Offboarding"`, `"Subscription"`) — strings pass through to UI verbatim. `Abo`→`Subscription` and `Sales`→`Onboarding` were `ALTER TYPE ... RENAME VALUE` (`20260717_client_satisfaction_and_status_rename.sql`); the label sort order was left as-is (Postgres can't reorder it in place, and nothing sorts by this enum in SQL).
 - `crm_pipeline_stage` is used only by `agency_crm_deals` (the agency's own sales funnel), not by lead records.
 
 ---
@@ -128,6 +128,7 @@ The business entity whose outreach we run.
 | `bi_setup_done` | boolean default false | |
 | `lost_reason` | text | |
 | `notes` | text | |
+| `satisfaction` | smallint `CHECK 1..3`, nullable (`20260717_client_satisfaction_and_status_rename.sql`) | Manual CS rating ("hearts"). NULL = not rated. Replaced the automatic condition-engine health rollup on the Clients grid. |
 | `updated_at` | timestamptz | |
 
 RLS:

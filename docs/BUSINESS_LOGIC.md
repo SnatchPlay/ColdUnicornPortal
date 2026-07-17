@@ -200,7 +200,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 | Client campaigns | Outreach-only portfolio cards, daily volume line chart, top-10 sent bar. |
 | Client analytics | 4 KPI tiles, pipeline activity line chart, daily sent area chart, campaign reply rates, conversion funnel. |
 | Manager dashboard | 4 metric cards (Assigned clients, Active campaigns, Leads in progress, Unclassified replies), campaign watchlist, client portfolio with KPI progress, lead queue. |
-| Manager clients page | 5 tabs (Overview, DoD, 3-DoD, WoW, MoM) with metric tables. Editable client drawer + user-mapping management + dynamic condition highlights/badges/health filters. |
+| Manager clients page | 5 tabs (Overview, DoD, 3-DoD, WoW, MoM) with metric tables. Editable client drawer + user-mapping management + per-cell condition highlights. Row-level triage is a manual 1вЂ“3 heart satisfaction rating (filter + inline edit), not an automatic health rollup. |
 | Internal leads | Editable qualification + milestones + comments drawer. Reply history inline. |
 | Internal campaigns | Editable metadata drawer + per-campaign daily performance line chart. |
 | Internal statistics | Trend lines, qualification donut, campaign portfolio cards. |
@@ -220,7 +220,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 - **SQL (in our metrics)** вЂ” same set as MQL. The historical "SQL" label in DoD/WoW/MoM views means *MQL leads counted* (case-insensitive match on `qualification === 'mql'`); it is **not** a separate stage. New copy should prefer "MQL"; "SQL" is retained where it would be disruptive to rename.
 - **Meeting Booked vs Meeting Held** вЂ” `meeting_booked` is the manager's signal that the meeting is on the calendar; `meeting_held` confirms it actually happened. Some metrics use one, some the other ([04-metrics В§11.3](reference/functional/04-metrics-catalog.md#113-mom-meetings)). Code is canonical.
 - **Reply scope filter** вЂ” filters **leads by their `qualification` value** (`OOO` vs not-OOO), not replies by classification. The label is being renamed to make this clear ([decision](#decision-2026-04-25-rename-reply-scope-filter)).
-- **Non-active clients** вЂ” clients with `status в€€ ('On hold', 'Offboarding', 'Sales')`.
+- **Non-active clients** вЂ” clients with `status в€€ ('On hold', 'Offboarding', <Onboarding?>)`. The old `Sales` value was renamed to `Onboarding` (`20260717_client_satisfaction_and_status_rename.sql`); mechanically those rows are now `Onboarding`, but whether an *onboarding* client should still count as "non-active" is a product question left for a human вЂ” not silently redefined here.
 - **OOO routing** вЂ” the act of replying back to an Out-Of-Office reply with a follow-up campaign. The portal stores configuration (`client_ooo_routing` table + `clients.auto_ooo_enabled`); n8n executes the routing.
 
 ### 4.3 Configuration vs execution split
@@ -278,8 +278,8 @@ Source: created by admin (likely via SQL today; UI creation is on the [backlog](
 
 `status` enum drives visibility surfaces:
 
-- `Active`, `Abo` вЂ” operational; default surface population.
-- `On hold`, `Offboarding`, `Sales` вЂ” non-active operational states.
+- `Active`, `Subscription` (formerly `Abo`) вЂ” operational; default surface population.
+- `Onboarding` (formerly `Sales`), `On hold`, `Offboarding` вЂ” non-default operational states.
 - `Inactive` вЂ” fully retired; not surfaced.
 
 `manager_id` is **not nullable** вЂ” every client must have an assigned manager. Reassignment is admin-only ([decision](#decision-2026-04-25-manager-reassignment-only-not-unassign)).
@@ -692,7 +692,7 @@ Implemented a data-driven condition system over client operational metrics:
 
 - `condition_rules` table + RLS + seeded CS PDCA rules.
 - Safe JSON DSL evaluator (no executable formula mode).
-- Clients surfaces now render explainable highlights/badges/health filters.
+- Clients surfaces render explainable per-cell highlights + tooltips. (The row-level health rollup and health filter these rules once fed were replaced by the manual satisfaction rating, 2026-07-17.)
 - Admin/super-admin can manage rules from `/admin/settings`.
 
 This capability is intentionally distinct from the legacy biweekly Health Assessment form.
