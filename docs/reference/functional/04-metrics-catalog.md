@@ -1,6 +1,6 @@
 ﻿# 04 В· Metrics Catalog
 
-Every metric shown anywhere in the portal, with its formula, source columns, file:line of the computation, time window, edge-case handling, and which roles see it. When a metric is derived from `leads`, remember that the snapshot loader orders leads by `updated_at DESC` and may be limited (`loadSnapshot({ leadsLimit })`); timeframe filters are applied client-side on top of that.
+Every metric shown anywhere in the portal, with its formula, source columns, file:line of the computation, time window, edge-case handling, and which roles see it. When a metric is derived from `leads`, remember that lead rows never arrive as one global list: the Leads workspaces read them through the `loadLeadsList` gateway action, which **filters, sorts and paginates server-side** ([repository.ts:730](../../../src/app/data/repository.ts#L730), [orm-gateway/index.ts:1675](../../../supabase/functions/orm-gateway/index.ts#L1675)), while the dashboards receive slim lead projections inside their own page payload (ADR-0009). Timeframe filters are then applied client-side on top of the rows the page actually received.
 
 ## Contents
 
@@ -34,7 +34,7 @@ Each metric uses:
 - **Edge cases:** null, zero-denominator, rounding, precedence.
 - **Visible to:** which roles can see it.
 
-All client-side metric code lives in [`lib/client-view-models.ts`](../../../src/app/lib/client-view-models.ts) and [`lib/client-metrics.ts`](../../../src/app/lib/client-metrics.ts); pages consume these through the `useCoreData()` snapshot plus scope functions from [`lib/selectors.ts`](../../../src/app/lib/selectors.ts).
+All client-side metric code lives in [`lib/client-view-models.ts`](../../../src/app/lib/client-view-models.ts) and [`lib/client-metrics.ts`](../../../src/app/lib/client-metrics.ts). Pages feed these functions with the payload their **own** hook loaded from the `orm-gateway` edge function ([ADR-0008](../../adr/0008-orm-gateway-edge-function.md), [ADR-0009](../../adr/0009-per-page-data-contracts.md)) — e.g. `useClientDashboard()` ([client-dashboard-page.tsx:193](../../../src/app/pages/client-dashboard-page.tsx#L193)), `useLeadsList()` ([`lib/use-leads.ts`](../../../src/app/lib/use-leads.ts)), `useClientsOverview()` ([clients-page.tsx:158](../../../src/app/pages/clients-page.tsx#L158)). Gateway payloads are already RLS-scoped to the caller; internal pages that mix clients (Clients, Domains, Invoices) additionally pass rows through the `scopeX` helpers in [`lib/selectors.ts`](../../../src/app/lib/selectors.ts) for UI consistency under impersonation.
 
 ---
 
@@ -270,7 +270,7 @@ for (const lead of leads) {
 - **Where:** Client Dashboard "Leads Count per month".
 - **Formula:** `sum(daily_stats.mql_count)` aggregated by calendar month.
 - **Source:** `daily_stats.mql_count`.
-- **Note:** driven by the pre-aggregated table; **not** by the leads list. This is why the metric is available only for roles whose snapshot includes `daily_stats` (manager/admin) вЂ” clients reach this via the subset of daily stats they are RLS-visible for; if the client's snapshot intentionally excluded `daily_stats`, the chart falls back to empty state. Today the exclusion is only applied for the client role ([core-data.tsx](../../../src/app/providers/core-data.tsx)).
+- **Note:** driven by the pre-aggregated table; **not** by the leads list. Every role that can reach this chart receives `daily_stats` in its page payload — `loadClientDashboard` returns `dailyStats` to clients too — scoped by RLS to the rows that role may see. An empty chart means no rows in the window, not a withheld table.
 
 ### 6.5 Prospects added daily вЂ” Client Dashboard
 
@@ -651,8 +651,9 @@ Runtime mapping for dynamic condition rules is built in `buildClientConditionCon
 | `monthly_sql_kpi` | `clients.kpi_leads` |
 | `monthly_meeting_kpi` | `clients.kpi_meetings` |
 | `monthly_won_kpi` | `null` in current build (dependent rule seeded disabled) |
-| `auto_li_api_key` | aimfox `client_sequencers.api_key` (via `ClientsOverviewPayload.clientSequencers`; was `clients.linkedin_api_key` — ADR-0008) |
-| `bi_setup` | `clients.bi_setup_done` |
+| `auto_li_api_key` | aimfox `client_sequencers.api_key` (via `ClientsOverviewPayload.clientSequencers`; was `clients.linkedin_api_key` — ADR-0012) |
+| `bi_setup` | `clients.bi_setup_done` (context key only — the Bi column was removed from the grid and the drawer) |
+| `cell.total_leads`, `cell.sql_leads`, `cell.bucket` | the 3-DoD row of the bucket being coloured (per-cell evaluation only) |
 
 ### 15.2 DoD dynamic bucket evaluation
 

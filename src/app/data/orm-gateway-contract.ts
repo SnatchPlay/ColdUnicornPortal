@@ -8,7 +8,6 @@
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
-  CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
   Identity,
@@ -17,7 +16,7 @@
   LeadCustomFieldValueRecord,
   LeadRecord,
   UserRecord,
-} from "../types/core";
+} from "../types/core.ts";
 import type {
   AdminDashboardOverview,
   AdminSettingsPayload,
@@ -38,7 +37,8 @@ import type {
   LeadsListResponse,
   ManagerDashboardOverview,
   ShellData,
-} from "../types/view-contracts";
+  TablePreferencesPayload,
+} from "../types/view-contracts.ts";
 
 export type OrmGatewayAuthErrorCode =
   | "runtime_config"
@@ -67,12 +67,6 @@ export interface OrmGatewayFailure {
 }
 
 export type OrmGatewayEnvelope<T> = OrmGatewaySuccess<T> | OrmGatewayFailure;
-
-export interface LoadSnapshotPayload {
-  action: "loadSnapshot";
-  includeDailyStats?: boolean;
-  leadsLimit?: number;
-}
 
 export interface LoadConditionRulesPayload {
   action: "loadConditionRules";
@@ -200,7 +194,7 @@ export interface UpdateInvoicePayload {
 }
 
 /**
- * Per-sequencer credential patch (ADR-0008). Only present fields overwrite;
+ * Per-sequencer credential patch (ADR-0012). Only present fields overwrite;
  * `sequencer_key` is the sequencers catalog key ('smartlead' | 'emailbison' | 'aimfox' | …).
  */
 export interface SequencerCredentialInput {
@@ -214,13 +208,13 @@ export interface SequencerCredentialInput {
 export interface CreateClientPayload {
   action: "createClient";
   input: Omit<ClientRecord, "id" | "created_at" | "updated_at">;
-  /** Optional client_sequencers rows created alongside the client (ADR-0008). */
+  /** Optional client_sequencers rows created alongside the client (ADR-0012). */
   sequencerCredentials?: SequencerCredentialInput[];
 }
 
 export interface CreateCampaignPayload {
   action: "createCampaign";
-  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0008) applies. */
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0012) applies. */
   input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string };
 }
 
@@ -299,6 +293,25 @@ export interface SetColumnOrderPayload {
   action: "setColumnOrder";
   /** Ordered list of column ids. Index in this list becomes the row's `position`. */
   orderedKeys: string[];
+}
+
+/**
+ * Per-user table preferences (column widths, filters, sort). Personal — unlike
+ * `column_overrides`, which is the global master-admin layout. The row is always the
+ * caller's own: the gateway derives `user_id` from the JWT and RLS enforces it, so no
+ * user id crosses the wire.
+ */
+export interface LoadTablePreferencesPayload {
+  action: "loadTablePreferences";
+  /** Which table, e.g. "clients:mega". */
+  tableKey: string;
+}
+
+export interface SaveTablePreferencesPayload {
+  action: "saveTablePreferences";
+  tableKey: string;
+  /** Shape is owned by the UI; the gateway stores it as opaque jsonb. */
+  preferences: Record<string, unknown>;
 }
 
 export interface CreateClientCustomFieldPayload {
@@ -387,7 +400,6 @@ export interface UpsertLeadCustomFieldValuePayload {
 }
 
 export type OrmGatewayRequest =
-  | LoadSnapshotPayload
   | LoadConditionRulesPayload
   | LoadShellDataPayload
   | LoadAdminDashboardPayload
@@ -427,6 +439,8 @@ export type OrmGatewayRequest =
   | UpdateProfileAvatarPayload
   | UpsertColumnOverridePayload
   | SetColumnOrderPayload
+  | LoadTablePreferencesPayload
+  | SaveTablePreferencesPayload
   | CreateClientCustomFieldPayload
   | UpdateClientCustomFieldPayload
   | DeleteClientCustomFieldPayload
@@ -451,7 +465,6 @@ export interface UpdateProfileNameResult {
 }
 
 export interface OrmGatewayResponseMap {
-  loadSnapshot: CoreSnapshot;
   loadShellData: ShellData;
   loadAdminDashboardOverview: AdminDashboardOverview;
   loadManagerDashboardOverview: ManagerDashboardOverview;
@@ -491,6 +504,8 @@ export interface OrmGatewayResponseMap {
   updateProfileAvatar: UpdateProfileNameResult;
   upsertColumnOverride: ColumnOverrideRecord;
   setColumnOrder: ColumnOverrideRecord[];
+  loadTablePreferences: TablePreferencesPayload;
+  saveTablePreferences: TablePreferencesPayload;
   createClientCustomField: ClientCustomFieldRecord;
   updateClientCustomField: ClientCustomFieldRecord;
   deleteClientCustomField: { ok: true };
@@ -523,14 +538,6 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function isOptionalBoolean(value: unknown): value is boolean | undefined {
-  return value === undefined || typeof value === "boolean";
-}
-
-function isOptionalNumber(value: unknown): value is number | undefined {
-  return value === undefined || (typeof value === "number" && Number.isFinite(value));
-}
-
 function hasStringField(obj: Record<string, unknown>, key: string) {
   return isString(obj[key]) && obj[key].trim().length > 0;
 }
@@ -547,23 +554,6 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   const action = payload.action;
   if (!isString(action) || action.trim().length === 0) {
     return { ok: false, error: "Request action is required." };
-  }
-
-  if (action === "loadSnapshot") {
-    if (!isOptionalBoolean(payload.includeDailyStats)) {
-      return { ok: false, error: "loadSnapshot.includeDailyStats must be a boolean when provided." };
-    }
-    if (!isOptionalNumber(payload.leadsLimit)) {
-      return { ok: false, error: "loadSnapshot.leadsLimit must be a number when provided." };
-    }
-    return {
-      ok: true,
-      value: {
-        action,
-        includeDailyStats: payload.includeDailyStats,
-        leadsLimit: payload.leadsLimit,
-      },
-    };
   }
 
   if (action === "loadConditionRules") {
@@ -892,6 +882,32 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     }
     const orderedKeys = payload.orderedKeys.filter((k): k is string => typeof k === "string");
     return { ok: true, value: { action, orderedKeys } };
+  }
+
+  if (action === "loadTablePreferences" || action === "saveTablePreferences") {
+    if (!hasStringField(payload, "tableKey")) {
+      return { ok: false, error: `${action} requires tableKey.` };
+    }
+    const tableKey = String(payload.tableKey).trim();
+    if (tableKey.length === 0 || tableKey.length > 64) {
+      return { ok: false, error: "tableKey must be 1–64 characters." };
+    }
+
+    if (action === "loadTablePreferences") {
+      return { ok: true, value: { action, tableKey } };
+    }
+
+    if (!hasObjectField(payload, "preferences") || Array.isArray(payload.preferences)) {
+      return { ok: false, error: "saveTablePreferences requires a preferences object." };
+    }
+    // The column matches a 64 KB check constraint; reject early so a runaway client gets a
+    // clear error instead of a constraint violation. 32 KB is ~10x any real layout.
+    const preferences = payload.preferences as Record<string, unknown>;
+    if (JSON.stringify(preferences).length > 32_768) {
+      return { ok: false, error: "preferences payload is too large (max 32 KB)." };
+    }
+
+    return { ok: true, value: { action, tableKey, preferences } };
   }
 
   if (action === "createClientCustomField") {

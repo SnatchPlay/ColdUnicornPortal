@@ -1,7 +1,8 @@
 export type AppRole = "super_admin" | "admin" | "master_admin" | "manager" | "client";
 export type InviteRole = "admin" | "manager" | "client";
 export type InviteStatus = "pending" | "accepted" | "expired";
-export type ClientStatus = "Active" | "Abo" | "On hold" | "Offboarding" | "Inactive" | "Sales";
+export const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
+export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export type CampaignType = "outreach" | "ooo" | "nurture" | "ooo_followup";
 export type CampaignStatus = "draft" | "launching" | "active" | "stopped" | "completed";
 export type LeadGender = "male" | "female";
@@ -68,7 +69,8 @@ export interface ClientRecord {
   created_at: string;
   updated_at: string;
   name: string;
-  manager_id: string;
+  /** Assigned owner (CS Manager or admin). `null` when the client is unassigned. */
+  manager_id: string | null;
   kpi_leads: number | null;
   kpi_meetings: number | null;
   contracted_amount: number | null;
@@ -95,7 +97,7 @@ export interface ClientUserRecord {
   user_id: string;
 }
 
-// ── Sequencers (ADR-0008) ─────────────────────────────────────────────────────
+// ── Sequencers (ADR-0012) ─────────────────────────────────────────────────────
 // External sending tools (Smartlead / EmailBison / Aimfox). Catalog rows carry
 // fixed load-bearing UUIDs (column defaults + n8n constants); per-client
 // credentials live in client_sequencers (replaced clients.external_api_key /
@@ -139,7 +141,7 @@ export interface CampaignRecord {
   positive_responses: number;
   start_date: string | null;
   gender_target: string | null;
-  /** ADR-0008: owning sequencer. Set at creation (DB default = EmailBison); immutable via portal. */
+  /** ADR-0012: owning sequencer. Set at creation (DB default = EmailBison); immutable via portal. */
   sequencer_id: string;
 }
 
@@ -386,20 +388,3 @@ export interface LeadCustomFieldValueRecord {
   updated_by: string | null;
 }
 
-export interface CoreSnapshot {
-  users: UserRecord[];
-  clients: ClientRecord[];
-  clientUsers: ClientUserRecord[];
-  campaigns: CampaignRecord[];
-  leads: LeadRecord[];
-  replies: ReplyRecord[];
-  campaignDailyStats: CampaignDailyStatRecord[];
-  dailyStats: DailyStatRecord[];
-  domains: DomainRecord[];
-  invoices: InvoiceRecord[];
-  emailExcludeList: EmailExcludeRecord[];
-  conditionRules: ConditionRuleRecord[];
-  columnOverrides: ColumnOverrideRecord[];
-  clientCustomFields: ClientCustomFieldRecord[];
-  clientCustomFieldValues: ClientCustomFieldValueRecord[];
-}

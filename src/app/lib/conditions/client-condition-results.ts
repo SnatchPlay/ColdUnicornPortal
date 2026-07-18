@@ -109,6 +109,15 @@ function evaluateThreeDodCells(
   if (td3Rules.length === 0) return results;
 
   for (const row of metrics.threeDodRows) {
+    // Sibling metrics of the *same* day, so a rule on one 3-DoD column can compare
+    // itself against the other one in its own bucket (`cell.sql_leads`) instead of
+    // the row-level rolling sums (`three_dod_sql`), which are equal for all buckets.
+    const cell = {
+      bucket: row.bucket,
+      total_leads: row.totalLeads,
+      sql_leads: row.sqlLeads,
+    };
+
     for (const { metricKey, pick } of THREE_DOD_METRIC_PICKS) {
       const value = pick(row);
       const metricRules = td3Rules.filter((rule) => rule.metricKey === metricKey);
@@ -117,7 +126,7 @@ function evaluateThreeDodCells(
       const cellKey = makeThreeDodCellKey(row.bucket, metricKey);
       const cellMatches = metricRules
         .map((rule) =>
-          evaluateSingleRule({ ...context, value }, rule, {
+          evaluateSingleRule({ ...context, cell, value }, rule, {
             targetId: context.target_id,
             columnKey: cellKey,
             applyTo: "cell",

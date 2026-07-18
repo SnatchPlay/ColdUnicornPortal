@@ -16,7 +16,8 @@ import { getHealthScore, getHighestSeverity } from "../lib/conditions/evaluator"
 import { toConditionRule } from "../lib/conditions/mapper";
 import type { ConditionSeverity } from "../lib/conditions/types";
 import { useAuth } from "../providers/auth";
-import type { ClientCustomFieldRecord, ClientRecord, ClientSequencerRecord, InviteRequest } from "../types/core";
+import { CLIENT_STATUSES } from "../types/core";
+import type { ClientCustomFieldRecord, ClientRecord, ClientSequencerRecord, ClientStatus, InviteRequest } from "../types/core";
 import type { SequencerCredentialInput } from "../data/orm-gateway-contract";
 import { getCustomFieldSortValue } from "../lib/custom-field-sort";
 import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
@@ -36,19 +37,37 @@ import {
   type MegaSortState,
 } from "./clients-page/mega-table";
 import { createSelectionStore } from "./clients-page/selection-store";
+import { useTablePreferences } from "../lib/use-table-preferences";
 
 const PAGE_SIZE = 50;
 const HEALTH_FILTERS = ["all", "warning", "danger", "critical", "healthy"] as const;
 type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
-const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
-type ClientStatus = (typeof CLIENT_STATUSES)[number];
+// Radix <Select> forbids an empty-string item value, so the "no owner" choice needs a sentinel.
+// It maps to `manager_id = null` on submit.
+const UNASSIGNED_MANAGER = "__unassigned__";
+
+/** Row key in `user_table_preferences` for this grid. */
+const CLIENTS_TABLE_PREFS_KEY = "clients:mega";
+
+/**
+ * The caller's saved layout. Every field is optional and re-validated on read: a stale key
+ * (a column that no longer exists, a status that was renamed) must be ignored, never trusted.
+ */
+interface ClientsTablePreferences extends Record<string, unknown> {
+  /** Column width in px, keyed by column id. */
+  widths: Record<string, number>;
+  healthFilter: string;
+  statusFilter: string[];
+  managerFilter: string;
+  sort: MegaSortState;
+}
 
 interface CreateClientDraft {
   name: string;
   managerId: string;
   status: ClientStatus | "";
-  // Sequencer credentials — saved to client_sequencers, not clients (ADR-0008).
+  // Sequencer credentials — saved to client_sequencers, not clients (ADR-0012).
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
@@ -468,10 +487,11 @@ const CreateClientSheet = memo(function CreateClientSheet({
   }, [open, defaultManagerId]);
 
   async function handleSubmit() {
-    if (!draft || !draft.name.trim() || !draft.managerId || !draft.status) return;
+    // Manager is optional — only name and status are required.
+    if (!draft || !draft.name.trim() || !draft.status) return;
     setIsSubmitting(true);
     try {
-      // Sequencer credentials become client_sequencers rows server-side (ADR-0008).
+      // Sequencer credentials become client_sequencers rows server-side (ADR-0012).
       const sequencerCredentials: SequencerCredentialInput[] = [];
       const workspaceId = draft.externalWorkspaceId.trim() || null;
       const emailbisonKey = draft.externalApiKey.trim() || null;
@@ -485,7 +505,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
       await onCreateClient(
         {
           name: draft.name.trim(),
-          manager_id: draft.managerId,
+          manager_id: draft.managerId || null,
           status: draft.status as ClientStatus,
           kpi_leads: draft.kpiLeads,
           kpi_meetings: draft.kpiMeetings,
@@ -535,15 +555,23 @@ const CreateClientSheet = memo(function CreateClientSheet({
             </label>
             {canEditAssignments && (
               <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager *</span>
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manager</span>
                 <Select
-                  value={draft.managerId}
-                  onValueChange={(v) => setDraft((d) => (d ? { ...d, managerId: v } : d))}
+                  value={draft.managerId || UNASSIGNED_MANAGER}
+                  onValueChange={(v) =>
+                    setDraft((d) => (d ? { ...d, managerId: v === UNASSIGNED_MANAGER ? "" : v } : d))
+                  }
                 >
                   <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                    <SelectValue placeholder="Select manager" />
+                    <SelectValue placeholder="Unassigned" />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                    <SelectItem
+                      value={UNASSIGNED_MANAGER}
+                      className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                    >
+                      Unassigned
+                    </SelectItem>
                     {managerUsers.map((m) => (
                       <SelectItem
                         key={m.id}
@@ -659,7 +687,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
               onClick={() => {
                 void handleSubmit();
               }}
-              disabled={isSubmitting || !draft.name.trim() || !draft.managerId || !draft.status}
+              disabled={isSubmitting || !draft.name.trim() || !draft.status}
               className="w-full rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? "Creating..." : "Create client"}
@@ -753,7 +781,7 @@ export function ClientsPage() {
   const sequencers = useMemo(() => data?.sequencers ?? [], [data]);
   const clientSequencers = useMemo(() => data?.clientSequencers ?? [], [data]);
 
-  // Per-client sequencer credential rows keyed by catalog key (ADR-0008).
+  // Per-client sequencer credential rows keyed by catalog key (ADR-0012).
   const credsByClientId = useMemo<ReadonlyMap<string, ClientSequencerCreds>>(() => {
     const keyBySequencerId = new Map(sequencers.map((s) => [s.id, s.key] as const));
     const out = new Map<string, ClientSequencerCreds>();
@@ -824,6 +852,14 @@ export function ClientsPage() {
     [updateClient],
   );
 
+  // Stable callback for inline status edits from the grid's Status column.
+  const handleStatusChange = useCallback(
+    (clientId: string, status: ClientStatus) => {
+      void updateClient(clientId, { status });
+    },
+    [updateClient],
+  );
+
   // ── Drawer / selection state ──────────────────────────────────────────────────────────────────
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -841,8 +877,99 @@ export function ClientsPage() {
   const [managerFilter, setManagerFilter] = useState("all");
   const [sort, setSort] = useState<MegaSortState>({ key: "health", direction: "asc" });
 
+  // Per-user layout: column widths, filters and sort, stored in Postgres so the grid looks
+  // the same on any browser. The name search is deliberately *not* persisted — a stale
+  // search term silently hiding most of the table on next login is a trap, not a feature.
+  const { preferences: tablePrefs, loaded: prefsLoaded, update: updateTablePrefs } =
+    useTablePreferences<ClientsTablePreferences>(CLIENTS_TABLE_PREFS_KEY);
+
+  // Apply the stored layout once, when it lands. `prefsLoaded` flips exactly once per mount,
+  // so this cannot fight the user's later clicks.
+  const prefsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!prefsLoaded || prefsAppliedRef.current) return;
+    prefsAppliedRef.current = true;
+
+    if (tablePrefs.healthFilter && HEALTH_FILTERS.includes(tablePrefs.healthFilter as HealthFilter)) {
+      setHealthFilter(tablePrefs.healthFilter as HealthFilter);
+    }
+    if (Array.isArray(tablePrefs.statusFilter)) {
+      const valid = tablePrefs.statusFilter.filter((s): s is string => CLIENT_STATUSES.includes(s as never));
+      setStatusFilter(new Set(valid));
+    }
+    if (typeof tablePrefs.managerFilter === "string") {
+      setManagerFilter(tablePrefs.managerFilter);
+    }
+    if (tablePrefs.sort && typeof tablePrefs.sort.key === "string") {
+      setSort({
+        key: tablePrefs.sort.key,
+        direction: tablePrefs.sort.direction === "desc" ? "desc" : "asc",
+      });
+    }
+  }, [prefsLoaded, tablePrefs]);
+
+  const handleSortChange = useCallback(
+    (next: MegaSortState) => {
+      setSort(next);
+      updateTablePrefs({ sort: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleWidthsChange = useCallback(
+    (widths: Record<string, number>) => updateTablePrefs({ widths }),
+    [updateTablePrefs],
+  );
+
+  const handleHealthFilterChange = useCallback(
+    (next: HealthFilter) => {
+      setHealthFilter(next);
+      updateTablePrefs({ healthFilter: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleStatusToggle = useCallback(
+    (status: string) => {
+      setStatusFilter((prev) => {
+        const next = new Set(prev);
+        if (next.has(status)) next.delete(status);
+        else next.add(status);
+        updateTablePrefs({ statusFilter: [...next] });
+        return next;
+      });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleManagerFilterChange = useCallback(
+    (next: string) => {
+      setManagerFilter(next);
+      updateTablePrefs({ managerFilter: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleClearFilters = useCallback(() => {
+    setNameSearch("");
+    setStatusFilter(new Set());
+    setManagerFilter("all");
+    setHealthFilter("all");
+    updateTablePrefs({ healthFilter: "all", statusFilter: [], managerFilter: "all" });
+  }, [updateTablePrefs]);
+
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
-  const managerUsers = useMemo(() => users.filter((u) => u.role === "manager"), [users]);
+  // Assignable owners for a client: CS Managers *and* admins (any internal, non-client user).
+  // Named `managerUsers` because it feeds the "Manager" picker/filter and the manager-name lookup.
+  const managerUsers = useMemo(
+    () =>
+      users
+        .filter((u) => u.role !== "client")
+        .sort((a, b) =>
+          `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`),
+        ),
+    [users],
+  );
   const clientRoleUsers = useMemo(() => users.filter((u) => u.role === "client"), [users]);
   const managerById = useMemo(() => new Map(managerUsers.map((m) => [m.id, m] as const)), [managerUsers]);
 
@@ -858,7 +985,7 @@ export function ClientsPage() {
     const packs = new Map<string, ReturnType<typeof evaluateClientConditions>>();
     for (const client of scopedClients) {
       const metrics = metricsByClientId.get(client.id) ?? createClientMetricsFromSummary(EMPTY_METRICS_SUMMARY);
-      const manager = managerById.get(client.manager_id) ?? null;
+      const manager = managerById.get(client.manager_id ?? "") ?? null;
       const context = buildClientConditionContext({
         client,
         manager: manager as Parameters<typeof buildClientConditionContext>[0]["manager"],
@@ -885,7 +1012,7 @@ export function ClientsPage() {
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return timeSyncOp(`[perf][clients] mega-rows (${scopedClients.length} rows)`, () =>
       scopedClients.map((client) => {
-        const manager = managerById.get(client.manager_id);
+        const manager = managerById.get(client.manager_id ?? "");
         const managerName = manager
           ? `${manager.first_name ?? ""} ${manager.last_name ?? ""}`.trim()
           : "Unassigned";
@@ -974,6 +1101,9 @@ export function ClientsPage() {
 
   const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
   const canInviteUsers = identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
+  // Inline status edit mirrors the drawer's status field, which is open to any internal user
+  // (managers manage their own clients' lifecycle). RLS remains the write gate.
+  const canEditStatus = identity ? identity.role !== "client" : false;
 
   // External store that broadcasts the selected-client id and column id to
   // per-row subscribers in the mega-table. Decouples the row/cell highlight
@@ -1162,68 +1292,40 @@ export function ClientsPage() {
     );
   }
 
+  const createClientButton = (
+    <CreateClientSheetHost
+      managerUsers={managerUsers}
+      canEditAssignments={canEditAssignments}
+      onCreateClient={handleCreateClientStable}
+      defaultManagerId={defaultManagerId}
+    />
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <CreateClientSheetHost
-          managerUsers={managerUsers}
-          canEditAssignments={canEditAssignments}
-          onCreateClient={handleCreateClientStable}
-          defaultManagerId={defaultManagerId}
-        />
-      </div>
-
       {scopedClients.length === 0 ? (
-        <EmptyState
-          title="No clients assigned"
-          description="The current identity does not have any visible clients."
-        />
+        <>
+          <div className="flex justify-end">{createClientButton}</div>
+          <EmptyState
+            title="No clients assigned"
+            description="The current identity does not have any visible clients."
+          />
+        </>
       ) : (
         <Surface
           title="Client PDCA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current health filter${statsLoading ? " · loading metrics…" : ""}`}
+          actions={createClientButton}
         >
-          {/* ── Filter bar ─────────────────────────────────────── */}
-          <div className="mb-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <p className="shrink-0 text-xs uppercase tracking-[0.16em] text-muted-foreground">Health</p>
-              <div className="min-w-0 flex-1 overflow-x-auto">
-                <ToggleGroup
-                  type="single"
-                  value={healthFilter}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setHealthFilter(value as HealthFilter);
-                  }}
-                  variant="outline"
-                  className="min-w-max flex-nowrap rounded-xl border border-border bg-black/10 p-1"
-                >
-                  {HEALTH_FILTERS.map((filter) => (
-                    <ToggleGroupItem key={filter} value={filter} className="h-8 shrink-0 text-xs">
-                      {filter === "all"
-                        ? `All (${healthFilterCounts.get("all") ?? 0})`
-                        : `${
-                            filter === "healthy"
-                              ? "Healthy"
-                              : filter === "critical"
-                              ? "Critical"
-                              : filter === "danger"
-                              ? "Danger"
-                              : "Warning"
-                          } (${healthFilterCounts.get(filter) ?? 0})`}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-            </div>
-
+          {/* ── Filter bar — single row: search · status · health · manager ─── */}
+          <div className="mb-4">
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="search"
                 value={nameSearch}
                 onChange={(e) => setNameSearch(e.target.value)}
                 placeholder="Search by name…"
-                className="h-8 min-w-[160px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
+                className="h-8 w-[132px] rounded-lg border border-white/15 bg-black/30 px-3 text-xs text-white placeholder:text-muted-foreground outline-none focus:border-white/30"
               />
 
               <div className="flex flex-wrap gap-1.5">
@@ -1233,14 +1335,7 @@ export function ClientsPage() {
                     <button
                       key={s}
                       type="button"
-                      onClick={() => {
-                        setStatusFilter((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(s)) next.delete(s);
-                          else next.add(s);
-                          return next;
-                        });
-                      }}
+                      onClick={() => handleStatusToggle(s)}
                       className={cn(
                         "rounded border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition",
                         active
@@ -1254,9 +1349,37 @@ export function ClientsPage() {
                 })}
               </div>
 
+              <ToggleGroup
+                type="single"
+                value={healthFilter}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  handleHealthFilterChange(value as HealthFilter);
+                }}
+                variant="outline"
+                className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
+                aria-label="Health filter"
+              >
+                {HEALTH_FILTERS.map((filter) => (
+                  <ToggleGroupItem key={filter} value={filter} className="h-6 shrink-0 px-1.5 text-[11px]">
+                    {filter === "all"
+                      ? `All (${healthFilterCounts.get("all") ?? 0})`
+                      : `${
+                          filter === "healthy"
+                            ? "Healthy"
+                            : filter === "critical"
+                            ? "Critical"
+                            : filter === "danger"
+                            ? "Danger"
+                            : "Warning"
+                        } (${healthFilterCounts.get(filter) ?? 0})`}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+
               {canEditAssignments && managerUsers.length > 0 && (
-                <Select value={managerFilter} onValueChange={setManagerFilter}>
-                  <SelectTrigger className="h-8 min-w-[140px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
+                <Select value={managerFilter} onValueChange={handleManagerFilterChange}>
+                  <SelectTrigger className="h-8 w-[136px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
                     <SelectValue placeholder="All managers" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1273,15 +1396,10 @@ export function ClientsPage() {
               {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || healthFilter !== "all") && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setNameSearch("");
-                    setStatusFilter(new Set());
-                    setManagerFilter("all");
-                    setHealthFilter("all");
-                  }}
+                  onClick={handleClearFilters}
                   className="h-8 rounded-lg border border-white/15 bg-black/20 px-3 text-xs text-white/50 transition hover:border-white/30 hover:text-white"
                 >
-                  Clear filters
+                  Clear
                 </button>
               )}
             </div>
@@ -1291,17 +1409,21 @@ export function ClientsPage() {
             <ClientsMegaTable
               rows={visibleMegaRows}
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={handleSortChange}
               onRowClick={handleRowClick}
               onHighlight={handleCellHighlight}
               selectionStore={selectionStore}
               colsRef={tableColsRef}
+              savedWidths={(tablePrefs.widths as Record<string, number> | undefined) ?? null}
+              onWidthsChange={handleWidthsChange}
               columnOverrides={columnOverrides}
               customFields={clientCustomFields}
               customFieldValuesByClient={customFieldValuesByClient}
               canEditCustomField={canEditCustomField}
               onCustomFieldValueChange={handleCustomFieldValueChange}
               onNotesChange={handleNotesChange}
+              canEditStatus={canEditStatus}
+              onStatusChange={handleStatusChange}
             />
           </DevProfiler>
 

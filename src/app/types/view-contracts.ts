@@ -1,4 +1,4 @@
-// View contracts for the per-page data architecture that replaces the universal CoreSnapshot.
+// View contracts for the per-page data architecture (ADR-0009). One payload type per page.
 //
 // Rule (see memory: snapshot-refactor-no-legacy-fallback): the server computes FACTS — primitive
 // aggregates (count/sum/min/max, GROUP BY) and column PROJECTIONS that reduce payload. The frontend
@@ -22,11 +22,11 @@ import type {
   LeadRecord,
   ReplyRecord,
   SequencerRecord,
-} from "./core";
+} from "./core.ts";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
 // payload — only fields actually consumed by createClientMetrics are shipped).
-import type { DailyStatInput } from "../lib/client-metrics";
+import type { DailyStatInput } from "../lib/client-metrics.ts";
 
 // --- Lite shapes (navigation / filter options) ---------------------------------------------------
 
@@ -263,7 +263,7 @@ export interface ClientsOverviewPayload {
   clientCustomFields: ClientCustomFieldRecord[];
   /** Per-client custom field values. */
   clientCustomFieldValues: ClientCustomFieldValueRecord[];
-  /** Sequencer catalog (ADR-0008; 3 rows, no secrets). */
+  /** Sequencer catalog (ADR-0012; 3 rows, no secrets). */
   sequencers: SequencerRecord[];
   /** Per-client sequencer credentials. RLS-scoped: manager-own/admin; empty for client role. */
   clientSequencers: ClientSequencerRecord[];
@@ -506,7 +506,7 @@ export interface AnalyticsDailyStatInput {
  * Lite client shape for the Analytics overview — only what InternalStatisticsPage reads.
  * Drops: min_daily_sent, inboxes_count, crm_config, sms_phone_numbers, notification_emails,
  * auto_ooo_enabled, prospects_signed, prospects_added, setup_info, bi_setup_done, lost_reason,
- * notes, and audit timestamps. (Sequencer credentials live in client_sequencers — ADR-0008.)
+ * notes, and audit timestamps. (Sequencer credentials live in client_sequencers — ADR-0012.)
  */
 export interface AnalyticsClientLite {
   id: string;
@@ -663,4 +663,17 @@ export interface LeadsFilterOptions {
   clientsLite: Array<{ id: string; name: string }>;
   /** Distinct campaigns that have at least one visible lead. Sorted by name. */
   campaignsLite: Array<{ id: string; name: string; clientId: string }>;
+}
+
+/**
+ * Per-user preferences for one table (column widths, filters, sort). Personal to the
+ * caller — the gateway keys the row on the JWT subject, so no user id crosses the wire.
+ * `preferences` is opaque jsonb: the UI owns its shape and must tolerate a stale or
+ * unknown key rather than break the page.
+ */
+export interface TablePreferencesPayload {
+  tableKey: string;
+  /** null when the user has never saved preferences for this table. */
+  preferences: Record<string, unknown> | null;
+  updatedAt: string | null;
 }

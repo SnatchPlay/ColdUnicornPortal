@@ -36,17 +36,30 @@ This reference documents the PdcaFigmaTest portal (ColdUnicorn PDCA) end-to-end:
 - Every metric entry follows the template: **Name · Formula · Source · File:line · Displayed in · Time window · Edge cases · Visible to**.
 - Every chart entry follows: **ID · Page · Type · Data hook · Series + colors · Interactions · Empty state**.
 - Relative links inside this folder use `./file.md#anchor`. Links into code climb three levels: `../../../src/...`.
-- "Internal role" = `manager` ∪ `admin` ∪ `super_admin`. "Internal user" = anyone whose role is not `client`.
+- "Internal role" = `manager` ∪ `admin` ∪ `super_admin` ∪ `master_admin`. "Internal user" = anyone whose role is not `client`.
 
 ## Related documents (not superseded)
 
-- **`docs/BUSINESS_LOGIC.md`** — canonical product specification (read this **first**).
-- **`docs/reference/agent-tooling.md`** — Playwright MCP, Supabase MCP, shadcn MCP, visual-debug workflow, quality gate.
-- `docs/adr/0001..0004-*.md` — architecture decision records (source-of-truth, role shells, visibility, lead boundaries).
-- `docs/reference/route-map.md`, `query-map.md`, `mutation-ownership-matrix.md`, `role-visibility-matrix.md`, `db-ui-mapping.md`, `ui-states.md` — short cheat-sheets; this reference is the long form.
-- `docs/reference/supabase-production-rls.sql` — the RLS script canonical for production deploys.
-- `docs/reference/production-release.md` — checklist for shipping.
-- `docs/archive/MASTER_FUNCTIONAL_SPECIFICATION.md`, `docs/archive/PROJECT_SPEC.md` — historical specs; kept for diffing, not authoritative.
+**Start here**
+
+- **[`CLAUDE.md`](../../../CLAUDE.md)** — the working agreement. Rules + task routing.
+- **[`docs/BUSINESS_LOGIC.md`](../../BUSINESS_LOGIC.md)** — canonical product specification ("should we build this?").
+- **[`docs/ADR.md`](../../ADR.md)** — index of all 11 architecture decisions ("why is it like this?").
+
+**Working docs**
+
+- [`docs/reuse-catalog.md`](../../reuse-catalog.md) — search this **before** writing any component, hook, helper, or selector.
+- [`docs/reference/design-system.md`](../design-system.md) — theme model (dark + contrast axes), colour/typography/radii tokens, primitive inventory, status-semantics CSS, state surfaces. Read before any UI change.
+- [`docs/development-standards-and-operations.md`](../../development-standards-and-operations.md) — commands, quality gate, verification workflows, env, safety, observability.
+- [`docs/reference/agent-tooling.md`](../agent-tooling.md) — Playwright MCP, Supabase MCP, shadcn MCP.
+- [`docs/reference/production-release.md`](../production-release.md) — shipping checklist.
+- [`docs/reference/supabase-production-rls.sql`](../supabase-production-rls.sql) — RLS script for production deploys. **Caution:** it lags the live schema; verify against `pg_policies` before trusting it.
+
+**Cheat-sheets** (April stubs — the `functional/` files above are the long form and win on conflict)
+
+- [`route-map.md`](../route-map.md), [`query-map.md`](../query-map.md), [`mutation-ownership-matrix.md`](../mutation-ownership-matrix.md), [`role-visibility-matrix.md`](../role-visibility-matrix.md), [`db-ui-mapping.md`](../db-ui-mapping.md), [`ui-states.md`](../ui-states.md)
+
+**Archive** — [`docs/archive/`](../../archive/README.md). Historical, **not authoritative**: it predates the ORM gateway and the per-page cutover, so its data-flow descriptions are wrong. Do not answer questions from it.
 
 ## Update policy
 

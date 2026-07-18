@@ -11,7 +11,6 @@ import type {
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
-  CoreSnapshot,
   DomainRecord,
   EmailExcludeRecord,
   InviteRecord,
@@ -44,6 +43,7 @@ import type {
   ManagerDashboardOverview,
   ManagerDashboardParams,
   ShellData,
+  TablePreferencesPayload,
 } from "../types/view-contracts";
 import type {
   LoadIdentityResult,
@@ -60,7 +60,6 @@ type RepositoryErrorKind = "permission" | "network" | "timeout" | "unknown";
 const SNAPSHOT_RETRY_DELAYS_MS = [250, 600] as const;
 
 const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: RepositoryOperation }> = {
-  loadSnapshot: { table: "snapshot", operation: "select" },
   loadShellData: { table: "shell", operation: "select" },
   loadAdminDashboardOverview: { table: "dashboard", operation: "select" },
   loadManagerDashboardOverview: { table: "dashboard", operation: "select" },
@@ -100,6 +99,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateProfileAvatar: { table: "users", operation: "update" },
   upsertColumnOverride: { table: "client_table_column_overrides", operation: "upsert" },
   setColumnOrder: { table: "client_table_column_overrides", operation: "update" },
+  loadTablePreferences: { table: "user_table_preferences", operation: "select" },
+  saveTablePreferences: { table: "user_table_preferences", operation: "upsert" },
   createClientCustomField: { table: "client_custom_fields", operation: "insert" },
   updateClientCustomField: { table: "client_custom_fields", operation: "update" },
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
@@ -395,8 +396,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const body = { action, ...payload, _requestId: requestId } as Record<string, unknown>;
   const meta = ORM_ACTION_META[action];
 
-  // Instrument loadSnapshot ([TEMP PERF]) and all per-page gateway loaders ([PERF][gateway]).
-  const isLoadSnapshot = action === "loadSnapshot";
+  // Instrument all per-page gateway loaders ([PERF][gateway]).
   const isGatewayTracked =
     action === "loadShellData" ||
     action === "loadAdminDashboardOverview" ||
@@ -412,7 +412,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadAdminSettings" ||
     action === "loadCampaignsList" ||
     action === "loadCampaignStats";
-  const isPerfTracked = isLoadSnapshot || isGatewayTracked;
+  const isPerfTracked = isGatewayTracked;
   const tFetchStart = isPerfTracked ? performance.now() : 0;
 
   const gatewayFunction = runtimeConfig.ormGatewayFunction;
@@ -430,7 +430,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
   const tTextEnd = isPerfTracked ? performance.now() : 0;
 
   if (isPerfTracked) {
-    const label = isLoadSnapshot ? "[TEMP PERF]" : "[PERF][gateway]";
+    const label = "[PERF][gateway]";
     const fetchMs = tFetchEnd - tFetchStart;
     // Parse _serverMs from the raw text before full JSON parse to get server-side breakdown.
     let serverMsStr = "";
@@ -459,11 +459,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
 
   if (text) {
     try {
-      const tParseStart = isLoadSnapshot ? performance.now() : 0;
       envelope = JSON.parse(text) as OrmGatewayEnvelope<OrmGatewayResponseMap[TAction]>;
-      if (isLoadSnapshot) {
-        console.log(`[TEMP PERF] loadSnapshot JSON.parse: ${(performance.now() - tParseStart).toFixed(1)}ms`);
-      }
     } catch {
       envelope = null;
     }
@@ -547,10 +543,6 @@ async function invokeOrmGatewaySelectWithRetry<TAction extends OrmGatewayAction>
 }
 
 export interface Repository {
-  loadSnapshot(options?: {
-    includeDailyStats?: boolean;
-    leadsLimit?: number;
-  }): Promise<CoreSnapshot>;
   loadShellData(): Promise<ShellData>;
   loadAdminDashboardOverview(): Promise<AdminDashboardOverview>;
   loadManagerDashboardOverview(managerId: string, params?: ManagerDashboardParams): Promise<ManagerDashboardOverview>;
@@ -573,7 +565,7 @@ export interface Repository {
     input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
     sequencerCredentials?: SequencerCredentialInput[],
   ): Promise<ClientRecord>;
-  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0008) applies. */
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0012) applies. */
   createCampaign(
     input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string },
   ): Promise<CampaignRecord>;
@@ -618,6 +610,12 @@ export interface Repository {
     patch: { label_override?: string | null; hidden?: boolean; position?: number | null },
   ): Promise<ColumnOverrideRecord>;
   setColumnOrder(orderedKeys: string[]): Promise<ColumnOverrideRecord[]>;
+  /** The caller's own saved layout for one table. `preferences` is null when never saved. */
+  loadTablePreferences(tableKey: string): Promise<TablePreferencesPayload>;
+  saveTablePreferences(
+    tableKey: string,
+    preferences: Record<string, unknown>,
+  ): Promise<TablePreferencesPayload>;
   createClientCustomField(input: {
     name: string;
     field_type: ClientCustomFieldType;
@@ -641,7 +639,7 @@ export interface Repository {
     fieldId: string,
     value: string | null,
   ): Promise<ClientCustomFieldValueRecord>;
-  /** ADR-0008: upsert one client↔sequencer settings row, keyed by sequencers.key. */
+  /** ADR-0012: upsert one client↔sequencer settings row, keyed by sequencers.key. */
   upsertClientSequencer(
     clientId: string,
     sequencerKey: string,
@@ -676,23 +674,6 @@ export interface Repository {
 }
 
 export const repository: Repository = {
-  async loadSnapshot(options) {
-    // [SNAPSHOT_FORBIDDEN_AFTER_CUTOVER] The universal snapshot is being retired in favour of
-    // per-page data contracts (loadShellData + per-route loaders). Any call surfaced here after
-    // the no-snapshot cutover (Phase 8) is a regression. The stack trace pinpoints the caller.
-    console.warn(
-      "[SNAPSHOT_FORBIDDEN_AFTER_CUTOVER] repository.loadSnapshot called",
-      new Error("loadSnapshot call site").stack,
-    );
-    const includeDailyStats = options?.includeDailyStats ?? true;
-    const leadsLimit = options?.leadsLimit;
-
-    return invokeOrmGatewaySelectWithRetry("loadSnapshot", {
-      includeDailyStats,
-      leadsLimit,
-    });
-  },
-
   async loadShellData() {
     return invokeOrmGatewaySelectWithRetry("loadShellData", {});
   },
@@ -997,6 +978,14 @@ export const repository: Repository = {
 
   async upsertColumnOverride(columnKey, patch) {
     return invokeOrmGatewayAction("upsertColumnOverride", { columnKey, patch });
+  },
+
+  async loadTablePreferences(tableKey) {
+    return invokeOrmGatewaySelectWithRetry("loadTablePreferences", { tableKey });
+  },
+
+  async saveTablePreferences(tableKey, preferences) {
+    return invokeOrmGatewayAction("saveTablePreferences", { tableKey, preferences });
   },
 
   async setColumnOrder(orderedKeys) {

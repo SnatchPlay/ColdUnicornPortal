@@ -11,6 +11,17 @@ coverage/
 .env.local
 .env.*.local
 !.env.example
+!.env.local.example
+
+# Edge-function local secrets (keep only the *.example)
+supabase/functions/.env
+supabase/functions/.env.local
+!supabase/functions/.env.local.example
+
+# Supabase CLI artifacts + local prod dumps (dumps hold real PII — never commit)
+supabase/.temp/
+supabase/.branches/
+supabase/.local/
 
 # Logs
 *.log

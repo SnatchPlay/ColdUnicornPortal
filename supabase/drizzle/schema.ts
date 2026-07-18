@@ -136,7 +136,7 @@ export const campaigns = pgTable("campaigns", {
 	positiveResponses: integer("positive_responses").default(0).notNull(),
 	startDate: date("start_date"),
 	genderTarget: varchar("gender_target", { length: 10 }),
-	// ADR-0008: sequencer attribution. DB default = EmailBison (fixed load-bearing UUID).
+	// ADR-0012: sequencer attribution. DB default = EmailBison (fixed load-bearing UUID).
 	sequencerId: uuid("sequencer_id").default(sql`'00000000-0000-4000-a000-000000000002'::uuid`).notNull(),
 }, (table) => [
 	foreignKey({
@@ -181,7 +181,7 @@ export const clients = pgTable("clients", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	name: text().notNull(),
-	managerId: uuid("manager_id").notNull(),
+	managerId: uuid("manager_id"),
 	kpiLeads: smallint("kpi_leads"),
 	kpiMeetings: smallint("kpi_meetings"),
 	contractedAmount: numeric("contracted_amount"),

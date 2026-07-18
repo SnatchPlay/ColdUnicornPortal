@@ -95,7 +95,7 @@ Data: server returns `leadQueue` as **full `LeadsListRow` records** (created wit
 ### 1.6 Empty / loading / error
 
 - `LoadingState` while data loads.
-- `<Banner tone="warning">` with retry button on `useCoreData().error`.
+- `<Banner tone="warning">` with retry button on `useManagerDashboard().error` ([manager-dashboard-page.tsx:39](../../../src/app/pages/manager-dashboard-page.tsx#L39)); retry calls the hook's `refresh()`.
 - Each surface renders `<EmptyState>` when its own filtered array is empty.
 
 ---
@@ -115,7 +115,7 @@ One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/meg
 | Group band | Sub band | Columns |
 |-----------|----------|---------|
 | **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
-| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Bi-setup ✓, Auto-OOO ✓, CRM ✓, Updated |
+| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
 | **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
 | **3-Day rolling** | 3-DoD TOTAL leads | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads` |
@@ -128,7 +128,7 @@ Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns`
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
-**Notes (Basic band)** is inline-editable directly in the grid: a plain text input, blur-to-save via `useCoreData().updateClient(client.id, { notes })` (same optimistic-update/rollback path as the drawer, §2.3). Mirrors the existing inline-edit pattern already used for custom columns (`customFieldColumn` in `mega-table.tsx`). Editing the drawer's "Internal notes" field updates the same `clients.notes` column and vice versa.
+**Notes (Basic band)** is inline-editable directly in the grid: a plain text input, blur-to-save via the page's `updateClient(client.id, { notes })` callback ([clients-page.tsx:259](../../../src/app/pages/clients-page.tsx#L259)), which calls `repository.updateClient` directly (same optimistic-update/rollback path as the drawer, §2.3). Mirrors the existing inline-edit pattern already used for custom columns (`customFieldColumn` in `mega-table.tsx`). Editing the drawer's "Internal notes" field updates the same `clients.notes` column and vice versa.
 
 ### 2.3 Detail drawer (editable)
 
@@ -174,12 +174,11 @@ Editable fields — **Client configuration** section:
 | Prospects signed | number input | `clients.prospects_signed` | manager + admin |
 | Prospects added | number input | `clients.prospects_added` | manager + admin |
 | Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` | manager + admin |
-| BI setup done | checkbox | `clients.bi_setup_done` | manager + admin |
 | Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Abo}` |
 | Internal notes | textarea | `clients.notes` | Always visible; also inline-editable from the mega-table (§2.2) |
 | Setup notes | textarea | `clients.setup_info` | manager + admin |
 
-Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repository.updateClient`. Optimistic update; revert on error. See [09-mutations §2](./09-mutations-rls.md).
+Save calls `repository.updateClient(clientId, patch)` directly from the page ([clients-page.tsx:267](../../../src/app/pages/clients-page.tsx#L267)). The row is patched optimistically in the page hook's local state; on error the hook re-fetches (`load()`) to roll back and shows a toast. See [09-mutations §2](./09-mutations-rls.md).
 
 ### 2.4 Create client Sheet
 
@@ -187,7 +186,7 @@ Save calls `useCoreData().updateClient(client.id, patch)` which proxies to `repo
 
 - **Manager role:** `manager_id` auto-set to `identity.userId`; field hidden.
 - **Admin / super_admin:** `manager_id` shown as a Select of users with `role='manager'`.
-- Calls `useCoreData().createClient(input)`. On success the new client is prepended to the snapshot (no optimistic update). See [09-mutations §2.10](./09-mutations-rls.md).
+- Calls `repository.createClient(input)` ([clients-page.tsx:245](../../../src/app/pages/clients-page.tsx#L245)). On success the returned row is prepended to the page hook's local `clients` array (no optimistic update). See [09-mutations §2.10](./09-mutations-rls.md).
 
 ### 2.5 Filtering and health segmentation
 
@@ -272,13 +271,13 @@ Metadata (read-only): Email, job title, company, campaign name, step (`message_n
 
 Replies history: listed sorted by `received_at DESC`; each entry shows classification badge, language code, subject, body, received date.
 
-Save: `useCoreData().updateLead(lead.id, patch)` в†’ `repository.updateLead`. Optimistic; revert on error. Per ADR-0004, only the listed fields are actually sent. Escape closes drawer.
+Save: `repository.updateLead(lead.id, patch)` called directly from the page ([leads-page.tsx:510](../../../src/app/pages/leads-page.tsx#L510)), then `useLeadsList().refresh()` re-runs the `loadLeadsList` action so the row reflects the server state. Per ADR-0004, only the listed fields are actually sent. Escape closes drawer.
 
 ### 3.5 Create lead Sheet
 
 "New lead" button in `PageHeader` actions. Opens a `<Sheet>`. Required field: `client_id`. Optional: `campaign_id` (filtered to selected client's campaigns), `first_name`, `last_name`, `email`, `company_name`, `job_title`. `source` is always `'manual'` (not shown).
 
-Calls `useCoreData().createLead(input)`. See [09-mutations §2.12](./09-mutations-rls.md).
+Calls `repository.createLead(input)` ([leads-page.tsx:416](../../../src/app/pages/leads-page.tsx#L416)), then `useLeadsList().refresh()`. See [09-mutations §2.12](./09-mutations-rls.md).
 
 ### 3.6 Scope
 
@@ -327,13 +326,13 @@ Read-only metadata: `external_id`, `type`, `start_date`, `gender_target`, `clien
 
 Embedded chart: **Daily performance** LineChart for the selected campaign over the current timeframe (`sent`, `replies`, `opens`, `bounces` вЂ” same four series as Client Campaigns daily volume chart).
 
-Save: `useCoreData().updateCampaign(campaign.id, patch)` в†’ `repository.updateCampaign`. RLS: `campaigns_update_scoped` requires `can_manage_client`.
+Save: `repository.updateCampaign(campaign.id, patch)` called directly from the page ([campaigns-page.tsx:500](../../../src/app/pages/campaigns-page.tsx#L500)), then `useCampaignsList().refresh()`. RLS: `campaigns_update_scoped` requires `can_manage_client`.
 
 ### 4.4 Create campaign Sheet
 
 “New campaign” button in `PageHeader` actions (alongside the `DateRangeButton`). Required fields: `client_id`, `external_id` (Smartlead/Bison ID — unique, user-entered), `name`, `type`, `status`. Optional: `database_size`, `start_date`.
 
-Calls `useCoreData().createCampaign(input)`. See [09-mutations §2.11](./09-mutations-rls.md).
+Calls `repository.createCampaign(input)` ([campaigns-page.tsx:480](../../../src/app/pages/campaigns-page.tsx#L480)), then `useCampaignsList().refresh()`. See [09-mutations §2.11](./09-mutations-rls.md).
 
 ---
 
@@ -401,7 +400,7 @@ Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_cl
 
 "New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date`. Optional: `exchange_cost`, `status`.
 
-Calls `useCoreData().createDomain(input)`. See [09-mutations §2.13](./09-mutations-rls.md).
+Calls `repository.createDomain(input)` ([domains-page.tsx:375](../../../src/app/pages/domains-page.tsx#L375)), then `useDomainsPage().refresh()`. See [09-mutations §2.13](./09-mutations-rls.md).
 
 ---
 
@@ -460,7 +459,7 @@ The manager drawer on Clients page now covers all `clients` columns except `crm_
 - **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
 
-`bi_setup_done`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are editable in the drawer. Sequencer credentials (EmailBison workspace/key, Aimfox key) save via `upsertClientSequencer` to `client_sequencers` (ADR-0008); saves are diffed separately from the client patch (`buildSequencerPatches`).
+`prospects_signed`, `prospects_added`, `notes`, `lost_reason` are editable in the drawer (BL-3 shipped). Sequencer credentials (EmailBison workspace/key, Aimfox LinkedIn key) save via `upsertClientSequencer` to `client_sequencers` (ADR-0012), not to `clients` columns; saves are diffed separately from the client patch (`buildSequencerPatches`). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
 
 ---
 

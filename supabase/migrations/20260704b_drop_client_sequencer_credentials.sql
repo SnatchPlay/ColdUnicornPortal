@@ -1,4 +1,4 @@
--- DESTRUCTIVE half of 20260704_sequencers_catalog.sql (ADR-0008).
+-- DESTRUCTIVE half of 20260704_sequencers_catalog.sql (ADR-0012).
 -- Drops the per-client sequencer credential columns that moved to client_sequencers.
 --
 -- !! DO NOT APPLY with a no-arg `node scripts/db-apply-migrations.mjs` run until the

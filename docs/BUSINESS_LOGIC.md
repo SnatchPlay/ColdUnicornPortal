@@ -1,7 +1,7 @@
 ﻿# Business Logic Specification вЂ” ColdUnicorn PDCA Portal
 
 **Status:** Authoritative. Updated whenever scope changes.
-**Last revision:** 2026-04-28.
+**Last revision:** 2026-07-14.
 **Audience:** Product owner, engineers, managers, support, AI agents.
 
 This document describes **what the product is**, **what it does for each role**, **what it explicitly does not do**, and **how it is bounded against external systems** (Supabase, n8n). It is the canonical business specification вЂ” when reality diverges from this file, this file wins until it is updated.
@@ -75,8 +75,8 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
         в”‚   в†ђ single source of truth               в”‚
         в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
                                  в–І
-                                 в”‚ SELECT / scoped UPDATE
-                                 в”‚ (publishable key + RLS)
+                                 в”‚ POST /functions/v1/orm-gateway
+                                 в”‚ (publishable key; RLS re-applied in-tx)
                                  в–ј
         в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
         в”‚     This Portal (React SPA, Vite)        в”‚
@@ -106,8 +106,10 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 ### Supabase responsibilities
 
 - **Source of truth** for every table.
-- **RLS enforcement** of role boundaries (`public.is_admin_user`, `is_manager_of_client`, `can_access_client`, `is_internal_user`).
-- **Edge functions** `send-invite` and `manage-invites` (the only server-side code path the portal invokes for writes that need elevated privileges).
+- **RLS enforcement** of role boundaries (`public.is_admin_user`, `is_manager_of_client`, `can_access_client`, `is_internal_user`). RLS is *the* security boundary — the portal has no server of its own to enforce access in.
+- **Edge functions:**
+  - **`orm-gateway`** — the portal's entire data path. The SPA does not query Postgres directly: it POSTs `{ action, ...payload }` to this function, which runs Drizzle + postgres.js and re-establishes the caller's JWT claims and role *inside each transaction*, so RLS still applies. It also computes the server-side aggregates the dashboards need. (`orm-gateway-next` is a staging twin.) → [ADR-0008](adr/0008-orm-gateway-edge-function.md)
+  - **`send-invite`, `manage-invites`** — privileged invitation flows.
 
 ### Hard rule
 
@@ -117,7 +119,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 
 ## 3. Roles and responsibilities
 
-Four roles. Detailed UI/route mapping in [docs/reference/functional/02-roles-routes.md](reference/functional/02-roles-routes.md).
+Five roles: `client`, `manager` ("CS Manager"), `admin`, `master_admin` ([ADR-0005](adr/0005-master-admin-role.md)), `super_admin`. Detailed UI/route mapping in [docs/reference/functional/02-roles-routes.md](reference/functional/02-roles-routes.md).
 
 ### 3.1 Client
 
@@ -520,11 +522,50 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 
 Append-only. Each entry: date, decision, rationale, references.
 
-### Decision (2026-07-04): Multi-sequencer model — catalog + per-client credentials (ADR-0008)
+### Decision (2026-07-14): Documentation + agent-contract overhaul; snapshot layer deleted
+
+No product-scope change. This entry records a **documentation and architecture-hygiene** pass that
+changed what agents are told to build against.
+
+- **The universal snapshot is gone.** `loadSnapshot`, `CoreSnapshot`, `CoreDataProvider`,
+  `useCoreData` and `LegacySnapshotOutlet` were deleted from the codebase — they had already been
+  bypassed in production (`CoreDataProvider` was mounted nowhere) but the docs still instructed
+  agents to route all data and mutations through them. The cutover-guard allowlist is now empty.
+  → [ADR-0009](adr/0009-per-page-data-contracts.md)
+- **Four decisions that were shipped but never recorded now have ADRs**: the ORM gateway edge
+  function and its trust model ([0008](adr/0008-orm-gateway-edge-function.md)), the per-page data
+  contracts ([0009](adr/0009-per-page-data-contracts.md)), the legacy CRM second Supabase client —
+  previously an unexplained apparent violation of ADR-0001 — as a **bounded, read-only exception**
+  ([0010](adr/0010-legacy-crm-integration.md)), and the conditions rules engine
+  ([0011](adr/0011-conditions-rules-engine.md)). Index: [ADR.md](ADR.md).
+- **`CLAUDE.md` shrank from ~40 KB to ~7 KB**, becoming a rules + task-routing contract. The detail
+  moved to [reuse-catalog.md](reuse-catalog.md),
+  [design-system.md](reference/design-system.md),
+  [development-standards-and-operations.md](development-standards-and-operations.md), and four new
+  procedural skills (`portal-page`, `gateway-action`, `rls-migration`, `visual-verify`).
+- **The design system is documented for the first time.** The previous "design conventions" file was
+  a 7-line stub, and the palette rules in `CLAUDE.md` were wrong (panels are `#050505`, not
+  `#0f0f0f`). The two theme axes — the hardcoded `.dark` class and the separate high-contrast status
+  palette that **defaults to on** — are now written down.
+- **33 unused shadcn primitives were deleted** (46 → 16). Three of them (`dialog`, `sheet`, `chart`)
+  were the ones the old docs told agents to use, while having zero importers.
+
+**Why:** the docs had drifted far enough that an agent following them faithfully would write code
+against dead scaffolding. Docs that describe a system that no longer runs are worse than no docs.
+
+**Bug found and fixed in the same pass — invoice editing is admin-only.** `invoices_update_admin` is
+`private.is_admin_user()`-only (`super_admin | admin | master_admin`), so a **manager editing an
+invoice got a `42501`** even though the drawer offered the control — and the test suite had this
+codified as expected behaviour (the "saves invoice draft changes" test ran as a *manager*). We
+**gated the UI** rather than widening RLS: invoices are billing records, and admin-only writes are
+the intended boundary. Managers keep read access (`invoices_select_scoped`). The drawer now renders
+read-only for them, with a regression test. → [09-mutations-rls.md](reference/functional/09-mutations-rls.md) §4
+
+### Decision (2026-07-04): Multi-sequencer model — catalog + per-client credentials (ADR-0012)
 
 Sequencers (Smartlead, EmailBison, Aimfox — the look4lead concept is replaced by Aimfox) became first-class data: a global `sequencers` catalog (fixed load-bearing UUIDs), per-client credentials in `client_sequencers` (replacing the dropped `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` columns), `sequencer_id NOT NULL DEFAULT EmailBison` on `campaigns` and `leads` (all historical rows attributed to EmailBison), and the ingestion-only `sequencer_daily_stats` table for Aimfox LinkedIn PDCA metrics (invites sent/accepted per profile, remaining database size, invite limit ≈195/week). The client drawer's credential fields now read/write `client_sequencers` via the `upsertClientSequencer` gateway action. AI reply classification and SMS/email notifications for LinkedIn leads stay in n8n (OoS-12). The destructive column-drop migration (`20260704b`) applies only after the n8n cutover.
 
-**Rationale:** Aimfox integration + upcoming per-sequencer PDCA statistics require attributing campaigns/leads/stats to a specific tool and holding more than one credential set per client. **References:** [ADR-0008](adr/0008-multi-sequencer-model.md), migrations `20260704_sequencers_catalog.sql` / `20260704b_drop_client_sequencer_credentials.sql`, [03-data-model.md](reference/functional/03-data-model.md), [09-mutations-rls.md](reference/functional/09-mutations-rls.md), [11-integrations.md](reference/functional/11-integrations.md).
+**Rationale:** Aimfox integration + upcoming per-sequencer PDCA statistics require attributing campaigns/leads/stats to a specific tool and holding more than one credential set per client. **References:** [ADR-0012](adr/0012-multi-sequencer-model.md), migrations `20260704_sequencers_catalog.sql` / `20260704b_drop_client_sequencer_credentials.sql`, [03-data-model.md](reference/functional/03-data-model.md), [09-mutations-rls.md](reference/functional/09-mutations-rls.md), [11-integrations.md](reference/functional/11-integrations.md).
 
 ### Decision (2026-06-19): User profile photos (avatars) with initials fallback (Batch 10D)
 

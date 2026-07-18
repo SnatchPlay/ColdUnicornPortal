@@ -83,7 +83,7 @@ The `crm_config` JSONB column on `clients` exists for future integration with th
 
 ### OoS-12 вЂ” Smartlead / Bison API sync from portal
 
-The portal does **not** call Smartlead/Bison/**Aimfox** APIs directly. n8n owns those integrations. Pushing data from the portal directly would duplicate logic and split error handling. Since ADR-0008 the portal stores per-client sequencer credentials in `client_sequencers` and reads `sequencer_daily_stats` — configuration and display only; execution stays in n8n. The full sequencer-management UI (catalog editing, enable/disable, Aimfox PDCA panels) is phase 2 (backlog BL-3).
+The portal does **not** call Smartlead/Bison/**Aimfox** APIs directly. n8n owns those integrations. Pushing data from the portal directly would duplicate logic and split error handling. Since ADR-0012 the portal stores per-client sequencer credentials in `client_sequencers` and reads `sequencer_daily_stats` — configuration and display only; execution stays in n8n. The full sequencer-management UI (catalog editing, enable/disable, Aimfox PDCA panels) is phase 2 (backlog BL-3).
 
 ### OoS-13 вЂ” ABS scoring
 

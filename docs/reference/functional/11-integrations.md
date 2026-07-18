@@ -39,12 +39,14 @@ The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only sy
 
 The portal must **never** issue INSERT or UPDATE against these. They are populated by n8n (or a future ingestion replacement) using the service role.
 
-| Table | Write source | Window in snapshot | Read scope |
-|-------|--------------|--------------------|------------|
-| `replies` | n8n: insert + classify | full history (no window in `loadSnapshot`) | scoped via RLS |
-| `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** ([repository.ts:29](../../../src/app/data/repository.ts#L29)) | scoped via set-based RLS |
-| `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** ([repository.ts:30](../../../src/app/data/repository.ts#L30)); **skipped for client role** | scoped via RLS |
-| `sequencer_daily_stats` | n8n ("Get Metrics from Aimfox", 2-hourly): UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas). `profile_id` = Aimfox account id, `''` = client rollup (current workflow) | not in snapshot yet (phase-2 UI) | scoped via set-based RLS |
+Read windows are enforced **server-side** in the `orm-gateway` edge function ([ADR-0008](../../adr/0008-orm-gateway-edge-function.md)); each page requests only the action it needs ([ADR-0009](../../adr/0009-per-page-data-contracts.md)).
+
+| Table | Write source | Read window (gateway) | Read scope |
+|-------|--------------|-----------------------|------------|
+| `replies` | n8n: insert + classify | never bulk-loaded. List/dashboard actions read **server-side aggregates only** (reply count + last reply per lead, e.g. [orm-gateway/index.ts:1807](../../../supabase/functions/orm-gateway/index.ts#L1807)); the full thread for **one** lead is fetched on demand by `loadLeadDetail` ([index.ts:1949](../../../supabase/functions/orm-gateway/index.ts#L1949), full history, no window) | scoped via RLS |
+| `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** — `CAMPAIGN_DAILY_STATS_WINDOW_DAYS` ([index.ts:19](../../../supabase/functions/orm-gateway/index.ts#L19)) | scoped via set-based RLS |
+| `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** — `DAILY_STATS_WINDOW_DAYS` ([index.ts:20](../../../supabase/functions/orm-gateway/index.ts#L20)) | scoped via RLS |
+| `sequencer_daily_stats` (ADR-0012) | n8n ("Get Metrics from Aimfox", 2-hourly): UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas). `profile_id` = Aimfox account id, `''` = client rollup (current workflow) | not read by the portal yet (phase-2 UI) | scoped via set-based RLS |
 
 The `domains` and `invoices` tables sit in the middle: rows arrive from ingestion, but the portal **mutates operational fields** (status, reputation, dates for domains; status, amount, issue date for invoices). New row creation is ingestion-only.
 

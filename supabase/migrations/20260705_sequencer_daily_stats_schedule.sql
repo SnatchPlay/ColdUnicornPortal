@@ -1,5 +1,5 @@
 -- Align sequencer_daily_stats with the real "Get Metrics from Aimfox" n8n workflow
--- (analyzed 2026-07-05; ADR-0008 follow-up).
+-- (analyzed 2026-07-05; ADR-0012 follow-up).
 --
 -- The workflow writes three per-day Aimfox schedule volumes to the PDCA sheet
 -- ("Schedule volume for Today/Tomorrow/Day after tomorrow (Aimfox)") that had no

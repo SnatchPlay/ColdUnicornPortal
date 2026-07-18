@@ -149,8 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   //   3. `onAuthStateChange` "SIGNED_IN" event (restored persisted session)
   // All three carry the same session. Without this guard each one runs its own
   // `loadIdentity` round-trip and commits a fresh `actorIdentity` reference,
-  // which downstream `CoreDataProvider` reacts to with a duplicate
-  // `loadSnapshot` (~12 MB × 2). The signature is `${user.id}:${access_token}`
+  // which re-fires every identity-dependent per-page loader downstream.
+  // The signature is `${user.id}:${access_token}`
   // for a real session, or the literal `"null"` for signed-out. Genuine
   // transitions — sign-in (new token), sign-out (`"null"`), token-refresh
   // (new access_token) — produce a different signature and are not blocked.

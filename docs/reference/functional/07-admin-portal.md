@@ -88,7 +88,7 @@ On success (`ok: true` from edge function):
 - Message banner: "Invitation sent to <email>".
 - Invites list refreshed.
 
-Handler chain: `useCoreData().sendInvite(payload)` в†’ `repository.sendInvite(payload)` в†’ `invokeInviteEdgeFunction("send-invite", вЂ¦)`. Full error handling in [09 В§3](./09-mutations-rls.md#3-edge-functions).
+Handler chain: the page calls `repository.sendInvite(payload)` directly ([admin-user-management-page.tsx:276](../../../src/app/pages/admin-user-management-page.tsx#L276)) в†’ `invokeInviteEdgeFunction("send-invite", вЂ¦)`. Full error handling in [09 В§3](./09-mutations-rls.md#3-edge-functions).
 
 ### 2.3 Invites list
 
@@ -120,7 +120,7 @@ List data comes from `repository.listInvites()` on mount and after each mutation
 
 ### 2.4 Mapping to `client_users`
 
-When a `client` invitation is accepted, the backend edge function creates both the `users` row and the `client_users` mapping. `AdminUserManagementPage` doesn't directly manage mappings in the common flow, but `useCoreData().upsertClientUserMapping(userId, clientId)` is exposed via the repository for programmatic reassignment if ever needed.
+When a `client` invitation is accepted, the backend edge function creates both the `users` row and the `client_users` mapping. `AdminUserManagementPage` doesn't directly manage mappings in the common flow, but `repository.upsertClientUserMapping(userId, clientId)` ([repository.ts:894](../../../src/app/data/repository.ts#L894)) is available for programmatic reassignment if ever needed.
 
 ### 2.5 Avatars (photos)
 
@@ -145,7 +145,7 @@ Banner announcing write access (in contrast to manager's read-only banner).
 
 - `domain` text input, trimmed and lower-cased on submit (client-side normalisation).
 - "Add domain" submit button.
-- Submit handler: `useCoreData().upsertEmailExcludeDomain(domain)` в†’ `repository.upsertEmailExcludeDomain`.
+- Submit handler: `repository.upsertEmailExcludeDomain(domain)` called directly from the page, then `useBlacklistPage().refresh()` ([blacklist-page.tsx:46](../../../src/app/pages/blacklist-page.tsx#L46)).
 - Validation: non-empty after trim; no duplicate prevention beyond the DB UNIQUE constraint on the primary key `domain`.
 
 ### 3.3 Entries list
@@ -154,7 +154,7 @@ One row per entry, reverse-chronological by default:
 
 - `domain`
 - `created_at` formatted
-- **Remove** button (admin only). Click triggers `useCoreData().deleteEmailExcludeDomain(domain)` with a confirmation toast.
+- **Remove** button (admin only). Click triggers `repository.deleteEmailExcludeDomain(domain)` followed by `useBlacklistPage().refresh()` ([blacklist-page.tsx:57](../../../src/app/pages/blacklist-page.tsx#L57)), with a confirmation toast.
 
 No pagination; the blacklist is expected to be short (hundreds).
 

@@ -34,7 +34,7 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 | Default timeframe | **30 days** (`createDefaultTimeframe()`) | [timeframe.ts](../../../src/app/lib/timeframe.ts) | Loaded into pages on first render. |
 | `today` normalisation | **noon** local | [client-metrics.ts:249-250](../../../src/app/lib/client-metrics.ts#L249-L250) | Avoids DST boundary issues when bucketing days. |
 | Condition severity rank | `critical_over > danger > warning > info > good` | `src/app/lib/conditions/types.ts`, `evaluator.ts` | Highest rank wins visual precedence; lower `priority` breaks ties. |
-| Sequencer catalog UUIDs (ADR-0008) | smartlead `00000000-0000-4000-a000-000000000001`, emailbison `…-0002`, aimfox `…-0003` | `20260704_sequencers_catalog.sql`, `supabase/drizzle/schema.ts` (campaigns default) | **Load-bearing** — they are the column DEFAULTs on `campaigns.sequencer_id` / `leads.sequencer_id` and the constants n8n hardcodes. Never change. |
+| Sequencer catalog UUIDs (ADR-0012) | smartlead `00000000-0000-4000-a000-000000000001`, emailbison `…-0002`, aimfox `…-0003` | `20260704_sequencers_catalog.sql`, `supabase/drizzle/schema.ts` (campaigns default) | **Load-bearing** — they are the column DEFAULTs on `campaigns.sequencer_id` / `leads.sequencer_id` and the constants n8n hardcodes. Never change. |
 | `sequencer_id` default | **EmailBison** (`…-0002`) | `campaigns` / `leads` DDL | Inserts that omit `sequencer_id` attribute to EmailBison — all pre-2026-07-04 rows were backfilled this way. Aimfox flows must set it explicitly. |
 | `sequencer_daily_stats.profile_id` sentinel | `''` (empty string, NOT NULL) | `20260704_sequencers_catalog.sql` | Means "account-level rollup"; kept non-null so the UNIQUE(client, sequencer, profile, date) key stays honest. |
 | `invite_limit` vs `invite_limit_remaining` | weekly cap vs left-today | `sequencer_daily_stats` | `invite_limit` = Σ Aimfox accounts' `limit.connect` (≈195/account, weekly); `invite_limit_remaining` = what n8n says is left today. The legacy sheet's "Invitations limit" column held the REMAINING value — do not conflate. |
@@ -72,7 +72,7 @@ Custom columns (`cf:<fieldId>`) are built dynamically and are **not** in the sta
 - **Per-column section reassignment** → `colsection:<column id>` (e.g. `colsection:inboxes`, `colsection:cf:<fieldId>`). `label_override` holds the target section's *original* name; `applySectionAssignment` rewrites that column's `sub` and `group` (via `SECTION_TO_GROUP`) so it renders under the chosen band. This is label-only: the column keeps its position, so the master admin must also reorder it adjacent to that section or the band splits. Applied *before* the `section:*` rename pass, so a reassigned column also picks up that section's display rename.
 - **Master-admin-created sections** → a single row keyed `sections:custom`, with `label_override` holding a **JSON array** of the invented section names. This is purely a settings-side registry so created sections appear in the Section dropdown and rename list; mega-table never reads it. A created section only materialises as a band once a column carries a matching `colsection:<id>`. `SECTION_TO_GROUP` has no entry for a custom section, so reassigned columns keep their own `group` (the thick group separators may not align — acceptable for a manual band). Deleting a custom section (in settings) clears the columns' `colsection` rows, drops its `section:<name>` rename, then rewrites the `sections:custom` array.
 
-`setColumnOrder` only touches reordered keys, so `core-data.tsx` re-merges untouched overrides (notably `section:*`) into the optimistic and post-server snapshot to keep them from vanishing on a reorder.
+`setColumnOrder` only touches reordered keys, so the caller must re-merge untouched overrides (notably `section:*`) into its local state after the optimistic update and after the server response — otherwise they vanish on a reorder. This re-merge now lives in the settings page/`useAdminSettings` state rather than in a global provider.
 
 ### `private.is_internal_user()` and `public.is_internal_user()` must stay in lockstep
 
@@ -138,10 +138,6 @@ Requires a TLD of at least two letters. Domain is normalised with `trim().toLowe
 
 [statistics-page.tsx:61-66](../../../src/app/pages/statistics-page.tsx#L61-L66) вЂ” When the user changes the client filter and the previously-selected campaign no longer belongs to a visible client, `campaignFilterId` is reset to `ALL_FILTER_VALUE`. Avoids "selected but invisible" states.
 
-### Daily-stats inclusion gate
-
-[core-data.tsx:103](../../../src/app/providers/core-data.tsx#L103) вЂ” `includeDailyStats = identity?.role !== "client"`. During super-admin impersonation of a client, the snapshot reload omits `daily_stats`, so client-shell pages that rely on it render empty states. Document for support; this is intentional ([10-nfr В§1.1](./10-nfr.md#11-bulk-snapshot)).
-
 ### Condition evaluator `value` fallback
 
 `evaluateConditionRules()` injects `context.value = context[rule.metricKey]` when `value` is not already present. This keeps rules written against `left.metric = "value"` reusable across surfaces without hardcoding column-specific branches.
@@ -160,9 +156,9 @@ Three seeded WoW rules intentionally keep a legacy green branch for very low rat
 
 These branches are preserved for parity and documented in rule `notes` pending minimum-volume guard design.
 
-### Condition-rules read gate for client role
+### Condition rules are never fetched for the client role
 
-`CoreDataProvider.refresh()` skips `repository.loadConditionRules()` when `identity.role === "client"` to avoid expected RLS denials for the client role.
+There is no longer an explicit role check: condition rules only travel inside the two gateway payloads that clients never request — `loadClientsOverview` (Clients page, [orm-gateway/index.ts:1372](../../../supabase/functions/orm-gateway/index.ts#L1372)) and `loadAdminSettings` (Settings, [index.ts:2217](../../../supabase/functions/orm-gateway/index.ts#L2217)). Both routes are internal-only, so the client role never triggers the RLS denial the old provider-level skip existed to avoid. The standalone `repository.loadConditionRules()` action still exists ([repository.ts:788](../../../src/app/data/repository.ts#L788)) but no page calls it — if a client-visible page ever does, the denial returns.
 ### Auth state-change debounce
 
 [auth.tsx:238](../../../src/app/providers/auth.tsx#L238) вЂ” `window.setTimeout(..., 0)` defers the auth-state listener so multiple Supabase events (TOKEN_REFRESHED + USER_UPDATED) within the same tick batch into one identity reload.
@@ -178,7 +174,7 @@ These branches are preserved for parity and documented in rule `notes` pending m
 | **`positive_responses`** (campaign drawer) vs `positive_replies_count` (daily stats) | Look like the same metric | The drawer field is a manually curated lifetime counter; the daily-stats column is ingestion-derived per day. They can diverge intentionally. |
 | **`meeting_booked`** vs **`meeting_held`** | Often used interchangeably in conversation | Two separate booleans. Some metrics use one, some the other. |
 | **`getClientKpis().mqls`** | Looks like a stage count | `count(qualification === 'MQL')` вЂ” uses the raw qualification, not `getLeadStage`. Differs from "MQL stage count" once a lead progresses past MQL. |
-| **`leads.source`** vs **`leads.sequencer_id`** | Both sound like "which tool sent this" | `source` is free-text channel provenance (`'cold_email'`, gateway fallback `"smartlead"`); `sequencer_id` is the FK attribution (ADR-0008). Do not unify them. |
+| **`leads.source`** vs **`leads.sequencer_id`** | Both sound like "which tool sent this" | `source` is free-text channel provenance (`'cold_email'`, gateway fallback `"smartlead"`); `sequencer_id` is the FK attribution (ADR-0012). Do not unify them. |
 
 ---
 

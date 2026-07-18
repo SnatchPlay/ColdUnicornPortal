@@ -18,17 +18,12 @@ import type { evaluateClientConditions } from "../../lib/conditions/client-condi
 import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatDate, formatMoney } from "../../lib/format";
+import { CLIENT_STATUSES } from "../../types/core";
 import type { ClientRecord, ClientSequencerRecord, ClientUserRecord, UserRecord } from "../../types/core";
 
-const CLIENT_STATUSES: ClientRecord["status"][] = [
-  "Active",
-  "Abo",
-  "On hold",
-  "Offboarding",
-  "Inactive",
-  "Sales",
-];
 const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
+// Sentinel for the "no owner" choice — Radix <Select> forbids an empty-string item value.
+const UNASSIGNED_MANAGER = "__unassigned__";
 
 const LOST_REASON_STATUSES: ClientRecord["status"][] = ["Inactive", "Offboarding", "Abo"];
 
@@ -42,14 +37,13 @@ export interface ClientDraft {
   autoOooEnabled: boolean;
   setupInfo: string;
   managerId: string;
-  // sequencer credentials (editable; saved to client_sequencers, not clients — ADR-0008)
+  // sequencer credentials (editable; saved to client_sequencers, not clients — ADR-0012)
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
   // prospects & setup
   prospectsSigned: number;
   prospectsAdded: number;
-  biSetupDone: boolean;
   // notes & lost reason
   notes: string;
   lostReason: string;
@@ -255,7 +249,7 @@ function IssuesTimeline({ issues, emptyLabel }: IssuesTimelineProps) {
   );
 }
 
-/** Per-client sequencer credential rows relevant to the drawer (ADR-0008). */
+/** Per-client sequencer credential rows relevant to the drawer (ADR-0012). */
 export interface ClientSequencerCreds {
   emailbison: ClientSequencerRecord | null;
   aimfox: ClientSequencerRecord | null;
@@ -273,13 +267,12 @@ export function toClientDraft(client: ClientRecord, creds: ClientSequencerCreds)
     smsPhoneNumbers: client.sms_phone_numbers ?? [],
     autoOooEnabled: client.auto_ooo_enabled,
     setupInfo: client.setup_info ?? "",
-    managerId: client.manager_id,
+    managerId: client.manager_id ?? "",
     externalWorkspaceId: creds.emailbison?.external_workspace_id ?? "",
     externalApiKey: creds.emailbison?.api_key ?? "",
     linkedinApiKey: creds.aimfox?.api_key ?? "",
     prospectsSigned: client.prospects_signed,
     prospectsAdded: client.prospects_added,
-    biSetupDone: client.bi_setup_done,
     notes: client.notes ?? "",
     lostReason: client.lost_reason ?? "",
     kpiLeads: client.kpi_leads != null ? String(client.kpi_leads) : "",
@@ -320,14 +313,14 @@ export function buildClientPatch(
     patch.auto_ooo_enabled = draft.autoOooEnabled;
   }
 
-  if (canEditAssignments && client.manager_id !== draft.managerId) {
-    patch.manager_id = draft.managerId;
+  if (canEditAssignments && (client.manager_id ?? "") !== draft.managerId) {
+    patch.manager_id = draft.managerId || null;
   }
 
   // prospects & setup flags
+  // Sequencer credentials are persisted separately via client_sequencers (ADR-0012), not on the client patch.
   if (client.prospects_signed !== draft.prospectsSigned) patch.prospects_signed = draft.prospectsSigned;
   if (client.prospects_added !== draft.prospectsAdded) patch.prospects_added = draft.prospectsAdded;
-  if (client.bi_setup_done !== draft.biSetupDone) patch.bi_setup_done = draft.biSetupDone;
 
   // notes & lost reason
   const nextNotes = draft.notes.trim() || null;
@@ -352,7 +345,7 @@ export function buildClientPatch(
 
 /**
  * Diff the draft's credential fields against the current client_sequencers rows.
- * Returns one upsert per touched sequencer (ADR-0008: EmailBison holds workspace
+ * Returns one upsert per touched sequencer (ADR-0012: EmailBison holds workspace
  * id + API key; Aimfox holds the LinkedIn key).
  */
 export function buildSequencerPatches(
@@ -803,15 +796,25 @@ export function ClientDrawer({
                     Assigned manager
                   </span>
                   <Select
-                    value={draft.managerId || undefined}
+                    value={draft.managerId || UNASSIGNED_MANAGER}
                     onValueChange={(value) =>
-                      setDraft((current) => (current ? { ...current, managerId: value } : current))
+                      setDraft((current) =>
+                        current
+                          ? { ...current, managerId: value === UNASSIGNED_MANAGER ? "" : value }
+                          : current,
+                      )
                     }
                   >
                     <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                      <SelectValue placeholder="Select manager" />
+                      <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+                      <SelectItem
+                        value={UNASSIGNED_MANAGER}
+                        className="text-white focus:bg-[#1a1a1a] focus:text-white"
+                      >
+                        Unassigned
+                      </SelectItem>
                       {managerUsers.map((manager) => (
                         <SelectItem
                           key={manager.id}
@@ -871,22 +874,6 @@ export function ClientDrawer({
                     onCheckedChange={(checked) =>
                       setDraft((current) =>
                         current ? { ...current, autoOooEnabled: checked === true } : current,
-                      )
-                    }
-                    className="h-4 w-4"
-                  />
-                </div>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">BI setup done</span>
-                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <span className="text-sm">{draft.biSetupDone ? "Done" : "Not done"}</span>
-                  <Checkbox
-                    checked={draft.biSetupDone}
-                    onCheckedChange={(checked) =>
-                      setDraft((current) =>
-                        current ? { ...current, biSetupDone: checked === true } : current,
                       )
                     }
                     className="h-4 w-4"

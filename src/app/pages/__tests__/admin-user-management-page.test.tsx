@@ -9,11 +9,6 @@ vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
 }));
 
-// core-data mock prevents the heavy transitive load from crm-integration-card etc.
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(() => ({ clients: [], loading: false, error: null, refresh: vi.fn() })),
-}));
-
 vi.mock("../../providers/shell-data", () => ({
   useShellData: vi.fn(() => ({
     clientsLite: [{ id: "client-1", name: "Acme", manager_id: "manager-1", status: "active", kpi_leads: null, kpi_meetings: null, notification_emails: null }],

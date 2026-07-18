@@ -20,7 +20,7 @@ export interface BuildClientConditionContextInput {
    */
   customFieldValues?: ReadonlyMap<string, string | null>;
   /**
-   * Sequencer credentials from client_sequencers (ADR-0008). These keep the
+   * Sequencer credentials from client_sequencers (ADR-0012). These keep the
    * legacy metric paths alive after the clients.* credential columns were
    * dropped — live rules depend on them: `spreadsheet_or_workspace_ids_present`
    * reads `client.external_workspace_id`, `auto_li_api_key_present` reads
@@ -48,7 +48,7 @@ export interface ClientConditionContext {
     prospects_added: number | null;
     auto_ooo_enabled: boolean | null;
     bi_setup_done: boolean | null;
-    // Sequencer credential paths (ADR-0008): sourced from client_sequencers,
+    // Sequencer credential paths (ADR-0012): sourced from client_sequencers,
     // names kept for live-rule compatibility (metric_key = 'client.external_workspace_id').
     external_workspace_id: string | null;
     external_api_key: string | null;
@@ -118,6 +118,18 @@ export interface ClientConditionContext {
   custom: Record<string, string | null>;
 
   value?: unknown;
+
+  /**
+   * Sibling metrics of the bucket currently being coloured. Only present on the
+   * per-cell evaluation path (see `evaluateThreeDodCells`), where the row-level
+   * `three_dod_*` keys hold rolling sums and are therefore identical across all
+   * five buckets. Rules reference these as `cell.sql_leads` / `cell.total_leads`.
+   */
+  cell?: {
+    bucket: string;
+    total_leads: number;
+    sql_leads: number;
+  };
 }
 
 function rowByBucket<T extends { bucket: string }>(rows: T[], bucket: string): T | null {

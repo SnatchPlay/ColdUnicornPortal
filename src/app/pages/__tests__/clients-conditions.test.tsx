@@ -17,6 +17,10 @@ vi.mock("../../data/repository", () => ({
   },
   repository: {
     loadClientsOverview: vi.fn(),
+    // The clients grid loads the caller's saved layout on mount; an unstubbed method here
+    // would throw synchronously inside the hook.
+    loadTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: null, updatedAt: null }),
+    saveTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: {}, updatedAt: null }),
     loadClientsStats: vi.fn(),
     loadClientsMetricsSummary: vi.fn(),
     updateClient: vi.fn(),
@@ -175,6 +179,9 @@ async function renderPage() {
 describe("clients condition surfaces", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // useTablePreferences caches the saved layout in localStorage; without this a filter
+    // set by one test leaks into the next one and silently empties the grid.
+    window.localStorage.clear();
     mockedUseAuth.mockReturnValue({
       identity: {
         id: "manager-1",

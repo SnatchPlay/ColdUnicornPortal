@@ -29,7 +29,7 @@ High-density single-surface dashboard for the client, showing contract-relevant 
 
 ### 1.3 Data inputs
 
-From `useCoreData()` → `scopeClients`, `scopeCampaigns`, `scopeLeads`, `scopeCampaignStats`, `scopeDailyStats` (as `selectors.ts`). Then timeframe-filtered with `filterByTimeframe` from `timeframe.ts`.
+From the page's own hook `useClientDashboard(clientId)` ([client-dashboard-page.tsx:193](../../../src/app/pages/client-dashboard-page.tsx#L193)), which calls `repository.loadClientDashboard(clientId)` — one `orm-gateway` action returning `client`, `campaigns`, `leadProjections`, `campaignDailyStats`, `dailyStats` ([ADR-0008](../../adr/0008-orm-gateway-edge-function.md), [ADR-0009](../../adr/0009-per-page-data-contracts.md)). The payload is already scoped to this client by RLS, so no `scopeX` pass is needed here; the arrays are then timeframe-filtered with `filterByTimeframe` from `timeframe.ts`.
 
 ### 1.4 KPI cards (5 tiles) — [see 04-metrics §2 & §7](./04-metrics-catalog.md#2-client-kpis)
 
@@ -71,8 +71,8 @@ Empty states: each chart renders `<EmptyPortalState title="…" description="…
 
 ### 1.7 Error / loading
 
-- `PortalLoadingState` while `useCoreData().loading`.
-- `PortalErrorState` with a retry button when `useCoreData().error` is set.
+- `PortalLoadingState` while `useClientDashboard().loading`.
+- `PortalErrorState` with a retry button when `useClientDashboard().error` is set; the button calls the hook's `refresh()`.
 
 ---
 
@@ -218,7 +218,7 @@ File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.t
 | Profile name | `displayName` text input | "Update name" | `updateProfileName(normalizedName)` |
 | Change password | `password`, `confirmPassword` | "Update password" | `updatePassword(password)` |
 | Sign out | _(button)_ | "Sign out" | `signOut()` |
-| **CRM integration** | provider select + dynamic credentials form | "Connect with OAuth" / "Submit credentials" / "Disconnect" | `useCoreData().updateClient(clientId, { crm_config })` (status only) — credentials forwarded to legacy CRM Supabase project edge functions ([see 11 · Integrations §CRM Integration](./11-integrations.md#crm-integration)) |
+| **CRM integration** | provider select + dynamic credentials form | "Connect with OAuth" / "Submit credentials" / "Disconnect" | `repository.updateClient(client.id, { crm_config })` called directly from [`crm-integration-card.tsx:178`](../../../src/app/components/crm-integration-card.tsx#L178) (disconnect: `{ crm_config: null }`, [:355](../../../src/app/components/crm-integration-card.tsx#L355)) — status only; credentials forwarded to legacy CRM Supabase project edge functions ([see 11 · Integrations §CRM Integration](./11-integrations.md#crm-integration)) |
 
 ### 5.2 Sections hidden from client
 

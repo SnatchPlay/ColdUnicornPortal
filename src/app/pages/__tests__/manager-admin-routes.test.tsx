@@ -11,15 +11,10 @@ import { LeadsPage } from "../leads-page";
 import { ManagerDashboardPage } from "../manager-dashboard-page";
 import { StatisticsPage } from "../statistics-page";
 import { useAuth } from "../../providers/auth";
-import { useCoreData } from "../../providers/core-data";
 import { repository } from "../../data/repository";
 
 vi.mock("../../providers/auth", () => ({
   useAuth: vi.fn(),
-}));
-
-vi.mock("../../providers/core-data", () => ({
-  useCoreData: vi.fn(),
 }));
 
 vi.mock("../../providers/shell-data", () => ({
@@ -28,7 +23,7 @@ vi.mock("../../providers/shell-data", () => ({
   })),
 }));
 
-// Dashboard + clients pages (Phase 2A/3) load their own data via repository; mock those methods.
+// Dashboard + clients pages load their own data via repository; mock those methods.
 // Synchronous factory so RepositoryError can be re-exported as a simple stub class.
 vi.mock("../../data/repository", () => ({
   RepositoryError: class RepositoryError extends Error {
@@ -40,6 +35,10 @@ vi.mock("../../data/repository", () => ({
     loadManagerDashboardOverview: vi.fn(),
     loadClientDashboard: vi.fn(),
     loadClientsOverview: vi.fn(),
+    // The clients grid loads the caller's saved layout on mount; an unstubbed method here
+    // would throw synchronously inside the hook.
+    loadTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: null, updatedAt: null }),
+    saveTablePreferences: vi.fn().mockResolvedValue({ tableKey: "clients:mega", preferences: {}, updatedAt: null }),
     loadLeadsList: vi.fn(),
     loadLeadDetail: vi.fn(),
     loadLeadsFilterOptions: vi.fn(),
@@ -62,7 +61,7 @@ type RouteCase = {
   Component: () => JSX.Element;
 };
 
-// Phase 7: domains / invoices / blacklist — per-page loaders, no CoreDataProvider.
+// domains / invoices / blacklist — per-page loaders.
 const MODULES_ROUTE_CASES: RouteCase[] = [
   { name: "manager domains route", role: "manager", title: "Domains", Component: DomainsPage },
   { name: "manager invoices route", role: "manager", title: "Invoices", Component: InvoicesPage },
@@ -72,60 +71,42 @@ const MODULES_ROUTE_CASES: RouteCase[] = [
   { name: "admin blacklist route", role: "admin", title: "Blacklist", Component: BlacklistPage },
 ];
 
-// Statistics routes (Phase 6): per-page loaders, no CoreDataProvider.
+// Statistics — per-page loaders.
 const STATISTICS_ROUTE_CASES: RouteCase[] = [
   { name: "manager statistics route", role: "manager", title: "Statistics", Component: StatisticsPage },
   { name: "admin statistics route", role: "admin", title: "Statistics", Component: StatisticsPage },
 ];
 
-// Campaigns routes (Phase 5): per-page loaders, no CoreDataProvider.
+// Campaigns — per-page loaders.
 const CAMPAIGNS_ROUTE_CASES: RouteCase[] = [
   { name: "manager campaigns route", role: "manager", title: "Campaigns", Component: CampaignsPage },
   { name: "admin campaigns route", role: "admin", title: "Campaigns", Component: CampaignsPage },
 ];
 
-// Clients routes (Phase 3): per-page loaders, no CoreDataProvider.
+// Clients — per-page loaders.
 const CLIENTS_ROUTE_CASES: RouteCase[] = [
   { name: "manager clients route", role: "manager", title: "Clients", Component: ClientsPage },
   { name: "admin clients route", role: "admin", title: "Clients", Component: ClientsPage },
 ];
 
-// Leads routes (Phase 4): per-page loaders, no CoreDataProvider.
+// Leads — per-page loaders.
 const LEADS_ROUTE_CASES: RouteCase[] = [
   { name: "manager leads route", role: "manager", title: "Leads", Component: LeadsPage },
   { name: "admin leads route", role: "admin", title: "Leads", Component: LeadsPage },
 ];
 
-// Dashboard routes (Phase 2A): per-page loaders, no CoreDataProvider.
+// Dashboard — per-page loaders.
 const DASHBOARD_ROUTE_CASES: RouteCase[] = [
   { name: "manager dashboard route", role: "manager", title: "Manager Dashboard", Component: ManagerDashboardPage },
   { name: "admin dashboard route", role: "admin", title: "Runtime data sync failed", Component: AdminDashboardPage },
 ];
 
 const mockedUseAuth = vi.mocked(useAuth);
-const mockedUseCoreData = vi.mocked(useCoreData);
 const mockedRepo = vi.mocked(repository);
 
 function makeAuth(role: AppRole) {
   return {
     identity: { id: "user-1", fullName: "Test User", email: "user@test.local", role },
-  };
-}
-
-function makeCoreData(overrides?: Partial<ReturnType<typeof makeCoreDataBase>>) {
-  return { ...makeCoreDataBase(), ...overrides };
-}
-
-function makeCoreDataBase() {
-  return {
-    users: [], clients: [], clientUsers: [], campaigns: [], leads: [], replies: [],
-    campaignDailyStats: [], dailyStats: [], domains: [], invoices: [], emailExcludeList: [],
-    loading: false, error: null,
-    refresh: vi.fn(async () => {}), updateClient: vi.fn(async () => {}),
-    updateCampaign: vi.fn(async () => {}), updateLead: vi.fn(async () => {}),
-    updateDomain: vi.fn(async () => {}), updateInvoice: vi.fn(async () => {}),
-    upsertClientUserMapping: vi.fn(async () => {}), deleteClientUserMapping: vi.fn(async () => {}),
-    upsertEmailExcludeDomain: vi.fn(async () => {}), deleteEmailExcludeDomain: vi.fn(async () => {}),
   };
 }
 
@@ -147,6 +128,9 @@ function renderRoute(Component: RouteCase["Component"]) {
 describe("manager/admin route states", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // useTablePreferences caches the saved layout in localStorage; without this a filter
+    // set by one test leaks into the next one and silently empties the grid.
+    window.localStorage.clear();
     // All per-page loaders hang indefinitely — keeps loading state for sync loading checks.
     mockedRepo.loadAdminDashboardOverview.mockReturnValue(new Promise(() => {}));
     mockedRepo.loadManagerDashboardOverview.mockReturnValue(new Promise(() => {}));
@@ -163,7 +147,7 @@ describe("manager/admin route states", () => {
     mockedRepo.loadBlacklistPage.mockReturnValue(new Promise(() => {}));
   });
 
-  // ── Modules routes (Phase 7: per-page loaders, no CoreDataProvider) ─────────────────────────
+  // ── Modules routes (per-page loader) ─────────────────────────
 
   it.each(MODULES_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
@@ -200,7 +184,7 @@ describe("manager/admin route states", () => {
     ).toBeGreaterThan(callsBefore);
   });
 
-  // ── Dashboard routes (Phase 2A: per-page loaders, no CoreDataProvider) ──────────────────────
+  // ── Dashboard routes (per-page loader) ──────────────────────
 
   it.each(DASHBOARD_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
@@ -235,7 +219,7 @@ describe("manager/admin route states", () => {
     ).toBeGreaterThan(callsBefore);
   });
 
-  // ── Clients routes (Phase 3: per-page loader, no CoreDataProvider) ──────────────────────────
+  // ── Clients routes (per-page loader) ──────────────────────────
 
   it.each(CLIENTS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
@@ -260,7 +244,7 @@ describe("manager/admin route states", () => {
     expect(mockedRepo.loadClientsOverview.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 
-  // ── Leads routes (Phase 4: per-page loader, no CoreDataProvider) ─────────────────────────────
+  // ── Leads routes (per-page loader) ─────────────────────────────
 
   it.each(LEADS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
@@ -269,7 +253,7 @@ describe("manager/admin route states", () => {
     expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
   });
 
-  // ── Campaigns routes (Phase 5: per-page loader, no CoreDataProvider) ────────────────────────
+  // ── Campaigns routes (per-page loader) ────────────────────────
 
   it.each(CAMPAIGNS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);
@@ -278,7 +262,7 @@ describe("manager/admin route states", () => {
     expect(screen.getByText("Loading workspace data")).toBeInTheDocument();
   });
 
-  // ── Statistics routes (Phase 6: per-page loader, no CoreDataProvider) ───────────────────────
+  // ── Statistics routes (per-page loader) ───────────────────────
 
   it.each(STATISTICS_ROUTE_CASES)("renders loading state on $name", ({ role, Component }) => {
     mockedUseAuth.mockReturnValue(makeAuth(role) as never);

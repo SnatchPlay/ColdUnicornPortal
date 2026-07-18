@@ -1,4 +1,4 @@
--- Multi-sequencer model (ADR-0008): global sequencer catalog, per-client sequencer
+-- Multi-sequencer model (ADR-0012): global sequencer catalog, per-client sequencer
 -- credentials (replacing clients.external_api_key / external_workspace_id /
 -- linkedin_api_key), campaign/lead sequencer attribution, and the LinkedIn/Aimfox
 -- PDCA ingestion stats table.
@@ -38,7 +38,7 @@ create table if not exists public.sequencers (
 );
 
 comment on table public.sequencers is
-  'Catalog of external sending tools (sequencers). Fixed UUIDs are load-bearing (column defaults + n8n constants). ADR-0008.';
+  'Catalog of external sending tools (sequencers). Fixed UUIDs are load-bearing (column defaults + n8n constants). ADR-0012.';
 
 insert into public.sequencers (id, key, name, channel) values
   ('00000000-0000-4000-a000-000000000001', 'smartlead',  'Smartlead',  'email'),
@@ -62,7 +62,7 @@ create table if not exists public.client_sequencers (
 );
 
 comment on table public.client_sequencers is
-  'Per-client sequencer connection settings (API keys, workspace ids). Portal-owned config; n8n reads. Replaces clients.external_api_key/external_workspace_id/linkedin_api_key. ADR-0008.';
+  'Per-client sequencer connection settings (API keys, workspace ids). Portal-owned config; n8n reads. Replaces clients.external_api_key/external_workspace_id/linkedin_api_key. ADR-0012.';
 
 create index if not exists idx_client_sequencers_sequencer
   on public.client_sequencers (sequencer_id);
@@ -123,7 +123,7 @@ create table if not exists public.sequencer_daily_stats (
 );
 
 comment on table public.sequencer_daily_stats is
-  'Ingestion-only daily sequencer stats (LinkedIn invites, remaining database, invite limits). n8n service-role writes; portal reads. ADR-0008.';
+  'Ingestion-only daily sequencer stats (LinkedIn invites, remaining database, invite limits). n8n service-role writes; portal reads. ADR-0012.';
 
 create index if not exists idx_sequencer_daily_stats_date
   on public.sequencer_daily_stats (report_date desc);
