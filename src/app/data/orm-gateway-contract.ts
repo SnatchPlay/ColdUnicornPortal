@@ -35,6 +35,7 @@ import type {
   LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
+  LeadCrmListResponse,
   ManagerDashboardOverview,
   ShellData,
   TablePreferencesPayload,
@@ -120,6 +121,12 @@ export interface LoadClientsMetricsSummaryPayload {
 
 export interface LoadLeadsListPayload {
   action: "loadLeadsList";
+  params: LeadsListParams;
+}
+
+/** CRM view read-model — same params/filters as loadLeadsList, plus joined child data + asOf. */
+export interface LoadLeadCrmListPayload {
+  action: "loadLeadCrmList";
   params: LeadsListParams;
 }
 
@@ -409,6 +416,7 @@ export type OrmGatewayRequest =
   | LoadClientsStatsPayload
   | LoadClientsMetricsSummaryPayload
   | LoadLeadsListPayload
+  | LoadLeadCrmListPayload
   | LoadLeadDetailPayload
   | LoadLeadsFilterOptionsPayload
   | LoadAnalyticsOverviewPayload
@@ -473,6 +481,7 @@ export interface OrmGatewayResponseMap {
   loadClientsStats: ClientsStatsPayload;
   loadClientsMetricsSummary: ClientsMetricsSummaryPayload;
   loadLeadsList: LeadsListResponse;
+  loadLeadCrmList: LeadCrmListResponse;
   loadLeadDetail: LeadDetailResult;
   loadLeadsFilterOptions: LeadsFilterOptions;
   loadAnalyticsOverview: AnalyticsOverviewPayload;
@@ -611,6 +620,37 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     const p = payload.params as Record<string, unknown>;
     if (!isString(p.sortField) || !isString(p.sortDir)) {
       return { ok: false, error: "loadLeadsList.params requires sortField and sortDir strings." };
+    }
+    const page = typeof p.page === "number" ? p.page : 1;
+    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 100) : 50;
+    return {
+      ok: true,
+      value: {
+        action,
+        params: {
+          clientId: isString(p.clientId) ? p.clientId : undefined,
+          campaignId: isString(p.campaignId) ? p.campaignId : undefined,
+          stage: isString(p.stage) ? p.stage : undefined,
+          replyScope: (p.replyScope === "active" || p.replyScope === "ooo") ? p.replyScope : "all",
+          dateFrom: isString(p.dateFrom) ? p.dateFrom : undefined,
+          dateTo: isString(p.dateTo) ? p.dateTo : undefined,
+          search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,
+          sortField: String(p.sortField),
+          sortDir: p.sortDir === "asc" ? "asc" : "desc",
+          page: Math.max(1, Math.trunc(page)),
+          pageSize,
+        } as LeadsListParams,
+      },
+    };
+  }
+
+  if (action === "loadLeadCrmList") {
+    if (!isObject(payload.params)) {
+      return { ok: false, error: "loadLeadCrmList requires a params object." };
+    }
+    const p = payload.params as Record<string, unknown>;
+    if (!isString(p.sortField) || !isString(p.sortDir)) {
+      return { ok: false, error: "loadLeadCrmList.params requires sortField and sortDir strings." };
     }
     const page = typeof p.page === "number" ? p.page : 1;
     const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 100) : 50;

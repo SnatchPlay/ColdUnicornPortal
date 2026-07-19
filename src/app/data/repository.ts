@@ -40,6 +40,7 @@ import type {
   LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
+  LeadCrmListResponse,
   ManagerDashboardOverview,
   ManagerDashboardParams,
   ShellData,
@@ -68,6 +69,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadClientsStats: { table: "clients", operation: "select" },
   loadClientsMetricsSummary: { table: "clients", operation: "select" },
   loadLeadsList: { table: "leads", operation: "select" },
+  loadLeadCrmList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
   loadAnalyticsOverview: { table: "analytics", operation: "select" },
@@ -406,6 +408,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadClientsStats" ||
     action === "loadClientsMetricsSummary" ||
     action === "loadLeadsList" ||
+    action === "loadLeadCrmList" ||
     action === "loadLeadDetail" ||
     action === "loadLeadsFilterOptions" ||
     action === "loadAnalyticsOverview" ||
@@ -551,6 +554,7 @@ export interface Repository {
   loadClientsStats(): Promise<ClientsStatsPayload>;
   loadClientsMetricsSummary(): Promise<ClientsMetricsSummaryPayload>;
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
+  loadLeadCrmList(params: LeadsListParams): Promise<LeadCrmListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
@@ -751,6 +755,9 @@ export const repository: Repository = {
     return result;
   },
 
+  async loadLeadCrmList(params) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadCrmList", { params });
+  },
   async loadLeadsList(params) {
     return invokeOrmGatewaySelectWithRetry("loadLeadsList", { params });
   },

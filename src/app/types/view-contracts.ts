@@ -22,7 +22,10 @@ import type {
   LeadRecord,
   ReplyRecord,
   SequencerRecord,
+  MeetingStatus,
+  OfferStatus,
 } from "./core.ts";
+import type { BusinessDayConfig } from "../lib/crm/business-days.ts";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
 // payload — only fields actually consumed by createClientMetrics are shipped).
@@ -475,6 +478,57 @@ export interface LeadsListResponse {
 /** Reply thread for a single lead, loaded lazily when the drawer opens. */
 export interface LeadDetailResult {
   replies: ReplyRecord[];
+}
+
+// --- Lead CRM view read-model (ADR-0013) ------------------------------------------------------
+// Flat projection: one row per lead + the current child records the CRM columns render. Health
+// colours + resolved status are FORMULAS the client computes (lib/crm/*), fed the server `asOf`.
+
+/** Displayed intro/summary meeting projection (internal-only fields nulled for the client role). */
+export interface LeadCrmMeeting {
+  status: MeetingStatus | null;
+  scheduled_at: string | null;
+  held_at: string | null;
+  call_script: string | null;
+  transcription_url: string | null;
+  pre_meeting_insights: string | null;
+  process_score: number | null;
+  conversion_insights: string | null;
+}
+export interface LeadCrmOffer {
+  status: OfferStatus | null;
+  contracted_send_date: string | null;
+}
+export interface LeadCrmValueDelivery {
+  planned_date: string | null;
+  value_items: string[];
+  sent_at: string | null;
+}
+
+/** One flattened CRM row. Extends the leads-list row (LeadRecord + join fields) with child data. */
+export interface LeadCrmRow extends LeadsListRow {
+  intro_meeting: LeadCrmMeeting | null;
+  summary_meeting: LeadCrmMeeting | null;
+  /** Latest non-cancelled offer. */
+  current_offer: LeadCrmOffer | null;
+  /** Earliest open task's due date (contracted next-step date). */
+  next_task_due_at: string | null;
+  /** Count of open (planned/in_progress) tasks. */
+  open_tasks_count: number;
+  value_delivery_1: LeadCrmValueDelivery | null;
+  value_delivery_2: LeadCrmValueDelivery | null;
+}
+
+export interface LeadCrmListResponse {
+  rows: LeadCrmRow[];
+  totalCount: number;
+  stageCounts: Partial<Record<LeadStageKey, number>>;
+  customFields: LeadCustomFieldRecord[];
+  customValues: Array<{ lead_id: string; field_id: string; value: string | null }>;
+  /** Authoritative server clock — feed to the health evaluator so deadlines are deterministic. */
+  asOf: string;
+  /** Working-day config the health deadlines are evaluated against (ADR-0013). */
+  businessDays: BusinessDayConfig;
 }
 
 // --- Analytics overview (Phase 6) ---------------------------------------------------------------

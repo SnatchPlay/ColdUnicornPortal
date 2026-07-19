@@ -9,6 +9,7 @@ import {
   type OrmGatewayEnvelope,
   type OrmGatewayRequest,
 } from "../../../src/app/data/orm-gateway-contract.ts";
+import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1808,6 +1809,293 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         field_id: String(r.field_id),
         value: r.value === null || r.value === undefined ? null : String(r.value),
       })),
+    };
+  }
+
+  if (payload.action === "loadLeadCrmList") {
+    // CRM view read-model (ADR-0013): loadLeadsList's filter/sort/pagination + joined child records.
+    // Health colours + resolved status are FORMULAS the client computes from these facts + `asOf`.
+    const p = payload.params;
+    const t0 = performance.now();
+    const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 100);
+    const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
+
+    // Resolve the caller's app role AND the server clock ONCE. The role lets us null internal-only CRM
+    // fields for the client role in the TS mapping (ADR-0013 §6) instead of an inline CASE per column
+    // (private.current_app_role() is unusable here — authenticated lacks USAGE). `now()` is the DB
+    // transaction clock: asOf must share the clock that wrote the child timestamps so health deadline
+    // math is not thrown off by edge-runtime clock skew.
+    const ctxRows = await rawQuery<{ role: string | null; server_now: unknown }>(tx, sql`
+      SELECT
+        (SELECT u.role FROM public.users u WHERE u.id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid) AS role,
+        now() AS server_now
+    `);
+    const isClient = ctxRows[0]?.role === "client";
+    const asOf = (ctxRows[0]?.server_now ? toIsoString(ctxRows[0].server_now) : null) ?? new Date().toISOString();
+
+    const stageExpr = sql`
+      CASE
+        WHEN l.won = true THEN 'won'
+        WHEN l.offer_sent = true THEN 'offer_sent'
+        WHEN l.meeting_held = true THEN 'meeting_held'
+        WHEN l.meeting_booked = true THEN 'meeting_scheduled'
+        WHEN l.qualification IS NULL THEN 'unqualified'
+        ELSE l.qualification::text
+      END
+    `;
+
+    const baseWhereParts: ReturnType<typeof sql>[] = [];
+    if (p.clientId) baseWhereParts.push(sql`l.client_id = ${p.clientId}`);
+    if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
+    if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
+    if (p.dateTo) baseWhereParts.push(sql`l.created_at <= ${p.dateTo}`);
+    if (p.replyScope === "ooo") baseWhereParts.push(sql`l.qualification = 'OOO'`);
+    if (p.replyScope === "active") baseWhereParts.push(sql`l.qualification IS DISTINCT FROM 'OOO'`);
+    if (p.search) {
+      const needle = `%${p.search.toLowerCase()}%`;
+      baseWhereParts.push(sql`(
+        LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.email, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.company_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.job_title, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.country, '')) LIKE ${needle}
+      )`);
+    }
+    const baseWhereClause = baseWhereParts.length > 0 ? sql`WHERE ${sql.join(baseWhereParts, sql` AND `)}` : sql``;
+    const dataWhereParts = p.stage ? [...baseWhereParts, sql`(${stageExpr}) = ${p.stage}`] : baseWhereParts;
+    const dataWhereClause = dataWhereParts.length > 0 ? sql`WHERE ${sql.join(dataWhereParts, sql` AND `)}` : sql``;
+
+    const dirSql = p.sortDir === "asc" ? sql`ASC` : sql`DESC`;
+    const dirSqlTie = sql`ASC`;
+    let orderClause: ReturnType<typeof sql>;
+    if (p.sortField === "lead") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "client") {
+      orderClause = sql`ORDER BY LOWER(c.name) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "company") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.company_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "status") {
+      orderClause = sql`ORDER BY (${stageExpr}) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "campaign") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(camp.name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "step") {
+      orderClause = sql`ORDER BY l.message_number ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "replies") {
+      orderClause = sql`ORDER BY reply_count ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "lastReply") {
+      orderClause = sql`ORDER BY last_reply_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else {
+      orderClause = sql`ORDER BY l.created_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    }
+
+    const stageCountRows = await rawQuery<{ stage: string; count: number }>(tx, sql`
+      SELECT (${stageExpr}) AS stage, COUNT(*)::int AS count
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      ${baseWhereClause}
+      GROUP BY 1
+    `);
+
+    // One flat data query. Child cardinality is bounded (intro/summary unique per lead; LATERAL
+    // LIMIT 1 for current offer / next task; deliveries unique per sequence) → no N+1, no row fan-out.
+    const dataRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        l.id, l.created_at, l.updated_at, l.client_id,
+        l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
+        l.company_name, l.linkedin_url, l.gender, l.qualification,
+        l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+        l.industry, l.headcount_range, l.website, l.country,
+        l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
+        l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
+        l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+        l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id,
+        l.linkedin_invitation_sent_at, l.contact_made_at, l.contact_method,
+        l.negotiation_started_at, l.concluded_at, l.final_outcome,
+        -- coldunicorn_note + conclusion are internal-only; nulled for the client role in TS via isClient.
+        l.coldunicorn_note, l.conclusion,
+        c.name AS client_name,
+        camp.name AS campaign_name,
+        COALESCE(r.reply_count, 0)::int AS reply_count,
+        r.last_reply_at,
+        im.status AS intro_status, im.scheduled_at AS intro_scheduled_at, im.held_at AS intro_held_at,
+        im.call_script AS intro_call_script, im.transcription_url AS intro_transcription_url,
+        im.pre_meeting_insights AS intro_pre_meeting_insights, im.process_score AS intro_process_score,
+        im.conversion_insights AS intro_conversion_insights,
+        sm.status AS summary_status, sm.scheduled_at AS summary_scheduled_at, sm.held_at AS summary_held_at,
+        sm.call_script AS summary_call_script, sm.transcription_url AS summary_transcription_url,
+        sm.pre_meeting_insights AS summary_pre_meeting_insights, sm.process_score AS summary_process_score,
+        sm.conversion_insights AS summary_conversion_insights,
+        co.status AS offer_status, co.contracted_send_date AS offer_contracted_send_date,
+        nt.due_at AS next_task_due_at, COALESCE(tk.open_count, 0)::int AS open_tasks_count,
+        d1.planned_date AS d1_planned_date, d1.value_items AS d1_value_items, d1.sent_at AS d1_sent_at,
+        d2.planned_date AS d2_planned_date, d2.value_items AS d2_value_items, d2.sent_at AS d2_sent_at
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+      LEFT JOIN (
+        SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
+        FROM replies GROUP BY lead_id
+      ) r ON r.lead_id = l.id
+      LEFT JOIN lead_meetings im ON im.lead_id = l.id AND im.meeting_type = 'intro'
+      LEFT JOIN lead_meetings sm ON sm.lead_id = l.id AND sm.meeting_type = 'summary'
+      LEFT JOIN LATERAL (
+        SELECT o.status, o.contracted_send_date FROM lead_offers o
+        WHERE o.lead_id = l.id AND o.status <> 'cancelled'
+        ORDER BY o.created_at DESC LIMIT 1
+      ) co ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS open_count FROM lead_tasks t
+        WHERE t.lead_id = l.id AND t.status IN ('planned', 'in_progress')
+      ) tk ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT t.due_at FROM lead_tasks t
+        WHERE t.lead_id = l.id AND t.status IN ('planned', 'in_progress')
+        ORDER BY t.due_at ASC NULLS LAST, t.position ASC, t.created_at ASC LIMIT 1
+      ) nt ON TRUE
+      LEFT JOIN lead_value_deliveries d1 ON d1.lead_id = l.id AND d1.sequence_number = 1
+      LEFT JOIN lead_value_deliveries d2 ON d2.lead_id = l.id AND d2.sequence_number = 2
+      ${dataWhereClause}
+      ${orderClause}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
+
+    const stageCounts: Record<string, number> = {};
+    let totalCount = 0;
+    for (const row of stageCountRows) {
+      stageCounts[String(row.stage)] = row.count ?? 0;
+      totalCount += row.count ?? 0;
+    }
+
+    const str = (v: unknown): string | null => (v ? String(v) : null);
+    const num = (v: unknown): number | null => (v != null ? Number(v) : null);
+    const mapMeeting = (r: Record<string, unknown>, prefix: string) => {
+      const status = r[`${prefix}_status`];
+      const scheduled = r[`${prefix}_scheduled_at`];
+      const held = r[`${prefix}_held_at`];
+      if (!status && !scheduled && !held) return null; // no meeting row joined
+      return {
+        status: status ? String(status) : null,
+        scheduled_at: scheduled ? toIsoString(scheduled) : null,
+        held_at: held ? toIsoString(held) : null,
+        // Internal-only fields (ADR-0013 §6): nulled for the client role.
+        call_script: isClient ? null : str(r[`${prefix}_call_script`]),
+        transcription_url: isClient ? null : str(r[`${prefix}_transcription_url`]),
+        pre_meeting_insights: isClient ? null : str(r[`${prefix}_pre_meeting_insights`]),
+        process_score: isClient ? null : num(r[`${prefix}_process_score`]),
+        conversion_insights: isClient ? null : str(r[`${prefix}_conversion_insights`]),
+      };
+    };
+    const mapDelivery = (r: Record<string, unknown>, prefix: string) => {
+      const planned = r[`${prefix}_planned_date`];
+      const items = r[`${prefix}_value_items`];
+      const sent = r[`${prefix}_sent_at`];
+      if (!planned && !sent && !(Array.isArray(items) && items.length > 0)) return null;
+      return {
+        planned_date: planned ? String(planned) : null,
+        value_items: Array.isArray(items) ? items.map((x) => String(x)) : [],
+        sent_at: sent ? toIsoString(sent) : null,
+      };
+    };
+
+    const rows = dataRows.map((r) => ({
+      id: String(r.id),
+      created_at: r.created_at ? toIsoString(r.created_at) ?? "" : "",
+      updated_at: r.updated_at ? toIsoString(r.updated_at) ?? "" : "",
+      client_id: String(r.client_id),
+      campaign_id: str(r.campaign_id),
+      email: str(r.email),
+      first_name: str(r.first_name),
+      last_name: str(r.last_name),
+      job_title: str(r.job_title),
+      company_name: str(r.company_name),
+      linkedin_url: str(r.linkedin_url),
+      gender: str(r.gender),
+      qualification: str(r.qualification),
+      expected_return_date: str(r.expected_return_date),
+      external_id: str(r.external_id),
+      phone_number: str(r.phone_number),
+      phone_source: str(r.phone_source),
+      industry: str(r.industry),
+      headcount_range: str(r.headcount_range),
+      website: str(r.website),
+      country: str(r.country),
+      message_title: str(r.message_title),
+      message_number: num(r.message_number),
+      response_time_hours: num(r.response_time_hours),
+      response_time_label: str(r.response_time_label),
+      meeting_booked: Boolean(r.meeting_booked),
+      meeting_held: Boolean(r.meeting_held),
+      offer_sent: Boolean(r.offer_sent),
+      won: Boolean(r.won),
+      added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
+      external_blacklist_id: num(r.external_blacklist_id),
+      external_domain_blacklist_id: num(r.external_domain_blacklist_id),
+      source: r.source ? String(r.source) : "smartlead",
+      reply_text: str(r.reply_text),
+      client_note: str(r.client_note),
+      coldunicorn_note: isClient ? null : str(r.coldunicorn_note),
+      highlight: str(r.highlight),
+      sequencer_id: String(r.sequencer_id),
+      linkedin_invitation_sent_at: r.linkedin_invitation_sent_at ? toIsoString(r.linkedin_invitation_sent_at) : null,
+      contact_made_at: r.contact_made_at ? toIsoString(r.contact_made_at) : null,
+      contact_method: str(r.contact_method),
+      negotiation_started_at: r.negotiation_started_at ? toIsoString(r.negotiation_started_at) : null,
+      conclusion: isClient ? null : str(r.conclusion),
+      concluded_at: r.concluded_at ? toIsoString(r.concluded_at) : null,
+      final_outcome: str(r.final_outcome),
+      clientName: String(r.client_name ?? ""),
+      campaignName: str(r.campaign_name),
+      replyCount: Number(r.reply_count ?? 0),
+      lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
+      intro_meeting: mapMeeting(r, "intro"),
+      summary_meeting: mapMeeting(r, "summary"),
+      current_offer: r.offer_status || r.offer_contracted_send_date
+        ? { status: str(r.offer_status), contracted_send_date: str(r.offer_contracted_send_date) }
+        : null,
+      next_task_due_at: r.next_task_due_at ? toIsoString(r.next_task_due_at) : null,
+      open_tasks_count: Number(r.open_tasks_count ?? 0),
+      value_delivery_1: mapDelivery(r, "d1"),
+      value_delivery_2: mapDelivery(r, "d2"),
+    }));
+
+    const pageClientIds = Array.from(new Set(rows.map((r) => r.client_id)));
+    const pageLeadIds = rows.map((r) => r.id);
+    let customFields: Record<string, unknown>[] = [];
+    let customValues: Record<string, unknown>[] = [];
+    if (pageClientIds.length > 0) {
+      customFields = await safeRawSelect(
+        tx,
+        sql`select id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+            from public.lead_custom_fields
+            where client_id in (${sql.join(pageClientIds.map((id) => sql`${id}`), sql`, `)})
+            order by position asc, created_at asc`,
+      );
+    }
+    if (pageLeadIds.length > 0) {
+      customValues = await safeRawSelect(
+        tx,
+        sql`select lead_id, field_id, value from public.lead_custom_field_values
+            where lead_id in (${sql.join(pageLeadIds.map((id) => sql`${id}`), sql`, `)})`,
+      );
+    }
+
+    console.log(
+      `[PERF][orm-gateway] loadLeadCrmList: totalHandlerMs=${(performance.now() - t0).toFixed(1)} ` +
+        `rows=${rows.length} totalCount=${totalCount} isClient=${isClient} page=${p.page} pageSize=${pageSize}`,
+    );
+
+    return {
+      rows,
+      totalCount,
+      stageCounts,
+      customFields: customFields.map(toLeadCustomFieldRecord),
+      customValues: customValues.map((r) => ({
+        lead_id: String(r.lead_id),
+        field_id: String(r.field_id),
+        value: r.value === null || r.value === undefined ? null : String(r.value),
+      })),
+      asOf,
+      businessDays: DEFAULT_BUSINESS_DAY_CONFIG,
     };
   }
 

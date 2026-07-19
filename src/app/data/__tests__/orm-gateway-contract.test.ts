@@ -18,6 +18,26 @@ describe("parseOrmGatewayRequest", () => {
     }
   });
 
+  it("accepts loadLeadCrmList and normalizes params", () => {
+    const parsed = parseOrmGatewayRequest({
+      action: "loadLeadCrmList",
+      params: { sortField: "lead", sortDir: "asc", page: 2, pageSize: 999, replyScope: "ooo", search: "  acme  " },
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok && parsed.value.action === "loadLeadCrmList") {
+      expect(parsed.value.params.pageSize).toBe(100); // clamped to max
+      expect(parsed.value.params.page).toBe(2);
+      expect(parsed.value.params.replyScope).toBe("ooo");
+      expect(parsed.value.params.search).toBe("acme"); // trimmed
+    }
+  });
+
+  it("rejects loadLeadCrmList without sort params", () => {
+    const parsed = parseOrmGatewayRequest({ action: "loadLeadCrmList", params: {} });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("loadLeadCrmList");
+  });
+
   it("accepts createLeadCustomField with a valid input", () => {
     const parsed = parseOrmGatewayRequest({
       action: "createLeadCustomField",
