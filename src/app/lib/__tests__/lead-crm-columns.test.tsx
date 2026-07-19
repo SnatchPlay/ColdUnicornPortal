@@ -60,4 +60,21 @@ describe("buildLeadCrmColumns", () => {
   it("Open tasks reads the count", () => {
     expect(col("next_steps").value(row({ open_tasks_count: 3 }))).toBe(3);
   });
+
+  it("maps SLA columns to their spreadsheet health letters", () => {
+    expect(col("company").healthId).toBe("A");
+    expect(col("contact_made").healthId).toBe("P");
+    expect(col("negotiation_days").healthId).toBe("AI");
+    expect(col("conclusion").healthId).toBe("AN");
+    // Non-SLA columns carry no health letter.
+    expect(col("status").healthId).toBeUndefined();
+    expect(col("disposition").healthId).toBeUndefined();
+  });
+
+  it("appends the AO process-issues column only for internal + includeProcessIssues", () => {
+    expect(byId(buildLeadCrmColumns({ role: "admin", showClient: false })).has("process_issues")).toBe(false);
+    expect(byId(buildLeadCrmColumns({ role: "admin", showClient: false, includeProcessIssues: true })).has("process_issues")).toBe(true);
+    // Client role never gets the rollup — its projection nulls the internal SLA fields AO would tally.
+    expect(byId(buildLeadCrmColumns({ role: "client", showClient: false, includeProcessIssues: true })).has("process_issues")).toBe(false);
+  });
 });

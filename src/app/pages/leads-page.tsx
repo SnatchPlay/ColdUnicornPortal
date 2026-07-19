@@ -354,8 +354,19 @@ function InternalLeadsPage() {
   // CRM view columns. Combined mode unions the PDCA report columns (as the Lead band) with the CRM
   // stage columns, dropping the CRM lead-stage duplicates (spec B.3 — a calm union).
   const crmAsOf = crmView.data?.asOf;
+  // Per-cell health colours (CRM mode only). The context object is memoised so LeadCrmTable's
+  // per-row evaluation memo stays stable across unrelated re-renders.
+  const crmHealthContext = useMemo(
+    () => (crmView.data ? { asOf: crmView.data.asOf, businessDays: crmView.data.businessDays } : undefined),
+    [crmView.data],
+  );
   const crmColumns = useMemo<LeadCrmColumn[]>(() => {
-    const base = buildLeadCrmColumns({ role: identity?.role, showClient: showClientColumn, asOf: crmAsOf });
+    const base = buildLeadCrmColumns({
+      role: identity?.role,
+      showClient: showClientColumn,
+      asOf: crmAsOf,
+      includeProcessIssues: viewMode === "crm",
+    });
     if (viewMode !== "combined") return base;
     const pdcaAsCrm: LeadCrmColumn[] = reportColumns.map((c: LeadReportColumn) => ({
       id: `pdca:${c.id}`, label: c.label, stage: "lead", width: c.width, minWidth: c.minWidth, align: c.align,
@@ -730,6 +741,8 @@ function InternalLeadsPage() {
                 selectedId={selectedLead?.id ?? null}
                 rowAriaLabel={(lead) => `Open details for ${getFullName(lead.first_name, lead.last_name)}`}
                 showStageStrip={viewMode === "crm"}
+                showHealth={viewMode === "crm"}
+                healthContext={crmHealthContext}
               />
             ) : (
             <LeadReportTable
