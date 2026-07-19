@@ -156,12 +156,11 @@ function atLeastSql(status?: string | null): boolean {
 // --- meeting helpers -------------------------------------------------------------------------
 
 function meetingScheduledOrHeld(m?: CrmMeetingFacts | null): boolean {
-  if (!m) return false;
-  // A cancelled / no_show meeting is NOT active even though it still carries its scheduled_at/held_at
-  // timestamp — this keeps the health predicate consistent with the boolean-recompute trigger's
-  // "active = scheduled/held, not cancelled/no_show" rule (ADR-0013 §5).
-  if (m.status === "cancelled" || m.status === "no_show") return false;
-  return m.status === "scheduled" || m.status === "held" || isPresent(m.scheduled_at) || isPresent(m.held_at);
+  // "Active" is keyed on STATUS only — the single source of truth shared with the boolean-recompute
+  // trigger (`status in ('scheduled','held')`, ADR-0013 §5). Keying on a bare scheduled_at/held_at
+  // timestamp too would let a still-'planned' meeting read as active in the CRM colours while the KPI
+  // boolean stayed false. cancelled/no_show fall through to false naturally.
+  return m?.status === "scheduled" || m?.status === "held";
 }
 function meetingAnchor(m?: CrmMeetingFacts | null): string | null {
   return m?.held_at ?? m?.scheduled_at ?? null;

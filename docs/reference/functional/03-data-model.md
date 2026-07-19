@@ -30,6 +30,10 @@ All `CREATE TYPE ... AS ENUM` definitions, [schema.ts:4-12](../../../supabase/dr
 | `lead_qualification` | `preMQL`, `MQL`, `meeting_scheduled`, `meeting_held`, `offer_sent`, `won`, `rejected`, `OOO`, `NRR` |
 | `reply_classification` | `OOO`, `Interested`, `NRR`, `Left_Company`, `Spam_Inbound`, `other` |
 | `user_role` | `super_admin`, `admin`, **`master_admin`**, `manager`, `client` |
+| `meeting_type` | `intro`, `summary`, `general` — Lead CRM (ADR-0013) |
+| `meeting_status` | `planned`, `scheduled`, `held`, `cancelled`, `no_show` — Lead CRM |
+| `offer_status` | `planned`, `sent`, `accepted`, `rejected`, `cancelled` — Lead CRM |
+| `task_status` | `planned`, `in_progress`, `completed`, `cancelled`, `skipped` — Lead CRM |
 
 Notes:
 
@@ -369,6 +373,25 @@ RLS (all set-based, ADR-0006):
 - `lcf_write_admin` — definitions writable only by `super_admin/admin/master_admin`.
 - `lcfv_select_scoped` — values readable when the lead's `client_id` is accessible.
 - `lcfv_write_scoped` — values writable when the actor can access the lead's client **and** `private.current_app_role()` ∈ the field's `editable_by`.
+
+### 2.4b Lead CRM child tables (ADR-0013)
+
+Four lead-owned child tables added by [`20260719_lead_crm_tables.sql`](../../../supabase/migrations/20260719_lead_crm_tables.sql) for the CRM view. All are `lead_id`-scoped `ON DELETE CASCADE` and carry `handle_updated_at()` triggers. Stages in the CRM view are **visual groups only** — there is no stage table or stored `current_stage`.
+
+| Table | Purpose | Key columns |
+|-------|---------|-------------|
+| `lead_meetings` | intro / summary / general meetings | `meeting_type`, `status`, `call_script`, `scheduled_at`, `held_at`, `transcription_url`, `pre_meeting_insights`, `process_score` (0–100), `conversion_insights`. Partial unique index → one intro + one summary per lead; general repeats. |
+| `lead_offers` | offers/revisions (multiple per lead) | `status`, `contracted_send_date`, `sent_at`, `offer_url`, `source_meeting_id` |
+| `lead_tasks` | next-step tasks (no `task_type` in MVP) | `title`, `due_at`, `status`, `position`, `source_meeting_id` |
+| `lead_value_deliveries` | additional-value deliveries | `sequence_number` (unique per lead), `planned_date`, `value_items text[]`, `sent_at` |
+
+**New `leads` columns** (spec §8.1): `linkedin_invitation_sent_at`, `contact_made_at`, `contact_method` (text CHECK `phone`|`email`), `negotiation_started_at`, `conclusion`, `concluded_at`. Also re-synced the previously-missing `sequencer_id` into `schema.ts`. The status taxonomy (`leads.crm_status`) lands in a separate Phase-1b migration.
+
+**RLS** ([`20260719b`](../../../supabase/migrations/20260719b_lead_crm_rls.sql)) — set-based per ADR-0006, verified via EXPLAIN as `authenticated` (hashed SubPlan on the child scan, no per-row `private.*`):
+- `<table>_select_scoped` — readable when the parent lead's `client_id` is accessible (`private.can_access_client`); clients get **read-only** CRM data.
+- `<table>_write_scoped` (`for all`) — writable when the caller `can_manage_client` the parent lead's client; **client role write-blocked in Postgres**.
+
+**Legacy-boolean recompute** ([`20260719c`](../../../supabase/migrations/20260719c_lead_crm_boolean_sync.sql)) — `AFTER INSERT/UPDATE/DELETE` triggers (`private.recompute_lead_meeting_flags` / `recompute_lead_offer_flags`, SECURITY DEFINER) keep `leads.meeting_booked`/`meeting_held`/`offer_sent` in sync by **recomputing from child rows** (cancelling a meeting un-counts it). n8n writes the child tables directly, so the sync must be a DB trigger, not gateway code. `won` is not trigger-managed. See [09-mutations-rls §2.18](09-mutations-rls.md#218-lead-crm-child-tables-adr-0013).
 
 ### 2.5 Daily stats (client-level rollup)
 

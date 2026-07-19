@@ -224,6 +224,14 @@ must not be a gateway call per mousemove), and **degrades instead of failing**: 
 rejected — an older gateway build, say — the table keeps working off the cache. Migration:
 `20260714b_user_table_preferences.sql`.
 
+### 2.18 Lead CRM child tables (ADR-0013)
+
+`lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
+
+- **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
+- **Portal gateway write actions** (create/update/delete meetings/offers/tasks/deliveries + an atomic conclusion+status action) land in **Phase 5**; until then the tables are populated by n8n/service-role and read by the CRM read-model.
+- **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
+
 ---
 
 ## 3. Edge functions
@@ -315,6 +323,7 @@ Canonical authorization per entity, **verified against `pg_policies` on the live
 | `client_users` | ✖ | ✖ | ✓ | admin-only |
 | `campaigns` | ✖ | ✓ assigned | ✓ all | `campaigns_update_scoped` = `can_manage_client(client_id)` |
 | `leads` | ✖ | ✓ assigned | ✓ all | `leads_update_scoped` = `can_manage_client(client_id)` |
+| `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` | ✖ | ✓ assigned | ✓ all | `<table>_write_scoped` = set-based `can_manage_client` via parent lead (ADR-0013). Gateway write actions: Phase 5. |
 | `replies` | ✖ | ✖ | ✖ | ingestion only — no portal write policy |
 | `campaign_daily_stats` | ✖ | ✖ | ✖ | ingestion only |
 | `daily_stats` | ✖ | ✖ | ✖ | ingestion only |
