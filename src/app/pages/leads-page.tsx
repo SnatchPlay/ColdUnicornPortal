@@ -15,6 +15,7 @@ import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface
 import { LeadEditForm } from "../components/lead-edit-form";
 import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
 import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
+import { LeadOfferEditor } from "../components/lead-offer-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -54,7 +55,7 @@ import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { FinalOutcome } from "../types/core";
-import type { LeadMeetingInput } from "../data/orm-gateway-contract";
+import type { LeadMeetingInput, LeadOfferInput } from "../data/orm-gateway-contract";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -310,6 +311,7 @@ function InternalLeadsPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
   const [savingMeeting, setSavingMeeting] = useState<"intro" | "summary" | null>(null);
+  const [savingOffer, setSavingOffer] = useState(false);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -600,6 +602,24 @@ function InternalLeadsPage() {
         toast.error("Failed to save meeting.");
       } finally {
         setSavingMeeting(null);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert the current offer (ADR-0013, Phase 5.3). A sent/accepted status fires the offer_sent trigger.
+  const handleSaveOffer = useCallback(
+    async (patch: LeadOfferInput) => {
+      if (!selectedLead) return;
+      setSavingOffer(true);
+      try {
+        await repository.upsertLeadOffer(selectedLead.id, patch);
+        toast.success("Offer saved.");
+        refresh();
+      } catch {
+        toast.error("Failed to save offer.");
+      } finally {
+        setSavingOffer(false);
       }
     },
     [selectedLead, refresh],
@@ -910,6 +930,17 @@ function InternalLeadsPage() {
                       readOnly={identity?.role === "client"}
                       savingType={savingMeeting}
                       onSave={handleSaveMeeting}
+                    />
+                  ) : null}
+
+                  {/* Offer editor (ADR-0013, Phase 5.3) — CRM view only; upsert drives the offer_sent sync. */}
+                  {viewMode === "crm" ? (
+                    <LeadOfferEditor
+                      key={`offer:${selectedLead.id}`}
+                      offer={(selectedLead as LeadCrmRow).current_offer}
+                      readOnly={identity?.role === "client"}
+                      saving={savingOffer}
+                      onSave={handleSaveOffer}
                     />
                   ) : null}
 

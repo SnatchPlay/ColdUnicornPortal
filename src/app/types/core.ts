@@ -42,7 +42,9 @@ export type MeetingType = "intro" | "summary" | "general";
 /** Single source for the meeting-status values — shared by the gateway validator and the editor select. */
 export const MEETING_STATUS_VALUES = ["planned", "scheduled", "held", "cancelled", "no_show"] as const;
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
-export type OfferStatus = "planned" | "sent" | "accepted" | "rejected" | "cancelled";
+/** Single source for offer-status values — shared by the gateway validator and the editor select. */
+export const OFFER_STATUS_VALUES = ["planned", "sent", "accepted", "rejected", "cancelled"] as const;
+export type OfferStatus = (typeof OFFER_STATUS_VALUES)[number];
 export type TaskStatus = "planned" | "in_progress" | "completed" | "cancelled" | "skipped";
 export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";

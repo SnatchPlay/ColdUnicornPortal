@@ -1,4 +1,4 @@
-﻿import { and, asc, desc, eq, gte, sql } from "npm:drizzle-orm@0.45.2";
+﻿import { and, asc, desc, eq, gte, ne, sql } from "npm:drizzle-orm@0.45.2";
 import { inArray } from "npm:drizzle-orm@0.45.2";
 import { drizzle } from "npm:drizzle-orm@0.45.2/postgres-js";
 import postgres from "npm:postgres@3.4.9";
@@ -10,7 +10,7 @@ import {
   type OrmGatewayRequest,
 } from "../../../src/app/data/orm-gateway-contract.ts";
 import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
-import { MEETING_STATUS_VALUES } from "../../../src/app/types/core.ts";
+import { MEETING_STATUS_VALUES, OFFER_STATUS_VALUES } from "../../../src/app/types/core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -421,6 +421,32 @@ function toLeadMeetingRecord(row: typeof schema.leadMeetings.$inferSelect) {
     process_score: normalizeNumeric(row.processScore),
     conversion_insights: row.conversionInsights,
     post_meeting_analysis_generated_at: row.postMeetingAnalysisGeneratedAt,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+const OFFER_STATUSES = new Set<string>(OFFER_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned offer fields (ADR-0013, Phase 5.3). Validated so a malformed value
+ *  is dropped rather than 500. */
+function mapLeadOfferInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("status" in patch && typeof patch.status === "string" && OFFER_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("contracted_send_date" in patch && isDateish(patch.contracted_send_date)) m.contractedSendDate = patch.contracted_send_date;
+  return m;
+}
+
+function toLeadOfferRecord(row: typeof schema.leadOffers.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    status: row.status,
+    contracted_send_date: row.contractedSendDate,
+    sent_at: row.sentAt,
+    offer_url: row.offerUrl,
+    notes: row.notes,
+    source_meeting_id: row.sourceMeetingId,
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
@@ -2626,6 +2652,41 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     }
     if (!row) fail(500, "Meeting could not be saved.");
     return toLeadMeetingRecord(row);
+  }
+
+  if (payload.action === "upsertLeadOffer") {
+    // Offers are not unique per lead; operate on the "current offer" the CRM view shows — the latest
+    // non-cancelled one. Update it if present, else insert. A sent/accepted status fires the
+    // offer_sent recompute trigger. RLS gates read + write to manager/admin of the lead's client.
+    const input = mapLeadOfferInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadOffers)
+      .where(and(eq(schema.leadOffers.leadId, payload.leadId), ne(schema.leadOffers.status, "cancelled")))
+      .orderBy(desc(schema.leadOffers.createdAt))
+      .limit(1);
+    let row;
+    if (existing[0] && input.status === "cancelled") {
+      // Cancelling retracts the offer, so cancel EVERY non-cancelled offer — otherwise offer_sent could
+      // linger true on an older parallel offer (e.g. one n8n created). Return the one the UI was editing.
+      const rows = await tx
+        .update(schema.leadOffers)
+        .set(input)
+        .where(and(eq(schema.leadOffers.leadId, payload.leadId), ne(schema.leadOffers.status, "cancelled")))
+        .returning();
+      row = rows.find((r: { id: string }) => r.id === existing[0].id) ?? rows[0];
+    } else if (existing[0]) {
+      row = Object.keys(input).length === 0
+        ? existing[0]
+        : (await tx.update(schema.leadOffers).set(input).where(eq(schema.leadOffers.id, existing[0].id)).returning())[0];
+    } else {
+      row = (await tx
+        .insert(schema.leadOffers)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Offer could not be saved.");
+    return toLeadOfferRecord(row);
   }
 
   if (payload.action === "updateDomain") {

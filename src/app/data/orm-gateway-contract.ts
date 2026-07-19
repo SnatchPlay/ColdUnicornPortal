@@ -16,8 +16,10 @@
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
   LeadMeetingRecord,
+  LeadOfferRecord,
   LeadRecord,
   MeetingStatus,
+  OfferStatus,
   UserRecord,
 } from "../types/core.ts";
 import type {
@@ -222,6 +224,22 @@ export interface UpsertLeadMeetingPayload {
   leadId: string;
   meetingType: "intro" | "summary";
   patch: LeadMeetingInput;
+}
+
+/**
+ * Upsert the current offer for a lead (ADR-0013, Phase 5.3). Offers are not unique per lead, but the
+ * CRM view shows one "current offer" (latest non-cancelled), so this operates on THAT offer — update it
+ * if one exists, else insert a new one. A `sent`/`accepted` status fires the DB trigger that recomputes
+ * `leads.offer_sent`.
+ */
+export interface LeadOfferInput {
+  status?: OfferStatus;
+  contracted_send_date?: string | null;
+}
+export interface UpsertLeadOfferPayload {
+  action: "upsertLeadOffer";
+  leadId: string;
+  patch: LeadOfferInput;
 }
 
 export interface UpdateDomainPayload {
@@ -467,6 +485,7 @@ export type OrmGatewayRequest =
   | UpdateLeadPayload
   | ConcludeLeadPayload
   | UpsertLeadMeetingPayload
+  | UpsertLeadOfferPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -535,6 +554,7 @@ export interface OrmGatewayResponseMap {
   updateLead: LeadRecord;
   concludeLead: LeadRecord;
   upsertLeadMeeting: LeadMeetingRecord;
+  upsertLeadOffer: LeadOfferRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -840,6 +860,13 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         patch: payload.patch as LeadMeetingInput,
       },
     };
+  }
+
+  if (action === "upsertLeadOffer") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadOffer requires leadId and patch object." };
+    }
+    return { ok: true, value: { action, leadId: String(payload.leadId), patch: payload.patch as LeadOfferInput } };
   }
 
   if (action === "updateDomain") {

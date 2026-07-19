@@ -20,6 +20,7 @@ import type {
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
   LeadMeetingRecord,
+  LeadOfferRecord,
   LeadRecord,
   ManagedUserRecord,
   UserRecord,
@@ -50,6 +51,7 @@ import type {
 } from "../types/view-contracts";
 import type {
   LeadMeetingInput,
+  LeadOfferInput,
   LoadIdentityResult,
   OrmGatewayAction,
   OrmGatewayEnvelope,
@@ -88,6 +90,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateLead: { table: "leads", operation: "update" },
   concludeLead: { table: "leads", operation: "update" },
   upsertLeadMeeting: { table: "lead_meetings", operation: "upsert" },
+  upsertLeadOffer: { table: "lead_offers", operation: "upsert" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -587,6 +590,8 @@ export interface Repository {
   concludeLead(leadId: string, finalOutcome: FinalOutcome | null, conclusion: string | null): Promise<LeadRecord>;
   /** Upsert the intro/summary meeting for a lead (ADR-0013). Fires the boolean-recompute trigger. */
   upsertLeadMeeting(leadId: string, meetingType: "intro" | "summary", patch: LeadMeetingInput): Promise<LeadMeetingRecord>;
+  /** Upsert the current (latest non-cancelled) offer for a lead (ADR-0013). Fires the offer_sent trigger. */
+  upsertLeadOffer(leadId: string, patch: LeadOfferInput): Promise<LeadOfferRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -863,6 +868,10 @@ export const repository: Repository = {
 
   async upsertLeadMeeting(leadId, meetingType, patch) {
     return invokeOrmGatewayAction("upsertLeadMeeting", { leadId, meetingType, patch });
+  },
+
+  async upsertLeadOffer(leadId, patch) {
+    return invokeOrmGatewayAction("upsertLeadOffer", { leadId, patch });
   },
 
   async updateDomain(domainId, patch) {

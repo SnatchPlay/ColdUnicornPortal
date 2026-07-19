@@ -90,6 +90,14 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **KPI sync:** a `scheduled`/`held` status fires `private.recompute_lead_meeting_flags` (`AFTER INSERT/UPDATE/DELETE`), recomputing `leads.meeting_booked` (any scheduled/held meeting) and `meeting_held` (any held meeting). RECOMPUTE, not latch: setting `cancelled` un-counts both. Verified end-to-end on the local stack: portal upsert scheduled→booked=true; held→held=true; cancelled→both false.
 - **Called from:** the CRM drawer's `LeadMeetingsEditor` ([lead-meetings-editor.tsx](../../../src/app/components/lead-meetings-editor.tsx)); `repository.upsertLeadMeeting`.
 
+### 2.3c `upsertLeadOffer(leadId, patch)` — current-offer write (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_offers`. RLS `lead_offers_write_scoped` (set-based `can_manage_client`) — **client write-blocked in Postgres**.
+- **Target:** offers are not unique per lead, but the CRM view shows one "current offer" (latest non-cancelled), so this operates on THAT offer — update the latest non-cancelled one if present, else insert. Empty/all-invalid patch on an existing offer returns it unchanged (no empty `SET`). **`status='cancelled'` retracts the offer entirely — it cancels EVERY non-cancelled offer for the lead**, so `offer_sent` can't linger true on an older parallel offer (e.g. one n8n created).
+- **Writable fields:** `status` (`planned|sent|accepted|rejected|cancelled`, enum-validated), `contracted_send_date` (date). `sent_at` / `offer_url` / `notes` and offer revisions are deferred (not projected by the read-model yet).
+- **KPI sync:** a `sent`/`accepted` status fires `private.recompute_lead_offer_flags`, recomputing `leads.offer_sent` (RECOMPUTE — `cancelled` un-counts). Verified end-to-end on the local stack: portal upsert sent→offer_sent=true; cancelled→false.
+- **Called from:** the CRM drawer's `LeadOfferEditor` ([lead-offer-editor.tsx](../../../src/app/components/lead-offer-editor.tsx)); `repository.upsertLeadOffer`.
+
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 
 - **Table:** `domains`.
@@ -247,7 +255,7 @@ rejected — an older gateway build, say — the table keeps working off the cac
 `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
 
 - **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
-- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). Child-table writes are landing in **Phase 5.3**: `lead_meetings` upsert (`upsertLeadMeeting`, §2.3b) is done; `lead_offers` / `lead_tasks` / `lead_value_deliveries` are still pending, populated meanwhile by n8n/service-role and read by the CRM read-model.
+- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). Child-table writes are landing in **Phase 5.3**: `lead_meetings` upsert (`upsertLeadMeeting`, §2.3b) and `lead_offers` upsert (`upsertLeadOffer`, §2.3c) are done; `lead_tasks` / `lead_value_deliveries` are still pending, populated meanwhile by n8n/service-role and read by the CRM read-model.
 - **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
 
 ---
