@@ -13,6 +13,7 @@ import type {
   ConditionRuleRecord,
   DomainRecord,
   EmailExcludeRecord,
+  FinalOutcome,
   InviteRecord,
   InviteRequest,
   InvoiceRecord,
@@ -83,6 +84,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
   updateLead: { table: "leads", operation: "update" },
+  concludeLead: { table: "leads", operation: "update" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -578,6 +580,8 @@ export interface Repository {
   updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
   updateCampaign(campaignId: string, patch: Partial<CampaignRecord>): Promise<CampaignRecord>;
   updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
+  /** Atomic terminal conclusion (ADR-0013): sets final_outcome + conclusion + concluded_at + syncs `won`. */
+  concludeLead(leadId: string, finalOutcome: FinalOutcome | null, conclusion: string | null): Promise<LeadRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -846,6 +850,10 @@ export const repository: Repository = {
 
   async updateLead(leadId, patch) {
     return invokeOrmGatewayAction("updateLead", { leadId, patch });
+  },
+
+  async concludeLead(leadId, finalOutcome, conclusion) {
+    return invokeOrmGatewayAction("concludeLead", { leadId, finalOutcome, conclusion });
   },
 
   async updateDomain(domainId, patch) {

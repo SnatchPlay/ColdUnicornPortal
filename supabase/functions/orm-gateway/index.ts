@@ -225,6 +225,14 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     client_note: row.clientNote,
     coldunicorn_note: row.coldunicornNote,
     highlight: row.highlight,
+    // Lead CRM columns (ADR-0013). Mapped so mutation returns (updateLead/concludeLead) are authoritative.
+    linkedin_invitation_sent_at: row.linkedinInvitationSentAt,
+    contact_made_at: row.contactMadeAt,
+    contact_method: row.contactMethod,
+    negotiation_started_at: row.negotiationStartedAt,
+    conclusion: row.conclusion,
+    concluded_at: row.concludedAt,
+    final_outcome: row.finalOutcome,
   };
 }
 
@@ -2518,6 +2526,21 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
   if (payload.action === "updateLead") {
     const patch = mapLeadPatch(payload.patch as Record<string, unknown>);
     const rows = await tx.update(schema.leads).set(patch).where(eq(schema.leads.id, payload.leadId)).returning();
+    if (!rows[0]) fail(404, "Lead record was not found.");
+    return toLeadRecord(rows[0]);
+  }
+
+  if (payload.action === "concludeLead") {
+    // Atomic terminal write (ADR-0013 §Phase 5). `final_outcome ⇒ concluded_at` (DB CHECK); `won` is
+    // synced here because the meeting/offer recompute triggers deliberately never touch it. Un-concluding
+    // (finalOutcome=null) clears all four so the win KPI and the CRM status both revert.
+    const outcome = payload.finalOutcome;
+    const set = outcome === null
+      ? { finalOutcome: null, concludedAt: null, conclusion: payload.conclusion, won: false }
+      // `coalesce(concluded_at, now())` preserves the FIRST conclusion time across later note/outcome
+      // edits (only un-concluding clears it); it must not drift forward when just the note changes.
+      : { finalOutcome: outcome, concludedAt: sql`coalesce(${schema.leads.concludedAt}, now())`, conclusion: payload.conclusion, won: outcome === "won" };
+    const rows = await tx.update(schema.leads).set(set).where(eq(schema.leads.id, payload.leadId)).returning();
     if (!rows[0]) fail(404, "Lead record was not found.");
     return toLeadRecord(rows[0]);
   }

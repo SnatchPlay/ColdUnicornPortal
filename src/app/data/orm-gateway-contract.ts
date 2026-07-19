@@ -10,6 +10,7 @@
   ConditionRuleRecord,
   DomainRecord,
   EmailExcludeRecord,
+  FinalOutcome,
   Identity,
   InvoiceRecord,
   LeadCustomFieldRecord,
@@ -186,6 +187,19 @@ export interface UpdateLeadPayload {
   action: "updateLead";
   leadId: string;
   patch: Partial<LeadRecord>;
+}
+
+/**
+ * Atomic terminal-conclusion write (ADR-0013, Phase 5). Sets `final_outcome` + `conclusion` +
+ * `concluded_at` together (the DB CHECK requires `final_outcome ⇒ concluded_at`) and syncs the legacy
+ * `won` boolean so the win KPIs stay correct (`won` is NOT trigger-managed — the meeting/offer
+ * recompute triggers never touch it). `finalOutcome: null` un-concludes the lead (clears all four).
+ */
+export interface ConcludeLeadPayload {
+  action: "concludeLead";
+  leadId: string;
+  finalOutcome: FinalOutcome | null;
+  conclusion: string | null;
 }
 
 export interface UpdateDomainPayload {
@@ -429,6 +443,7 @@ export type OrmGatewayRequest =
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
+  | ConcludeLeadPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -495,6 +510,7 @@ export interface OrmGatewayResponseMap {
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
   updateLead: LeadRecord;
+  concludeLead: LeadRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -759,6 +775,29 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "updateLead requires leadId and patch object." };
     }
     return { ok: true, value: { action, leadId: String(payload.leadId), patch: payload.patch as Partial<LeadRecord> } };
+  }
+
+  if (action === "concludeLead") {
+    if (!hasStringField(payload, "leadId")) {
+      return { ok: false, error: "concludeLead requires leadId." };
+    }
+    const outcome = payload.finalOutcome;
+    if (outcome !== null && outcome !== "won" && outcome !== "lost" && outcome !== "lost_premql") {
+      return { ok: false, error: "concludeLead finalOutcome must be won | lost | lost_premql | null." };
+    }
+    const conclusion = payload.conclusion;
+    if (conclusion !== null && conclusion !== undefined && !isString(conclusion)) {
+      return { ok: false, error: "concludeLead conclusion must be a string or null." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        leadId: String(payload.leadId),
+        finalOutcome: outcome as FinalOutcome | null,
+        conclusion: (conclusion ?? null) as string | null,
+      },
+    };
   }
 
   if (action === "updateDomain") {

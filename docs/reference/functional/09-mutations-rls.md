@@ -71,6 +71,15 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
   - Firmographics: `country`, `industry`, `headcount_range`, `website`
   - OOO: `expected_return_date`, `added_to_ooo_campaign`
 - **Never accepted by gateway (read-only):** `id`, `client_id`, `campaign_id`, `external_id`, `external_blacklist_id`, `external_domain_blacklist_id`, `source`, `reply_text`, `response_time_hours`, `response_time_label`, `message_title`, `message_number`, `created_at`. Keys outside the whitelist are silently dropped — they will not error, just no-op.
+- **Not editable via `mapLeadPatch`:** the terminal-status columns `final_outcome`, `conclusion`, `concluded_at`. They are written only by `concludeLead` (§2.3a), which sets all three atomically and syncs `won`.
+
+### 2.3a `concludeLead(leadId, finalOutcome, conclusion)` — atomic terminal write (ADR-0013, Phase 5)
+
+- **Table:** `leads`. Same RLS as `updateLead` (`leads_update_scoped`; **client write-blocked in Postgres**) — no new policy; this action reuses the leads UPDATE path.
+- **Purpose:** set `final_outcome` (`won|lost|lost_premql|null`), `conclusion`, and `concluded_at` together so the DB CHECK `final_outcome ⇒ concluded_at` always holds, and **sync the legacy `won` boolean** — the meeting/offer recompute triggers deliberately never touch `won`, so the conclusion action owns it. `won = (finalOutcome === 'won')`; `finalOutcome: null` un-concludes (clears all four, `won=false`).
+- **Why separate from `updateLead`:** it must set `won` + the three terminal columns in one statement; routing it through the draft/`mapLeadPatch` flow would let two write paths race over `won`. Bypasses the whitelist by design (a dedicated action, not a free-form patch).
+- **Called from:** the Leads page CRM-view drawer conclusion editor ([lead-conclusion-editor.tsx](../../../src/app/components/lead-conclusion-editor.tsx)); `repository.concludeLead`.
+- **KPI:** `won` stays the source of truth for the win KPIs (funnel/dashboards/MoM); this action keeps it consistent with `final_outcome`. Verified end-to-end on the local stack (conclude→`won=true`+CHECK holds; un-conclude→all four cleared).
 
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 
@@ -229,7 +238,7 @@ rejected — an older gateway build, say — the table keeps working off the cac
 `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
 
 - **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
-- **Portal gateway write actions** (create/update/delete meetings/offers/tasks/deliveries + an atomic conclusion+status action) land in **Phase 5**; until then the tables are populated by n8n/service-role and read by the CRM read-model.
+- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**. The child-table CRUD (create/update/delete meetings/offers/tasks/deliveries) and the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) are **Phase 5.2/5.3** (pending); until then those tables/columns are populated by n8n/service-role and read by the CRM read-model.
 - **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
 
 ---

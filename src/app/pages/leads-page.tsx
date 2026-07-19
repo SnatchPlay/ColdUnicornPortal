@@ -13,6 +13,7 @@ import {
 } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { LeadEditForm } from "../components/lead-edit-form";
+import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -51,6 +52,7 @@ import { buildLeadPatch, toLeadDraft, type LeadDraft } from "../lib/lead-draft";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
+import type { FinalOutcome } from "../types/core";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -304,6 +306,7 @@ function InternalLeadsPage() {
   const [viewMode, setViewMode] = useState<"pdca" | "crm" | "combined">("pdca");
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isConcluding, setIsConcluding] = useState(false);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -561,6 +564,24 @@ function InternalLeadsPage() {
     if (!selectedLead) return;
     setDraft(toLeadDraft(selectedLead));
   }
+
+  // Atomic terminal conclusion (ADR-0013) — separate from the draft flow so it can sync `won`.
+  const handleConclude = useCallback(
+    async (finalOutcome: FinalOutcome | null, conclusion: string | null) => {
+      if (!selectedLead) return;
+      setIsConcluding(true);
+      try {
+        await repository.concludeLead(selectedLead.id, finalOutcome, conclusion);
+        toast.success(finalOutcome ? "Lead conclusion saved." : "Conclusion cleared.");
+        refresh();
+      } catch {
+        toast.error("Failed to save conclusion.");
+      } finally {
+        setIsConcluding(false);
+      }
+    },
+    [selectedLead, refresh],
+  );
 
   function handleStageFilterChange(value: string) {
     const next = value === "all" || PIPELINE_STAGES.some((item) => item.key === value) ? (value as PipelineStage | "all") : "all";
@@ -842,7 +863,20 @@ function InternalLeadsPage() {
                     draft={draft}
                     updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
                     readOnly={identity?.role === "client"}
+                    hideWon={viewMode === "crm"}
                   />
+
+                  {/* Terminal conclusion (ADR-0013, Phase 5) — pure CRM view only; owns `won` (so the
+                      legacy pipeline toggle above is hidden there) to avoid two write paths racing. */}
+                  {viewMode === "crm" ? (
+                    <LeadConclusionEditor
+                      key={selectedLead.id}
+                      lead={selectedLead}
+                      readOnly={identity?.role === "client"}
+                      saving={isConcluding}
+                      onSave={handleConclude}
+                    />
+                  ) : null}
 
                   {loadingDetail ? (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">

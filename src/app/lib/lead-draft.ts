@@ -71,7 +71,8 @@ export function toLeadDraft(lead: LeadRecord): LeadDraft {
   };
 }
 
-function nullableString(value: string): string | null {
+/** Trim a form string to its stored value: empty/whitespace → null, else the trimmed text. */
+export function nullableString(value: string): string | null {
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
 }

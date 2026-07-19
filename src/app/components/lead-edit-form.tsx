@@ -26,10 +26,12 @@ export function EditInput({ value, onChange, disabled, type = "text", placeholde
   );
 }
 
-export function LeadEditForm({ draft, updateDraft, readOnly }: {
+export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false }: {
   draft: LeadDraft;
   updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;
   readOnly: boolean;
+  /** Hide the legacy `won` pipeline toggle — the CRM drawer's conclusion editor owns `won` (ADR-0013). */
+  hideWon?: boolean;
 }) {
   const set = <K extends keyof LeadDraft>(key: K, value: LeadDraft[K]) =>
     updateDraft((current) => ({ ...current, [key]: value }));
@@ -93,7 +95,7 @@ export function LeadEditForm({ draft, updateDraft, readOnly }: {
             { label: "Meeting held", key: "meetingHeld" as const, value: draft.meetingHeld },
             { label: "Offer sent", key: "offerSent" as const, value: draft.offerSent },
             { label: "Won", key: "won" as const, value: draft.won },
-          ].map((item) => (
+          ].filter((item) => !(hideWon && item.key === "won")).map((item) => (
             <label key={item.label} className="rounded-2xl border border-white/10 bg-black/10 p-4">
               <EditLabel>{item.label}</EditLabel>
               <div className="mt-3 flex items-center justify-between">
