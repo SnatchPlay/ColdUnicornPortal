@@ -19,6 +19,7 @@ import type {
   InvoiceRecord,
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
+  LeadMeetingRecord,
   LeadRecord,
   ManagedUserRecord,
   UserRecord,
@@ -48,6 +49,7 @@ import type {
   TablePreferencesPayload,
 } from "../types/view-contracts";
 import type {
+  LeadMeetingInput,
   LoadIdentityResult,
   OrmGatewayAction,
   OrmGatewayEnvelope,
@@ -85,6 +87,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateCampaign: { table: "campaigns", operation: "update" },
   updateLead: { table: "leads", operation: "update" },
   concludeLead: { table: "leads", operation: "update" },
+  upsertLeadMeeting: { table: "lead_meetings", operation: "upsert" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -582,6 +585,8 @@ export interface Repository {
   updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
   /** Atomic terminal conclusion (ADR-0013): sets final_outcome + conclusion + concluded_at + syncs `won`. */
   concludeLead(leadId: string, finalOutcome: FinalOutcome | null, conclusion: string | null): Promise<LeadRecord>;
+  /** Upsert the intro/summary meeting for a lead (ADR-0013). Fires the boolean-recompute trigger. */
+  upsertLeadMeeting(leadId: string, meetingType: "intro" | "summary", patch: LeadMeetingInput): Promise<LeadMeetingRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -854,6 +859,10 @@ export const repository: Repository = {
 
   async concludeLead(leadId, finalOutcome, conclusion) {
     return invokeOrmGatewayAction("concludeLead", { leadId, finalOutcome, conclusion });
+  },
+
+  async upsertLeadMeeting(leadId, meetingType, patch) {
+    return invokeOrmGatewayAction("upsertLeadMeeting", { leadId, meetingType, patch });
   },
 
   async updateDomain(domainId, patch) {

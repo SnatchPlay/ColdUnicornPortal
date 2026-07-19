@@ -15,7 +15,9 @@
   InvoiceRecord,
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
+  LeadMeetingRecord,
   LeadRecord,
+  MeetingStatus,
   UserRecord,
 } from "../types/core.ts";
 import type {
@@ -200,6 +202,26 @@ export interface ConcludeLeadPayload {
   leadId: string;
   finalOutcome: FinalOutcome | null;
   conclusion: string | null;
+}
+
+/**
+ * Upsert the intro/summary meeting for a lead (ADR-0013, Phase 5.3). One intro + one summary per lead
+ * (partial unique index), so this keys on `(lead_id, meeting_type)` — no `id` needed. Only the fields a
+ * CS manager owns are writable (status/dates/call script); the AI-generated fields (transcription,
+ * insights, score) stay n8n-owned. A `scheduled`/`held` status fires the DB trigger that recomputes
+ * `leads.meeting_booked`/`meeting_held`.
+ */
+export interface LeadMeetingInput {
+  status?: MeetingStatus;
+  scheduled_at?: string | null;
+  held_at?: string | null;
+  call_script?: string | null;
+}
+export interface UpsertLeadMeetingPayload {
+  action: "upsertLeadMeeting";
+  leadId: string;
+  meetingType: "intro" | "summary";
+  patch: LeadMeetingInput;
 }
 
 export interface UpdateDomainPayload {
@@ -444,6 +466,7 @@ export type OrmGatewayRequest =
   | UpdateCampaignPayload
   | UpdateLeadPayload
   | ConcludeLeadPayload
+  | UpsertLeadMeetingPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -511,6 +534,7 @@ export interface OrmGatewayResponseMap {
   updateCampaign: CampaignRecord;
   updateLead: LeadRecord;
   concludeLead: LeadRecord;
+  upsertLeadMeeting: LeadMeetingRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -796,6 +820,24 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         leadId: String(payload.leadId),
         finalOutcome: outcome as FinalOutcome | null,
         conclusion: (conclusion ?? null) as string | null,
+      },
+    };
+  }
+
+  if (action === "upsertLeadMeeting") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadMeeting requires leadId and patch object." };
+    }
+    if (payload.meetingType !== "intro" && payload.meetingType !== "summary") {
+      return { ok: false, error: "upsertLeadMeeting meetingType must be intro | summary." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        leadId: String(payload.leadId),
+        meetingType: payload.meetingType,
+        patch: payload.patch as LeadMeetingInput,
       },
     };
   }

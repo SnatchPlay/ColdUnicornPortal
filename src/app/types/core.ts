@@ -39,7 +39,9 @@ export type ContactDisposition = "OOO" | "NRR";
 export type LeadCrmStatus = CrmStage | FinalOutcome;
 export type ContactMethod = "phone" | "email";
 export type MeetingType = "intro" | "summary" | "general";
-export type MeetingStatus = "planned" | "scheduled" | "held" | "cancelled" | "no_show";
+/** Single source for the meeting-status values — shared by the gateway validator and the editor select. */
+export const MEETING_STATUS_VALUES = ["planned", "scheduled", "held", "cancelled", "no_show"] as const;
+export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 export type OfferStatus = "planned" | "sent" | "accepted" | "rejected" | "cancelled";
 export type TaskStatus = "planned" | "in_progress" | "completed" | "cancelled" | "skipped";
 export type ConditionTargetEntity = "client" | "campaign" | "lead";

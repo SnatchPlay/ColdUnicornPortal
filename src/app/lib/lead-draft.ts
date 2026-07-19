@@ -57,7 +57,7 @@ export interface LeadDraft {
  * This matches the day the health engine reads (`civilDateOf`), so a `type="date"` input seeded/diffed
  * with it shows the same day the SLA uses and re-saving never shifts a lead's health civil date.
  */
-function datePart(value: string | null): string | null {
+export function datePart(value: string | null): string | null {
   if (!value) return null;
   const d = civilDateOf(value, DEFAULT_BUSINESS_DAY_CONFIG);
   return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;

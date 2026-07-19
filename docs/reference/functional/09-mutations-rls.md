@@ -82,6 +82,14 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Called from:** the Leads page CRM-view drawer conclusion editor ([lead-conclusion-editor.tsx](../../../src/app/components/lead-conclusion-editor.tsx)); `repository.concludeLead`.
 - **KPI:** `won` stays the source of truth for the win KPIs (funnel/dashboards/MoM); this action keeps it consistent with `final_outcome`. Verified end-to-end on the local stack (conclude→`won=true`+CHECK holds; un-conclude→all four cleared).
 
+### 2.3b `upsertLeadMeeting(leadId, meetingType, patch)` — intro/summary meeting write (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_meetings`. RLS `lead_meetings_write_scoped` (`for all`, set-based `can_manage_client` through the parent lead) — **client write-blocked in Postgres**.
+- **Upsert key:** `(lead_id, meeting_type)` — one intro + one summary per lead (partial unique index). The handler does select-then-insert/update (drizzle cannot target a partial unique index in `ON CONFLICT`), all inside the RLS transaction.
+- **Writable fields (CS-manager-owned):** `status` (`planned|scheduled|held|cancelled|no_show`, enum-validated), `scheduled_at`, `held_at` (dates, YYYY-MM-DD), `call_script`. **NOT writable:** the AI-generated `transcription_url`, `pre_meeting_insights`, `process_score`, `conversion_insights`, `*_generated_at`, `meeting_url`, `calendar_event_id` — n8n owns those (thin-surface principle).
+- **KPI sync:** a `scheduled`/`held` status fires `private.recompute_lead_meeting_flags` (`AFTER INSERT/UPDATE/DELETE`), recomputing `leads.meeting_booked` (any scheduled/held meeting) and `meeting_held` (any held meeting). RECOMPUTE, not latch: setting `cancelled` un-counts both. Verified end-to-end on the local stack: portal upsert scheduled→booked=true; held→held=true; cancelled→both false.
+- **Called from:** the CRM drawer's `LeadMeetingsEditor` ([lead-meetings-editor.tsx](../../../src/app/components/lead-meetings-editor.tsx)); `repository.upsertLeadMeeting`.
+
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 
 - **Table:** `domains`.
@@ -239,7 +247,7 @@ rejected — an older gateway build, say — the table keeps working off the cac
 `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
 
 - **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
-- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). The child-table CRUD (create/update/delete meetings/offers/tasks/deliveries) is **Phase 5.3** (pending); until then those tables are populated by n8n/service-role and read by the CRM read-model.
+- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). Child-table writes are landing in **Phase 5.3**: `lead_meetings` upsert (`upsertLeadMeeting`, §2.3b) is done; `lead_offers` / `lead_tasks` / `lead_value_deliveries` are still pending, populated meanwhile by n8n/service-role and read by the CRM read-model.
 - **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
 
 ---

@@ -14,6 +14,7 @@ import {
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { LeadEditForm } from "../components/lead-edit-form";
 import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
+import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -53,6 +54,7 @@ import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { FinalOutcome } from "../types/core";
+import type { LeadMeetingInput } from "../data/orm-gateway-contract";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -307,6 +309,7 @@ function InternalLeadsPage() {
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
+  const [savingMeeting, setSavingMeeting] = useState<"intro" | "summary" | null>(null);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -578,6 +581,25 @@ function InternalLeadsPage() {
         toast.error("Failed to save conclusion.");
       } finally {
         setIsConcluding(false);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert intro/summary meeting (ADR-0013, Phase 5.3). A scheduled/held status fires the DB trigger
+  // that recomputes meeting_booked/meeting_held, so refresh() re-reads the synced booleans.
+  const handleSaveMeeting = useCallback(
+    async (meetingType: "intro" | "summary", patch: LeadMeetingInput) => {
+      if (!selectedLead) return;
+      setSavingMeeting(meetingType);
+      try {
+        await repository.upsertLeadMeeting(selectedLead.id, meetingType, patch);
+        toast.success(`${meetingType === "intro" ? "Intro" : "Summary"} meeting saved.`);
+        refresh();
+      } catch {
+        toast.error("Failed to save meeting.");
+      } finally {
+        setSavingMeeting(null);
       }
     },
     [selectedLead, refresh],
@@ -876,6 +898,18 @@ function InternalLeadsPage() {
                       readOnly={identity?.role === "client"}
                       saving={isConcluding}
                       onSave={handleConclude}
+                    />
+                  ) : null}
+
+                  {/* Meeting editors (ADR-0013, Phase 5.3) — CRM view only; upsert drives the boolean sync. */}
+                  {viewMode === "crm" ? (
+                    <LeadMeetingsEditor
+                      key={`meetings:${selectedLead.id}`}
+                      intro={(selectedLead as LeadCrmRow).intro_meeting}
+                      summary={(selectedLead as LeadCrmRow).summary_meeting}
+                      readOnly={identity?.role === "client"}
+                      savingType={savingMeeting}
+                      onSave={handleSaveMeeting}
                     />
                   ) : null}
 

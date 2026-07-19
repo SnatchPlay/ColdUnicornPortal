@@ -10,6 +10,7 @@ import {
   type OrmGatewayRequest,
 } from "../../../src/app/data/orm-gateway-contract.ts";
 import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
+import { MEETING_STATUS_VALUES } from "../../../src/app/types/core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -335,6 +336,12 @@ function mapCampaignPatch(patch: Record<string, unknown>) {
   return mapped;
 }
 
+/** Acceptable value for a timestamptz/date column edited via a date input: null or a `YYYY-MM-DD…`
+ *  string. Guards direct-date writes so a malformed value is skipped rather than reaching Postgres. */
+function isDateish(v: unknown): v is string | null {
+  return v === null || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v));
+}
+
 function mapLeadPatch(patch: Record<string, unknown>) {
   const mapped: Record<string, unknown> = {};
   // Pipeline state (ADR-0004 original)
@@ -371,9 +378,7 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   // atomic concludeLead action writes them. Dates are validated (null or a YYYY-MM-DD... string) so a
   // malformed value is skipped rather than reaching Postgres as a 500.
   const setDate = (key: string, drizzleKey: string) => {
-    if (!(key in patch)) return;
-    const v = patch[key];
-    if (v === null || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v))) mapped[drizzleKey] = v;
+    if (key in patch && isDateish(patch[key])) mapped[drizzleKey] = patch[key];
   };
   setDate("linkedin_invitation_sent_at", "linkedinInvitationSentAt");
   setDate("contact_made_at", "contactMadeAt");
@@ -383,6 +388,42 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   // Bookkeeping
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
+}
+
+const MEETING_STATUSES = new Set<string>(MEETING_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned meeting fields (ADR-0013, Phase 5.3). AI-generated fields
+ *  (transcription/insights/score) are NOT writable here — n8n owns them. Every field is validated so
+ *  a malformed value is dropped rather than reaching Postgres as a 500. */
+function mapLeadMeetingInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("status" in patch && typeof patch.status === "string" && MEETING_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("scheduled_at" in patch && isDateish(patch.scheduled_at)) m.scheduledAt = patch.scheduled_at;
+  if ("held_at" in patch && isDateish(patch.held_at)) m.heldAt = patch.held_at;
+  if ("call_script" in patch && (patch.call_script === null || typeof patch.call_script === "string")) m.callScript = patch.call_script;
+  return m;
+}
+
+function toLeadMeetingRecord(row: typeof schema.leadMeetings.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    meeting_type: row.meetingType,
+    status: row.status,
+    call_script: row.callScript,
+    scheduled_at: row.scheduledAt,
+    held_at: row.heldAt,
+    meeting_url: row.meetingUrl,
+    calendar_event_id: row.calendarEventId,
+    transcription_url: row.transcriptionUrl,
+    pre_meeting_insights: row.preMeetingInsights,
+    pre_meeting_insights_generated_at: row.preMeetingInsightsGeneratedAt,
+    process_score: normalizeNumeric(row.processScore),
+    conversion_insights: row.conversionInsights,
+    post_meeting_analysis_generated_at: row.postMeetingAnalysisGeneratedAt,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
 }
 
 function mapDomainPatch(patch: Record<string, unknown>) {
@@ -2557,6 +2598,34 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const rows = await tx.update(schema.leads).set(set).where(eq(schema.leads.id, payload.leadId)).returning();
     if (!rows[0]) fail(404, "Lead record was not found.");
     return toLeadRecord(rows[0]);
+  }
+
+  if (payload.action === "upsertLeadMeeting") {
+    // One intro + one summary per lead (partial unique index). Select-then-write on (lead_id,
+    // meeting_type) rather than ON CONFLICT — drizzle can't target a partial unique index. RLS gates
+    // both the read and the write to manager/admin of the lead's client. A scheduled/held status fires
+    // the boolean-recompute trigger (leads.meeting_booked / meeting_held).
+    const input = mapLeadMeetingInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadMeetings)
+      .where(and(eq(schema.leadMeetings.leadId, payload.leadId), eq(schema.leadMeetings.meetingType, payload.meetingType)))
+      .limit(1);
+    let row;
+    if (existing[0]) {
+      // Nothing valid to change (empty/all-invalid patch) — return the current row rather than emit an
+      // empty `SET` (invalid SQL). Non-empty patch → update by id.
+      row = Object.keys(input).length === 0
+        ? existing[0]
+        : (await tx.update(schema.leadMeetings).set(input).where(eq(schema.leadMeetings.id, existing[0].id)).returning())[0];
+    } else {
+      row = (await tx
+        .insert(schema.leadMeetings)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, meetingType: payload.meetingType, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Meeting could not be saved.");
+    return toLeadMeetingRecord(row);
   }
 
   if (payload.action === "updateDomain") {
