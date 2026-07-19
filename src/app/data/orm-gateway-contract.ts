@@ -18,6 +18,7 @@
   LeadMeetingRecord,
   LeadOfferRecord,
   LeadRecord,
+  LeadValueDeliveryRecord,
   MeetingStatus,
   OfferStatus,
   UserRecord,
@@ -240,6 +241,23 @@ export interface UpsertLeadOfferPayload {
   action: "upsertLeadOffer";
   leadId: string;
   patch: LeadOfferInput;
+}
+
+/**
+ * Upsert one of the two value deliveries for a lead (ADR-0013, Phase 5.3). Keyed on
+ * `(lead_id, sequence_number)` (unique) — sequence 1 or 2, the two the CRM view shows. All fields are
+ * CS-manager-owned; no legacy-boolean trigger fires (value deliveries feed only the CRM columns).
+ */
+export interface LeadValueDeliveryInput {
+  planned_date?: string | null;
+  value_items?: string[];
+  sent_at?: string | null;
+}
+export interface UpsertLeadValueDeliveryPayload {
+  action: "upsertLeadValueDelivery";
+  leadId: string;
+  sequenceNumber: 1 | 2;
+  patch: LeadValueDeliveryInput;
 }
 
 export interface UpdateDomainPayload {
@@ -486,6 +504,7 @@ export type OrmGatewayRequest =
   | ConcludeLeadPayload
   | UpsertLeadMeetingPayload
   | UpsertLeadOfferPayload
+  | UpsertLeadValueDeliveryPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -555,6 +574,7 @@ export interface OrmGatewayResponseMap {
   concludeLead: LeadRecord;
   upsertLeadMeeting: LeadMeetingRecord;
   upsertLeadOffer: LeadOfferRecord;
+  upsertLeadValueDelivery: LeadValueDeliveryRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -867,6 +887,19 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "upsertLeadOffer requires leadId and patch object." };
     }
     return { ok: true, value: { action, leadId: String(payload.leadId), patch: payload.patch as LeadOfferInput } };
+  }
+
+  if (action === "upsertLeadValueDelivery") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadValueDelivery requires leadId and patch object." };
+    }
+    if (payload.sequenceNumber !== 1 && payload.sequenceNumber !== 2) {
+      return { ok: false, error: "upsertLeadValueDelivery sequenceNumber must be 1 or 2." };
+    }
+    return {
+      ok: true,
+      value: { action, leadId: String(payload.leadId), sequenceNumber: payload.sequenceNumber, patch: payload.patch as LeadValueDeliveryInput },
+    };
   }
 
   if (action === "updateDomain") {

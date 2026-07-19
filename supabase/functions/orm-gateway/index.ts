@@ -452,6 +452,33 @@ function toLeadOfferRecord(row: typeof schema.leadOffers.$inferSelect) {
   };
 }
 
+/** Whitelist the CS-manager-owned value-delivery fields (ADR-0013, Phase 5.3). Validated so malformed
+ *  values are dropped rather than 500. planned_date is a DATE; sent_at a timestamptz. */
+function mapLeadValueDeliveryInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("planned_date" in patch && isDateish(patch.planned_date)) m.plannedDate = patch.planned_date;
+  if ("sent_at" in patch && isDateish(patch.sent_at)) m.sentAt = patch.sent_at;
+  if ("value_items" in patch && Array.isArray(patch.value_items) && patch.value_items.every((x) => typeof x === "string")) {
+    m.valueItems = patch.value_items;
+  }
+  return m;
+}
+
+function toLeadValueDeliveryRecord(row: typeof schema.leadValueDeliveries.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    sequence_number: row.sequenceNumber,
+    planned_date: row.plannedDate,
+    value_items: row.valueItems ?? [],
+    sent_at: row.sentAt,
+    source_meeting_id: row.sourceMeetingId,
+    notes: row.notes,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
 function mapDomainPatch(patch: Record<string, unknown>) {
   const mapped: Record<string, unknown> = {};
   if ("status" in patch) mapped.status = patch.status;
@@ -2687,6 +2714,30 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     }
     if (!row) fail(500, "Offer could not be saved.");
     return toLeadOfferRecord(row);
+  }
+
+  if (payload.action === "upsertLeadValueDelivery") {
+    // Keyed on (lead_id, sequence_number) — unique, sequence 1 or 2 (same select-then-write shape as
+    // meetings; no boolean trigger — value deliveries feed only the CRM columns). RLS gates read+write.
+    const input = mapLeadValueDeliveryInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadValueDeliveries)
+      .where(and(eq(schema.leadValueDeliveries.leadId, payload.leadId), eq(schema.leadValueDeliveries.sequenceNumber, payload.sequenceNumber)))
+      .limit(1);
+    let row;
+    if (existing[0]) {
+      row = Object.keys(input).length === 0
+        ? existing[0]
+        : (await tx.update(schema.leadValueDeliveries).set(input).where(eq(schema.leadValueDeliveries.id, existing[0].id)).returning())[0];
+    } else {
+      row = (await tx
+        .insert(schema.leadValueDeliveries)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, sequenceNumber: payload.sequenceNumber, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Value delivery could not be saved.");
+    return toLeadValueDeliveryRecord(row);
   }
 
   if (payload.action === "updateDomain") {

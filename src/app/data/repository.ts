@@ -22,6 +22,7 @@ import type {
   LeadMeetingRecord,
   LeadOfferRecord,
   LeadRecord,
+  LeadValueDeliveryRecord,
   ManagedUserRecord,
   UserRecord,
 } from "../types/core";
@@ -52,6 +53,7 @@ import type {
 import type {
   LeadMeetingInput,
   LeadOfferInput,
+  LeadValueDeliveryInput,
   LoadIdentityResult,
   OrmGatewayAction,
   OrmGatewayEnvelope,
@@ -91,6 +93,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   concludeLead: { table: "leads", operation: "update" },
   upsertLeadMeeting: { table: "lead_meetings", operation: "upsert" },
   upsertLeadOffer: { table: "lead_offers", operation: "upsert" },
+  upsertLeadValueDelivery: { table: "lead_value_deliveries", operation: "upsert" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -592,6 +595,8 @@ export interface Repository {
   upsertLeadMeeting(leadId: string, meetingType: "intro" | "summary", patch: LeadMeetingInput): Promise<LeadMeetingRecord>;
   /** Upsert the current (latest non-cancelled) offer for a lead (ADR-0013). Fires the offer_sent trigger. */
   upsertLeadOffer(leadId: string, patch: LeadOfferInput): Promise<LeadOfferRecord>;
+  /** Upsert value delivery 1 or 2 for a lead (ADR-0013). Keyed on (lead_id, sequence_number). */
+  upsertLeadValueDelivery(leadId: string, sequenceNumber: 1 | 2, patch: LeadValueDeliveryInput): Promise<LeadValueDeliveryRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -872,6 +877,10 @@ export const repository: Repository = {
 
   async upsertLeadOffer(leadId, patch) {
     return invokeOrmGatewayAction("upsertLeadOffer", { leadId, patch });
+  },
+
+  async upsertLeadValueDelivery(leadId, sequenceNumber, patch) {
+    return invokeOrmGatewayAction("upsertLeadValueDelivery", { leadId, sequenceNumber, patch });
   },
 
   async updateDomain(domainId, patch) {

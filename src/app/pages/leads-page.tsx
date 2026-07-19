@@ -16,6 +16,7 @@ import { LeadEditForm } from "../components/lead-edit-form";
 import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
 import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
 import { LeadOfferEditor } from "../components/lead-offer-editor";
+import { LeadValueDeliveriesEditor } from "../components/lead-value-deliveries-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -55,7 +56,7 @@ import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { FinalOutcome } from "../types/core";
-import type { LeadMeetingInput, LeadOfferInput } from "../data/orm-gateway-contract";
+import type { LeadMeetingInput, LeadOfferInput, LeadValueDeliveryInput } from "../data/orm-gateway-contract";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -312,6 +313,7 @@ function InternalLeadsPage() {
   const [isConcluding, setIsConcluding] = useState(false);
   const [savingMeeting, setSavingMeeting] = useState<"intro" | "summary" | null>(null);
   const [savingOffer, setSavingOffer] = useState(false);
+  const [savingValueSeq, setSavingValueSeq] = useState<1 | 2 | null>(null);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -620,6 +622,24 @@ function InternalLeadsPage() {
         toast.error("Failed to save offer.");
       } finally {
         setSavingOffer(false);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert value delivery 1 or 2 (ADR-0013, Phase 5.3). No boolean trigger — feeds the CRM columns only.
+  const handleSaveValueDelivery = useCallback(
+    async (sequenceNumber: 1 | 2, patch: LeadValueDeliveryInput) => {
+      if (!selectedLead) return;
+      setSavingValueSeq(sequenceNumber);
+      try {
+        await repository.upsertLeadValueDelivery(selectedLead.id, sequenceNumber, patch);
+        toast.success(`${sequenceNumber === 1 ? "1st" : "2nd"} value delivery saved.`);
+        refresh();
+      } catch {
+        toast.error("Failed to save value delivery.");
+      } finally {
+        setSavingValueSeq(null);
       }
     },
     [selectedLead, refresh],
@@ -941,6 +961,18 @@ function InternalLeadsPage() {
                       readOnly={identity?.role === "client"}
                       saving={savingOffer}
                       onSave={handleSaveOffer}
+                    />
+                  ) : null}
+
+                  {/* Value deliveries (ADR-0013, Phase 5.3) — CRM view only; feeds the expert-brand columns. */}
+                  {viewMode === "crm" ? (
+                    <LeadValueDeliveriesEditor
+                      key={`values:${selectedLead.id}`}
+                      first={(selectedLead as LeadCrmRow).value_delivery_1}
+                      second={(selectedLead as LeadCrmRow).value_delivery_2}
+                      readOnly={identity?.role === "client"}
+                      savingSeq={savingValueSeq}
+                      onSave={handleSaveValueDelivery}
                     />
                   ) : null}
 
