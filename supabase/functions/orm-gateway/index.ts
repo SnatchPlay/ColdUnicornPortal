@@ -366,6 +366,20 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   // OOO state
   if ("expected_return_date" in patch) mapped.expectedReturnDate = patch.expected_return_date;
   if ("added_to_ooo_campaign" in patch) mapped.addedToOooCampaign = patch.added_to_ooo_campaign;
+  // Lead CRM operational state (ADR-0013, Phase 5.2). Editable dates/method that drive the CRM health
+  // columns. Terminal-status columns (final_outcome/conclusion/concluded_at) are NOT here — only the
+  // atomic concludeLead action writes them. Dates are validated (null or a YYYY-MM-DD... string) so a
+  // malformed value is skipped rather than reaching Postgres as a 500.
+  const setDate = (key: string, drizzleKey: string) => {
+    if (!(key in patch)) return;
+    const v = patch[key];
+    if (v === null || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v))) mapped[drizzleKey] = v;
+  };
+  setDate("linkedin_invitation_sent_at", "linkedinInvitationSentAt");
+  setDate("contact_made_at", "contactMadeAt");
+  setDate("negotiation_started_at", "negotiationStartedAt");
+  // contact_method has a DB CHECK (phone|email); coerce anything else to NULL rather than 500 on write.
+  if ("contact_method" in patch) mapped.contactMethod = patch.contact_method === "phone" || patch.contact_method === "email" ? patch.contact_method : null;
   // Bookkeeping
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;

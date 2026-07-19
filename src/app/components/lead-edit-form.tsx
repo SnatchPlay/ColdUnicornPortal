@@ -1,12 +1,13 @@
 import { Checkbox } from "./ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import {
+  CONTACT_METHOD_UNSET,
   EDITABLE_QUALIFICATIONS,
   LEAD_GENDER_UNSET,
   LEAD_QUALIFICATION_UNSET,
   type LeadDraft,
 } from "../lib/lead-draft";
-import type { LeadGender, LeadQualification } from "../types/core";
+import type { ContactMethod, LeadGender, LeadQualification } from "../types/core";
 
 /**
  * Editable lead form (Identity / Pipeline / OOO sections). Shared by the Leads page drawer and the
@@ -26,12 +27,14 @@ export function EditInput({ value, onChange, disabled, type = "text", placeholde
   );
 }
 
-export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false }: {
+export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false, showCrmFields = false }: {
   draft: LeadDraft;
   updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;
   readOnly: boolean;
   /** Hide the legacy `won` pipeline toggle — the CRM drawer's conclusion editor owns `won` (ADR-0013). */
   hideWon?: boolean;
+  /** Show the CRM operational fields (contact/method/negotiation/LinkedIn dates) — CRM view only. */
+  showCrmFields?: boolean;
 }) {
   const set = <K extends keyof LeadDraft>(key: K, value: LeadDraft[K]) =>
     updateDraft((current) => ({ ...current, [key]: value }));
@@ -120,6 +123,31 @@ export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false }: 
           </label>
         </div>
       </section>
+
+      {/* CRM operational state (ADR-0013, Phase 5.2) — dates driving the CRM health columns. Shown only
+          in the CRM view; edited via the shared draft/Save flow (not a separate action). */}
+      {showCrmFields ? (
+        <section className="space-y-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">CRM operational</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-2"><EditLabel>Contact made</EditLabel><EditInput value={draft.contactMadeAt} onChange={(v) => set("contactMadeAt", v)} disabled={readOnly} type="date" /></label>
+            <label className="space-y-2">
+              <EditLabel>Contact method</EditLabel>
+              <Select value={draft.contactMethod === "" ? CONTACT_METHOD_UNSET : draft.contactMethod} disabled={readOnly}
+                onValueChange={(value) => set("contactMethod", value === CONTACT_METHOD_UNSET ? "" : (value as ContactMethod))}>
+                <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value={CONTACT_METHOD_UNSET} className="text-white focus:bg-[#1a1a1a] focus:text-white">—</SelectItem>
+                  <SelectItem value="phone" className="text-white focus:bg-[#1a1a1a] focus:text-white">phone</SelectItem>
+                  <SelectItem value="email" className="text-white focus:bg-[#1a1a1a] focus:text-white">email</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-2"><EditLabel>LinkedIn invite sent</EditLabel><EditInput value={draft.linkedinInvitationSentAt} onChange={(v) => set("linkedinInvitationSentAt", v)} disabled={readOnly} type="date" /></label>
+            <label className="space-y-2"><EditLabel>Negotiation start</EditLabel><EditInput value={draft.negotiationStartedAt} onChange={(v) => set("negotiationStartedAt", v)} disabled={readOnly} type="date" /></label>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

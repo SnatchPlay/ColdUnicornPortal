@@ -864,6 +864,7 @@ function InternalLeadsPage() {
                     updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
                     readOnly={identity?.role === "client"}
                     hideWon={viewMode === "crm"}
+                    showCrmFields={isCrmView}
                   />
 
                   {/* Terminal conclusion (ADR-0013, Phase 5) — pure CRM view only; owns `won` (so the

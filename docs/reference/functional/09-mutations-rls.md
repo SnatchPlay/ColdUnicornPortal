@@ -70,6 +70,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
   - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
   - Firmographics: `country`, `industry`, `headcount_range`, `website`
   - OOO: `expected_return_date`, `added_to_ooo_campaign`
+  - CRM operational (ADR-0013, Phase 5.2): `linkedin_invitation_sent_at`, `contact_made_at`, `negotiation_started_at` (dates edited as `YYYY-MM-DD`, stored midnight), `contact_method` (`phone|email` — any other value is coerced to `NULL` server-side to respect the DB CHECK)
 - **Never accepted by gateway (read-only):** `id`, `client_id`, `campaign_id`, `external_id`, `external_blacklist_id`, `external_domain_blacklist_id`, `source`, `reply_text`, `response_time_hours`, `response_time_label`, `message_title`, `message_number`, `created_at`. Keys outside the whitelist are silently dropped — they will not error, just no-op.
 - **Not editable via `mapLeadPatch`:** the terminal-status columns `final_outcome`, `conclusion`, `concluded_at`. They are written only by `concludeLead` (§2.3a), which sets all three atomically and syncs `won`.
 
@@ -238,7 +239,7 @@ rejected — an older gateway build, say — the table keeps working off the cac
 `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
 
 - **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
-- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**. The child-table CRUD (create/update/delete meetings/offers/tasks/deliveries) and the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) are **Phase 5.2/5.3** (pending); until then those tables/columns are populated by n8n/service-role and read by the CRM read-model.
+- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). The child-table CRUD (create/update/delete meetings/offers/tasks/deliveries) is **Phase 5.3** (pending); until then those tables are populated by n8n/service-role and read by the CRM read-model.
 - **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
 
 ---
