@@ -27,10 +27,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadCrmList } from "../lib/use-lead-crm";
 import { getFullName } from "../lib/format";
-import { buildLeadReportColumns } from "../lib/lead-report-columns";
+import { buildLeadReportColumns, type LeadReportColumn } from "../lib/lead-report-columns";
+import { buildLeadCrmColumns, type LeadCrmColumn } from "../lib/lead-crm-columns";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
 import { LeadReportTable } from "../components/lead-report-table";
+import { LeadCrmTable } from "../components/lead-crm-table";
+import type { LeadCrmRow } from "../types/view-contracts";
 import { LeadCustomColumnsManager } from "../components/lead-custom-columns-manager";
 import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export";
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
@@ -297,6 +301,7 @@ function InternalLeadsPage() {
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => parseTimeframeFromParams(searchParams));
   const [currentPage, setCurrentPage] = useState(() => parsePage(searchParams.get("page")));
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"pdca" | "crm" | "combined">("pdca");
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
@@ -325,7 +330,15 @@ function InternalLeadsPage() {
     pageSize: PAGE_SIZE,
   }), [clientFilter, campaignFilter, stageFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
 
-  const { data, loading, error, refresh } = useLeadsList(listParams);
+  // View switcher (ADR-0013): PDCA = existing report; CRM = banded CRM table; combined = union, calm.
+  const isCrmView = viewMode !== "pdca";
+  const pdca = useLeadsList(listParams, { enabled: !isCrmView });
+  const crmView = useLeadCrmList(listParams, { enabled: isCrmView });
+  // Re-bind the shared names to the active mode so all downstream derivations work unchanged.
+  const data = isCrmView ? crmView.data : pdca.data;
+  const loading = isCrmView ? crmView.loading : pdca.loading;
+  const error = isCrmView ? crmView.error : pdca.error;
+  const refresh = isCrmView ? crmView.refresh : pdca.refresh;
   const { data: filterOptions } = useLeadsFilterOptions();
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
 
@@ -338,6 +351,23 @@ function InternalLeadsPage() {
   const customValues = useMemo(() => data?.customValues ?? [], [data]);
   const customColumns = useLeadCustomColumns({ role: identity?.role, fields: customFields, values: customValues });
   const reportColumns = useMemo(() => [...baseReportColumns, ...customColumns], [baseReportColumns, customColumns]);
+  // CRM view columns. Combined mode unions the PDCA report columns (as the Lead band) with the CRM
+  // stage columns, dropping the CRM lead-stage duplicates (spec B.3 — a calm union).
+  const crmAsOf = crmView.data?.asOf;
+  const crmColumns = useMemo<LeadCrmColumn[]>(() => {
+    const base = buildLeadCrmColumns({ role: identity?.role, showClient: showClientColumn, asOf: crmAsOf });
+    if (viewMode !== "combined") return base;
+    const pdcaAsCrm: LeadCrmColumn[] = reportColumns.map((c: LeadReportColumn) => ({
+      id: `pdca:${c.id}`, label: c.label, stage: "lead", width: c.width, minWidth: c.minWidth, align: c.align,
+      value: c.value, render: c.render,
+    }));
+    // Drop the PDCA (getLeadStage) Status and keep the CRM (resolveCrmStatus) Status so the taxonomy is
+    // consistent across CRM and combined modes.
+    return [
+      ...pdcaAsCrm.filter((c) => c.id !== "pdca:status"),
+      ...base.filter((c) => c.stage !== "lead" || c.id === "status"),
+    ];
+  }, [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf]);
   const defaultColumnWidths = useMemo(() => reportColumns.map((c) => c.width), [reportColumns]);
   const minColumnWidths = useMemo(() => reportColumns.map((c) => c.minWidth), [reportColumns]);
   const leadColumns = useResizableColumns({
@@ -664,6 +694,23 @@ function InternalLeadsPage() {
         </div>
       </Surface>
 
+      <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs w-fit">
+        {([["pdca", "PDCA"], ["crm", "CRM"], ["combined", "PDCA + CRM"]] as const).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setViewMode(mode)}
+            aria-pressed={viewMode === mode}
+            className={cn(
+              "rounded-lg px-3 py-1.5 transition",
+              viewMode === mode ? "bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {rows.length === 0 && !loading ? (
         <EmptyState title="No leads match the current filters" description="Leads are scoped by role and searchable across core enrichment fields." />
       ) : (
@@ -675,6 +722,16 @@ function InternalLeadsPage() {
             </div>
           )}
           <div className="overflow-hidden rounded-2xl border border-border">
+            {viewMode !== "pdca" ? (
+              <LeadCrmTable
+                rows={rows as LeadCrmRow[]}
+                columns={crmColumns}
+                onRowClick={(lead) => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
+                selectedId={selectedLead?.id ?? null}
+                rowAriaLabel={(lead) => `Open details for ${getFullName(lead.first_name, lead.last_name)}`}
+                showStageStrip={viewMode === "crm"}
+              />
+            ) : (
             <LeadReportTable
               rows={rows}
               columns={reportColumns}
@@ -701,6 +758,7 @@ function InternalLeadsPage() {
                 }
               }}
             />
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

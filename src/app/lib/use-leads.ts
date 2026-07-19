@@ -15,9 +15,10 @@ export function mapLeadsError(reason: unknown): string {
 }
 
 /** Fetches a server-paginated/filtered leads list. Re-fetches whenever params change. */
-export function useLeadsList(params: LeadsListParams) {
+export function useLeadsList(params: LeadsListParams, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [data, setData] = useState<LeadsListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   // Serialize params to avoid effect identity issues.
   const paramsKey = JSON.stringify(params);
@@ -36,7 +37,10 @@ export function useLeadsList(params: LeadsListParams) {
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void load(params); }, [paramsKey]);
+  useEffect(() => {
+    if (!enabled) { setLoading(false); return; }
+    void load(params);
+  }, [paramsKey, enabled]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const refresh = useCallback(() => { void load(params); }, [load, paramsKey]);

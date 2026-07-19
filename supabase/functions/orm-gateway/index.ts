@@ -1831,7 +1831,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         now() AS server_now
     `);
     const isClient = ctxRows[0]?.role === "client";
-    const asOf = (ctxRows[0]?.server_now ? toIsoString(ctxRows[0].server_now) : null) ?? new Date().toISOString();
+    // Normalize the DB clock to strict ISO — postgres.js may hand back `now()` as a raw
+    // "YYYY-MM-DD HH:MM:SS+00" string (toIsoString only ISO-formats Date instances), and the health
+    // evaluator's contract is an ISO `asOf`.
+    const parsedNow = ctxRows[0]?.server_now ? new Date(String(ctxRows[0].server_now)) : null;
+    const asOf = parsedNow && !Number.isNaN(parsedNow.getTime()) ? parsedNow.toISOString() : new Date().toISOString();
 
     const stageExpr = sql`
       CASE

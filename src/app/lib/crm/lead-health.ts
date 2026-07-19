@@ -102,7 +102,8 @@ export interface LeadCrmFacts {
   linkedin_invitation_sent_at?: string | null;
   linkedin_integration_connected?: boolean | null;
   message_number?: number | null;
-  reply_count?: number | null;
+  /** camelCase to match LeadCrmRow (inherited from LeadsListRow) so a row satisfies the facts directly. */
+  replyCount?: number | null;
   created_at?: string | null; // lead received date
   contact_made_at?: string | null;
   contact_method?: string | null; // phone | email
@@ -319,7 +320,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
     if (f.linkedin_integration_connected) return overdue("yellow", "Integration connected, invitation not sent", null);
     return na("LinkedIn automation not connected"); // avoid falsely-yellow disconnected customers (spec Appendix F, col I)
   },
-  K: (f) => (isPresent(f.reply_count) && (f.reply_count ?? 0) > 0 ? green("Message history exists") : neutral("No message history")),
+  K: (f) => ((f.replyCount ?? 0) > 0 ? green("Message history exists") : neutral("No message history")),
   L: (f) => presence(f.message_number, "Message number"),
 
   // --- Qualification stage ---

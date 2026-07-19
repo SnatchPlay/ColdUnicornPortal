@@ -18,9 +18,10 @@ function mapError(reason: unknown): string {
  * and carries the `loadIdRef` stale guard (ADR-0009) so a slow in-flight response can never overwrite
  * a newer one — the pattern the leads list (`use-leads.ts`) predates and should not be copied from.
  */
-export function useLeadCrmList(params: LeadsListParams) {
+export function useLeadCrmList(params: LeadsListParams, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [data, setData] = useState<LeadCrmListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const loadIdRef = useRef(0);
   const paramsKey = JSON.stringify(params);
@@ -43,7 +44,10 @@ export function useLeadCrmList(params: LeadsListParams) {
       });
   }
 
-  useEffect(() => { load(); }, [paramsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!enabled) { setLoading(false); return; }
+    load();
+  }, [paramsKey, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { data, loading, error, refresh: () => { load(); } };
+  return { data, loading, error, refresh: () => { if (enabled) load(); } };
 }

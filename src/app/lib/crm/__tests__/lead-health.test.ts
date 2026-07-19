@@ -22,9 +22,9 @@ describe("presence columns (green / neutral)", () => {
     expect(cell("A", { company_name: "Acme" }, RECEIVED).state).toBe("green");
     expect(cell("A", { company_name: "" }, RECEIVED).state).toBe("neutral");
   });
-  it("K Msg history green only when reply_count > 0", () => {
-    expect(cell("K", { reply_count: 3 }, RECEIVED).state).toBe("green");
-    expect(cell("K", { reply_count: 0 }, RECEIVED).state).toBe("neutral");
+  it("K Msg history green only when replyCount > 0 (matches LeadCrmRow field name)", () => {
+    expect(cell("K", { replyCount: 3 }, RECEIVED).state).toBe("green");
+    expect(cell("K", { replyCount: 0 }, RECEIVED).state).toBe("neutral");
   });
   it("unregistered columns (H/J/M) are neutral", () => {
     expect(cell("M", {}, RECEIVED).state).toBe("neutral");
