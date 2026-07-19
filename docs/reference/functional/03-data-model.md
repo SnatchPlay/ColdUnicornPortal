@@ -385,7 +385,12 @@ Four lead-owned child tables added by [`20260719_lead_crm_tables.sql`](../../../
 | `lead_tasks` | next-step tasks (no `task_type` in MVP) | `title`, `due_at`, `status`, `position`, `source_meeting_id` |
 | `lead_value_deliveries` | additional-value deliveries | `sequence_number` (unique per lead), `planned_date`, `value_items text[]`, `sent_at` |
 
-**New `leads` columns** (spec §8.1): `linkedin_invitation_sent_at`, `contact_made_at`, `contact_method` (text CHECK `phone`|`email`), `negotiation_started_at`, `conclusion`, `concluded_at`. Also re-synced the previously-missing `sequencer_id` into `schema.ts`. The status taxonomy (`leads.crm_status`) lands in a separate Phase-1b migration.
+**New `leads` columns** (spec §8.1): `linkedin_invitation_sent_at`, `contact_made_at`, `contact_method` (text CHECK `phone`|`email`), `negotiation_started_at`, `conclusion`, `concluded_at`. Also re-synced the previously-missing `sequencer_id` into `schema.ts`.
+
+**Status model (Phase 1b, ADR-0013 split model — [`20260719d`](../../../supabase/migrations/20260719d_lead_final_outcome.sql)):** the taxonomy is SPLIT, not a single stored column.
+- `crm_stage` (`preMQL`/`MQL`/`SQL`) and `contact_disposition` (`ooo`/`nrr`) are **DERIVED on read** (`src/app/lib/crm/lead-status.ts` — `deriveCrmStage`, `deriveContactDisposition`); no columns, no backfill.
+- `leads.final_outcome` (enum `final_outcome` = `won`/`lost`/`lost_premql`, nullable) is the **only stored** part — the explicit terminal decision, guarded by `leads_final_outcome_concluded_check` (`final_outcome ⇒ concluded_at`), set atomically with `conclusion`/`concluded_at` by the Phase-5 conclusion action.
+- `resolveCrmStatus` = `final_outcome ?? won-boolean ?? rejected→lost ?? deriveCrmStage`. **KPI dashboards are unchanged** (booleans/`qualification`).
 
 **RLS** ([`20260719b`](../../../supabase/migrations/20260719b_lead_crm_rls.sql)) — set-based per ADR-0006, verified via EXPLAIN as `authenticated` (hashed SubPlan on the child scan, no per-row `private.*`):
 - `<table>_select_scoped` — readable when the parent lead's `client_id` is accessible (`private.can_access_client`); clients get **read-only** CRM data.

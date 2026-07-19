@@ -207,6 +207,26 @@ describe("AO process-issue count", () => {
   });
 });
 
+describe("terminal outcome suppresses forward SLA (won included)", () => {
+  const at = "2026-07-30T12:00:00Z";
+  it("won lead → W (offer date) not_applicable", () => {
+    const facts: LeadCrmFacts = { status: "won", intro_meeting: { status: "held", held_at: "2026-07-14T09:00:00Z" } };
+    expect(cell("W", facts, at).state).toBe("not_applicable");
+  });
+  it("won lead → AI (days in negotiation) not_applicable", () => {
+    expect(cell("AI", { status: "won", negotiation_started_at: "2026-01-01T00:00:00Z" }, at).state).toBe("not_applicable");
+  });
+});
+
+describe("AN keys on final_outcome, not concluded_at alone", () => {
+  it("green when a terminal outcome is recorded", () => {
+    expect(cell("AN", { final_outcome: "won" }, RECEIVED).state).toBe("green");
+  });
+  it("neutral when only concluded_at is set (no outcome)", () => {
+    expect(cell("AN", { concluded_at: RECEIVED }, RECEIVED).state).toBe("neutral");
+  });
+});
+
 describe("code-review fixes", () => {
   const late = "2026-07-20T12:00:00Z";
 

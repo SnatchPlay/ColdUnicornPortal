@@ -109,6 +109,7 @@ export interface LeadCrmFacts {
   negotiation_started_at?: string | null;
   conclusion?: string | null;
   concluded_at?: string | null;
+  final_outcome?: "won" | "lost" | "lost_premql" | null;
   client_note?: string | null;
   coldunicorn_note?: string | null;
   intro_meeting?: CrmMeetingFacts | null;
@@ -145,6 +146,12 @@ const STATUS_RANK: Record<string, number> = { preMQL: 0, MQL: 1, SQL: 2, won: 3 
 
 function isLost(status?: string | null): boolean {
   return status === "lost" || status === "lost_premql";
+}
+/** Any terminal outcome (won/lost/lost_premql) — all of them stop forward-step SLA nagging: a closed
+ *  deal or a lost lead should not show overdue value-delivery / negotiation cells (spec Appendix D.4
+ *  names LOST; the split status model treats every `final_outcome` uniformly as terminal). */
+function isTerminal(status?: string | null): boolean {
+  return isLost(status) || status === "won";
 }
 function atLeastMql(status?: string | null): boolean {
   return !isLost(status) && (STATUS_RANK[status ?? ""] ?? -1) >= STATUS_RANK.MQL;
@@ -193,12 +200,12 @@ function timedSla(params: {
   missingLabel: string;
   anchorIso: string | null;
   thresholds: Threshold[];
-  lost: boolean;
+  terminal: boolean;
   ctx: HealthContext;
 }): CellHealth {
   if (!params.prereqMet) return na();
   if (params.present) return green(params.presentReason);
-  if (params.lost) return na("Lead is lost — future SLA suppressed");
+  if (params.terminal) return na("Lead is terminal — future SLA suppressed");
   if (!isPresent(params.anchorIso)) return pending(`${params.missingLabel} — awaiting anchor date`, null);
 
   const evaluated = params.thresholds
@@ -224,7 +231,7 @@ function contactMade(facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
   const day0 = contactDayZero(received as string, cfg);
 
   if (!isPresent(facts.contact_made_at)) {
-    if (isLost(facts.status)) return na("Lead is lost — future SLA suppressed");
+    if (isTerminal(facts.status)) return na("Lead is lost — future SLA suppressed");
     const redAt = endOfDayIso(addBusinessDays(day0, 1, cfg), cfg);
     if (isPastDeadline(redAt, ctx.asOf)) return overdue("red", "Contact not made within 1 working day", redAt);
     const day0End = endOfDayIso(day0, cfg);
@@ -273,7 +280,7 @@ function introProcessScore(facts: LeadCrmFacts, ctx: HealthContext): CellHealth 
     return overdue("red", `Process score ${score}`, null);
   }
   if (!meetingScheduledOrHeld(intro)) return na();
-  if (isLost(facts.status)) return na("Lead is lost — future SLA suppressed");
+  if (isTerminal(facts.status)) return na("Lead is lost — future SLA suppressed");
   const anchor = meetingAnchor(intro);
   if (!anchor) return pending("Score pending — awaiting meeting date", null);
   const deadline = businessDeadline(anchor, 1, ctx.businessDays);
@@ -284,7 +291,7 @@ function introProcessScore(facts: LeadCrmFacts, ctx: HealthContext): CellHealth 
 
 function daysInNegotiation(facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
   if (!isPresent(facts.negotiation_started_at)) return na("Negotiation not started");
-  if (isLost(facts.status)) return na("Lead is lost — negotiation age suppressed"); // spec Appendix D.4
+  if (isTerminal(facts.status)) return na("Lead is lost — negotiation age suppressed"); // spec Appendix D.4
   const end = isPresent(facts.concluded_at) ? (facts.concluded_at as string) : ctx.asOf;
   const days = calendarDaysBetween(facts.negotiation_started_at as string, end, ctx.businessDays);
   // RECOMMENDED boundaries 0-30/31-60/61-90/91+ (spec Appendix C.5 leaves exact 30/60/90 OPEN).
@@ -328,7 +335,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Intro meeting not set",
       anchorIso: f.created_at ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }], // client gives yellow only, no red (spec C.2 R)
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   S: (f) => {
@@ -345,7 +352,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Intro transcription missing",
       anchorIso: meetingAnchor(f.intro_meeting),
       thresholds: [{ hours: 2, state: "red" }],
-      lost: false, // transcript is about a held meeting, not a future step
+      terminal: false, // transcript is about a held meeting, not a future step
       ctx,
     }),
   U: introProcessScore,
@@ -357,7 +364,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Intro conversion insights missing",
       anchorIso: meetingAnchor(f.intro_meeting),
       thresholds: [{ workingDays: 1, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
 
@@ -370,7 +377,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Contracted offer date missing",
       anchorIso: meetingAnchor(f.intro_meeting),
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   X: (f, ctx) =>
@@ -381,7 +388,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Contracted next-step date missing",
       anchorIso: meetingAnchor(f.intro_meeting),
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   Y: (f, ctx) =>
@@ -392,7 +399,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Next-step task missing",
       anchorIso: f.next_task_due_at ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   Z: (f, ctx) =>
@@ -403,7 +410,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Summary transcription missing",
       anchorIso: meetingAnchor(f.summary_meeting),
       thresholds: [{ hours: 2, state: "red" }],
-      lost: false,
+      terminal: false,
       ctx,
     }),
   AA: (f, ctx) =>
@@ -414,7 +421,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Summary conversion insights missing",
       anchorIso: meetingAnchor(f.summary_meeting),
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
 
@@ -427,7 +434,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "First value date missing",
       anchorIso: f.next_task_due_at ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   AC: (f) => {
@@ -444,7 +451,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "First value not sent",
       anchorIso: f.value_delivery_1?.planned_date ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   AE: (f, ctx) =>
@@ -455,7 +462,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Second value date missing",
       anchorIso: f.value_delivery_1?.planned_date ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   AF: (f) => {
@@ -472,7 +479,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Second value not sent",
       anchorIso: f.value_delivery_2?.planned_date ?? null,
       thresholds: [{ workingDays: 1, state: "yellow" }, { workingDays: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
 
@@ -485,14 +492,16 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       missingLabel: "Negotiation not started",
       anchorIso: f.value_delivery_2?.sent_at ?? f.value_delivery_2?.planned_date ?? null,
       thresholds: [{ weeks: 1, state: "yellow" }, { weeks: 2, state: "red" }],
-      lost: isLost(f.status),
+      terminal: isTerminal(f.status),
       ctx,
     }),
   AI: daysInNegotiation,
   AJ: (f) => presence(isPresent(f.client_note) ? f.client_note : f.coldunicorn_note, "Notes"),
 
   // --- Conclusions stage ---
-  AN: (f) => (isPresent(f.concluded_at) ? green("Concluded") : neutral("Not concluded")),
+  // Keyed on the terminal outcome (the real "concluded" signal), not concluded_at alone: the CHECK
+  // only enforces final_outcome ⇒ concluded_at, so concluded_at can be set without an outcome.
+  AN: (f) => (isPresent(f.final_outcome) ? green("Concluded") : neutral("Not concluded")),
 };
 
 /** All column ids the evaluator produces a health state for (excludes derived `AO`). */

@@ -41,12 +41,31 @@ browser clock. The existing `leads.highlight` (manual green/yellow/red) is unrel
 This is **not** the conditions engine ([ADR-0011](0011-conditions-rules-engine.md)): CRM health is
 fixed product logic needing `not_applicable`/`pending` + `deadline_at`, not a user-configurable DSL.
 
-### 4. Status taxonomy coexists with — and does not delete — the legacy booleans
-A new `lead_crm_status` enum + `leads.crm_status` column is added and backfilled from the current
-`getLeadStage()` logic. The legacy pipeline booleans (`meeting_booked`, `meeting_held`, `offer_sent`,
-`won`) and the `qualification` enum **remain** and stay authoritative for KPIs until every consumer is
-migrated. We do **not** introduce a parallel `final_outcome` without this migration (spec §11 risk
-note). Terminal states `lost` / `lost_premql` suppress future SLA warnings (spec Appendix D.4).
+### 4. Status taxonomy is SPLIT (derived stage + stored terminal + separate disposition); KPIs untouched
+> Refined 2026-07-19 after mapping every status consumer. A single mixed `crm_status` column was
+> rejected because it conflates two orthogonal axes and creates a manual-vs-derived clobber problem.
+
+The taxonomy is three separate things:
+- **`crm_stage`** (`preMQL | MQL | SQL`) — the non-terminal funnel position, **DERIVED on read** from
+  activity facts (`deriveCrmStage` in `src/app/lib/crm/lead-status.ts`), never stored → no backfill, no
+  drift, no re-derivation trigger.
+- **`final_outcome`** (`won | lost | lost_premql`) — the explicit terminal decision, the ONLY stored
+  column (`leads.final_outcome`), set atomically with `conclusion` + `concluded_at` by the conclusion
+  action (Phase 5). A CHECK enforces `final_outcome ⇒ concluded_at`.
+- **`contact_disposition`** (`ooo | nrr`) — a separate dimension **DERIVED** from the n8n-owned
+  `leads.qualification`; it does not change the funnel stage (OOO preserves it; NRR becomes `lost` only
+  via an explicit decision). OOO/NRR stay read-only — reclassifying them would be an n8n contract change.
+
+`resolveCrmStatus` collapses stage + outcome into the single display/health status and bridges the
+legacy terminal signals (`won` boolean, `qualification='rejected'`). Terminal `lost`/`lost_premql`
+suppress future SLA warnings (spec Appendix D.4).
+
+**Existing KPI dashboards are NOT migrated.** Mapping showed the activity-count KPIs (meetings
+booked/held, offers sent, conversion-funnel widths, MoM meetings) cannot be reconstructed from the
+coarse taxonomy, and the status-count KPIs would silently change meaning (point-in-time `qualification`
+stamp vs funnel position). They keep their booleans/`qualification` semantics; metric convergence is a
+separate, product-sign-off-gated decision. The legacy booleans + `qualification` **remain** authoritative
+for KPIs (spec §11 risk note).
 
 ### 5. Legacy booleans are kept in sync by a DB trigger that **recomputes** from child rows
 Because n8n writes child tables **directly, bypassing the gateway**, boolean sync cannot live only in
@@ -87,13 +106,17 @@ write via the gateway; n8n/service role writes automation fields.
 - **A `public.lead_crm_view` SQL view.** Rejected — no per-role field suppression, second place to run
   the mandatory EXPLAIN gate.
 - **Keep deferring the status taxonomy.** Rejected — the client confirmed it is in scope now.
+- **A single mixed `crm_status` column + KPI migration.** Rejected (2026-07-19) — see §4: the taxonomy is
+  coarser than the booleans (lossy for activity KPIs) and would silently change status-KPI meaning, for
+  no benefit to the CRM view.
 
 ## Consequences
 
-- **KPI migration is the highest-risk workstream.** ~10 sites read the booleans (`getClientKpis`,
-  conversion funnel, manager/admin dashboard SQL group-bys, MoM). They move to `crm_status` with the
-  trigger keeping booleans synced during transition; every migrated number is re-derived on a sample
-  before/after.
+- **KPIs are NOT migrated to the taxonomy** (§4). The ~10 boolean/`qualification` KPI sites
+  (`getClientKpis`, conversion funnel, manager/admin dashboard SQL group-bys, MoM) keep their current
+  semantics; the split model touches none of them. `crm_stage`/`final_outcome` are consumed only by the
+  new CRM view (M column, health gating) and the Phase-5 conclusion action. Metric convergence, if ever
+  wanted, is a separate change with product sign-off on the new definitions.
 - Adding the 6 new `leads` columns and 4 tables is a three-artifact change each: SQL migration →
   `supabase/drizzle/schema.ts` → `src/app/types/core.ts` (+ `mapLeadPatch` for anything editable).
 - OPEN parameters ship as flagged defaults, not invented rules (spec Appendix F.1): business-day

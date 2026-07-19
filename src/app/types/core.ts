@@ -27,10 +27,16 @@ export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
 /** Manual report row highlight colour (Batch 4). `null` = no highlight. */
 export type LeadHighlight = "green" | "yellow" | "red";
 
-// --- Lead CRM view (Cold CRM / PDCA spec) -----------------------------------------------------
-/** Canonical CRM status taxonomy (spec §2). Terminal: `lost`, `lost_premql`. Coexists with the
- *  legacy `qualification` enum + pipeline booleans during migration (ADR-000X). */
-export type LeadCrmStatus = "preMQL" | "MQL" | "SQL" | "won" | "lost" | "lost_premql";
+// --- Lead CRM view (Cold CRM / PDCA spec, ADR-0013 split status model) -------------------------
+/** Non-terminal funnel position — DERIVED on read from activity facts, never stored. */
+export type CrmStage = "preMQL" | "MQL" | "SQL";
+/** Explicit terminal decision — STORED on `leads.final_outcome` with `conclusion` + `concluded_at`. */
+export type FinalOutcome = "won" | "lost" | "lost_premql";
+/** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification` (OOO/NRR).
+ *  Uppercase to match the existing OOO/NRR convention (qualification enum, reply_classification). */
+export type ContactDisposition = "OOO" | "NRR";
+/** The resolved single display/health status (a `CrmStage` or a `FinalOutcome`). */
+export type LeadCrmStatus = CrmStage | FinalOutcome;
 export type ContactMethod = "phone" | "email";
 export type MeetingType = "intro" | "summary" | "general";
 export type MeetingStatus = "planned" | "scheduled" | "held" | "cancelled" | "no_show";
@@ -196,6 +202,18 @@ export interface LeadRecord {
   coldunicorn_note: string | null;
   /** Manual report row highlight; `null` when unset. */
   highlight: LeadHighlight | null;
+  /** Sequencer attribution (ADR-0012); DEFAULT EmailBison. */
+  sequencer_id: string;
+  // Lead CRM columns (ADR-0013).
+  linkedin_invitation_sent_at: string | null;
+  contact_made_at: string | null;
+  contact_method: ContactMethod | null;
+  negotiation_started_at: string | null;
+  /** Free-text conclusion recorded with a terminal `final_outcome`. */
+  conclusion: string | null;
+  concluded_at: string | null;
+  /** Explicit terminal outcome; `null` = non-terminal (funnel stage is derived). */
+  final_outcome: FinalOutcome | null;
 }
 
 /** Meeting attached to a lead (spec §8.2). Intro/summary are one-per-lead; general repeats. */

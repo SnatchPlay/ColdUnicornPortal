@@ -14,6 +14,7 @@ export const meetingType = pgEnum("meeting_type", ['intro', 'summary', 'general'
 export const meetingStatus = pgEnum("meeting_status", ['planned', 'scheduled', 'held', 'cancelled', 'no_show'])
 export const offerStatus = pgEnum("offer_status", ['planned', 'sent', 'accepted', 'rejected', 'cancelled'])
 export const taskStatus = pgEnum("task_status", ['planned', 'in_progress', 'completed', 'cancelled', 'skipped'])
+export const finalOutcome = pgEnum("final_outcome", ['won', 'lost', 'lost_premql'])
 
 
 export const leads = pgTable("leads", {
@@ -61,6 +62,7 @@ export const leads = pgTable("leads", {
 	negotiationStartedAt: timestamp("negotiation_started_at", { withTimezone: true, mode: 'string' }),
 	conclusion: text(),
 	concludedAt: timestamp("concluded_at", { withTimezone: true, mode: 'string' }),
+	finalOutcome: finalOutcome("final_outcome"),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),
