@@ -26,6 +26,16 @@ export type ReplyClassification =
 export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
 /** Manual report row highlight colour (Batch 4). `null` = no highlight. */
 export type LeadHighlight = "green" | "yellow" | "red";
+
+// --- Lead CRM view (Cold CRM / PDCA spec) -----------------------------------------------------
+/** Canonical CRM status taxonomy (spec §2). Terminal: `lost`, `lost_premql`. Coexists with the
+ *  legacy `qualification` enum + pipeline booleans during migration (ADR-000X). */
+export type LeadCrmStatus = "preMQL" | "MQL" | "SQL" | "won" | "lost" | "lost_premql";
+export type ContactMethod = "phone" | "email";
+export type MeetingType = "intro" | "summary" | "general";
+export type MeetingStatus = "planned" | "scheduled" | "held" | "cancelled" | "no_show";
+export type OfferStatus = "planned" | "sent" | "accepted" | "rejected" | "cancelled";
+export type TaskStatus = "planned" | "in_progress" | "completed" | "cancelled" | "skipped";
 export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";
 export type ConditionApplyTo = "row" | "cell" | "badge" | "section";
@@ -186,6 +196,71 @@ export interface LeadRecord {
   coldunicorn_note: string | null;
   /** Manual report row highlight; `null` when unset. */
   highlight: LeadHighlight | null;
+}
+
+/** Meeting attached to a lead (spec §8.2). Intro/summary are one-per-lead; general repeats. */
+export interface LeadMeetingRecord {
+  id: string;
+  lead_id: string;
+  meeting_type: MeetingType;
+  status: MeetingStatus;
+  call_script: string | null;
+  scheduled_at: string | null;
+  held_at: string | null;
+  meeting_url: string | null;
+  calendar_event_id: string | null;
+  transcription_url: string | null;
+  pre_meeting_insights: string | null;
+  pre_meeting_insights_generated_at: string | null;
+  process_score: number | null;
+  conversion_insights: string | null;
+  post_meeting_analysis_generated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Offer attached to a lead (spec §8.3). Multiple offers/revisions allowed. */
+export interface LeadOfferRecord {
+  id: string;
+  lead_id: string;
+  status: OfferStatus;
+  contracted_send_date: string | null;
+  sent_at: string | null;
+  offer_url: string | null;
+  notes: string | null;
+  source_meeting_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Next-step task attached to a lead (spec §8.4). No `task_type` in MVP. */
+export interface LeadTaskRecord {
+  id: string;
+  lead_id: string;
+  title: string;
+  due_at: string | null;
+  status: TaskStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  source_meeting_id: string | null;
+  notes: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Additional-value delivery attached to a lead (spec §8.5). `sequence_number` 1/2 shown in the view. */
+export interface LeadValueDeliveryRecord {
+  id: string;
+  lead_id: string;
+  sequence_number: number;
+  planned_date: string | null;
+  value_items: string[];
+  sent_at: string | null;
+  source_meeting_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ReplyRecord {

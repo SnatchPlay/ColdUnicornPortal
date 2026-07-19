@@ -49,9 +49,12 @@ functional reference and [design-system.md](reference/design-system.md).
 | [0010](adr/0010-legacy-crm-integration.md) | Legacy CRM as a read-only second Supabase project | Accepted 2026-07-14 | The single documented exception to ADR-0001. Read-only, config-surface only. |
 | [0011](adr/0011-conditions-rules-engine.md) | Conditions rules engine (JSON DSL) | Accepted 2026-07-14 | Client-health rules are a stored JSON DSL evaluated client-side — not free-form formulas, not SQL. |
 | [0012](adr/0012-multi-sequencer-model.md) | Multi-sequencer model (catalog + per-client credentials) | Accepted 2026-07-04 | Sequencers (Smartlead/EmailBison/Aimfox) are first-class: `sequencers` catalog + `client_sequencers` credentials; `campaigns`/`leads` carry `sequencer_id`. |
+| [0013](adr/0013-lead-crm-view-and-status-taxonomy.md) | Lead CRM view, child entities, and status taxonomy | Accepted 2026-07-19 | CRM view over `leads`: 4 child tables, derived health colours (shared TS module, not the conditions engine), `crm_status` taxonomy, DB-trigger boolean recompute. |
 
 ## Superseded / amended
 
 - ADR-0001's "only data system" clause is **narrowed** by ADR-0010 (legacy CRM read path).
 - ADR-0009 **supersedes** the bulk-snapshot loading strategy described in pre-2026-07 revisions
   of `10-nfr.md` and `01-overview.md`.
+- ADR-0013 **supersedes** ADR-0004's deferral of the status-model change: the `preMQL/MQL/SQL/won/
+  lost/lost_premql` taxonomy is now in scope (coexisting with the legacy booleans during migration).
