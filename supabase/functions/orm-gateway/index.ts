@@ -246,13 +246,9 @@ function toDomainRecord(row: typeof schema.domains.$inferSelect) {
     domain_name: row.domainName,
     setup_email: row.setupEmail,
     purchase_date: row.purchaseDate,
-    exchange_date: row.exchangeDate,
     updated_at: row.updatedAt,
     status: row.status,
-    reputation: row.reputation,
-    exchange_cost: normalizeNumeric(row.exchangeCost),
-    campaign_verified_at: row.campaignVerifiedAt,
-    warmup_verified_at: row.warmupVerifiedAt,
+    winnr_status: row.winnrStatus,
   };
 }
 
@@ -559,12 +555,10 @@ function toLeadTaskRecord(row: typeof schema.leadTasks.$inferSelect) {
 }
 
 function mapDomainPatch(patch: Record<string, unknown>) {
+  // Only the local domain_status enum is portal-editable. winnr_status and the other Winnr sync
+  // columns are ingestion-only (n8n via service_role) — never accept them from a portal patch.
   const mapped: Record<string, unknown> = {};
   if ("status" in patch) mapped.status = patch.status;
-  if ("reputation" in patch) mapped.reputation = patch.reputation;
-  if ("exchange_cost" in patch) mapped.exchangeCost = patch.exchange_cost;
-  if ("campaign_verified_at" in patch) mapped.campaignVerifiedAt = patch.campaign_verified_at;
-  if ("warmup_verified_at" in patch) mapped.warmupVerifiedAt = patch.warmup_verified_at;
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }
@@ -677,12 +671,7 @@ function mapDomainInsert(input: Record<string, unknown>) {
     domainName: input.domain_name,
     setupEmail: input.setup_email,
     purchaseDate: input.purchase_date,
-    exchangeDate: input.exchange_date,
     status: input.status ?? null,
-    reputation: input.reputation ?? null,
-    exchangeCost: input.exchange_cost ?? null,
-    campaignVerifiedAt: input.campaign_verified_at ?? null,
-    warmupVerifiedAt: input.warmup_verified_at ?? null,
   };
 }
 

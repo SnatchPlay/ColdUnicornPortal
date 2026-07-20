@@ -51,9 +51,8 @@ function makeAuth(role: "admin" | "manager") {
 const domain = {
   id: "domain-1", created_at: "2026-01-01", client_id: "client-1",
   domain_name: "acme.com", setup_email: "setup@acme.com",
-  purchase_date: "2026-01-01", exchange_date: "2026-01-10",
-  updated_at: "2026-01-12", status: "active", reputation: "good",
-  exchange_cost: 199, campaign_verified_at: null, warmup_verified_at: null,
+  purchase_date: "2026-01-01",
+  updated_at: "2026-01-12", status: "active", winnr_status: "active",
 };
 
 const client = { id: "client-1", name: "Acme", manager_id: "manager-1" };

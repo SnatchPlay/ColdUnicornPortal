@@ -379,26 +379,22 @@ File: [`src/app/pages/domains-page.tsx`](../../../src/app/pages/domains-page.tsx
 |--------|--------|
 | Domain | `domains.domain_name` + `setup_email` subtitle |
 | Client | joined via `client_id` |
-| Status | `domains.status` (badge) |
-| Reputation | `domains.reputation` |
+| Status | `domains.status` (local badge) |
+| Winnr status | `domains.winnr_status` (read-only, from Winnr) |
 
-Resizable columns as elsewhere.
+Resizable columns as elsewhere. A per-domain **email-accounts panel** (mailboxes + warming health) shows in the detail view — see [email-accounts-page](../../../src/app/pages/email-accounts-page.tsx) for the full mailbox list.
 
 ### 6.3 Drawer (editable)
 
-- `status` Select
-- `reputation` text input
-- `exchange_cost` number
-- `campaign_verified_at` date input
-- `warmup_verified_at` date input
+- `status` Select (local `domain_status` — the only editable field)
 
-Read-only: `purchase_date`, `exchange_date`.
+Read-only: `client`, `setup_email`, `purchase_date`, `winnr_status`, and the per-domain mailbox warming panel. Winnr sync fields are ingestion-only (n8n).
 
 Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_client`.
 
 ### 6.4 Create domain Sheet
 
-"New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date`. Optional: `exchange_cost`, `status`.
+"New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`. Optional: `status`. (`exchange_date` / `exchange_cost` were dropped in `20260720f`.)
 
 Calls `repository.createDomain(input)` ([domains-page.tsx:375](../../../src/app/pages/domains-page.tsx#L375)), then `useDomainsPage().refresh()`. See [09-mutations §2.13](./09-mutations-rls.md).
 

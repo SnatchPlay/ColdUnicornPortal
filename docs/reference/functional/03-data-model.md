@@ -446,12 +446,14 @@ Outreach sending domains.
 | `id` | uuid PK |
 | `client_id` | uuid FK not null |
 | `domain_name`, `setup_email` | text not null |
-| `purchase_date`, `exchange_date` | date not null |
-| `status` | `domain_status` |
-| `reputation` | text |
-| `exchange_cost` | numeric(8,2) |
-| `campaign_verified_at`, `warmup_verified_at` | date |
-| `updated_at` | timestamptz |
+| `purchase_date` | date not null |
+| `status` | `domain_status` — **local, portal-editable** lifecycle status |
+| `winnr_status` | text — Winnr provider status (ingestion-only, read-only), separate from `status` |
+| `created_at`, `updated_at` | timestamptz |
+
+**Winnr sync columns (`20260720f`, ingestion-only — n8n writes via service_role, not declared in `schema.ts`):** `winnr_domain_id` (text, partial-unique), `dns_provider` (text), `winnr_tags` (text[]), `winnr_email_user_count` (int), `winnr_created_at` / `winnr_updated_at` / `last_seen_at` / `last_synced_at` / `missing_since` (timestamptz), `raw_payload` (jsonb). A case-insensitive unique index `domains_domain_name_ci_uq` on `lower(trim(domain_name))` backs the sync match key.
+
+> **Dropped `20260720f`:** `reputation`, `exchange_date`, `exchange_cost`, `campaign_verified_at`, `warmup_verified_at`. Current warming is per-mailbox in `email_accounts`; history in `email_account_warming_daily`; a "warming done" signal is derived from `warming_status` / `warming_progress`. `campaign_verified_at` was not a Winnr signal and had no remaining consumer; `exchange_*` were agency bookkeeping whose UI was removed.
 
 RLS (verified live): `domains_select_scoped` = `private.can_access_client(client_id)` (client role can read its own domains); `domains_insert_scoped` / `_update_scoped` / `_delete_scoped` = `private.can_manage_client(client_id)` (assigned manager + admin tier). `domains_insert_internal` (`20260517`) is the additional permissive INSERT policy used by the "New domain" sheet.
 
