@@ -27,6 +27,39 @@ export function EditInput({ value, onChange, disabled, type = "text", placeholde
   );
 }
 
+/** Shared enum `<Select>` for the lead editors — `options` are the values (incl. any leading "unset"
+ *  sentinel the caller manages), `labels` maps each to its display text. */
+export function EditSelect({ value, options, labels, disabled, onChange, placeholder }: {
+  value: string; options: readonly string[]; labels: Record<string, string>;
+  disabled?: boolean; onChange: (next: string) => void; placeholder?: string;
+}) {
+  return (
+    <Select value={value} disabled={disabled} onValueChange={onChange}>
+      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder={placeholder} /></SelectTrigger>
+      <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+        {options.map((o) => (
+          <SelectItem key={o} value={o} className="text-white focus:bg-[#1a1a1a] focus:text-white">{labels[o]}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Shared dirty-gated Save pill used by all the CRM drawer editors. */
+export function SaveButton({ onClick, disabled, saving, label = "Save" }: {
+  onClick: () => void; disabled?: boolean; saving?: boolean; label?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {saving ? "Saving…" : label}
+    </button>
+  );
+}
+
 export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false, showCrmFields = false }: {
   draft: LeadDraft;
   updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;

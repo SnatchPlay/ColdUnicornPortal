@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { repository, RepositoryError } from "../data/repository";
 import type { LeadDetailResult, LeadsFilterOptions, LeadsListParams, LeadsListResponse } from "../types/view-contracts";
-import type { ReplyRecord } from "../types/core";
+import type { LeadTaskRecord, ReplyRecord } from "../types/core";
 
 export function mapLeadsError(reason: unknown): string {
   if (reason instanceof RepositoryError) {
@@ -87,4 +87,31 @@ export function useLeadDetail(leadId: string | null): { replies: ReplyRecord[]; 
   }, [leadId]);
 
   return { replies, loading };
+}
+
+/** Lazily fetches a lead's task list when the CRM drawer opens (ADR-0013). `reload` re-fetches after a
+ *  task write so the list and the CRM open-count/next-due stay in step. Uses a per-load id (ADR-0009
+ *  stale guard) so overlapping loads/reloads can never let an older response overwrite a newer one. */
+export function useLeadTasks(leadId: string | null): { tasks: LeadTaskRecord[]; loading: boolean; reload: () => void } {
+  const [tasks, setTasks] = useState<LeadTaskRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const loadIdRef = useRef(0);
+
+  const load = useCallback((id: string) => {
+    const loadId = ++loadIdRef.current;
+    setLoading(true);
+    repository.loadLeadTasks(id)
+      .then((result) => { if (loadId === loadIdRef.current) setTasks(result); })
+      .catch(() => { /* tasks missing is non-fatal — show empty */ })
+      .finally(() => { if (loadId === loadIdRef.current) setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    if (!leadId) { loadIdRef.current += 1; setTasks([]); return; } // invalidate any in-flight load
+    setTasks([]);
+    load(leadId);
+  }, [leadId, load]);
+
+  const reload = useCallback(() => { if (leadId) load(leadId); }, [leadId, load]);
+  return { tasks, loading, reload };
 }

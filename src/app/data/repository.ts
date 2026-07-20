@@ -22,6 +22,7 @@ import type {
   LeadMeetingRecord,
   LeadOfferRecord,
   LeadRecord,
+  LeadTaskRecord,
   LeadValueDeliveryRecord,
   ManagedUserRecord,
   UserRecord,
@@ -53,6 +54,7 @@ import type {
 import type {
   LeadMeetingInput,
   LeadOfferInput,
+  LeadTaskInput,
   LeadValueDeliveryInput,
   LoadIdentityResult,
   OrmGatewayAction,
@@ -94,6 +96,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   upsertLeadMeeting: { table: "lead_meetings", operation: "upsert" },
   upsertLeadOffer: { table: "lead_offers", operation: "upsert" },
   upsertLeadValueDelivery: { table: "lead_value_deliveries", operation: "upsert" },
+  loadLeadTasks: { table: "lead_tasks", operation: "select" },
+  upsertLeadTask: { table: "lead_tasks", operation: "upsert" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -421,6 +425,7 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadLeadsList" ||
     action === "loadLeadCrmList" ||
     action === "loadLeadDetail" ||
+    action === "loadLeadTasks" ||
     action === "loadLeadsFilterOptions" ||
     action === "loadAnalyticsOverview" ||
     action === "loadAdminSettings" ||
@@ -597,6 +602,10 @@ export interface Repository {
   upsertLeadOffer(leadId: string, patch: LeadOfferInput): Promise<LeadOfferRecord>;
   /** Upsert value delivery 1 or 2 for a lead (ADR-0013). Keyed on (lead_id, sequence_number). */
   upsertLeadValueDelivery(leadId: string, sequenceNumber: 1 | 2, patch: LeadValueDeliveryInput): Promise<LeadValueDeliveryRecord>;
+  /** Lazily load a lead's task list (ADR-0013). Ordered by position then creation. */
+  loadLeadTasks(leadId: string): Promise<LeadTaskRecord[]>;
+  /** Create (no id) or update (id set) a single lead task (ADR-0013). */
+  upsertLeadTask(leadId: string, id: string | undefined, patch: LeadTaskInput): Promise<LeadTaskRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -881,6 +890,14 @@ export const repository: Repository = {
 
   async upsertLeadValueDelivery(leadId, sequenceNumber, patch) {
     return invokeOrmGatewayAction("upsertLeadValueDelivery", { leadId, sequenceNumber, patch });
+  },
+
+  async loadLeadTasks(leadId) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadTasks", { leadId });
+  },
+
+  async upsertLeadTask(leadId, id, patch) {
+    return invokeOrmGatewayAction("upsertLeadTask", { leadId, id, patch });
   },
 
   async updateDomain(domainId, patch) {

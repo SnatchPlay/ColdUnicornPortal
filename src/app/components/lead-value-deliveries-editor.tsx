@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EditLabel, EditInput } from "./lead-edit-form";
+import { EditLabel, EditInput, SaveButton } from "./lead-edit-form";
 import { datePart } from "../lib/lead-draft";
 import type { LeadValueDeliveryInput } from "../data/orm-gateway-contract";
 import type { LeadCrmValueDelivery } from "../types/view-contracts";
@@ -40,17 +40,16 @@ function ValueSubEditor({ title, delivery, readOnly, saving, onSave }: {
         <EditInput value={itemsText} onChange={setItemsText} disabled={readOnly} placeholder="e.g. Case study, LinkedIn post" />
       </label>
       {!readOnly ? (
-        <button
+        <SaveButton
           onClick={() => onSave({
             planned_date: plannedDate || null,
             sent_at: sentAt || null,
             value_items: itemsText.split(",").map((s) => s.trim()).filter(Boolean),
           })}
           disabled={!dirty || saving}
-          className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save value"}
-        </button>
+          saving={saving}
+          label="Save value"
+        />
       ) : null}
     </div>
   );

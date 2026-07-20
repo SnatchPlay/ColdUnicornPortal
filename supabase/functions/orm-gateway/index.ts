@@ -10,7 +10,7 @@ import {
   type OrmGatewayRequest,
 } from "../../../src/app/data/orm-gateway-contract.ts";
 import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
-import { MEETING_STATUS_VALUES, OFFER_STATUS_VALUES } from "../../../src/app/types/core.ts";
+import { MEETING_STATUS_VALUES, OFFER_STATUS_VALUES, TASK_STATUS_VALUES } from "../../../src/app/types/core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -342,6 +342,15 @@ function isDateish(v: unknown): v is string | null {
   return v === null || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v));
 }
 
+/** Empty patch → return the existing row unchanged (avoids an invalid empty `SET`); else update by id.
+ *  Shared by the keyed lead-child upserts (meeting / value delivery / current offer). */
+// deno-lint-ignore no-explicit-any
+async function updateOrKeep(tx: any, table: { id: unknown }, existingRow: { id: string }, input: Record<string, unknown>) {
+  if (Object.keys(input).length === 0) return existingRow;
+  // deno-lint-ignore no-explicit-any
+  return (await (tx as any).update(table).set(input).where(eq((table as any).id, existingRow.id)).returning())[0];
+}
+
 function mapLeadPatch(patch: Record<string, unknown>) {
   const mapped: Record<string, unknown> = {};
   // Pipeline state (ADR-0004 original)
@@ -474,6 +483,36 @@ function toLeadValueDeliveryRecord(row: typeof schema.leadValueDeliveries.$infer
     sent_at: row.sentAt,
     source_meeting_id: row.sourceMeetingId,
     notes: row.notes,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+const TASK_STATUSES = new Set<string>(TASK_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned task fields (ADR-0013, Phase 5.3). Validated so malformed values are
+ *  dropped rather than 500. */
+function mapLeadTaskInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("title" in patch && typeof patch.title === "string") m.title = patch.title;
+  if ("due_at" in patch && isDateish(patch.due_at)) m.dueAt = patch.due_at;
+  if ("status" in patch && typeof patch.status === "string" && TASK_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("notes" in patch && (patch.notes === null || typeof patch.notes === "string")) m.notes = patch.notes;
+  return m;
+}
+
+function toLeadTaskRecord(row: typeof schema.leadTasks.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    title: row.title,
+    due_at: row.dueAt,
+    status: row.status,
+    started_at: row.startedAt,
+    completed_at: row.completedAt,
+    source_meeting_id: row.sourceMeetingId,
+    notes: row.notes,
+    position: row.position,
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
@@ -2666,11 +2705,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       .limit(1);
     let row;
     if (existing[0]) {
-      // Nothing valid to change (empty/all-invalid patch) — return the current row rather than emit an
-      // empty `SET` (invalid SQL). Non-empty patch → update by id.
-      row = Object.keys(input).length === 0
-        ? existing[0]
-        : (await tx.update(schema.leadMeetings).set(input).where(eq(schema.leadMeetings.id, existing[0].id)).returning())[0];
+      row = await updateOrKeep(tx, schema.leadMeetings, existing[0], input);
     } else {
       row = (await tx
         .insert(schema.leadMeetings)
@@ -2703,9 +2738,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         .returning();
       row = rows.find((r: { id: string }) => r.id === existing[0].id) ?? rows[0];
     } else if (existing[0]) {
-      row = Object.keys(input).length === 0
-        ? existing[0]
-        : (await tx.update(schema.leadOffers).set(input).where(eq(schema.leadOffers.id, existing[0].id)).returning())[0];
+      row = await updateOrKeep(tx, schema.leadOffers, existing[0], input);
     } else {
       row = (await tx
         .insert(schema.leadOffers)
@@ -2727,9 +2760,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       .limit(1);
     let row;
     if (existing[0]) {
-      row = Object.keys(input).length === 0
-        ? existing[0]
-        : (await tx.update(schema.leadValueDeliveries).set(input).where(eq(schema.leadValueDeliveries.id, existing[0].id)).returning())[0];
+      row = await updateOrKeep(tx, schema.leadValueDeliveries, existing[0], input);
     } else {
       row = (await tx
         .insert(schema.leadValueDeliveries)
@@ -2738,6 +2769,40 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     }
     if (!row) fail(500, "Value delivery could not be saved.");
     return toLeadValueDeliveryRecord(row);
+  }
+
+  if (payload.action === "loadLeadTasks") {
+    // Lazy per-lead task list (RLS-scoped read). Ordered by manual position then creation.
+    const rows = await tx
+      .select()
+      .from(schema.leadTasks)
+      .where(eq(schema.leadTasks.leadId, payload.leadId))
+      .orderBy(asc(schema.leadTasks.position), asc(schema.leadTasks.createdAt));
+    return rows.map(toLeadTaskRecord);
+  }
+
+  if (payload.action === "upsertLeadTask") {
+    // Create (no id) or update (id set, scoped to the lead so a mismatched id/leadId can't cross leads).
+    // RLS gates read+write to manager/admin. A completed/cancelled/skipped status drops the task out of
+    // the CRM open-task count + next-due date (recomputed by the read-model on the next refresh).
+    const input = mapLeadTaskInput(payload.patch as Record<string, unknown>);
+    let row;
+    if (payload.id) {
+      if (Object.keys(input).length === 0) {
+        row = (await tx.select().from(schema.leadTasks)
+          .where(and(eq(schema.leadTasks.id, payload.id), eq(schema.leadTasks.leadId, payload.leadId))).limit(1))[0];
+      } else {
+        row = (await tx.update(schema.leadTasks).set(input)
+          .where(and(eq(schema.leadTasks.id, payload.id), eq(schema.leadTasks.leadId, payload.leadId))).returning())[0];
+      }
+    } else {
+      if (typeof input.title !== "string" || !(input.title as string).trim()) fail(400, "A task title is required.");
+      row = (await tx.insert(schema.leadTasks)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, ...input, title: input.title as string })
+        .returning())[0];
+    }
+    if (!row) fail(404, "Task could not be saved.");
+    return toLeadTaskRecord(row);
   }
 
   if (payload.action === "updateDomain") {

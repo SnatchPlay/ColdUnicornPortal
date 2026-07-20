@@ -18,9 +18,11 @@
   LeadMeetingRecord,
   LeadOfferRecord,
   LeadRecord,
+  LeadTaskRecord,
   LeadValueDeliveryRecord,
   MeetingStatus,
   OfferStatus,
+  TaskStatus,
   UserRecord,
 } from "../types/core.ts";
 import type {
@@ -258,6 +260,29 @@ export interface UpsertLeadValueDeliveryPayload {
   leadId: string;
   sequenceNumber: 1 | 2;
   patch: LeadValueDeliveryInput;
+}
+
+/** Lazy per-lead task list (ADR-0013, Phase 5.3) — loaded when the CRM drawer opens, like the reply
+ *  thread. Tasks are a list (not projected into the CRM read-model beyond next-due + open count). */
+export interface LoadLeadTasksPayload {
+  action: "loadLeadTasks";
+  leadId: string;
+}
+export interface LeadTaskInput {
+  title?: string;
+  due_at?: string | null;
+  status?: TaskStatus;
+  notes?: string | null;
+}
+/**
+ * Create (no `id`) or update (`id` set) a single task. A completed/cancelled/skipped status drops the
+ * task out of the CRM's open-task count / next-due date (recomputed by the read-model on refresh).
+ */
+export interface UpsertLeadTaskPayload {
+  action: "upsertLeadTask";
+  leadId: string;
+  id?: string;
+  patch: LeadTaskInput;
 }
 
 export interface UpdateDomainPayload {
@@ -505,6 +530,8 @@ export type OrmGatewayRequest =
   | UpsertLeadMeetingPayload
   | UpsertLeadOfferPayload
   | UpsertLeadValueDeliveryPayload
+  | LoadLeadTasksPayload
+  | UpsertLeadTaskPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -575,6 +602,8 @@ export interface OrmGatewayResponseMap {
   upsertLeadMeeting: LeadMeetingRecord;
   upsertLeadOffer: LeadOfferRecord;
   upsertLeadValueDelivery: LeadValueDeliveryRecord;
+  loadLeadTasks: LeadTaskRecord[];
+  upsertLeadTask: LeadTaskRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -900,6 +929,21 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       ok: true,
       value: { action, leadId: String(payload.leadId), sequenceNumber: payload.sequenceNumber, patch: payload.patch as LeadValueDeliveryInput },
     };
+  }
+
+  if (action === "loadLeadTasks") {
+    if (!hasStringField(payload, "leadId")) {
+      return { ok: false, error: "loadLeadTasks requires leadId." };
+    }
+    return { ok: true, value: { action, leadId: String(payload.leadId) } };
+  }
+
+  if (action === "upsertLeadTask") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadTask requires leadId and patch object." };
+    }
+    const id = isString(payload.id) && payload.id.trim().length > 0 ? String(payload.id) : undefined;
+    return { ok: true, value: { action, leadId: String(payload.leadId), id, patch: payload.patch as LeadTaskInput } };
   }
 
   if (action === "updateDomain") {

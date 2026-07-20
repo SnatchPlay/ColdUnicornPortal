@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { EditLabel } from "./lead-edit-form";
+import { useState } from "react";
+import { EditLabel, EditSelect, SaveButton } from "./lead-edit-form";
 import { nullableString } from "../lib/lead-draft";
-import type { FinalOutcome, LeadRecord } from "../types/core";
+import { FINAL_OUTCOME_VALUES, type FinalOutcome, type LeadRecord } from "../types/core";
 
 /**
  * Terminal-conclusion editor for the Lead CRM view (ADR-0013, Phase 5). Setting a `final_outcome` is a
@@ -20,6 +19,8 @@ const OUTCOME_LABELS: Record<FinalOutcome, string> = {
   lost: "Lost",
   lost_premql: "Lost (pre-MQL)",
 };
+const OUTCOME_OPTIONS = [OUTCOME_NONE, ...FINAL_OUTCOME_VALUES];
+const OUTCOME_SELECT_LABELS: Record<string, string> = { [OUTCOME_NONE]: "Not concluded", ...OUTCOME_LABELS };
 
 export function LeadConclusionEditor({ lead, readOnly, saving, onSave }: {
   lead: LeadRecord;
@@ -30,11 +31,9 @@ export function LeadConclusionEditor({ lead, readOnly, saving, onSave }: {
   const [outcome, setOutcome] = useState<FinalOutcome | "">(lead.final_outcome ?? "");
   const [conclusion, setConclusion] = useState(lead.conclusion ?? "");
 
-  const { nextOutcome, nextConclusion, dirty } = useMemo(() => {
-    const o = outcome || null;
-    const c = nullableString(conclusion);
-    return { nextOutcome: o, nextConclusion: c, dirty: (lead.final_outcome ?? null) !== o || (lead.conclusion ?? null) !== c };
-  }, [outcome, conclusion, lead.final_outcome, lead.conclusion]);
+  const nextOutcome = outcome || null;
+  const nextConclusion = nullableString(conclusion);
+  const dirty = (lead.final_outcome ?? null) !== nextOutcome || (lead.conclusion ?? null) !== nextConclusion;
 
   return (
     <section className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -42,18 +41,13 @@ export function LeadConclusionEditor({ lead, readOnly, saving, onSave }: {
 
       <label className="block space-y-2">
         <EditLabel>Terminal outcome</EditLabel>
-        <Select value={outcome === "" ? OUTCOME_NONE : outcome} disabled={readOnly}
-          onValueChange={(v) => setOutcome(v === OUTCOME_NONE ? "" : (v as FinalOutcome))}>
-          <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60">
-            <SelectValue placeholder="Not concluded" />
-          </SelectTrigger>
-          <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-            <SelectItem value={OUTCOME_NONE} className="text-white focus:bg-[#1a1a1a] focus:text-white">Not concluded</SelectItem>
-            {(Object.keys(OUTCOME_LABELS) as FinalOutcome[]).map((o) => (
-              <SelectItem key={o} value={o} className="text-white focus:bg-[#1a1a1a] focus:text-white">{OUTCOME_LABELS[o]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <EditSelect
+          value={outcome === "" ? OUTCOME_NONE : outcome}
+          options={OUTCOME_OPTIONS}
+          labels={OUTCOME_SELECT_LABELS}
+          disabled={readOnly}
+          onChange={(v) => setOutcome(v === OUTCOME_NONE ? "" : (v as FinalOutcome))}
+        />
       </label>
 
       <label className="block space-y-2">
@@ -65,13 +59,7 @@ export function LeadConclusionEditor({ lead, readOnly, saving, onSave }: {
 
       {!readOnly ? (
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => onSave(nextOutcome, nextConclusion)}
-            disabled={!dirty || saving}
-            className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save conclusion"}
-          </button>
+          <SaveButton onClick={() => onSave(nextOutcome, nextConclusion)} disabled={!dirty || saving} saving={saving} label="Save conclusion" />
           <p className="text-xs text-muted-foreground">
             {nextOutcome === "won"
               ? "Marks the lead Won and counts it toward the win KPI."

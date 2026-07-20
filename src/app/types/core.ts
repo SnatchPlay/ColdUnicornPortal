@@ -31,7 +31,9 @@ export type LeadHighlight = "green" | "yellow" | "red";
 /** Non-terminal funnel position — DERIVED on read from activity facts, never stored. */
 export type CrmStage = "preMQL" | "MQL" | "SQL";
 /** Explicit terminal decision — STORED on `leads.final_outcome` with `conclusion` + `concluded_at`. */
-export type FinalOutcome = "won" | "lost" | "lost_premql";
+/** Single source for terminal-outcome values — shared by the gateway validator and the editor select. */
+export const FINAL_OUTCOME_VALUES = ["won", "lost", "lost_premql"] as const;
+export type FinalOutcome = (typeof FINAL_OUTCOME_VALUES)[number];
 /** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification` (OOO/NRR).
  *  Uppercase to match the existing OOO/NRR convention (qualification enum, reply_classification). */
 export type ContactDisposition = "OOO" | "NRR";
@@ -45,7 +47,9 @@ export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 /** Single source for offer-status values — shared by the gateway validator and the editor select. */
 export const OFFER_STATUS_VALUES = ["planned", "sent", "accepted", "rejected", "cancelled"] as const;
 export type OfferStatus = (typeof OFFER_STATUS_VALUES)[number];
-export type TaskStatus = "planned" | "in_progress" | "completed" | "cancelled" | "skipped";
+/** Single source for task-status values — shared by the gateway validator and the editor select. */
+export const TASK_STATUS_VALUES = ["planned", "in_progress", "completed", "cancelled", "skipped"] as const;
+export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";
 export type ConditionApplyTo = "row" | "cell" | "badge" | "section";

@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { EditLabel, EditInput } from "./lead-edit-form";
+import { EditLabel, EditInput, EditSelect, SaveButton } from "./lead-edit-form";
 import type { LeadOfferInput } from "../data/orm-gateway-contract";
 import type { LeadCrmOffer } from "../types/view-contracts";
 import { OFFER_STATUS_VALUES, type OfferStatus } from "../types/core";
@@ -43,25 +42,17 @@ export function LeadOfferEditor({ offer, readOnly, saving, onSave }: {
         <div className="grid gap-3 md:grid-cols-2">
           <label className="space-y-2">
             <EditLabel>Status</EditLabel>
-            <Select value={status} disabled={readOnly} onValueChange={(v) => setStatus(v as OfferStatus)}>
-              <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue /></SelectTrigger>
-              <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
-                {OFFER_STATUS_VALUES.map((s) => (
-                  <SelectItem key={s} value={s} className="text-white focus:bg-[#1a1a1a] focus:text-white">{STATUS_LABEL[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <EditSelect value={status} options={OFFER_STATUS_VALUES} labels={STATUS_LABEL} disabled={readOnly} onChange={(v) => setStatus(v as OfferStatus)} />
           </label>
           <label className="space-y-2"><EditLabel>Contracted send date</EditLabel><EditInput value={contractedSendDate} onChange={setContractedSendDate} disabled={readOnly} type="date" /></label>
         </div>
         {!readOnly ? (
-          <button
+          <SaveButton
             onClick={() => onSave({ status, contracted_send_date: contractedSendDate || null })}
             disabled={!dirty || saving}
-            className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save offer"}
-          </button>
+            saving={saving}
+            label="Save offer"
+          />
         ) : null}
       </div>
     </section>

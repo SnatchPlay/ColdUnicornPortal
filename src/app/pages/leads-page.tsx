@@ -17,6 +17,7 @@ import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
 import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
 import { LeadOfferEditor } from "../components/lead-offer-editor";
 import { LeadValueDeliveriesEditor } from "../components/lead-value-deliveries-editor";
+import { LeadTasksEditor } from "../components/lead-tasks-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -30,7 +31,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
-import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadsList, useLeadDetail, useLeadTasks, useLeadsFilterOptions } from "../lib/use-leads";
 import { useLeadCrmList } from "../lib/use-lead-crm";
 import { getFullName } from "../lib/format";
 import { buildLeadReportColumns, type LeadReportColumn } from "../lib/lead-report-columns";
@@ -56,7 +57,7 @@ import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { FinalOutcome } from "../types/core";
-import type { LeadMeetingInput, LeadOfferInput, LeadValueDeliveryInput } from "../data/orm-gateway-contract";
+import type { LeadMeetingInput, LeadOfferInput, LeadValueDeliveryInput, LeadTaskInput } from "../data/orm-gateway-contract";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -314,6 +315,7 @@ function InternalLeadsPage() {
   const [savingMeeting, setSavingMeeting] = useState<"intro" | "summary" | null>(null);
   const [savingOffer, setSavingOffer] = useState(false);
   const [savingValueSeq, setSavingValueSeq] = useState<1 | 2 | null>(null);
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -351,6 +353,9 @@ function InternalLeadsPage() {
   const refresh = isCrmView ? crmView.refresh : pdca.refresh;
   const { data: filterOptions } = useLeadsFilterOptions();
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
+  // Tasks are a lazy per-lead list, loaded only for the pure CRM drawer (ADR-0013, Phase 5.3) — the
+  // editor renders only there, so combined mode must not fetch a list it never shows.
+  const { tasks: leadTasks, loading: loadingTasks, reload: reloadTasks } = useLeadTasks(viewMode === "crm" ? selectedLeadId : null);
 
   const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
   const baseReportColumns = useMemo(
@@ -645,6 +650,28 @@ function InternalLeadsPage() {
     [selectedLead, refresh],
   );
 
+  // Create/update a task (ADR-0013, Phase 5.3). Reload the task list AND refresh the CRM list so the
+  // open-count / next-due date recompute. `undefined` id = a new task (tracked as "new" for the button).
+  const handleSaveTask = useCallback(
+    async (id: string | undefined, patch: LeadTaskInput): Promise<boolean> => {
+      if (!selectedLead) return false;
+      setSavingTaskId(id ?? "new");
+      try {
+        await repository.upsertLeadTask(selectedLead.id, id, patch);
+        toast.success(id ? "Task saved." : "Task added.");
+        reloadTasks();
+        refresh();
+        return true;
+      } catch {
+        toast.error("Failed to save task.");
+        return false;
+      } finally {
+        setSavingTaskId(null);
+      }
+    },
+    [selectedLead, refresh, reloadTasks],
+  );
+
   function handleStageFilterChange(value: string) {
     const next = value === "all" || PIPELINE_STAGES.some((item) => item.key === value) ? (value as PipelineStage | "all") : "all";
     setStageFilter(next);
@@ -929,51 +956,50 @@ function InternalLeadsPage() {
                     showCrmFields={isCrmView}
                   />
 
-                  {/* Terminal conclusion (ADR-0013, Phase 5) — pure CRM view only; owns `won` (so the
-                      legacy pipeline toggle above is hidden there) to avoid two write paths racing. */}
+                  {/* CRM child editors (ADR-0013, Phase 5.3) — pure CRM view only. Conclusion owns `won`
+                      (the legacy toggle is hidden above); meetings/offer upserts drive the boolean
+                      recompute triggers; values/tasks feed the read-model columns. Distinct `key`
+                      prefixes keep these siblings from colliding while still remounting per lead. */}
                   {viewMode === "crm" ? (
-                    <LeadConclusionEditor
-                      key={selectedLead.id}
-                      lead={selectedLead}
-                      readOnly={identity?.role === "client"}
-                      saving={isConcluding}
-                      onSave={handleConclude}
-                    />
-                  ) : null}
-
-                  {/* Meeting editors (ADR-0013, Phase 5.3) — CRM view only; upsert drives the boolean sync. */}
-                  {viewMode === "crm" ? (
-                    <LeadMeetingsEditor
-                      key={`meetings:${selectedLead.id}`}
-                      intro={(selectedLead as LeadCrmRow).intro_meeting}
-                      summary={(selectedLead as LeadCrmRow).summary_meeting}
-                      readOnly={identity?.role === "client"}
-                      savingType={savingMeeting}
-                      onSave={handleSaveMeeting}
-                    />
-                  ) : null}
-
-                  {/* Offer editor (ADR-0013, Phase 5.3) — CRM view only; upsert drives the offer_sent sync. */}
-                  {viewMode === "crm" ? (
-                    <LeadOfferEditor
-                      key={`offer:${selectedLead.id}`}
-                      offer={(selectedLead as LeadCrmRow).current_offer}
-                      readOnly={identity?.role === "client"}
-                      saving={savingOffer}
-                      onSave={handleSaveOffer}
-                    />
-                  ) : null}
-
-                  {/* Value deliveries (ADR-0013, Phase 5.3) — CRM view only; feeds the expert-brand columns. */}
-                  {viewMode === "crm" ? (
-                    <LeadValueDeliveriesEditor
-                      key={`values:${selectedLead.id}`}
-                      first={(selectedLead as LeadCrmRow).value_delivery_1}
-                      second={(selectedLead as LeadCrmRow).value_delivery_2}
-                      readOnly={identity?.role === "client"}
-                      savingSeq={savingValueSeq}
-                      onSave={handleSaveValueDelivery}
-                    />
+                    <>
+                      <LeadConclusionEditor
+                        key={`conclusion:${selectedLead.id}`}
+                        lead={selectedLead}
+                        readOnly={identity?.role === "client"}
+                        saving={isConcluding}
+                        onSave={handleConclude}
+                      />
+                      <LeadMeetingsEditor
+                        key={`meetings:${selectedLead.id}`}
+                        intro={(selectedLead as LeadCrmRow).intro_meeting}
+                        summary={(selectedLead as LeadCrmRow).summary_meeting}
+                        readOnly={identity?.role === "client"}
+                        savingType={savingMeeting}
+                        onSave={handleSaveMeeting}
+                      />
+                      <LeadOfferEditor
+                        key={`offer:${selectedLead.id}`}
+                        offer={(selectedLead as LeadCrmRow).current_offer}
+                        readOnly={identity?.role === "client"}
+                        saving={savingOffer}
+                        onSave={handleSaveOffer}
+                      />
+                      <LeadValueDeliveriesEditor
+                        key={`values:${selectedLead.id}`}
+                        first={(selectedLead as LeadCrmRow).value_delivery_1}
+                        second={(selectedLead as LeadCrmRow).value_delivery_2}
+                        readOnly={identity?.role === "client"}
+                        savingSeq={savingValueSeq}
+                        onSave={handleSaveValueDelivery}
+                      />
+                      <LeadTasksEditor
+                        tasks={leadTasks}
+                        loading={loadingTasks}
+                        readOnly={identity?.role === "client"}
+                        savingId={savingTaskId}
+                        onSave={handleSaveTask}
+                      />
+                    </>
                   ) : null}
 
                   {loadingDetail ? (
