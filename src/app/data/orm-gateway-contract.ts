@@ -882,6 +882,11 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     if (conclusion !== null && conclusion !== undefined && !isString(conclusion)) {
       return { ok: false, error: "concludeLead conclusion must be a string or null." };
     }
+    // Invariant (spec item 4): a terminal outcome requires a non-empty conclusion. Un-concluding
+    // (finalOutcome === null) may pass any conclusion (including null) since it clears the field.
+    if (outcome !== null && !(isString(conclusion) && conclusion.trim() !== "")) {
+      return { ok: false, error: "concludeLead requires a non-empty conclusion when finalOutcome is set." };
+    }
     return {
       ok: true,
       value: {

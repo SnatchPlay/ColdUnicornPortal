@@ -34,12 +34,17 @@ export type CrmStage = "preMQL" | "MQL" | "SQL";
 /** Single source for terminal-outcome values — shared by the gateway validator and the editor select. */
 export const FINAL_OUTCOME_VALUES = ["won", "lost", "lost_premql"] as const;
 export type FinalOutcome = (typeof FINAL_OUTCOME_VALUES)[number];
-/** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification` (OOO/NRR).
- *  Uppercase to match the existing OOO/NRR convention (qualification enum, reply_classification). */
-export type ContactDisposition = "OOO" | "NRR";
+/** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification`. Domain names
+ *  are canonical (spec item 10); the legacy `OOO`/`NRR` abbreviations survive only as the qualification
+ *  input values mapped in `mapLegacyQualificationToDisposition`. */
+export type ContactDisposition = "out_of_office" | "not_right_role";
 /** The resolved single display/health status (a `CrmStage` or a `FinalOutcome`). */
 export type LeadCrmStatus = CrmStage | FinalOutcome;
 export type ContactMethod = "phone" | "email";
+/** `intro`/`summary` are the one-per-lead meetings the CRM view renders. `general` is RESERVED for a
+ *  future repeatable meeting type (spec item 9): the enum value exists, but it has NO CRUD and is
+ *  intentionally rejected by `upsertLeadMeeting` (which is intro|summary only), because that path relies
+ *  on the partial-unique `(lead_id, meeting_type)` index that must not apply to a repeatable type. */
 export type MeetingType = "intro" | "summary" | "general";
 /** Single source for the meeting-status values — shared by the gateway validator and the editor select. */
 export const MEETING_STATUS_VALUES = ["planned", "scheduled", "held", "cancelled", "no_show"] as const;
@@ -222,6 +227,8 @@ export interface LeadRecord {
   concluded_at: string | null;
   /** Explicit terminal outcome; `null` = non-terminal (funnel stage is derived). */
   final_outcome: FinalOutcome | null;
+  /** Persisted contact disposition (n8n-owned), independent of `qualification`; `null` = active. */
+  contact_disposition: ContactDisposition | null;
 }
 
 /** Meeting attached to a lead (spec §8.2). Intro/summary are one-per-lead; general repeats. */

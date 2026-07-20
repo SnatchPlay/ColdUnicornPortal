@@ -26,12 +26,27 @@ describe("deriveCrmStage (non-terminal funnel position)", () => {
   });
 });
 
-describe("deriveContactDisposition (separate dimension)", () => {
-  it("maps OOO/NRR from qualification, null otherwise", () => {
-    expect(deriveContactDisposition({ qualification: "OOO" })).toBe("OOO");
-    expect(deriveContactDisposition({ qualification: "NRR" })).toBe("NRR");
+describe("deriveContactDisposition (persisted + legacy fallback)", () => {
+  it("prefers the persisted contact_disposition column over the legacy qualification", () => {
+    // Persisted wins even when qualification carries a different (or stage) value.
+    expect(deriveContactDisposition({ contact_disposition: "out_of_office", qualification: "MQL" })).toBe("out_of_office");
+    expect(deriveContactDisposition({ contact_disposition: "not_right_role", qualification: "SQL" })).toBe("not_right_role");
+  });
+  it("falls back to legacy OOO/NRR qualification for old rows without a persisted value", () => {
+    expect(deriveContactDisposition({ qualification: "OOO" })).toBe("out_of_office");
+    expect(deriveContactDisposition({ qualification: "NRR" })).toBe("not_right_role");
+  });
+  it("is null for an active contact", () => {
     expect(deriveContactDisposition({ qualification: "MQL" })).toBeNull();
     expect(deriveContactDisposition({})).toBeNull();
+  });
+  it("does NOT change crm_stage — a disposition and the funnel stage are independent dimensions", () => {
+    // MQL + OOO stays MQL; SQL (offer) + NRR stays SQL. The disposition never demotes the stage.
+    expect(deriveCrmStage({ qualification: "MQL" })).toBe("MQL");
+    expect(deriveCrmStage({ qualification: "MQL", offer_sent: true })).toBe("SQL");
+    // NRR never auto-produces a lost outcome.
+    expect(resolveCrmStatus({ contact_disposition: "not_right_role", qualification: "MQL" } as LeadStatusFacts)).toBe("MQL");
+    expect(resolveCrmStatus({ contact_disposition: "not_right_role", meeting_booked: true } as LeadStatusFacts)).toBe("SQL");
   });
 });
 

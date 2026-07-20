@@ -34,6 +34,8 @@ export interface LeadStatusFacts {
   offer_sent?: boolean | null;
   won?: boolean | null;
   final_outcome?: FinalOutcome | null;
+  /** Persisted disposition (n8n-owned). Preferred over the legacy `qualification` fallback. */
+  contact_disposition?: ContactDisposition | null;
 }
 
 /**
@@ -48,13 +50,28 @@ export function deriveCrmStage(facts: LeadStatusFacts): CrmStage {
 }
 
 /**
- * Contact disposition, derived from the n8n-owned `qualification` value. `null` = ordinary contact.
- * OOO/NRR are read-only here — reclassifying them would be an n8n ingestion-contract change.
+ * Map a legacy n8n `qualification` value to the canonical domain-named disposition (spec item 10).
+ * `null` = ordinary/active contact. The legacy `OOO`/`NRR` abbreviations live ONLY here, at the
+ * compatibility boundary — every consumer downstream sees `out_of_office` / `not_right_role`.
+ */
+export function mapLegacyQualificationToDisposition(qualification?: string | null): ContactDisposition | null {
+  if (qualification === "OOO") return "out_of_office";
+  if (qualification === "NRR") return "not_right_role";
+  return null;
+}
+
+/**
+ * The effective contact disposition (spec item 10). Prefers the PERSISTED `contact_disposition` column
+ * (n8n-owned, independent of `qualification`, so a disposition change never overwrites the funnel
+ * stage). Falls back to mapping a LEGACY `qualification` of OOO/NRR to a display disposition — that
+ * fallback is DISPLAY-ONLY for old rows: the prior qualification of a legacy OOO/NRR row cannot be
+ * reconstructed without historical data, so nothing is backfilled.
+ *
+ * `deriveCrmStage` reads `qualification` independently, so once n8n writes the disposition column
+ * instead of overwriting `qualification`, `MQL + OOO` stays `MQL` and `SQL + OOO` stays `SQL`.
  */
 export function deriveContactDisposition(facts: LeadStatusFacts): ContactDisposition | null {
-  if (facts.qualification === "OOO") return "OOO";
-  if (facts.qualification === "NRR") return "NRR";
-  return null;
+  return facts.contact_disposition ?? mapLegacyQualificationToDisposition(facts.qualification);
 }
 
 /**

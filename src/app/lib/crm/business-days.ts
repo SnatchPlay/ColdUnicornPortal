@@ -238,6 +238,17 @@ export function calendarDaysBetween(fromIso: string, toIso: string, cfg: Busines
   return civilDaysBetween(civilDateOf(fromIso, cfg), civilDateOf(toIso, cfg));
 }
 
+/**
+ * Working days from the cutoff-shifted contact day-zero to the contact date (spec col Q). This is the
+ * SINGLE basis shared by the col-Q displayed value and the Contact-made health reason, so the number in
+ * the cell and its hover explanation can never disagree. Never negative (a contact stamped before the
+ * received date clamps to 0).
+ */
+export function workingDaysToContact(receivedIso: string, contactMadeIso: string, cfg: BusinessDayConfig): number {
+  const day0 = contactDayZero(receivedIso, cfg);
+  return Math.max(0, businessDaysBetweenCivil(day0, civilDateOf(contactMadeIso, cfg), cfg));
+}
+
 /** Add `hours` to an instant (timestamp-based, timezone-independent) — the 2h transcript SLA. */
 export function addHours(iso: string, hours: number): string {
   return new Date(new Date(iso).getTime() + hours * MS_PER_HOUR).toISOString();

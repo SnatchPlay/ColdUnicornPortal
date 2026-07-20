@@ -131,6 +131,26 @@ Every reply that arrives is classified by n8n using LLM + heuristic rules. The c
 
 The portal **does not classify** and **does not provide a manual triage UI** ([decision in BUSINESS_LOGIC §10](../../BUSINESS_LOGIC.md#10-out-of-scope-legacy)). If unclassified replies appear in raw data, that indicates ingestion/classification lag in n8n rather than a portal action item.
 
+### 6a. Contact disposition write-path (ADR-0013, CRM split status model)
+
+The CRM view's disposition dimension (OOO / NRR) is stored in its **own** column, `leads.contact_disposition`
+(`out_of_office | not_right_role | NULL`), independent of `leads.qualification`. This is a deliberate split
+(spec item 10): a disposition change must **not** overwrite the funnel stage.
+
+**Required n8n contract:**
+
+| Reply classification | n8n MUST write | n8n MUST NOT do |
+|---|---|---|
+| `OOO` | `leads.contact_disposition = 'out_of_office'` | overwrite `leads.qualification` |
+| `NRR` | `leads.contact_disposition = 'not_right_role'` | set `final_outcome = 'lost'` (a lost outcome is an explicit human decision) |
+| active again | `leads.contact_disposition = NULL` | — |
+
+- **Stage independence:** `crm_stage` derives from `qualification` + offer/meeting facts only. With this contract, `MQL + OOO` stays `MQL` and `SQL + OOO` stays `SQL`.
+- **Legacy fallback (display-only):** for OLD rows where `qualification` is already `'OOO'`/`'NRR'`, the read-model maps that legacy value to a display disposition (`deriveContactDisposition`). This is a **fallback for display**, not a data fix — the prior qualification of a legacy OOO/NRR row **cannot be reconstructed** without historical data, so there is **no backfill** into preMQL/MQL/lost.
+- **CHECK:** `leads_contact_disposition_check` restricts the column to `out_of_office | not_right_role | NULL`.
+
+Until n8n is updated to write the column, existing OOO/NRR rows still render correctly via the legacy fallback; new OOO/NRR events keep overwriting `qualification` (the pre-existing behaviour) until the cutover lands.
+
 ---
 
 ## 7. Failure modes & invariants

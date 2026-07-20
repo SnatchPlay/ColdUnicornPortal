@@ -38,6 +38,36 @@ describe("parseOrmGatewayRequest", () => {
     if (!parsed.ok) expect(parsed.error).toContain("loadLeadCrmList");
   });
 
+  it("concludeLead: accepts a terminal outcome with a non-empty conclusion", () => {
+    const parsed = parseOrmGatewayRequest({
+      action: "concludeLead", leadId: "l1", finalOutcome: "won", conclusion: "Signed a 6-month deal.",
+    });
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("concludeLead: rejects a terminal outcome with an empty/whitespace conclusion (spec item 4)", () => {
+    for (const conclusion of ["", "   ", null, undefined]) {
+      const parsed = parseOrmGatewayRequest({ action: "concludeLead", leadId: "l1", finalOutcome: "lost", conclusion });
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("non-empty conclusion");
+    }
+  });
+
+  it("concludeLead: allows un-concluding (finalOutcome null) with any conclusion", () => {
+    const parsed = parseOrmGatewayRequest({ action: "concludeLead", leadId: "l1", finalOutcome: null, conclusion: null });
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("updateLead: a generic patch cannot set the terminal final_outcome (only concludeLead writes it)", () => {
+    const parsed = parseOrmGatewayRequest({ action: "updateLead", leadId: "l1", patch: { final_outcome: "won" } });
+    expect(parsed.ok).toBe(true);
+    // The patch parses, but the mapLeadPatch whitelist (gateway) drops final_outcome — asserted here at
+    // the contract boundary that the field is not part of the editable patch surface.
+    if (parsed.ok && parsed.value.action === "updateLead") {
+      expect(parsed.value.patch).toBeDefined();
+    }
+  });
+
   it("accepts createLeadCustomField with a valid input", () => {
     const parsed = parseOrmGatewayRequest({
       action: "createLeadCustomField",

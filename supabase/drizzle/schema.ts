@@ -63,6 +63,7 @@ export const leads = pgTable("leads", {
 	conclusion: text(),
 	concludedAt: timestamp("concluded_at", { withTimezone: true, mode: 'string' }),
 	finalOutcome: finalOutcome("final_outcome"),
+	contactDisposition: text("contact_disposition"),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),

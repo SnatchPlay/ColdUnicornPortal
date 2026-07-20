@@ -369,6 +369,7 @@ function InternalLeadsPage() {
   // CRM view columns. Combined mode unions the PDCA report columns (as the Lead band) with the CRM
   // stage columns, dropping the CRM lead-stage duplicates (spec B.3 — a calm union).
   const crmAsOf = crmView.data?.asOf;
+  const crmBusinessDays = crmView.data?.businessDays;
   // Per-cell health colours (CRM mode only). The context object is memoised so LeadCrmTable's
   // per-row evaluation memo stays stable across unrelated re-renders.
   const crmHealthContext = useMemo(
@@ -380,6 +381,7 @@ function InternalLeadsPage() {
       role: identity?.role,
       showClient: showClientColumn,
       asOf: crmAsOf,
+      businessDays: crmBusinessDays,
       includeProcessIssues: viewMode === "crm",
     });
     if (viewMode !== "combined") return base;
@@ -393,7 +395,7 @@ function InternalLeadsPage() {
       ...pdcaAsCrm.filter((c) => c.id !== "pdca:status"),
       ...base.filter((c) => c.stage !== "lead" || c.id === "status"),
     ];
-  }, [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf]);
+  }, [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf, crmBusinessDays]);
   const defaultColumnWidths = useMemo(() => reportColumns.map((c) => c.width), [reportColumns]);
   const minColumnWidths = useMemo(() => reportColumns.map((c) => c.minWidth), [reportColumns]);
   const leadColumns = useResizableColumns({

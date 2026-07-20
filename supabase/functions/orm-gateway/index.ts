@@ -234,6 +234,7 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     conclusion: row.conclusion,
     concluded_at: row.concludedAt,
     final_outcome: row.finalOutcome,
+    contact_disposition: row.contactDisposition,
   };
 }
 
@@ -2069,7 +2070,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
         l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id,
         l.linkedin_invitation_sent_at, l.contact_made_at, l.contact_method,
-        l.negotiation_started_at, l.concluded_at, l.final_outcome,
+        l.negotiation_started_at, l.concluded_at, l.final_outcome, l.contact_disposition,
         -- coldunicorn_note + conclusion are internal-only; nulled for the client role in TS via isClient.
         l.coldunicorn_note, l.conclusion,
         c.name AS client_name,
@@ -2085,9 +2086,17 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         sm.pre_meeting_insights AS summary_pre_meeting_insights, sm.process_score AS summary_process_score,
         sm.conversion_insights AS summary_conversion_insights,
         co.status AS offer_status, co.contracted_send_date AS offer_contracted_send_date,
-        nt.due_at AS next_task_due_at, COALESCE(tk.open_count, 0)::int AS open_tasks_count,
+        ot.open_tasks,
         d1.planned_date AS d1_planned_date, d1.value_items AS d1_value_items, d1.sent_at AS d1_sent_at,
-        d2.planned_date AS d2_planned_date, d2.value_items AS d2_value_items, d2.sent_at AS d2_sent_at
+        d2.planned_date AS d2_planned_date, d2.value_items AS d2_value_items, d2.sent_at AS d2_sent_at,
+        -- LinkedIn (Aimfox) integration applicability for col I (spec item 5): an Aimfox credential with
+        -- an api_key on the owning client. RLS-scoped like every other read in this transaction.
+        EXISTS (
+          SELECT 1 FROM client_sequencers cs
+          WHERE cs.client_id = l.client_id
+            AND cs.sequencer_id = '00000000-0000-4000-a000-000000000003'
+            AND cs.api_key IS NOT NULL
+        ) AS linkedin_integration_connected
       FROM leads l
       JOIN clients c ON c.id = l.client_id
       LEFT JOIN campaigns camp ON camp.id = l.campaign_id
@@ -2103,14 +2112,18 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         ORDER BY o.created_at DESC LIMIT 1
       ) co ON TRUE
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS open_count FROM lead_tasks t
+        -- Open tasks as an ordered list (spec col Y). next_task_due_at + open_tasks_count are derived
+        -- from the first element / length in TS, so the ordering here is the single source of truth.
+        SELECT COALESCE(
+          json_agg(
+            json_build_object('id', t.id, 'title', t.title, 'due_at', t.due_at, 'status', t.status, 'position', t.position)
+            ORDER BY t.due_at ASC NULLS LAST, t.position ASC, t.created_at ASC
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'::json
+        ) AS open_tasks
+        FROM lead_tasks t
         WHERE t.lead_id = l.id AND t.status IN ('planned', 'in_progress')
-      ) tk ON TRUE
-      LEFT JOIN LATERAL (
-        SELECT t.due_at FROM lead_tasks t
-        WHERE t.lead_id = l.id AND t.status IN ('planned', 'in_progress')
-        ORDER BY t.due_at ASC NULLS LAST, t.position ASC, t.created_at ASC LIMIT 1
-      ) nt ON TRUE
+      ) ot ON TRUE
       LEFT JOIN lead_value_deliveries d1 ON d1.lead_id = l.id AND d1.sequence_number = 1
       LEFT JOIN lead_value_deliveries d2 ON d2.lead_id = l.id AND d2.sequence_number = 2
       ${dataWhereClause}
@@ -2144,6 +2157,31 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         conversion_insights: isClient ? null : str(r[`${prefix}_conversion_insights`]),
       };
     };
+    const mapOpenTasks = (r: Record<string, unknown>) => {
+      const raw = r.open_tasks;
+      let list: unknown[] = [];
+      if (Array.isArray(raw)) {
+        list = raw;
+      } else if (typeof raw === "string") {
+        // postgres.js normally returns json as a parsed array; the string path is a defensive fallback
+        // for a driver/config that hands back raw text. Never let a malformed blob crash the whole page.
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch {
+          list = [];
+        }
+      }
+      return list
+        .map((t) => t as Record<string, unknown>)
+        .map((t) => ({
+          id: String(t.id),
+          title: t.title == null ? "" : String(t.title),
+          due_at: t.due_at ? toIsoString(t.due_at) : null,
+          status: (t.status === "in_progress" ? "in_progress" : "planned") as "planned" | "in_progress",
+          position: Number(t.position ?? 0),
+        }));
+    };
     const mapDelivery = (r: Record<string, unknown>, prefix: string) => {
       const planned = r[`${prefix}_planned_date`];
       const items = r[`${prefix}_value_items`];
@@ -2156,7 +2194,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       };
     };
 
-    const rows = dataRows.map((r) => ({
+    const rows = dataRows.map((r) => {
+      // Ordered open-tasks list; next_task_due_at + open_tasks_count derive from it so the SQL ordering
+      // is the single source of truth (col X/Y).
+      const openTasks = mapOpenTasks(r);
+      return {
       id: String(r.id),
       created_at: r.created_at ? toIsoString(r.created_at) ?? "" : "",
       updated_at: r.updated_at ? toIsoString(r.updated_at) ?? "" : "",
@@ -2202,6 +2244,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       conclusion: isClient ? null : str(r.conclusion),
       concluded_at: r.concluded_at ? toIsoString(r.concluded_at) : null,
       final_outcome: str(r.final_outcome),
+      // Persisted disposition (n8n-owned). The client resolves persisted-or-legacy-fallback via
+      // deriveContactDisposition, keeping qualification untouched (spec item 10).
+      contact_disposition: str(r.contact_disposition),
       clientName: String(r.client_name ?? ""),
       campaignName: str(r.campaign_name),
       replyCount: Number(r.reply_count ?? 0),
@@ -2211,11 +2256,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       current_offer: r.offer_status || r.offer_contracted_send_date
         ? { status: str(r.offer_status), contracted_send_date: str(r.offer_contracted_send_date) }
         : null,
-      next_task_due_at: r.next_task_due_at ? toIsoString(r.next_task_due_at) : null,
-      open_tasks_count: Number(r.open_tasks_count ?? 0),
       value_delivery_1: mapDelivery(r, "d1"),
       value_delivery_2: mapDelivery(r, "d2"),
-    }));
+      linkedin_integration_connected: Boolean(r.linkedin_integration_connected),
+      open_tasks: openTasks,
+      next_task_due_at: openTasks[0]?.due_at ?? null,
+      open_tasks_count: openTasks.length,
+      };
+    });
 
     const pageClientIds = Array.from(new Set(rows.map((r) => r.client_id)));
     const pageLeadIds = rows.map((r) => r.id);
@@ -2678,12 +2726,20 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
   }
 
   if (payload.action === "concludeLead") {
-    // Atomic terminal write (ADR-0013 §Phase 5). `final_outcome ⇒ concluded_at` (DB CHECK); `won` is
-    // synced here because the meeting/offer recompute triggers deliberately never touch it. Un-concluding
-    // (finalOutcome=null) clears all four so the win KPI and the CRM status both revert.
+    // Atomic terminal write (ADR-0013 §Phase 5). The two-sided DB CHECK
+    // (leads_conclusion_consistency_check) requires the three terminal columns to be ALL-null or
+    // ALL-set; `won` is synced here because the meeting/offer recompute triggers never touch it.
+    // Un-concluding (finalOutcome=null) MUST clear conclusion + concluded_at too (all three null),
+    // else the two-sided check rejects the write.
     const outcome = payload.finalOutcome;
+    // Invariant (spec item 3): a terminal outcome requires a non-empty conclusion. Enforced here, in the
+    // contract validator, AND by the DB CHECK as the backstop.
+    if (outcome !== null && !(typeof payload.conclusion === "string" && payload.conclusion.trim() !== "")) {
+      fail(400, "A conclusion is required to record a final outcome.");
+    }
     const set = outcome === null
-      ? { finalOutcome: null, concludedAt: null, conclusion: payload.conclusion, won: false }
+      // Un-conclude: clear all three canonical terminal fields (no draft conclusion survives) + won.
+      ? { finalOutcome: null, concludedAt: null, conclusion: null, won: false }
       // `coalesce(concluded_at, now())` preserves the FIRST conclusion time across later note/outcome
       // edits (only un-concluding clears it); it must not drift forward when just the note changes.
       : { finalOutcome: outcome, concludedAt: sql`coalesce(${schema.leads.concludedAt}, now())`, conclusion: payload.conclusion, won: outcome === "won" };

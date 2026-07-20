@@ -240,9 +240,9 @@ export function LeadCrmTable({
                     const raw = column.value(row);
                     const title = typeof raw === "string" ? raw : undefined;
                     const cell = health && column.healthId ? health[column.healthId] : undefined;
-                    // AO's value is derived from the health map, not the row projection.
+                    // The process-issues rollup's value is derived from the health map, not the row.
                     const content: ReactNode =
-                      column.healthId === "AO" && issues !== undefined
+                      column.healthId === "process_issues" && issues !== undefined
                         ? issues
                         : column.render
                           ? column.render(row)

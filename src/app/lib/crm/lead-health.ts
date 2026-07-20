@@ -32,8 +32,10 @@ import {
   contactDayZero,
   endOfDayIso,
   isPastDeadline,
+  workingDaysToContact,
   type BusinessDayConfig,
 } from "./business-days";
+import type { LeadCrmColumnId } from "./lead-crm-registry";
 
 export type HealthState =
   | "neutral"
@@ -259,13 +261,13 @@ function contactMade(facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
   return { state, reason: `Contacted by ${method} ${timing}${hasPhone ? "" : " (no phone on file)"}`, deadlineAt: null };
 }
 
-/** Q "Days to contact" shares P's state exactly but explains itself as a working-day count. */
+/** Q "Days to contact" shares P's state exactly but explains itself as a working-day count. Uses the
+ *  same `workingDaysToContact` basis as the col-Q displayed value so the two never disagree. */
 function daysToContact(facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
   const base = contactMade(facts, ctx);
   if (!isPresent(facts.created_at) || !isPresent(facts.contact_made_at)) return base;
-  const day0 = contactDayZero(facts.created_at as string, ctx.businessDays);
-  const days = businessDaysBetweenCivil(day0, civilDateOf(facts.contact_made_at as string, ctx.businessDays), ctx.businessDays);
-  return { ...base, reason: `${Math.max(0, days)} working day(s) to contact` };
+  const days = workingDaysToContact(facts.created_at as string, facts.contact_made_at as string, ctx.businessDays);
+  return { ...base, reason: `${days} working day(s) to contact` };
 }
 
 function introProcessScore(facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
@@ -306,29 +308,32 @@ function daysInNegotiation(facts: LeadCrmFacts, ctx: HealthContext): CellHealth 
 
 type ColumnEvaluator = (facts: LeadCrmFacts, ctx: HealthContext) => CellHealth;
 
-const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
+// Keyed by the STABLE semantic column id (not the spreadsheet letter), so the health cell, the registry
+// entry, and the rendered column all agree on one identifier. `Partial` because the neutral/undecided
+// columns (linkedin_url, domain, status, campaign cols, deferred outputs) have no evaluator.
+const COLUMN_EVALUATORS: Partial<Record<LeadCrmColumnId, ColumnEvaluator>> = {
   // --- Lead stage (presence → green/neutral) ---
-  A: (f) => presence(f.company_name, "Company"),
-  B: (f) => presence(f.industry, "Industry"),
-  C: (f) => presence(f.headcount_range, "Headcount"),
-  D: (f) => presence(f.job_title, "Job title"),
-  E: (f) => presence(`${f.first_name ?? ""}${f.last_name ?? ""}`.trim(), "Name"),
-  F: (f) => presence(f.phone_number, "Phone"),
-  G: (f) => presence(f.email, "Email"),
-  I: (f) => {
+  company: (f) => presence(f.company_name, "Company"),
+  industry: (f) => presence(f.industry, "Industry"),
+  headcount: (f) => presence(f.headcount_range, "Headcount"),
+  job_title: (f) => presence(f.job_title, "Job title"),
+  full_name: (f) => presence(`${f.first_name ?? ""}${f.last_name ?? ""}`.trim(), "Name"),
+  phone: (f) => presence(f.phone_number, "Phone"),
+  email: (f) => presence(f.email, "Email"),
+  linkedin_invitation: (f) => {
     if (isPresent(f.linkedin_invitation_sent_at)) return green("Invitation sent");
     if (f.linkedin_integration_connected) return overdue("yellow", "Integration connected, invitation not sent", null);
     return na("LinkedIn automation not connected"); // avoid falsely-yellow disconnected customers (spec Appendix F, col I)
   },
-  K: (f) => ((f.replyCount ?? 0) > 0 ? green("Message history exists") : neutral("No message history")),
-  L: (f) => presence(f.message_number, "Message number"),
+  msg_history: (f) => ((f.replyCount ?? 0) > 0 ? green("Message history exists") : neutral("No message history")),
+  msg_number: (f) => presence(f.message_number, "Message number"),
 
   // --- Qualification stage ---
-  N: (f) => presence(f.created_at, "Lead received date"),
-  O: (f) => (isPresent(f.intro_meeting?.call_script) ? green("Intro script set") : overdue("yellow", "Intro call script missing", null)),
-  P: contactMade,
-  Q: daysToContact, // Days to contact shares P's state but explains itself as a day count (spec §5.2 Q)
-  R: (f, ctx) =>
+  lead_received: (f) => presence(f.created_at, "Lead received date"),
+  intro_script: (f) => (isPresent(f.intro_meeting?.call_script) ? green("Intro script set") : overdue("yellow", "Intro call script missing", null)),
+  contact_made: contactMade,
+  days_to_contact: daysToContact, // shares contact_made's state but explains itself as a day count (spec §5.2 Q)
+  meeting_set: (f, ctx) =>
     timedSla({
       prereqMet: atLeastMql(f.status),
       present: meetingScheduledOrHeld(f.intro_meeting),
@@ -339,13 +344,13 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  S: (f) => {
+  intro_insights: (f) => {
     if (!(atLeastMql(f.status) && meetingScheduledOrHeld(f.intro_meeting))) return na();
     return isPresent(f.intro_meeting?.pre_meeting_insights)
       ? green("Pre-meeting insights set")
       : overdue("yellow", "Meeting set, insights missing", null);
   },
-  T: (f, ctx) =>
+  intro_transcript: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.intro_meeting),
       present: isPresent(f.intro_meeting?.transcription_url),
@@ -356,8 +361,8 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: false, // transcript is about a held meeting, not a future step
       ctx,
     }),
-  U: introProcessScore,
-  V: (f, ctx) =>
+  intro_score: introProcessScore,
+  intro_conversion: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.intro_meeting),
       present: isPresent(f.intro_meeting?.conversion_insights),
@@ -370,7 +375,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
     }),
 
   // --- Offering stage ---
-  W: (f, ctx) =>
+  offer_date: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.intro_meeting),
       present: isPresent(f.current_offer?.contracted_send_date),
@@ -381,7 +386,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  X: (f, ctx) =>
+  next_step_date: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.intro_meeting),
       present: isPresent(f.next_task_due_at),
@@ -392,7 +397,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  Y: (f, ctx) =>
+  next_steps: (f, ctx) =>
     timedSla({
       prereqMet: isPresent(f.next_task_due_at),
       present: (f.open_tasks_count ?? 0) > 0,
@@ -403,7 +408,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  Z: (f, ctx) =>
+  summary_transcript: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.summary_meeting),
       present: isPresent(f.summary_meeting?.transcription_url),
@@ -414,7 +419,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: false,
       ctx,
     }),
-  AA: (f, ctx) =>
+  summary_conversion: (f, ctx) =>
     timedSla({
       prereqMet: meetingScheduledOrHeld(f.summary_meeting),
       present: isPresent(f.summary_meeting?.conversion_insights),
@@ -427,7 +432,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
     }),
 
   // --- Expert brand building stage ---
-  AB: (f, ctx) =>
+  value1_date: (f, ctx) =>
     timedSla({
       prereqMet: atLeastSql(f.status) && isPresent(f.next_task_due_at),
       present: isPresent(f.value_delivery_1?.planned_date),
@@ -438,13 +443,13 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  AC: (f) => {
+  value1_items: (f) => {
     if (!isPresent(f.value_delivery_1?.planned_date)) return na();
     return isPresent(f.value_delivery_1?.value_items)
       ? green("First values list set")
       : overdue("yellow", "First value date set, list empty", null);
   },
-  AD: (f, ctx) =>
+  value1_sent: (f, ctx) =>
     timedSla({
       prereqMet: isPresent(f.value_delivery_1?.planned_date),
       present: isPresent(f.value_delivery_1?.sent_at),
@@ -455,7 +460,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  AE: (f, ctx) =>
+  value2_date: (f, ctx) =>
     timedSla({
       prereqMet: atLeastSql(f.status) && isPresent(f.value_delivery_1?.planned_date),
       present: isPresent(f.value_delivery_2?.planned_date),
@@ -466,13 +471,13 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  AF: (f) => {
+  value2_items: (f) => {
     if (!isPresent(f.value_delivery_2?.planned_date)) return na();
     return isPresent(f.value_delivery_2?.value_items)
       ? green("Second values list set")
       : overdue("yellow", "Second value date set, list empty", null);
   },
-  AG: (f, ctx) =>
+  value2_sent: (f, ctx) =>
     timedSla({
       prereqMet: isPresent(f.value_delivery_2?.planned_date),
       present: isPresent(f.value_delivery_2?.sent_at),
@@ -485,7 +490,7 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
     }),
 
   // --- Finalization stage ---
-  AH: (f, ctx) =>
+  negotiation: (f, ctx) =>
     timedSla({
       prereqMet: isPresent(f.value_delivery_2?.sent_at) || isPresent(f.value_delivery_2?.planned_date),
       present: isPresent(f.negotiation_started_at),
@@ -496,13 +501,13 @@ const COLUMN_EVALUATORS: Record<string, ColumnEvaluator> = {
       terminal: isTerminal(f.status),
       ctx,
     }),
-  AI: daysInNegotiation,
-  AJ: (f) => presence(isPresent(f.client_note) ? f.client_note : f.coldunicorn_note, "Notes"),
+  negotiation_days: daysInNegotiation,
+  notes: (f) => presence(isPresent(f.client_note) ? f.client_note : f.coldunicorn_note, "Notes"),
 
   // --- Conclusions stage ---
   // Keyed on the terminal outcome (the real "concluded" signal), not concluded_at alone: the CHECK
   // only enforces final_outcome ⇒ concluded_at, so concluded_at can be set without an outcome.
-  AN: (f) => (isPresent(f.final_outcome) ? green("Concluded") : neutral("Not concluded")),
+  conclusion: (f) => (isPresent(f.final_outcome) ? green("Concluded") : neutral("Not concluded")),
 };
 
 /** All column ids the evaluator produces a health state for (excludes derived `AO`). */
@@ -512,49 +517,53 @@ export const CRM_HEALTH_COLUMN_IDS = Object.keys(COLUMN_EVALUATORS);
 const ISSUE_STATES: ReadonlySet<HealthState> = new Set<HealthState>(["orange", "red"]);
 
 /**
- * Canonical set of steps counted by AO (spec Appendix D.6 leaves this list OPEN — this is the current
- * RECOMMENDED set). It contains each DISTINCT missing/overdue SLA step and deliberately EXCLUDES:
- *   - `Q` — it is the same underlying step as `P` (contact); counting both would double a single
- *     root failure, violating "one root failure counts once";
- *   - `U` (process score) and `AI` (days in negotiation) — quality/duration bands, not overdue steps;
- *   - presence-only columns and yellow-only columns (`R`, `S`, `O`, `AC`, `AF`, `AN`) which never
- *     reach an ISSUE_STATE anyway.
+ * Canonical set of steps counted by the process-issue rollup (spec Appendix D.6 leaves this list OPEN —
+ * this is the current RECOMMENDED set). It contains each DISTINCT missing/overdue SLA step and
+ * deliberately EXCLUDES:
+ *   - `days_to_contact` — the same underlying step as `contact_made`; counting both would double a
+ *     single root failure, violating "one root failure counts once";
+ *   - `intro_score` and `negotiation_days` — quality/duration bands, not overdue steps;
+ *   - presence-only and yellow-only columns (`meeting_set`, `intro_insights`, `intro_script`,
+ *     `value1_items`, `value2_items`, `conclusion`) which never reach an ISSUE_STATE anyway.
  */
-const AO_COUNTED_COLUMN_IDS: ReadonlySet<string> = new Set<string>([
-  "P", "T", "V", "W", "X", "Y", "Z", "AA", "AB", "AD", "AE", "AG", "AH",
+const PROCESS_ISSUE_COUNTED_IDS: ReadonlySet<LeadCrmColumnId> = new Set<LeadCrmColumnId>([
+  "contact_made", "intro_transcript", "intro_conversion", "offer_date", "next_step_date", "next_steps",
+  "summary_transcript", "summary_conversion", "value1_date", "value1_sent", "value2_date", "value2_sent",
+  "negotiation",
 ]);
 
-/** Evaluate one column's health. Unknown/neutral columns (H, J, M, campaign cols) return neutral. */
+/** Evaluate one column's health. Unknown/neutral columns (linkedin_url, domain, status, campaign cols)
+ *  return neutral. */
 export function evaluateCellHealth(colId: string, facts: LeadCrmFacts, ctx: HealthContext): CellHealth {
-  const evaluator = COLUMN_EVALUATORS[colId];
+  const evaluator = COLUMN_EVALUATORS[colId as LeadCrmColumnId];
   return evaluator ? evaluator(facts, ctx) : neutral();
 }
 
 /**
- * AO — count of active steps in an overdue state, restricted to the canonical counted set so a single
- * root failure counts once and quality bands don't inflate the tally (spec Appendix D.6). Prerequisite
- * suppression already turns downstream cells into `not_applicable`, keeping cascades out of the count.
+ * process_issues — count of active steps in an overdue state, restricted to the canonical counted set so
+ * a single root failure counts once and quality bands don't inflate the tally (spec Appendix D.6).
+ * Prerequisite suppression already turns downstream cells into `not_applicable`, keeping cascades out.
  */
 export function processIssuesCount(health: Record<string, CellHealth>): number {
   let count = 0;
   for (const [colId, cell] of Object.entries(health)) {
-    if (AO_COUNTED_COLUMN_IDS.has(colId) && ISSUE_STATES.has(cell.state)) count += 1;
+    if (PROCESS_ISSUE_COUNTED_IDS.has(colId as LeadCrmColumnId) && ISSUE_STATES.has(cell.state)) count += 1;
   }
   return count;
 }
 
-/** Map the AO count to its own cell health (spec §6.3: 0→green, 1→yellow, 2-3→orange, 4+→red). */
+/** Map the process-issue count to its own cell health (spec §6.3: 0→green, 1→yellow, 2-3→orange, 4+→red). */
 export function processIssuesHealth(count: number): CellHealth {
   const state: HealthState = count === 0 ? "green" : count === 1 ? "yellow" : count <= 3 ? "orange" : "red";
   return { state, reason: `${count} process issue(s)`, deadlineAt: null };
 }
 
-/** Evaluate every CRM column for one lead, including the derived AO cell. */
+/** Evaluate every CRM column for one lead, including the derived `process_issues` cell. */
 export function evaluateLeadHealth(facts: LeadCrmFacts, ctx: HealthContext): Record<string, CellHealth> {
   const health: Record<string, CellHealth> = {};
   for (const colId of CRM_HEALTH_COLUMN_IDS) {
     health[colId] = evaluateCellHealth(colId, facts, ctx);
   }
-  health.AO = processIssuesHealth(processIssuesCount(health));
+  health.process_issues = processIssuesHealth(processIssuesCount(health));
   return health;
 }
