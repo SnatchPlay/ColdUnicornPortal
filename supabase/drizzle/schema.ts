@@ -417,11 +417,16 @@ export const domains = pgTable("domains", {
 	purchaseDate: date("purchase_date").notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: domainStatus(),
-	// Winnr mailbox-provider status, kept separate from the local domain_status enum above
-	// (20260720f). Ingestion-only — n8n writes it via service_role. Other Winnr sync columns
-	// (winnr_domain_id, dns_provider, winnr_tags, last_synced_at, raw_payload, …) exist in the DB
-	// but are not declared here because the gateway neither reads nor writes them.
+	// Winnr sync fields (20260720f), ingestion-only — n8n writes them via service_role; the portal
+	// only reads. Kept separate from the local domain_status enum above. (raw_payload / winnr_domain_id
+	// / winnr_updated_at / last_seen_at exist in the DB but are intentionally not read by the gateway.)
 	winnrStatus: text("winnr_status"),
+	dnsProvider: text("dns_provider"),
+	winnrTags: text("winnr_tags").array(),
+	winnrEmailUserCount: integer("winnr_email_user_count"),
+	winnrCreatedAt: timestamp("winnr_created_at", { withTimezone: true, mode: 'string' }),
+	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
+	missingSince: timestamp("missing_since", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],

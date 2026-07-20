@@ -11,6 +11,7 @@ import {
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { DomainsSectionTabs } from "../components/domains-tabs";
+import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -99,6 +100,7 @@ export function EmailAccountsPage() {
   const [domainFilter, setDomainFilter] = useState(ALL);
   const [warmingFilter, setWarmingFilter] = useState(ALL);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [sort, setSort] = useState<{ key: AccountSortKey; direction: SortDirection }>({
     key: "email",
     direction: "asc",
@@ -110,9 +112,9 @@ export function EmailAccountsPage() {
   const historyIdRef = useRef(0);
 
   const columns = useResizableColumns({
-    storageKey: "table:email-accounts:columns",
-    defaultWidths: [360, 260, 160, 140, 140],
-    minWidths: [220, 160, 120, 100, 100],
+    storageKey: "table:email-accounts:columns:v3",
+    defaultWidths: [360, 260, 150, 130, 150],
+    minWidths: [220, 160, 120, 100, 110],
   });
   const tableStyle = useMemo(
     () => ({ "--email-accounts-table-columns": columns.template }) as CSSProperties,
@@ -248,7 +250,7 @@ export function EmailAccountsPage() {
           description="When mailboxes are synced from Winnr, they will appear here with warming health and inbox rate."
         />
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <>
           <Surface title="Mailbox list" subtitle={`${sortedAccounts.length} mailboxes in current scope`}>
             <div className="mb-4 flex flex-wrap gap-3">
               <input
@@ -288,7 +290,7 @@ export function EmailAccountsPage() {
 
             <div className="overflow-hidden rounded-2xl border border-border">
               <div className="overflow-x-auto" style={tableStyle}>
-                <div className="hidden min-w-[1100px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--email-accounts-table-columns)]">
+                <div className="hidden min-w-[720px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--email-accounts-table-columns)]">
                   {[
                     { key: "email" as const, label: "Email" },
                     { key: "domain" as const, label: "Domain" },
@@ -312,14 +314,17 @@ export function EmailAccountsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="divide-y divide-border md:min-w-[1100px]">
+                <div className="divide-y divide-border md:min-w-[720px]">
                   {sortedAccounts.map((account) => {
                     const active = selectedAccount?.id === account.id;
                     const domain = domainById.get(account.domain_id);
                     return (
                       <button
                         key={account.id}
-                        onClick={() => setSelectedAccountId(account.id)}
+                        onClick={() => {
+                          setSelectedAccountId(account.id);
+                          setDetailOpen(true);
+                        }}
                         className={`block w-full px-4 py-3 text-left transition ${active ? "bg-white/5" : "hover:bg-white/3"}`}
                       >
                         {/* Mobile card */}
@@ -335,7 +340,7 @@ export function EmailAccountsPage() {
                           </p>
                         </div>
                         {/* Desktop row */}
-                        <div className="hidden min-w-[1100px] items-center gap-3 [grid-template-columns:var(--email-accounts-table-columns)] md:grid">
+                        <div className="hidden min-w-[720px] items-center gap-3 [grid-template-columns:var(--email-accounts-table-columns)] md:grid">
                           <span className="truncate text-sm text-white">{account.email_address}</span>
                           <span className="truncate text-sm text-neutral-300">{domain?.domain_name ?? "—"}</span>
                           <span className={`text-xs uppercase tracking-[0.14em] ${warmingTone(account.warming_status)}`}>
@@ -352,11 +357,17 @@ export function EmailAccountsPage() {
             </div>
           </Surface>
 
-          <Surface title="Mailbox detail" subtitle="Current warming state and history.">
+          <LightweightSheet
+            open={detailOpen}
+            onOpenChange={setDetailOpen}
+            title={<span className="text-white">Mailbox detail</span>}
+            description="Current warming state and history."
+            className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-xl"
+          >
             {!selectedAccount ? (
               <EmptyState title="Select a mailbox" description="Select a row from the list to inspect warming health and history." />
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-5 px-6 pb-6">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email</p>
@@ -368,7 +379,9 @@ export function EmailAccountsPage() {
                       {domainById.get(selectedAccount.domain_id)?.domain_name ?? "—"}
                       <span className="text-neutral-500">
                         {" · "}
-                        {clientById.get(domainById.get(selectedAccount.domain_id)?.client_id ?? "")?.name ?? "Unknown client"}
+                        {domainById.get(selectedAccount.domain_id)?.client_id == null
+                          ? "Unlinked"
+                          : clientById.get(domainById.get(selectedAccount.domain_id)?.client_id ?? "")?.name ?? "Unknown client"}
                       </span>
                     </p>
                   </div>
@@ -426,8 +439,8 @@ export function EmailAccountsPage() {
                 </div>
               </div>
             )}
-          </Surface>
-        </div>
+          </LightweightSheet>
+        </>
       )}
     </div>
   );

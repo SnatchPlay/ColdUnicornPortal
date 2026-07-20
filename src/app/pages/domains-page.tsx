@@ -245,6 +245,7 @@ export function DomainsPage() {
   const domains = data?.domains ?? EMPTY_DOMAINS;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [detailOpen, setDetailOpen] = useState(false);
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DomainDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -253,9 +254,9 @@ export function DomainsPage() {
     direction: "asc",
   });
   const domainColumns = useResizableColumns({
-    storageKey: "table:domains:columns:v2",
-    defaultWidths: [480, 260, 200],
-    minWidths: [220, 160, 130],
+    storageKey: "table:domains:columns:v4",
+    defaultWidths: [540, 300, 200],
+    minWidths: [260, 180, 140],
   });
   const domainTableStyle = useMemo(
     () =>
@@ -418,7 +419,7 @@ export function DomainsPage() {
           description="When domains are synced, they will appear here with health and verification details."
         />
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <>
           <Surface title="Domain list" subtitle={`${sortedDomains.length} domains in current scope`}>
             <div className="mb-4 flex flex-wrap gap-3">
               <input
@@ -490,7 +491,10 @@ export function DomainsPage() {
                     return (
                       <button
                         key={domain.id}
-                        onClick={() => setSelectedDomainId(domain.id)}
+                        onClick={() => {
+                          setSelectedDomainId(domain.id);
+                          setDetailOpen(true);
+                        }}
                         className={`block w-full px-4 py-3 text-left transition ${
                           active ? "bg-white/5" : "hover:bg-white/3"
                         }`}
@@ -517,14 +521,20 @@ export function DomainsPage() {
             </div>
           </Surface>
 
-          <Surface title="Domain detail" subtitle="Edit local status; Winnr warming is read-only.">
+          <LightweightSheet
+            open={detailOpen}
+            onOpenChange={setDetailOpen}
+            title={<span className="text-white">Domain detail</span>}
+            description="Edit local status; Winnr data is read-only."
+            className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-xl"
+          >
             {!selectedDomain || !draft ? (
               <EmptyState
                 title="Select a domain"
                 description="Select a row from the list to inspect and update domain metadata."
               />
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-5 px-6 pb-6">
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => cancelDraft()}
@@ -560,6 +570,26 @@ export function DomainsPage() {
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Winnr status</p>
                     <p className="mt-2 text-sm">{selectedDomain.winnr_status ?? "—"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-black/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">DNS provider</p>
+                    <p className="mt-2 text-sm">{selectedDomain.dns_provider ?? "—"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-black/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Mailboxes (Winnr)</p>
+                    <p className="mt-2 text-sm">{selectedDomain.winnr_email_user_count ?? "—"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-black/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Winnr tags</p>
+                    <p className="mt-2 text-sm">{selectedDomain.winnr_tags?.length ? selectedDomain.winnr_tags.join(", ") : "—"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-black/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last synced</p>
+                    <p className="mt-2 text-sm">{formatDate(selectedDomain.last_synced_at)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-black/10 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Missing since</p>
+                    <p className="mt-2 text-sm">{selectedDomain.missing_since ? formatDate(selectedDomain.missing_since) : "—"}</p>
                   </div>
                 </div>
 
@@ -630,8 +660,8 @@ export function DomainsPage() {
                 </div>
               </div>
             )}
-          </Surface>
-        </div>
+          </LightweightSheet>
+        </>
       )}
     </div>
   );

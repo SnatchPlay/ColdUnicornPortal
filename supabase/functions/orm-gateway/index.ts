@@ -250,6 +250,12 @@ function toDomainRecord(row: typeof schema.domains.$inferSelect) {
     updated_at: row.updatedAt,
     status: row.status,
     winnr_status: row.winnrStatus,
+    dns_provider: row.dnsProvider,
+    winnr_tags: row.winnrTags,
+    winnr_email_user_count: row.winnrEmailUserCount,
+    winnr_created_at: row.winnrCreatedAt,
+    last_synced_at: row.lastSyncedAt,
+    missing_since: row.missingSince,
   };
 }
 

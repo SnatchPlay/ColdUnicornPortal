@@ -340,8 +340,8 @@ export interface CreateLeadPayload {
 
 export interface CreateDomainPayload {
   action: "createDomain";
-  // winnr_status is ingestion-only (n8n), never set on portal create.
-  input: Omit<DomainRecord, "id" | "created_at" | "updated_at" | "winnr_status">;
+  // Only the portal-owned fields; all Winnr sync fields are ingestion-only (n8n).
+  input: Pick<DomainRecord, "client_id" | "domain_name" | "setup_email" | "purchase_date" | "status">;
 }
 
 export interface CreateConditionRulePayload {

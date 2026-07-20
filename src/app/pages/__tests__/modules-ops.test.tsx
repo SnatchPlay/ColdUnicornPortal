@@ -80,6 +80,10 @@ describe("Sprint B module operations", () => {
     render(<MemoryRouter><DomainsPage /></MemoryRouter>);
     await act(async () => {});
 
+    // Detail is a drawer now — click the domain row to open it before editing.
+    fireEvent.click(screen.getAllByText("acme.com")[0]);
+    await act(async () => {});
+
     await chooseOptionByLabel("Status", "blocked");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
