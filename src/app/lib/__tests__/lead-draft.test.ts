@@ -41,6 +41,14 @@ function makeLead(overrides: Partial<LeadRecord> = {}): LeadRecord {
     client_note: "old client note",
     coldunicorn_note: null,
     highlight: null,
+    sequencer_id: "00000000-0000-4000-a000-000000000002",
+    linkedin_invitation_sent_at: null,
+    contact_made_at: null,
+    contact_method: null,
+    negotiation_started_at: null,
+    conclusion: null,
+    concluded_at: null,
+    final_outcome: null,
     ...overrides,
   };
 }

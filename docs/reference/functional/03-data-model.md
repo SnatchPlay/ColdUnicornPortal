@@ -30,6 +30,10 @@ All `CREATE TYPE ... AS ENUM` definitions, [schema.ts:4-12](../../../supabase/dr
 | `lead_qualification` | `preMQL`, `MQL`, `meeting_scheduled`, `meeting_held`, `offer_sent`, `won`, `rejected`, `OOO`, `NRR` |
 | `reply_classification` | `OOO`, `Interested`, `NRR`, `Left_Company`, `Spam_Inbound`, `other` |
 | `user_role` | `super_admin`, `admin`, **`master_admin`**, `manager`, `client` |
+| `meeting_type` | `intro`, `summary`, `general` — Lead CRM (ADR-0013) |
+| `meeting_status` | `planned`, `scheduled`, `held`, `cancelled`, `no_show` — Lead CRM |
+| `offer_status` | `planned`, `sent`, `accepted`, `rejected`, `cancelled` — Lead CRM |
+| `task_status` | `planned`, `in_progress`, `completed`, `cancelled`, `skipped` — Lead CRM |
 
 Notes:
 
@@ -112,16 +116,13 @@ The business entity whose outreach we run.
 | `kpi_meetings` | smallint | Contract target meetings/month. |
 | `contracted_amount` | numeric | For billing context; not displayed in main UI. |
 | `contract_due_date` | date | |
-| `external_workspace_id` | integer UNIQUE | Link to the ingestion tool's workspace. |
 | `status` | `client_status` not null | Drives filters and dashboard "non-active clients" surface (formerly "at-risk"). |
-| `external_api_key` | text | |
 | `min_daily_sent` | smallint default 0 | Shown in `ClientsPage` Overview column "Schedule". |
 | `inboxes_count` | smallint default 0 | |
 | `crm_config` | jsonb default `{}` | Reserved for per-client CRM integration settings. |
 | `sms_phone_numbers` | text[] | Notification targets. |
 | `notification_emails` | text[] | Notification targets. |
 | `auto_ooo_enabled` | boolean default false | Whether OOO auto-routing is on. |
-| `linkedin_api_key` | text | |
 | `prospects_signed` | integer default 0 | Contracted prospect cap. |
 | `prospects_added` | integer default 0 | Actual loaded; fallback source for `getClientKpis.prospects` when `campaigns.database_size` sums to zero. |
 | `setup_info` | text | Free-form setup notes. |
@@ -131,13 +132,65 @@ The business entity whose outreach we run.
 | `satisfaction` | smallint `CHECK 1..3`, nullable (`20260717_client_satisfaction_and_status_rename.sql`) | Manual CS rating ("hearts"). NULL = not rated. Replaced the automatic condition-engine health rollup on the Clients grid. |
 | `updated_at` | timestamptz | |
 
+> Sequencer credentials (formerly `external_workspace_id` integer UNIQUE, `external_api_key`, `linkedin_api_key`) moved to [`client_sequencers`](#22a-sequencers-adr-0008) on 2026-07-04 (ADR-0008); the columns are dropped by `20260704b_drop_client_sequencer_credentials.sql`.
+
 RLS:
 
 - `clients_select_scoped` — `private.can_access_client(id)`.
 - `clients_update_scoped` — **verified live:** `using`/`with check` = `private.can_manage_client(id)` (manager of the client + admin tier).
 - `clients_insert_internal` — role ∈ `{super_admin, admin, manager, master_admin}` (set-based subselect on `users`), migration `20260517_entity_insert_policies.sql`.
 
-#### `condition_rules` — [schema.ts:294-342](../../../supabase/drizzle/schema.ts#L294-L342)
+### 2.2a Sequencers (ADR-0012)
+
+Migrations [`20260704_sequencers_catalog.sql`](../../../supabase/migrations/20260704_sequencers_catalog.sql) + [`20260705_sequencer_daily_stats_schedule.sql`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql). Fixed catalog UUIDs are load-bearing (column defaults on `campaigns`/`leads` + n8n constants): smartlead `…-a000-000000000001`, emailbison `…-0002`, aimfox `…-0003`.
+
+#### `sequencers` — global catalog
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK (fixed, seeded) | |
+| `key` | text UNIQUE, `^[a-z0-9_]+$` | `smartlead` / `emailbison` / `aimfox`. |
+| `name` | text not null | Display name. |
+| `channel` | text, check `email`/`linkedin` | |
+| `enabled` | boolean default true | |
+| `created_at` | timestamptz | |
+
+RLS: `sequencers_select_authenticated` (`using true` — 3 rows, no secrets); `sequencers_write_master` (`for all`, master_admin only).
+
+#### `client_sequencers` — per-client connection settings
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK | |
+| `client_id` | uuid FK > `clients.id` on delete cascade, not null | |
+| `sequencer_id` | uuid FK > `sequencers.id` on delete restrict, not null | UNIQUE (`client_id`, `sequencer_id`). |
+| `api_key` | text | Secret — never visible to the client role. |
+| `external_workspace_id` | text | Text on purpose (platform-agnostic). Partial-unique per sequencer. |
+| `settings` | jsonb default `{}` | Future per-sequencer options. |
+| `enabled` | boolean default true | |
+| `created_at` / `updated_at` | timestamptz | |
+
+RLS: all four commands gated `private.can_manage_client(client_id)` (manager-own / admin; **client role sees zero rows**). Written by the portal via `upsertClientSequencer`; read by n8n (service role).
+
+#### `sequencer_daily_stats` — ingestion-only LinkedIn/Aimfox PDCA counters
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | uuid PK | |
+| `client_id` | uuid FK not null, cascade | |
+| `sequencer_id` | uuid FK not null, restrict | |
+| `profile_id` | text not null default `''` | Aimfox LinkedIn profile/seat id; `''` = account-level rollup. |
+| `report_date` | date not null | UNIQUE (`client_id`, `sequencer_id`, `profile_id`, `report_date`). |
+| `invites_sent` / `invites_accepted` | integer default 0 | Daily counters (n8n derives from `/analytics/interactions` buckets). |
+| `remaining_database_size` | integer | Snapshot: Σ over active campaigns of `audience_size − sent_connections`. |
+| `invite_limit` | integer | **Weekly** connect-cap snapshot: Σ of the client's Aimfox accounts' `limit.connect` (≈195/account). |
+| `invite_limit_remaining` | integer | Invites still available today (`invite_limit/5 −` today's sent buckets). Snapshot per 2-hourly run. |
+| `schedule_today` / `schedule_tomorrow` / `schedule_day_after` | integer default 0 | Aimfox planned invite volumes (`min(daily_limit, …)` formulas; `daily_limit = invite_limit/5`). Mirrors the sheet's "(Aimfox)" schedule columns. |
+| `created_at` | timestamptz | |
+
+RLS: SELECT-only, set-based per ADR-0006 (`client_id IN (SELECT id FROM clients WHERE private.can_access_client(id))`); no write policies — n8n service role UPSERTs on the unique key. Index on `report_date DESC`.
+
+#### `condition_rules` — [schema.ts:292-339](../../../supabase/drizzle/schema.ts#L292-L339)
 
 Dynamic condition rules used to evaluate client operational-health states across Clients surfaces.
 
@@ -209,6 +262,7 @@ RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not cur
 | `positive_responses` | integer default 0 | Editable in drawer for managers/admins. |
 | `start_date` | date | |
 | `gender_target` | varchar(10) | |
+| `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. Set at creation (gateway `mapCampaignInsert`); immutable via portal. |
 | `created_at` / `updated_at` | timestamptz | |
 
 RLS:
@@ -270,7 +324,8 @@ Columns of note:
 | `meeting_booked`, `meeting_held`, `offer_sent`, `won` | booleans default false | **Editable by internal roles; drive `getLeadStage`**. |
 | `added_to_ooo_campaign` | boolean | Routing flag. |
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
-| `source` | varchar(30) default `'cold_email'` | |
+| `source` | varchar(30) default `'cold_email'` | Channel provenance (free text; gateway reply-path fallback `"smartlead"`). **Not** the sequencer link — see `sequencer_id`. |
+| `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. n8n/ingestion-owned; NOT in the portal lead-patch whitelist (ADR-0004). Index `idx_leads_client_sequencer (client_id, sequencer_id)`. |
 | `reply_text` | text | Denormalised latest reply for quick lead-list rendering. |
 | `client_note` | text | Client-facing report note (renamed from `comments` in Batch 4, `20260618b`). Editable by manager/admin; visible to the client. |
 | `coldunicorn_note` | text | Internal report note (Batch 4). Editable by manager/admin; **nulled for the client role** in `loadLeadsList`. |
@@ -320,6 +375,30 @@ RLS (all set-based, ADR-0006):
 - `lcfv_select_scoped` — values readable when the lead's `client_id` is accessible.
 - `lcfv_write_scoped` — values writable when the actor can access the lead's client **and** `private.current_app_role()` ∈ the field's `editable_by`.
 
+### 2.4b Lead CRM child tables (ADR-0013)
+
+Four lead-owned child tables added by [`20260719_lead_crm_tables.sql`](../../../supabase/migrations/20260719_lead_crm_tables.sql) for the CRM view. All are `lead_id`-scoped `ON DELETE CASCADE` and carry `handle_updated_at()` triggers. Stages in the CRM view are **visual groups only** — there is no stage table or stored `current_stage`.
+
+| Table | Purpose | Key columns |
+|-------|---------|-------------|
+| `lead_meetings` | intro / summary / general meetings | `meeting_type`, `status`, `call_script`, `scheduled_at`, `held_at`, `transcription_url`, `pre_meeting_insights`, `process_score` (0–100), `conversion_insights`. Partial unique index → one intro + one summary per lead; general repeats. |
+| `lead_offers` | offers/revisions (multiple per lead) | `status`, `contracted_send_date`, `sent_at`, `offer_url`, `source_meeting_id` |
+| `lead_tasks` | next-step tasks (no `task_type` in MVP) | `title`, `due_at`, `status`, `position`, `source_meeting_id` |
+| `lead_value_deliveries` | additional-value deliveries | `sequence_number` (unique per lead), `planned_date`, `value_items text[]`, `sent_at` |
+
+**New `leads` columns** (spec §8.1): `linkedin_invitation_sent_at`, `contact_made_at`, `contact_method` (text CHECK `phone`|`email`), `negotiation_started_at`, `conclusion`, `concluded_at`. Also re-synced the previously-missing `sequencer_id` into `schema.ts`.
+
+**Status model (Phase 1b, ADR-0013 split model — [`20260719d`](../../../supabase/migrations/20260719d_lead_final_outcome.sql)):** the taxonomy is SPLIT, not a single stored column.
+- `crm_stage` (`preMQL`/`MQL`/`SQL`) and `contact_disposition` (`ooo`/`nrr`) are **DERIVED on read** (`src/app/lib/crm/lead-status.ts` — `deriveCrmStage`, `deriveContactDisposition`); no columns, no backfill.
+- `leads.final_outcome` (enum `final_outcome` = `won`/`lost`/`lost_premql`, nullable) is the **only stored** part — the explicit terminal decision, guarded by `leads_final_outcome_concluded_check` (`final_outcome ⇒ concluded_at`), set atomically with `conclusion`/`concluded_at` by the Phase-5 conclusion action.
+- `resolveCrmStatus` = `final_outcome ?? won-boolean ?? rejected→lost ?? deriveCrmStage`. **KPI dashboards are unchanged** (booleans/`qualification`).
+
+**RLS** ([`20260719b`](../../../supabase/migrations/20260719b_lead_crm_rls.sql)) — set-based per ADR-0006, verified via EXPLAIN as `authenticated` (hashed SubPlan on the child scan, no per-row `private.*`):
+- `<table>_select_scoped` — readable when the parent lead's `client_id` is accessible (`private.can_access_client`); clients get **read-only** CRM data.
+- `<table>_write_scoped` (`for all`) — writable when the caller `can_manage_client` the parent lead's client; **client role write-blocked in Postgres**.
+
+**Legacy-boolean recompute** ([`20260719c`](../../../supabase/migrations/20260719c_lead_crm_boolean_sync.sql)) — `AFTER INSERT/UPDATE/DELETE` triggers (`private.recompute_lead_meeting_flags` / `recompute_lead_offer_flags`, SECURITY DEFINER) keep `leads.meeting_booked`/`meeting_held`/`offer_sent` in sync by **recomputing from child rows** (cancelling a meeting un-counts it). n8n writes the child tables directly, so the sync must be a DB trigger, not gateway code. `won` is not trigger-managed. See [09-mutations-rls §2.18](09-mutations-rls.md#218-lead-crm-child-tables-adr-0013).
+
 ### 2.5 Daily stats (client-level rollup)
 
 #### `daily_stats` — [schema.ts:70-105](../../../supabase/drizzle/schema.ts#L70-L105)
@@ -368,14 +447,44 @@ Outreach sending domains.
 | `id` | uuid PK |
 | `client_id` | uuid FK not null |
 | `domain_name`, `setup_email` | text not null |
-| `purchase_date`, `exchange_date` | date not null |
-| `status` | `domain_status` |
-| `reputation` | text |
-| `exchange_cost` | numeric(8,2) |
-| `campaign_verified_at`, `warmup_verified_at` | date |
-| `updated_at` | timestamptz |
+| `purchase_date` | date not null |
+| `status` | `domain_status` — **local, portal-editable** lifecycle status |
+| `winnr_status` | text — Winnr provider status (ingestion-only, read-only), separate from `status` |
+| `created_at`, `updated_at` | timestamptz |
+
+**Winnr sync columns (`20260720f`, ingestion-only — n8n writes via service_role, not declared in `schema.ts`):** `winnr_domain_id` (text, partial-unique), `dns_provider` (text), `winnr_tags` (text[]), `winnr_email_user_count` (int), `winnr_created_at` / `winnr_updated_at` / `last_seen_at` / `last_synced_at` / `missing_since` (timestamptz), `raw_payload` (jsonb). A case-insensitive unique index `domains_domain_name_ci_uq` on `lower(trim(domain_name))` backs the sync match key.
+
+> **Dropped `20260720f`:** `reputation`, `exchange_date`, `exchange_cost`, `campaign_verified_at`, `warmup_verified_at`. Current warming is per-mailbox in `email_accounts`; history in `email_account_warming_daily`; a "warming done" signal is derived from `warming_status` / `warming_progress`. `campaign_verified_at` was not a Winnr signal and had no remaining consumer; `exchange_*` were agency bookkeeping whose UI was removed.
 
 RLS (verified live): `domains_select_scoped` = `private.can_access_client(client_id)` (client role can read its own domains); `domains_insert_scoped` / `_update_scoped` / `_delete_scoped` = `private.can_manage_client(client_id)` (assigned manager + admin tier). `domains_insert_internal` (`20260517`) is the additional permissive INSERT policy used by the "New domain" sheet.
+
+#### `email_accounts` — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+Individual Winnr mailboxes and their **current** warming snapshot. Warming is a mailbox-level concept, not a domain-level one: one domain has many mailboxes with independent health scores. **Ingestion-only** — n8n populates this from Winnr (`/v1/email-users` + `/v1/warming`) as `service_role`; the portal never writes it. Warming statuses are free `text` (the taxonomy is owned by the external API).
+
+| Column | Type |
+|--------|------|
+| `id` | uuid PK |
+| `domain_id` | uuid FK → `domains(id)` on delete cascade |
+| `winnr_email_user_id` | text unique (idempotent upsert key) |
+| `email_address` | text not null (unique on `lower(email_address)`) |
+| `username`, `display_name`, `status` | text |
+| `warming_status` | text |
+| `warming_health_score`, `warming_inbox_rate`, `warming_spam_rate`, `warming_progress` | numeric |
+| `warming_daily_volume` | integer |
+| `winnr_created_at`, `last_seen_at`, `last_synced_at`, `missing_since` | timestamptz |
+| `raw_payload` | jsonb |
+| `created_at`, `updated_at` | timestamptz |
+
+RLS: `email_accounts_select_scoped` — set-based (ADR-0006), scoped through the parent domain: `domain_id IN (SELECT d.id FROM domains d WHERE d.client_id IN (SELECT id FROM clients WHERE private.can_access_client(id)))`. No `authenticated` write policy (writes are `service_role`/n8n), mirroring `replies` / `campaign_daily_stats`.
+
+#### `email_account_warming_daily` — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+Per-mailbox daily warming history (from Winnr `/v1/warming/{id}/metrics`). Ingestion-only. PK `(email_account_id, metric_date)`. Columns: `warming_status` text, `emails_sent`/`daily_volume` integer, `health_score`/`inbox_rate`/`spam_rate`/`warmup_progress` numeric, `raw_payload` jsonb, `synced_at` timestamptz. RLS: `email_account_warming_daily_select_scoped` — set-based, scoped through `email_account → domain → client`.
+
+#### `domain_warming_summary` (view) — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+`security_invoker` aggregation over `email_accounts`, one row per domain: `email_accounts_count`, `active_warming_accounts_count`, `average_health_score`, `lowest_inbox_rate`, `highest_spam_rate`. Runs with the caller's privileges so `email_accounts` RLS still scopes the rows. Provides the domain-level rollup without duplicating warming columns onto `domains`. **Not yet read by a page** — it exists for the planned aggregate column on the Domains list; the per-domain mailbox panel derives its numbers client-side from the mailbox list already in the payload. `active_warming_accounts_count` assumes Winnr's status literal is `'active'` — reconcile once the n8n→Winnr mapping is confirmed.
 
 #### `invoices` — [schema.ts:264-283](../../../supabase/drizzle/schema.ts#L264-L283)
 

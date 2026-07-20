@@ -57,6 +57,9 @@ function makeRows(count: number, startIndex = 0) {
       meeting_booked: false, meeting_held: false, offer_sent: false, won: false,
       added_to_ooo_campaign: false, external_blacklist_id: null, external_domain_blacklist_id: null,
       source: "test", reply_text: null, client_note: null, coldunicorn_note: null, highlight: null,
+      sequencer_id: "00000000-0000-4000-a000-000000000002", linkedin_invitation_sent_at: null,
+      contact_made_at: null, contact_method: null, negotiation_started_at: null,
+      conclusion: null, concluded_at: null, final_outcome: null,
       clientName: "Acme", campaignName: "Campaign 1", replyCount: 0, lastReplyAt: null,
     };
   });

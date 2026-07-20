@@ -267,6 +267,31 @@
 [data-color-theme="contrast"] .cond-cell-warning { background-color: #F9F909; color: #000; font-weight: 800; }
 [data-color-theme="contrast"] .cond-cell-critical{ background-color: #ff00ff; color: #000; font-weight: 800; }
 
+/* --- Lead CRM per-cell health (ADR-0013 health model — 6 derived states, NOT the conditions
+   engine). Full-bleed inner shell tuned to the CRM table's px-2.5 / py-2 cells so the colour fills
+   the cell edge-to-edge over whatever sits beneath (incl. the sticky-left solid background). --- */
+.crm-cell {
+  box-sizing: border-box;
+  align-self: stretch;
+  width: calc(100% + 1.25rem);
+  margin: -0.5rem -0.625rem;
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.crm-cell-green   { background-color: rgb(6 78 59 / 0.5);   color: #a7f3d0; }
+.crm-cell-yellow  { background-color: rgb(113 63 18 / 0.55); color: #fde68a; }
+.crm-cell-orange  { background-color: rgb(124 45 18 / 0.7);  color: #fdba74; font-weight: 600; }
+.crm-cell-red     { background-color: rgb(127 29 29 / 0.72); color: #fecaca; font-weight: 600; }
+.crm-cell-pending { background-color: rgb(38 38 38 / 0.55);  color: #9ca3af; }
+
+[data-color-theme="contrast"] .crm-cell-green   { background-color: #06F701; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .crm-cell-yellow  { background-color: #F9F909; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .crm-cell-orange  { background-color: #ff6600; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .crm-cell-red     { background-color: #FA0200; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .crm-cell-pending { background-color: #2f2f2f; color: #e5e5e5; font-weight: 700; }
+
 /* --- Severity badges (name-column rollup, condition chips, rule builder) --- */
 .sev-badge-good    { border-color: rgb(167 243 208 / 0.45); background-color: rgb(16 185 129 / 0.12); color: #d1fae5; }
 .sev-badge-danger  { border-color: rgb(252 165 165 / 0.45); background-color: rgb(239 68 68 / 0.12);  color: #fee2e2; }

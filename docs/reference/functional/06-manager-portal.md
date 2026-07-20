@@ -137,7 +137,7 @@ Opens on row click. Draft pattern: local `draft` state deviates from `selectedCl
 Sections (top → bottom):
 
 1. **Header** — name, status pill, manager, contract amount + due.
-2. **Credentials & IDs** (read-only, masked + copy) — `external_workspace_id`, `external_api_key`, `linkedin_api_key`, CRM status from `crm_config`.
+2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): EmailBison workspace ID + API key, Aimfox API key; CRM status from `crm_config` (read-only badge).
 3. **Client configuration** — editable form (includes the **Customer satisfaction** hearts, §2.7).
 4. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
 5. **User access management** — invite + map client portal users.
@@ -151,9 +151,9 @@ Editable fields — **Credentials & IDs** section:
 
 | Field | Control | Source column | Who |
 |-------|---------|---------------|-----|
-| Workspace ID | number input | `clients.external_workspace_id` | manager + admin |
-| Workspace API key | `SecretInput` (show/hide) | `clients.external_api_key` | manager + admin |
-| LinkedIn API key | `SecretInput` (show/hide) | `clients.linkedin_api_key` | manager + admin |
+| EmailBison workspace ID | text input | `client_sequencers.external_workspace_id` (emailbison row) | manager + admin |
+| EmailBison API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (emailbison row) | manager + admin |
+| Aimfox API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (aimfox row) | manager + admin |
 | CRM status | read-only badge | `clients.crm_config` | — |
 
 Editable fields — **Contract & KPIs** section (admin only, hidden for manager):
@@ -396,26 +396,22 @@ File: [`src/app/pages/domains-page.tsx`](../../../src/app/pages/domains-page.tsx
 |--------|--------|
 | Domain | `domains.domain_name` + `setup_email` subtitle |
 | Client | joined via `client_id` |
-| Status | `domains.status` (badge) |
-| Reputation | `domains.reputation` |
+| Status | `domains.status` (local badge) |
+| Winnr status | `domains.winnr_status` (read-only, from Winnr) |
 
-Resizable columns as elsewhere.
+Resizable columns as elsewhere. A per-domain **email-accounts panel** (mailboxes + warming health) shows in the detail view. The full mailbox list ([email-accounts-page](../../../src/app/pages/email-accounts-page.tsx)) is a **sub-page of Domains**, not a separate sidebar entry: route `…/domains/email-accounts`, reached via the in-page `Domains | Email accounts` tabs ([domains-tabs.tsx](../../../src/app/components/domains-tabs.tsx)). Same for admin.
 
 ### 6.3 Drawer (editable)
 
-- `status` Select
-- `reputation` text input
-- `exchange_cost` number
-- `campaign_verified_at` date input
-- `warmup_verified_at` date input
+- `status` Select (local `domain_status` — the only editable field)
 
-Read-only: `purchase_date`, `exchange_date`.
+Read-only: `client`, `setup_email`, `purchase_date`, `winnr_status`, and the per-domain mailbox warming panel. Winnr sync fields are ingestion-only (n8n).
 
 Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_client`.
 
 ### 6.4 Create domain Sheet
 
-"New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date`. Optional: `exchange_cost`, `status`.
+"New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`. Optional: `status`. (`exchange_date` / `exchange_cost` were dropped in `20260720f`.)
 
 Calls `repository.createDomain(input)` ([domains-page.tsx:375](../../../src/app/pages/domains-page.tsx#L375)), then `useDomainsPage().refresh()`. See [09-mutations §2.13](./09-mutations-rls.md).
 
@@ -476,7 +472,7 @@ The manager drawer on Clients page now covers all `clients` columns except `crm_
 - **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
 
-`linkedin_api_key`, `external_workspace_id`, `external_api_key`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are now editable in the drawer (BL-3 shipped). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
+`prospects_signed`, `prospects_added`, `notes`, `lost_reason` are editable in the drawer (BL-3 shipped). Sequencer credentials (EmailBison workspace/key, Aimfox LinkedIn key) save via `upsertClientSequencer` to `client_sequencers` (ADR-0012), not to `clients` columns; saves are diffed separately from the client patch (`buildSequencerPatches`). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
 
 ---
 

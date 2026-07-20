@@ -94,10 +94,11 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 - **Configure** clients, campaigns, domains, invoices (manager / admin drawers).
 - **Manage** users (admin invitations) and the email blacklist (admin).
 - **Persist** notification destinations (`clients.notification_emails`, `sms_phone_numbers`) so n8n knows where to send alerts.
+- **Persist** per-client sequencer connections (`client_sequencers`: EmailBison workspace/API key, Aimfox API key) that n8n reads before calling sequencer APIs (ADR-0008).
 
 ### n8n responsibilities
 
-- **Ingestion:** populate `campaign_daily_stats`, `daily_stats`, `replies` (with classification), `domains` reputation/verification updates.
+- **Ingestion:** populate `campaign_daily_stats`, `daily_stats`, `replies` (with classification), `domains` reputation/verification updates, and `sequencer_daily_stats` (Aimfox LinkedIn invitation counters, remaining database size, invite limits — ADR-0008).
 - **Routing:** consume `client_ooo_routing` rows + OOO replies to assign follow-up campaigns in Smartlead/Bison.
 - **Notifications:** dispatch email/SMS to addresses found in `clients.notification_emails` / `sms_phone_numbers` when triggers fire (new lead, stalled campaign, etc.).
 - **Reply classification:** every reply that lands in `replies` is classified by n8n (using LLM + rules). The portal does not re-classify; "unclassified" is a transient ingestion state, not an action item.
@@ -107,7 +108,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 - **Source of truth** for every table.
 - **RLS enforcement** of role boundaries (`public.is_admin_user`, `is_manager_of_client`, `can_access_client`, `is_internal_user`). RLS is *the* security boundary — the portal has no server of its own to enforce access in.
 - **Edge functions:**
-  - **`orm-gateway`** — the portal's entire data path. The SPA does not query Postgres directly: it POSTs `{ action, ...payload }` to this function, which runs Drizzle + postgres.js and re-establishes the caller's JWT claims and role *inside each transaction*, so RLS still applies. It also computes the server-side aggregates the dashboards need. (`orm-gateway-next` is a staging twin.) → [ADR-0008](adr/0008-orm-gateway-edge-function.md)
+  - **`orm-gateway`** — the portal's entire data path. The SPA does not query Postgres directly: it POSTs `{ action, ...payload }` to this function, which runs Drizzle + postgres.js and re-establishes the caller's JWT claims and role *inside each transaction*, so RLS still applies. It also computes the server-side aggregates the dashboards need. It is the **single canonical** gateway function. → [ADR-0008](adr/0008-orm-gateway-edge-function.md)
   - **`send-invite`, `manage-invites`** — privileged invitation flows.
 
 ### Hard rule
@@ -148,7 +149,7 @@ Capabilities:
 - **Edit lead state:** `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments` (the ADR-0004 whitelist).
 - **Edit client config:** name, status, contracted KPIs, min daily sent, inboxes count, notification emails, SMS phone numbers, auto-OOO toggle, setup info, manager (admin only вЂ” manager cannot reassign themselves).
 - **Edit campaigns:** name, status, database size, positive responses.
-- **Edit domains:** status, reputation, exchange cost, verification dates.
+- **Edit domains:** local `status` only (legacy reputation / exchange / verification-date fields dropped in `20260720f`; Winnr warming is read-only).
 - **Edit invoices:** issue date, amount, status (within ingested invoice rows; managers do not create invoices in the portal).
 - **Read** the email blacklist; cannot modify it.
 - **Invite** users for assigned clients (admin role inherits the same).
@@ -204,7 +205,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 | Internal leads | Editable qualification + milestones + comments drawer. Reply history inline. |
 | Internal campaigns | Editable metadata drawer + per-campaign daily performance line chart. |
 | Internal statistics | Trend lines, qualification donut, campaign portfolio cards. |
-| Domains | Editable status, reputation, exchange cost, verification dates. |
+| Domains | Editable local `status`; Winnr status + per-domain mailbox warming shown read-only. |
 | Invoices | Editable issue date, amount, status. **Creation is ingestion-only.** |
 | Blacklist | Admin: add/remove. Manager: read-only banner. |
 | Admin user management | Send/resend/revoke invitations. Tabs: Overview / Pending / Accepted / Expired. |
@@ -234,6 +235,7 @@ Many features look "missing" from the portal's perspective because their **execu
 | Reply classification | Display classification badge | Classify and write `replies.classification` |
 | Daily counters | Render `campaign_daily_stats` and `daily_stats` rows | Pull from Smartlead/Bison and INSERT/UPSERT |
 | Ingestion metrics (sent/replies/bounces/opens) | Visualise | Write |
+| LinkedIn invitations (Aimfox) | Store `client_sequencers` credentials; display `sequencer_daily_stats` | Call the Aimfox API, send invites, UPSERT the daily stats |
 
 ---
 
@@ -274,7 +276,7 @@ Visibility:
 
 ### 5.3 Client
 
-Source: created by admin (likely via SQL today; UI creation is on the [backlog](#11-open-backlog-planned-not-built)). Portal mutates everything except `id`, `external_workspace_id`, contracted-amount/date when those are billing-locked.
+Source: created via the New-client sheet (manager/admin). Portal mutates everything except `id`; contracted-amount/date only when not billing-locked. Sequencer credentials (formerly `external_workspace_id` / `external_api_key` / `linkedin_api_key` columns) live in `client_sequencers`, one row per client × sequencer (ADR-0008).
 
 `status` enum drives visibility surfaces:
 
@@ -286,7 +288,7 @@ Source: created by admin (likely via SQL today; UI creation is on the [backlog](
 
 ### 5.4 Domain (sending domain)
 
-Source: created/updated by ingestion when domains are provisioned. Portal mutates operational fields: `status`, `reputation`, `exchange_cost`, `campaign_verified_at`, `warmup_verified_at`.
+Source: created/updated by ingestion when domains are provisioned. Portal mutates only the local `status` field (the legacy `reputation`, `exchange_cost`, `exchange_date`, `campaign_verified_at`, `warmup_verified_at` were dropped in `20260720f`). Winnr provider state lives in `winnr_status` + the mailbox tables (`email_accounts`, `email_account_warming_daily`), all ingestion-only.
 
 `status` lifecycle: `warmup в†’ active в†’ blocked в†’ retired`.
 
@@ -408,7 +410,7 @@ Who **may write** which table from where. RLS is the authoritative gate; ingesti
 | `daily_stats` | **never** | yes вЂ” daily UPSERT on (`client_id`, `report_date`) | Portal reads only; not loaded for client role |
 | `leads` | manager / admin (ADR-0004 whitelist) | yes вЂ” INSERT + enrichment UPDATE | Clients never write |
 | `replies` | **never** | yes вЂ” INSERT + classification UPDATE | Read-only from portal |
-| `domains` | manager / admin (operational fields) | yes вЂ” provisioning + reputation updates | |
+| `domains` | manager / admin (local `status` only) | yes вЂ” provisioning + Winnr sync (winnr_status, mailbox tables) | |
 | `invoices` | manager / admin (operational fields) | yes вЂ” invoice rows are ingested | Portal does not currently insert |
 | `email_exclude_list` | admin only | rarely | Used by n8n as block list before sends |
 | `client_ooo_routing` | (planned) manager / admin | rarely | n8n reads to act |
@@ -436,7 +438,7 @@ Plain-language map of which settings exist, who owns them, and where they live i
 - Notification destinations (until client self-service ships): `notification_emails`, `sms_phone_numbers`.
 - Auto-OOO toggle: `auto_ooo_enabled`.
 - Setup notes: `setup_info`.
-- LinkedIn API key (`linkedin_api_key`) вЂ” **planned UI**, currently only schema field.
+- Sequencer credentials (`client_sequencers`: EmailBison workspace ID + API key, Aimfox API key) — shipped in the client drawer Credentials & IDs section (ADR-0008).
 - Workshops / harmonogramy / cold-Ads tracking вЂ” **planned**, fields not in schema yet.
 
 **Admin only:**
@@ -455,7 +457,7 @@ Plain-language map of which settings exist, who owns them, and where they live i
 | SMS phone numbers | `clients.sms_phone_numbers` (text[]) | вњ“ Manager drawer | Manager (planned: client self-edit) |
 | Auto-OOO toggle | `clients.auto_ooo_enabled` (bool) | вњ“ Manager drawer | Manager / admin |
 | OOO routing rows | `client_ooo_routing` table | вњ— Planned | Manager / admin |
-| LinkedIn API key | `clients.linkedin_api_key` | вњ— Planned | Manager / admin |
+| Sequencer credentials (EmailBison / Aimfox) | `client_sequencers` (`api_key`, `external_workspace_id`) | ✓ Manager drawer | Manager / admin |
 | CRM config | `clients.crm_config` (jsonb) | вњ— Out of scope today | Admin |
 | Workshops / harmonogramy | _(not in schema)_ | вњ— Out of scope; schema work needed | Manager / admin |
 | Min daily sent | `clients.min_daily_sent` | вњ“ Manager drawer | Manager / admin |
@@ -504,7 +506,7 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 |---|------|--------|-------|
 | BL-1 | Client self-service notification preferences | A4 decision | UI on `/client/settings` to edit `notification_emails`, `sms_phone_numbers`. Manager retains override on `/manager/clients`. |
 | BL-2 | OOO routing rows management UI | A5 + ecosystem | Manager / admin UI to configure `client_ooo_routing` rows. Today only the boolean toggle is exposed. |
-| BL-3 | LinkedIn API key UI | A7 | Add `linkedin_api_key` field to manager/admin client drawer. |
+| BL-3 | Sequencer management UI (phase 2) | A7 / ADR-0008 | Catalog-driven UI for `sequencers` + `client_sequencers` (enable/disable, settings jsonb, future sequencers) and Aimfox PDCA panels over `sequencer_daily_stats`. The drawer already covers EmailBison/Aimfox credentials. |
 | BL-4 | Workshops / harmonogramy / cold-Ads ecosystem fields | A7 | Schema columns + UI in the manager/admin drawer. Specify exact field set before implementing. |
 | BL-5 | Agency CRM kanban (`agency_crm_deals`) | C5 decision | Admin/sales-manager UI for the agency's own pipeline. RLS already exists. |
 | BL-6 | *(Closed)* Remove non-active clients dashboard surface | 2026-04-29 decision | Surface removed from Admin dashboard. |
@@ -558,6 +560,12 @@ codified as expected behaviour (the "saves invoice draft changes" test ran as a 
 **gated the UI** rather than widening RLS: invoices are billing records, and admin-only writes are
 the intended boundary. Managers keep read access (`invoices_select_scoped`). The drawer now renders
 read-only for them, with a regression test. → [09-mutations-rls.md](reference/functional/09-mutations-rls.md) §4
+
+### Decision (2026-07-04): Multi-sequencer model — catalog + per-client credentials (ADR-0012)
+
+Sequencers (Smartlead, EmailBison, Aimfox — the look4lead concept is replaced by Aimfox) became first-class data: a global `sequencers` catalog (fixed load-bearing UUIDs), per-client credentials in `client_sequencers` (replacing the dropped `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` columns), `sequencer_id NOT NULL DEFAULT EmailBison` on `campaigns` and `leads` (all historical rows attributed to EmailBison), and the ingestion-only `sequencer_daily_stats` table for Aimfox LinkedIn PDCA metrics (invites sent/accepted per profile, remaining database size, invite limit ≈195/week). The client drawer's credential fields now read/write `client_sequencers` via the `upsertClientSequencer` gateway action. AI reply classification and SMS/email notifications for LinkedIn leads stay in n8n (OoS-12). The destructive column-drop migration (`20260704b`) applies only after the n8n cutover.
+
+**Rationale:** Aimfox integration + upcoming per-sequencer PDCA statistics require attributing campaigns/leads/stats to a specific tool and holding more than one credential set per client. **References:** [ADR-0012](adr/0012-multi-sequencer-model.md), migrations `20260704_sequencers_catalog.sql` / `20260704b_drop_client_sequencer_credentials.sql`, [03-data-model.md](reference/functional/03-data-model.md), [09-mutations-rls.md](reference/functional/09-mutations-rls.md), [11-integrations.md](reference/functional/11-integrations.md).
 
 ### Decision (2026-06-19): User profile photos (avatars) with initials fallback (Batch 10D)
 

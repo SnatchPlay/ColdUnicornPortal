@@ -13,6 +13,11 @@ import {
 } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { LeadEditForm } from "../components/lead-edit-form";
+import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
+import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
+import { LeadOfferEditor } from "../components/lead-offer-editor";
+import { LeadValueDeliveriesEditor } from "../components/lead-value-deliveries-editor";
+import { LeadTasksEditor } from "../components/lead-tasks-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import {
   Pagination,
@@ -26,11 +31,15 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
-import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadsList, useLeadDetail, useLeadTasks, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadCrmList } from "../lib/use-lead-crm";
 import { getFullName } from "../lib/format";
-import { buildLeadReportColumns } from "../lib/lead-report-columns";
+import { buildLeadReportColumns, type LeadReportColumn } from "../lib/lead-report-columns";
+import { buildLeadCrmColumns, type LeadCrmColumn } from "../lib/lead-crm-columns";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
 import { LeadReportTable } from "../components/lead-report-table";
+import { LeadCrmTable } from "../components/lead-crm-table";
+import type { LeadCrmRow } from "../types/view-contracts";
 import { LeadCustomColumnsManager } from "../components/lead-custom-columns-manager";
 import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export";
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
@@ -47,6 +56,8 @@ import { buildLeadPatch, toLeadDraft, type LeadDraft } from "../lib/lead-draft";
 import { cn } from "../components/ui/utils";
 import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
+import type { FinalOutcome } from "../types/core";
+import type { LeadMeetingInput, LeadOfferInput, LeadValueDeliveryInput, LeadTaskInput } from "../data/orm-gateway-contract";
 import { ClientLeadsPage } from "./client-leads-page";
 
 interface CreateLeadDraft {
@@ -297,8 +308,14 @@ function InternalLeadsPage() {
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => parseTimeframeFromParams(searchParams));
   const [currentPage, setCurrentPage] = useState(() => parsePage(searchParams.get("page")));
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"pdca" | "crm" | "combined">("pdca");
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isConcluding, setIsConcluding] = useState(false);
+  const [savingMeeting, setSavingMeeting] = useState<"intro" | "summary" | null>(null);
+  const [savingOffer, setSavingOffer] = useState(false);
+  const [savingValueSeq, setSavingValueSeq] = useState<1 | 2 | null>(null);
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [leadSort, setLeadSort] = useState<{ key: LeadSortKey; direction: SortDirection }>(() => {
     const sortKey = searchParams.get("sort");
     const key: LeadSortKey = LEAD_SORT_KEYS.includes(sortKey as LeadSortKey) ? (sortKey as LeadSortKey) : "created";
@@ -325,9 +342,20 @@ function InternalLeadsPage() {
     pageSize: PAGE_SIZE,
   }), [clientFilter, campaignFilter, stageFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
 
-  const { data, loading, error, refresh } = useLeadsList(listParams);
+  // View switcher (ADR-0013): PDCA = existing report; CRM = banded CRM table; combined = union, calm.
+  const isCrmView = viewMode !== "pdca";
+  const pdca = useLeadsList(listParams, { enabled: !isCrmView });
+  const crmView = useLeadCrmList(listParams, { enabled: isCrmView });
+  // Re-bind the shared names to the active mode so all downstream derivations work unchanged.
+  const data = isCrmView ? crmView.data : pdca.data;
+  const loading = isCrmView ? crmView.loading : pdca.loading;
+  const error = isCrmView ? crmView.error : pdca.error;
+  const refresh = isCrmView ? crmView.refresh : pdca.refresh;
   const { data: filterOptions } = useLeadsFilterOptions();
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
+  // Tasks are a lazy per-lead list, loaded only for the pure CRM drawer (ADR-0013, Phase 5.3) — the
+  // editor renders only there, so combined mode must not fetch a list it never shows.
+  const { tasks: leadTasks, loading: loadingTasks, reload: reloadTasks } = useLeadTasks(viewMode === "crm" ? selectedLeadId : null);
 
   const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
   const baseReportColumns = useMemo(
@@ -338,6 +366,36 @@ function InternalLeadsPage() {
   const customValues = useMemo(() => data?.customValues ?? [], [data]);
   const customColumns = useLeadCustomColumns({ role: identity?.role, fields: customFields, values: customValues });
   const reportColumns = useMemo(() => [...baseReportColumns, ...customColumns], [baseReportColumns, customColumns]);
+  // CRM view columns. Combined mode unions the PDCA report columns (as the Lead band) with the CRM
+  // stage columns, dropping the CRM lead-stage duplicates (spec B.3 — a calm union).
+  const crmAsOf = crmView.data?.asOf;
+  const crmBusinessDays = crmView.data?.businessDays;
+  // Per-cell health colours (CRM mode only). The context object is memoised so LeadCrmTable's
+  // per-row evaluation memo stays stable across unrelated re-renders.
+  const crmHealthContext = useMemo(
+    () => (crmView.data ? { asOf: crmView.data.asOf, businessDays: crmView.data.businessDays } : undefined),
+    [crmView.data],
+  );
+  const crmColumns = useMemo<LeadCrmColumn[]>(() => {
+    const base = buildLeadCrmColumns({
+      role: identity?.role,
+      showClient: showClientColumn,
+      asOf: crmAsOf,
+      businessDays: crmBusinessDays,
+      includeProcessIssues: viewMode === "crm",
+    });
+    if (viewMode !== "combined") return base;
+    const pdcaAsCrm: LeadCrmColumn[] = reportColumns.map((c: LeadReportColumn) => ({
+      id: `pdca:${c.id}`, label: c.label, stage: "lead", width: c.width, minWidth: c.minWidth, align: c.align,
+      value: c.value, render: c.render,
+    }));
+    // Drop the PDCA (getLeadStage) Status and keep the CRM (resolveCrmStatus) Status so the taxonomy is
+    // consistent across CRM and combined modes.
+    return [
+      ...pdcaAsCrm.filter((c) => c.id !== "pdca:status"),
+      ...base.filter((c) => c.stage !== "lead" || c.id === "status"),
+    ];
+  }, [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf, crmBusinessDays]);
   const defaultColumnWidths = useMemo(() => reportColumns.map((c) => c.width), [reportColumns]);
   const minColumnWidths = useMemo(() => reportColumns.map((c) => c.minWidth), [reportColumns]);
   const leadColumns = useResizableColumns({
@@ -521,6 +579,101 @@ function InternalLeadsPage() {
     setDraft(toLeadDraft(selectedLead));
   }
 
+  // Atomic terminal conclusion (ADR-0013) — separate from the draft flow so it can sync `won`.
+  const handleConclude = useCallback(
+    async (finalOutcome: FinalOutcome | null, conclusion: string | null) => {
+      if (!selectedLead) return;
+      setIsConcluding(true);
+      try {
+        await repository.concludeLead(selectedLead.id, finalOutcome, conclusion);
+        toast.success(finalOutcome ? "Lead conclusion saved." : "Conclusion cleared.");
+        refresh();
+      } catch {
+        toast.error("Failed to save conclusion.");
+      } finally {
+        setIsConcluding(false);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert intro/summary meeting (ADR-0013, Phase 5.3). A scheduled/held status fires the DB trigger
+  // that recomputes meeting_booked/meeting_held, so refresh() re-reads the synced booleans.
+  const handleSaveMeeting = useCallback(
+    async (meetingType: "intro" | "summary", patch: LeadMeetingInput) => {
+      if (!selectedLead) return;
+      setSavingMeeting(meetingType);
+      try {
+        await repository.upsertLeadMeeting(selectedLead.id, meetingType, patch);
+        toast.success(`${meetingType === "intro" ? "Intro" : "Summary"} meeting saved.`);
+        refresh();
+      } catch {
+        toast.error("Failed to save meeting.");
+      } finally {
+        setSavingMeeting(null);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert the current offer (ADR-0013, Phase 5.3). A sent/accepted status fires the offer_sent trigger.
+  const handleSaveOffer = useCallback(
+    async (patch: LeadOfferInput) => {
+      if (!selectedLead) return;
+      setSavingOffer(true);
+      try {
+        await repository.upsertLeadOffer(selectedLead.id, patch);
+        toast.success("Offer saved.");
+        refresh();
+      } catch {
+        toast.error("Failed to save offer.");
+      } finally {
+        setSavingOffer(false);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Upsert value delivery 1 or 2 (ADR-0013, Phase 5.3). No boolean trigger — feeds the CRM columns only.
+  const handleSaveValueDelivery = useCallback(
+    async (sequenceNumber: 1 | 2, patch: LeadValueDeliveryInput) => {
+      if (!selectedLead) return;
+      setSavingValueSeq(sequenceNumber);
+      try {
+        await repository.upsertLeadValueDelivery(selectedLead.id, sequenceNumber, patch);
+        toast.success(`${sequenceNumber === 1 ? "1st" : "2nd"} value delivery saved.`);
+        refresh();
+      } catch {
+        toast.error("Failed to save value delivery.");
+      } finally {
+        setSavingValueSeq(null);
+      }
+    },
+    [selectedLead, refresh],
+  );
+
+  // Create/update a task (ADR-0013, Phase 5.3). Reload the task list AND refresh the CRM list so the
+  // open-count / next-due date recompute. `undefined` id = a new task (tracked as "new" for the button).
+  const handleSaveTask = useCallback(
+    async (id: string | undefined, patch: LeadTaskInput): Promise<boolean> => {
+      if (!selectedLead) return false;
+      setSavingTaskId(id ?? "new");
+      try {
+        await repository.upsertLeadTask(selectedLead.id, id, patch);
+        toast.success(id ? "Task saved." : "Task added.");
+        reloadTasks();
+        refresh();
+        return true;
+      } catch {
+        toast.error("Failed to save task.");
+        return false;
+      } finally {
+        setSavingTaskId(null);
+      }
+    },
+    [selectedLead, refresh, reloadTasks],
+  );
+
   function handleStageFilterChange(value: string) {
     const next = value === "all" || PIPELINE_STAGES.some((item) => item.key === value) ? (value as PipelineStage | "all") : "all";
     setStageFilter(next);
@@ -537,7 +690,7 @@ function InternalLeadsPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Leads" subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly." />
+        <PageHeader title="Leads" />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton onClick={() => void refresh()}>Retry data sync</InlineLinkButton>
       </div>
@@ -548,7 +701,6 @@ function InternalLeadsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Leads"
-        subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
@@ -582,7 +734,28 @@ function InternalLeadsPage() {
         }
       />
 
-      <Surface title="Lead filters" subtitle={`Current timeframe: ${timeframeLabel}`}>
+      <Surface
+        title="Lead filters"
+        subtitle={`Current timeframe: ${timeframeLabel}`}
+        actions={
+          <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs">
+            {([["pdca", "PDCA"], ["crm", "CRM"], ["combined", "Combined"]] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                aria-pressed={viewMode === mode}
+                className={cn(
+                  "rounded-lg px-3 py-1.5 transition",
+                  viewMode === mode ? "bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      >
         <div className="space-y-4">
           <div className={`grid gap-4 ${clientsLite.length > 1 ? "xl:grid-cols-[1fr_180px_220px_180px]" : "xl:grid-cols-[1fr_260px_220px]"}`}>
             <div className="relative">
@@ -675,6 +848,18 @@ function InternalLeadsPage() {
             </div>
           )}
           <div className="overflow-hidden rounded-2xl border border-border">
+            {viewMode !== "pdca" ? (
+              <LeadCrmTable
+                rows={rows as LeadCrmRow[]}
+                columns={crmColumns}
+                onRowClick={(lead) => { markInteractionStart("lead-drawer:click"); setSelectedLeadId(lead.id); }}
+                selectedId={selectedLead?.id ?? null}
+                rowAriaLabel={(lead) => `Open details for ${getFullName(lead.first_name, lead.last_name)}`}
+                showStageStrip={viewMode === "crm"}
+                showHealth={viewMode === "crm"}
+                healthContext={crmHealthContext}
+              />
+            ) : (
             <LeadReportTable
               rows={rows}
               columns={reportColumns}
@@ -701,6 +886,7 @@ function InternalLeadsPage() {
                 }
               }}
             />
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -771,7 +957,54 @@ function InternalLeadsPage() {
                     draft={draft}
                     updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
                     readOnly={identity?.role === "client"}
+                    showCrmFields={isCrmView}
                   />
+
+                  {/* CRM child editors (ADR-0013, Phase 5.3) — pure CRM view only. Conclusion owns `won`
+                      (the legacy toggle is hidden above); meetings/offer upserts drive the boolean
+                      recompute triggers; values/tasks feed the read-model columns. Distinct `key`
+                      prefixes keep these siblings from colliding while still remounting per lead. */}
+                  {viewMode === "crm" ? (
+                    <>
+                      <LeadConclusionEditor
+                        key={`conclusion:${selectedLead.id}`}
+                        lead={selectedLead}
+                        readOnly={identity?.role === "client"}
+                        saving={isConcluding}
+                        onSave={handleConclude}
+                      />
+                      <LeadMeetingsEditor
+                        key={`meetings:${selectedLead.id}`}
+                        intro={(selectedLead as LeadCrmRow).intro_meeting}
+                        summary={(selectedLead as LeadCrmRow).summary_meeting}
+                        readOnly={identity?.role === "client"}
+                        savingType={savingMeeting}
+                        onSave={handleSaveMeeting}
+                      />
+                      <LeadOfferEditor
+                        key={`offer:${selectedLead.id}`}
+                        offer={(selectedLead as LeadCrmRow).current_offer}
+                        readOnly={identity?.role === "client"}
+                        saving={savingOffer}
+                        onSave={handleSaveOffer}
+                      />
+                      <LeadValueDeliveriesEditor
+                        key={`values:${selectedLead.id}`}
+                        first={(selectedLead as LeadCrmRow).value_delivery_1}
+                        second={(selectedLead as LeadCrmRow).value_delivery_2}
+                        readOnly={identity?.role === "client"}
+                        savingSeq={savingValueSeq}
+                        onSave={handleSaveValueDelivery}
+                      />
+                      <LeadTasksEditor
+                        tasks={leadTasks}
+                        loading={loadingTasks}
+                        readOnly={identity?.role === "client"}
+                        savingId={savingTaskId}
+                        onSave={handleSaveTask}
+                      />
+                    </>
+                  ) : null}
 
                   {loadingDetail ? (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">

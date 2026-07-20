@@ -190,7 +190,8 @@ Primary mappings:
 - `monthly_sql_kpi` < `clients.kpi_leads`
 - `monthly_meeting_kpi` < `clients.kpi_meetings`
 - `monthly_won_kpi` < `null` (rule is seeded disabled)
-- `auto_li_api_key` < `clients.linkedin_api_key`
+- `auto_li_api_key` < aimfox `client_sequencers.api_key` (was `clients.linkedin_api_key`; ADR-0012)
+- `client.external_workspace_id` / `client.external_api_key` / `client.linkedin_api_key` metric paths < emailbison/aimfox `client_sequencers` rows (ADR-0012) — the path names are kept for live-rule compatibility (`spreadsheet_or_workspace_ids_present` reads `client.external_workspace_id`)
 - `bi_setup` < `clients.bi_setup_done` (context key retained; the **Bi column was removed** from the
   grid and the drawer, so `bi_setup_required` is now seeded disabled and the metric is no longer
   offered in the guided builder)

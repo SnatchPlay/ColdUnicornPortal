@@ -14,13 +14,21 @@ import type {
   ClientCustomFieldRecord,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
+  DomainRecord,
+  EmailAccountRecord,
+  EmailAccountWarmingDailyRecord,
   LeadCustomFieldRecord,
   LeadRecord,
   ReplyRecord,
+  SequencerRecord,
+  MeetingStatus,
+  OfferStatus,
 } from "./core.ts";
+import type { BusinessDayConfig } from "../lib/crm/business-days.ts";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
 // dailyStats array type in ClientsOverviewPayload (no DailyStatRecord fields are added back in this
 // payload — only fields actually consumed by createClientMetrics are shipped).
@@ -261,6 +269,10 @@ export interface ClientsOverviewPayload {
   clientCustomFields: ClientCustomFieldRecord[];
   /** Per-client custom field values. */
   clientCustomFieldValues: ClientCustomFieldValueRecord[];
+  /** Sequencer catalog (ADR-0012; 3 rows, no secrets). */
+  sequencers: SequencerRecord[];
+  /** Per-client sequencer credentials. RLS-scoped: manager-own/admin; empty for client role. */
+  clientSequencers: ClientSequencerRecord[];
 }
 
 /**
@@ -471,6 +483,78 @@ export interface LeadDetailResult {
   replies: ReplyRecord[];
 }
 
+// --- Lead CRM view read-model (ADR-0013) ------------------------------------------------------
+// Flat projection: one row per lead + the current child records the CRM columns render. Health
+// colours + resolved status are FORMULAS the client computes (lib/crm/*), fed the server `asOf`.
+
+/** Displayed intro/summary meeting projection (internal-only fields nulled for the client role). */
+export interface LeadCrmMeeting {
+  status: MeetingStatus | null;
+  scheduled_at: string | null;
+  held_at: string | null;
+  call_script: string | null;
+  transcription_url: string | null;
+  pre_meeting_insights: string | null;
+  process_score: number | null;
+  conversion_insights: string | null;
+}
+export interface LeadCrmOffer {
+  status: OfferStatus | null;
+  contracted_send_date: string | null;
+}
+export interface LeadCrmValueDelivery {
+  planned_date: string | null;
+  value_items: string[];
+  sent_at: string | null;
+}
+
+/** Open (planned/in_progress) task, ordered as the "next steps" list (spec col Y). */
+export interface LeadCrmOpenTask {
+  id: string;
+  title: string;
+  due_at: string | null;
+  status: "planned" | "in_progress";
+  position: number;
+}
+
+/** One flattened CRM row. Extends the leads-list row (LeadRecord + join fields) with child data. */
+export interface LeadCrmRow extends LeadsListRow {
+  intro_meeting: LeadCrmMeeting | null;
+  summary_meeting: LeadCrmMeeting | null;
+  /** Latest non-cancelled offer. */
+  current_offer: LeadCrmOffer | null;
+  /**
+   * Open tasks, ordered (due_at asc nulls last, position, created_at) — the spec col Y "next steps
+   * list". `next_task_due_at` / `open_tasks_count` are derived from this in the gateway for the health
+   * evaluator; the list itself is what col Y renders.
+   */
+  open_tasks: LeadCrmOpenTask[];
+  /** Earliest open task's due date (contracted next-step date, col X). */
+  next_task_due_at: string | null;
+  /** Count of open (planned/in_progress) tasks. */
+  open_tasks_count: number;
+  value_delivery_1: LeadCrmValueDelivery | null;
+  value_delivery_2: LeadCrmValueDelivery | null;
+  /**
+   * Whether the owning client's LinkedIn (Aimfox) integration is connected — an Aimfox
+   * `client_sequencers` credential with an api_key. Drives col I: na when disconnected, so a customer
+   * without LinkedIn automation is never shown a false "invite overdue" (spec item 5).
+   */
+  linkedin_integration_connected: boolean;
+}
+
+export interface LeadCrmListResponse {
+  rows: LeadCrmRow[];
+  totalCount: number;
+  stageCounts: Partial<Record<LeadStageKey, number>>;
+  customFields: LeadCustomFieldRecord[];
+  customValues: Array<{ lead_id: string; field_id: string; value: string | null }>;
+  /** Authoritative server clock — feed to the health evaluator so deadlines are deterministic. */
+  asOf: string;
+  /** Working-day config the health deadlines are evaluated against (ADR-0013). */
+  businessDays: BusinessDayConfig;
+}
+
 // --- Analytics overview (Phase 6) ---------------------------------------------------------------
 // InternalStatisticsPage: server returns scoped daily_stats + lead groups + entity lists.
 // campaignDailyStats are NOT included — the page uses daily_stats for the default time series
@@ -498,9 +582,9 @@ export interface AnalyticsDailyStatInput {
 
 /**
  * Lite client shape for the Analytics overview — only what InternalStatisticsPage reads.
- * Drops: external_workspace_id, external_api_key, min_daily_sent, inboxes_count, crm_config,
- * sms_phone_numbers, notification_emails, auto_ooo_enabled, linkedin_api_key, prospects_signed,
- * prospects_added, setup_info, bi_setup_done, lost_reason, notes, and audit timestamps.
+ * Drops: min_daily_sent, inboxes_count, crm_config, sms_phone_numbers, notification_emails,
+ * auto_ooo_enabled, prospects_signed, prospects_added, setup_info, bi_setup_done, lost_reason,
+ * notes, and audit timestamps. (Sequencer credentials live in client_sequencers — ADR-0012.)
  */
 export interface AnalyticsClientLite {
   id: string;
@@ -516,11 +600,23 @@ export interface AnalyticsClientLite {
 // Per-page focused payloads replacing the 16MB global loadSnapshot for these three routes.
 // Mutations go through repository.X() directly; refresh() re-runs the loader.
 
-/** Payload for DomainsPage — full client rows (scopeClients/scopeDomains need manager_id). */
+/** Payload for DomainsPage — full client rows (scopeClients/scopeDomains need manager_id).
+ *  emailAccounts powers the per-domain mailbox panel in the detail view. */
 export interface DomainsPagePayload {
   clients: ClientRecord[];
   domains: DomainRecord[];
+  emailAccounts: EmailAccountRecord[];
 }
+
+/** Payload for EmailAccountsPage — clients + domains for scoping/labels, plus the mailboxes. */
+export interface EmailAccountsPagePayload {
+  clients: ClientRecord[];
+  domains: DomainRecord[];
+  emailAccounts: EmailAccountRecord[];
+}
+
+/** Lazily-loaded per-mailbox warming history for the trend chart (metric_date asc). */
+export type EmailAccountWarmingPayload = EmailAccountWarmingDailyRecord[];
 
 /** Payload for InvoicesPage — full client rows (scopeClients/scopeInvoices need manager_id). */
 export interface InvoicesPagePayload {

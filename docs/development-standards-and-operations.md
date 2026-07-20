@@ -141,7 +141,7 @@ Frontend gets the **publishable** key only. Runtime config is read in
 | Var | Purpose |
 |---|---|
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Primary project (`bnetnuzxynmdftiadwef`) |
-| `VITE_ORM_GATEWAY_FUNCTION` | Which gateway function to call (`orm-gateway` \| `orm-gateway-next`) |
+| `VITE_ORM_GATEWAY_FUNCTION` | Which gateway function to call. Defaults to the canonical `orm-gateway`; override only for a dev build targeting a temporary WIP function |
 | `VITE_APP_ENV` | Gates impersonation (non-production only) and makes `VITE_APP_BASE_URL` required |
 | `VITE_APP_BASE_URL` | Auth redirect base |
 | `VITE_AUTH_INVITE_ONLY` | Invite-only sign-up |

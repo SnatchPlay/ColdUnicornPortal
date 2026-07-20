@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, pgPolicy, uuid, timestamp, text, date, varchar, smallint, numeric, boolean, integer, unique, jsonb, pgView, pgEnum } from "drizzle-orm/pg-core"
+import { pgTable, index, foreignKey, pgPolicy, primaryKey, uuid, timestamp, text, date, varchar, smallint, numeric, boolean, integer, unique, jsonb, pgView, pgEnum } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const campaignStatus = pgEnum("campaign_status", ['draft', 'launching', 'active', 'stopped', 'completed'])
@@ -10,6 +10,11 @@ export const leadGender = pgEnum("lead_gender", ['male', 'female'])
 export const leadQualification = pgEnum("lead_qualification", ['preMQL', 'MQL', 'meeting_scheduled', 'meeting_held', 'offer_sent', 'won', 'rejected', 'OOO', 'NRR'])
 export const replyClassification = pgEnum("reply_classification", ['OOO', 'Interested', 'NRR', 'Left_Company', 'Spam_Inbound', 'other'])
 export const userRole = pgEnum("user_role", ['super_admin', 'admin', 'master_admin', 'manager', 'client'])
+export const meetingType = pgEnum("meeting_type", ['intro', 'summary', 'general'])
+export const meetingStatus = pgEnum("meeting_status", ['planned', 'scheduled', 'held', 'cancelled', 'no_show'])
+export const offerStatus = pgEnum("offer_status", ['planned', 'sent', 'accepted', 'rejected', 'cancelled'])
+export const taskStatus = pgEnum("task_status", ['planned', 'in_progress', 'completed', 'cancelled', 'skipped'])
+export const finalOutcome = pgEnum("final_outcome", ['won', 'lost', 'lost_premql'])
 
 
 export const leads = pgTable("leads", {
@@ -50,6 +55,15 @@ export const leads = pgTable("leads", {
 	clientNote: text("client_note"),
 	coldunicornNote: text("coldunicorn_note"),
 	highlight: text(),
+	sequencerId: uuid("sequencer_id").default(sql`'00000000-0000-4000-a000-000000000002'::uuid`).notNull(),
+	linkedinInvitationSentAt: timestamp("linkedin_invitation_sent_at", { withTimezone: true, mode: 'string' }),
+	contactMadeAt: timestamp("contact_made_at", { withTimezone: true, mode: 'string' }),
+	contactMethod: text("contact_method"),
+	negotiationStartedAt: timestamp("negotiation_started_at", { withTimezone: true, mode: 'string' }),
+	conclusion: text(),
+	concludedAt: timestamp("concluded_at", { withTimezone: true, mode: 'string' }),
+	finalOutcome: finalOutcome("final_outcome"),
+	contactDisposition: text("contact_disposition"),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),
@@ -136,6 +150,8 @@ export const campaigns = pgTable("campaigns", {
 	positiveResponses: integer("positive_responses").default(0).notNull(),
 	startDate: date("start_date"),
 	genderTarget: varchar("gender_target", { length: 10 }),
+	// ADR-0012: sequencer attribution. DB default = EmailBison (fixed load-bearing UUID).
+	sequencerId: uuid("sequencer_id").default(sql`'00000000-0000-4000-a000-000000000002'::uuid`).notNull(),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -184,17 +200,14 @@ export const clients = pgTable("clients", {
 	kpiMeetings: smallint("kpi_meetings"),
 	contractedAmount: numeric("contracted_amount"),
 	contractDueDate: date("contract_due_date"),
-	externalWorkspaceId: integer("external_workspace_id"),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: clientStatus().notNull(),
-	externalApiKey: text("external_api_key"),
 	minDailySent: smallint("min_daily_sent").default(0).notNull(),
 	inboxesCount: smallint("inboxes_count").default(0).notNull(),
 	crmConfig: jsonb("crm_config").default({}),
 	smsPhoneNumbers: text("sms_phone_numbers").array(),
 	notificationEmails: text("notification_emails").array(),
 	autoOooEnabled: boolean("auto_ooo_enabled").default(false).notNull(),
-	linkedinApiKey: text("linkedin_api_key"),
 	prospectsSigned: integer("prospects_signed").default(0).notNull(),
 	prospectsAdded: integer("prospects_added").default(0).notNull(),
 	setupInfo: text("setup_info"),
@@ -208,7 +221,6 @@ export const clients = pgTable("clients", {
 			foreignColumns: [users.id],
 			name: "clients_manager_id_fkey"
 		}),
-	unique("clients_external_workspace_id_key").on(table.externalWorkspaceId),
 	pgPolicy("clients_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: sql`private.can_access_client(id)` }),
 	pgPolicy("clients_update_scoped", { as: "permissive", for: "update", to: ["authenticated"] }),
 ]);
@@ -403,13 +415,13 @@ export const domains = pgTable("domains", {
 	domainName: text("domain_name").notNull(),
 	setupEmail: text("setup_email").notNull(),
 	purchaseDate: date("purchase_date").notNull(),
-	exchangeDate: date("exchange_date").notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: domainStatus(),
-	reputation: text(),
-	exchangeCost: numeric("exchange_cost", { precision: 8, scale:  2 }),
-	campaignVerifiedAt: date("campaign_verified_at"),
-	warmupVerifiedAt: date("warmup_verified_at"),
+	// Winnr mailbox-provider status, kept separate from the local domain_status enum above
+	// (20260720f). Ingestion-only — n8n writes it via service_role. Other Winnr sync columns
+	// (winnr_domain_id, dns_provider, winnr_tags, last_synced_at, raw_payload, …) exist in the DB
+	// but are not declared here because the gateway neither reads nor writes them.
+	winnrStatus: text("winnr_status"),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -421,6 +433,71 @@ export const domains = pgTable("domains", {
 	pgPolicy("domains_update_scoped", { as: "permissive", for: "update", to: ["authenticated"] }),
 	pgPolicy("domains_delete_scoped", { as: "permissive", for: "delete", to: ["authenticated"] }),
 ]);
+
+// Ingestion-only (n8n via service_role writes; portal reads). Set-based SELECT RLS scoped through
+// domain → client, mirroring replies / campaign_daily_stats (ADR-0006). See 20260720e migration.
+const emailAccountSelect = sql`(domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))`;
+const warmingDailySelect = sql`(email_account_id IN ( SELECT ea.id FROM email_accounts ea WHERE (ea.domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))))`;
+
+export const emailAccounts = pgTable("email_accounts", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	domainId: uuid("domain_id").notNull(),
+	winnrEmailUserId: text("winnr_email_user_id").notNull(),
+	emailAddress: text("email_address").notNull(),
+	username: text(),
+	displayName: text("display_name"),
+	status: text(),
+	warmingStatus: text("warming_status"),
+	warmingHealthScore: numeric("warming_health_score"),
+	warmingInboxRate: numeric("warming_inbox_rate"),
+	warmingSpamRate: numeric("warming_spam_rate"),
+	warmingDailyVolume: integer("warming_daily_volume"),
+	warmingProgress: numeric("warming_progress"),
+	winnrCreatedAt: timestamp("winnr_created_at", { withTimezone: true, mode: 'string' }),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
+	missingSince: timestamp("missing_since", { withTimezone: true, mode: 'string' }),
+	rawPayload: jsonb("raw_payload").default({}).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("email_accounts_domain_id_idx").using("btree", table.domainId.asc().nullsLast()),
+	index("email_accounts_warming_status_idx").using("btree", table.warmingStatus.asc().nullsLast()),
+	// NOTE: the case-insensitive unique index email_accounts_email_uq on lower(email_address) lives
+	// only in 20260720e_email_accounts_warming.sql — drizzle-kit does not model the lower() expression.
+	foreignKey({ columns: [table.domainId], foreignColumns: [domains.id], name: "email_accounts_domain_id_fkey" }).onDelete("cascade"),
+	unique("email_accounts_winnr_email_user_id_key").on(table.winnrEmailUserId),
+	pgPolicy("email_accounts_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: emailAccountSelect }),
+]);
+
+export const emailAccountWarmingDaily = pgTable("email_account_warming_daily", {
+	emailAccountId: uuid("email_account_id").notNull(),
+	metricDate: date("metric_date").notNull(),
+	warmingStatus: text("warming_status"),
+	emailsSent: integer("emails_sent"),
+	healthScore: numeric("health_score"),
+	inboxRate: numeric("inbox_rate"),
+	spamRate: numeric("spam_rate"),
+	dailyVolume: integer("daily_volume"),
+	warmupProgress: numeric("warmup_progress"),
+	rawPayload: jsonb("raw_payload").default({}).notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("email_account_warming_date_idx").using("btree", table.metricDate.asc().nullsLast()),
+	foreignKey({ columns: [table.emailAccountId], foreignColumns: [emailAccounts.id], name: "email_account_warming_daily_email_account_id_fkey" }).onDelete("cascade"),
+	primaryKey({ columns: [table.emailAccountId, table.metricDate], name: "email_account_warming_daily_pkey" }),
+	pgPolicy("email_account_warming_daily_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: warmingDailySelect }),
+]);
+
+export const domainWarmingSummary = pgView("domain_warming_summary", {
+	domainId: uuid("domain_id"),
+	emailAccountsCount: integer("email_accounts_count"),
+	activeWarmingAccountsCount: integer("active_warming_accounts_count"),
+	averageHealthScore: numeric("average_health_score"),
+	lowestInboxRate: numeric("lowest_inbox_rate"),
+	highestSpamRate: numeric("highest_spam_rate"),
+}).with({"securityInvoker":"on"}).as(sql`SELECT d.id AS domain_id, count(ea.id)::integer AS email_accounts_count, count(ea.id) FILTER (WHERE ea.warming_status = 'active')::integer AS active_warming_accounts_count, avg(ea.warming_health_score) AS average_health_score, min(ea.warming_inbox_rate) AS lowest_inbox_rate, max(ea.warming_spam_rate) AS highest_spam_rate FROM domains d LEFT JOIN email_accounts ea ON ea.domain_id = d.id GROUP BY d.id`);
+
 export const adminDashboardDaily = pgView("admin_dashboard_daily", {	reportDate: date("report_date"),
 	clientId: uuid("client_id"),
 	sentCount: integer("sent_count"),
@@ -430,3 +507,94 @@ export const adminDashboardDaily = pgView("admin_dashboard_daily", {	reportDate:
 	positiveRepliesCount: integer("positive_replies_count"),
 	inboxesActive: integer("inboxes_active"),
 }).with({"securityInvoker":"on"}).as(sql`SELECT cds.report_date, c.client_id, sum(cds.sent_count)::integer AS sent_count, sum(cds.reply_count)::integer AS reply_count, sum(cds.bounce_count)::integer AS bounce_count, sum(cds.unique_open_count)::integer AS unique_open_count, sum(cds.positive_replies_count)::integer AS positive_replies_count, sum(cds.inboxes_active)::integer AS inboxes_active FROM campaign_daily_stats cds JOIN campaigns c ON c.id = cds.campaign_id WHERE cds.report_date >= (CURRENT_DATE - '21 days'::interval) GROUP BY cds.report_date, c.client_id`);
+
+// --- Lead CRM child tables (ADR-0013, migrations 20260719*) -----------------------------------
+const leadChildSelect = sql`(lead_id IN ( SELECT l.id FROM leads l WHERE (l.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))`;
+const leadChildWrite = sql`(lead_id IN ( SELECT l.id FROM leads l WHERE (l.client_id IN ( SELECT clients.id FROM clients WHERE private.can_manage_client(clients.id)))))`;
+
+export const leadMeetings = pgTable("lead_meetings", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	leadId: uuid("lead_id").notNull(),
+	meetingType: meetingType("meeting_type").notNull(),
+	status: meetingStatus().default('planned').notNull(),
+	callScript: text("call_script"),
+	scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: 'string' }),
+	heldAt: timestamp("held_at", { withTimezone: true, mode: 'string' }),
+	meetingUrl: text("meeting_url"),
+	calendarEventId: text("calendar_event_id"),
+	transcriptionUrl: text("transcription_url"),
+	preMeetingInsights: text("pre_meeting_insights"),
+	preMeetingInsightsGeneratedAt: timestamp("pre_meeting_insights_generated_at", { withTimezone: true, mode: 'string' }),
+	processScore: numeric("process_score", { precision: 5, scale: 2 }),
+	conversionInsights: text("conversion_insights"),
+	postMeetingAnalysisGeneratedAt: timestamp("post_meeting_analysis_generated_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_lead_meetings_lead_type").using("btree", table.leadId.asc().nullsLast(), table.meetingType.asc().nullsLast()),
+	// NOTE: two partial unique indexes (uq_lead_meetings_intro / uq_lead_meetings_summary, one intro +
+	// one summary per lead) live only in 20260719_lead_crm_tables.sql — drizzle-kit does not model the
+	// `WHERE meeting_type = …` predicate, so they are intentionally not declared here.
+	foreignKey({ columns: [table.leadId], foreignColumns: [leads.id], name: "lead_meetings_lead_id_fkey" }).onDelete("cascade"),
+	pgPolicy("lead_meetings_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: leadChildSelect }),
+	pgPolicy("lead_meetings_write_scoped", { as: "permissive", for: "all", to: ["authenticated"], using: leadChildWrite, withCheck: leadChildWrite }),
+]);
+
+export const leadOffers = pgTable("lead_offers", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	leadId: uuid("lead_id").notNull(),
+	status: offerStatus().default('planned').notNull(),
+	contractedSendDate: date("contracted_send_date"),
+	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }),
+	offerUrl: text("offer_url"),
+	notes: text(),
+	sourceMeetingId: uuid("source_meeting_id"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_lead_offers_lead_created").using("btree", table.leadId.asc().nullsLast(), table.createdAt.desc().nullsLast()),
+	foreignKey({ columns: [table.leadId], foreignColumns: [leads.id], name: "lead_offers_lead_id_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.sourceMeetingId], foreignColumns: [leadMeetings.id], name: "lead_offers_source_meeting_id_fkey" }).onDelete("set null"),
+	pgPolicy("lead_offers_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: leadChildSelect }),
+	pgPolicy("lead_offers_write_scoped", { as: "permissive", for: "all", to: ["authenticated"], using: leadChildWrite, withCheck: leadChildWrite }),
+]);
+
+export const leadTasks = pgTable("lead_tasks", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	leadId: uuid("lead_id").notNull(),
+	title: text().notNull(),
+	dueAt: timestamp("due_at", { withTimezone: true, mode: 'string' }),
+	status: taskStatus().default('planned').notNull(),
+	startedAt: timestamp("started_at", { withTimezone: true, mode: 'string' }),
+	completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }),
+	sourceMeetingId: uuid("source_meeting_id"),
+	notes: text(),
+	position: smallint().default(0).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_lead_tasks_lead_status_due").using("btree", table.leadId.asc().nullsLast(), table.status.asc().nullsLast(), table.dueAt.asc().nullsLast()),
+	foreignKey({ columns: [table.leadId], foreignColumns: [leads.id], name: "lead_tasks_lead_id_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.sourceMeetingId], foreignColumns: [leadMeetings.id], name: "lead_tasks_source_meeting_id_fkey" }).onDelete("set null"),
+	pgPolicy("lead_tasks_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: leadChildSelect }),
+	pgPolicy("lead_tasks_write_scoped", { as: "permissive", for: "all", to: ["authenticated"], using: leadChildWrite, withCheck: leadChildWrite }),
+]);
+
+export const leadValueDeliveries = pgTable("lead_value_deliveries", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	leadId: uuid("lead_id").notNull(),
+	sequenceNumber: smallint("sequence_number").notNull(),
+	plannedDate: date("planned_date"),
+	valueItems: text("value_items").array().default(sql`'{}'::text[]`).notNull(),
+	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }),
+	sourceMeetingId: uuid("source_meeting_id"),
+	notes: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("uq_lead_value_deliveries_seq").on(table.leadId, table.sequenceNumber),
+	foreignKey({ columns: [table.leadId], foreignColumns: [leads.id], name: "lead_value_deliveries_lead_id_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.sourceMeetingId], foreignColumns: [leadMeetings.id], name: "lead_value_deliveries_source_meeting_id_fkey" }).onDelete("set null"),
+	pgPolicy("lead_value_deliveries_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: leadChildSelect }),
+	pgPolicy("lead_value_deliveries_write_scoped", { as: "permissive", for: "all", to: ["authenticated"], using: leadChildWrite, withCheck: leadChildWrite }),
+]);

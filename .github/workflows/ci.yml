@@ -77,7 +77,7 @@ jobs:
           version: latest
       - name: Deploy functions
         run: |
-          supabase functions deploy orm-gateway orm-gateway-next send-invite manage-invites \
+          supabase functions deploy orm-gateway send-invite manage-invites \
             --project-ref bnetnuzxynmdftiadwef
 
   # ── Deploy the frontend to the self-hosted server ─────────────────────────────────────────────

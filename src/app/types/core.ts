@@ -39,6 +39,35 @@ export type ReplyClassification =
 export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
 /** Manual report row highlight colour (Batch 4). `null` = no highlight. */
 export type LeadHighlight = "green" | "yellow" | "red";
+
+// --- Lead CRM view (Cold CRM / PDCA spec, ADR-0013 split status model) -------------------------
+/** Non-terminal funnel position — DERIVED on read from activity facts, never stored. */
+export type CrmStage = "preMQL" | "MQL" | "SQL";
+/** Explicit terminal decision — STORED on `leads.final_outcome` with `conclusion` + `concluded_at`. */
+/** Single source for terminal-outcome values — shared by the gateway validator and the editor select. */
+export const FINAL_OUTCOME_VALUES = ["won", "lost", "lost_premql"] as const;
+export type FinalOutcome = (typeof FINAL_OUTCOME_VALUES)[number];
+/** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification`. Domain names
+ *  are canonical (spec item 10); the legacy `OOO`/`NRR` abbreviations survive only as the qualification
+ *  input values mapped in `mapLegacyQualificationToDisposition`. */
+export type ContactDisposition = "out_of_office" | "not_right_role";
+/** The resolved single display/health status (a `CrmStage` or a `FinalOutcome`). */
+export type LeadCrmStatus = CrmStage | FinalOutcome;
+export type ContactMethod = "phone" | "email";
+/** `intro`/`summary` are the one-per-lead meetings the CRM view renders. `general` is RESERVED for a
+ *  future repeatable meeting type (spec item 9): the enum value exists, but it has NO CRUD and is
+ *  intentionally rejected by `upsertLeadMeeting` (which is intro|summary only), because that path relies
+ *  on the partial-unique `(lead_id, meeting_type)` index that must not apply to a repeatable type. */
+export type MeetingType = "intro" | "summary" | "general";
+/** Single source for the meeting-status values — shared by the gateway validator and the editor select. */
+export const MEETING_STATUS_VALUES = ["planned", "scheduled", "held", "cancelled", "no_show"] as const;
+export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
+/** Single source for offer-status values — shared by the gateway validator and the editor select. */
+export const OFFER_STATUS_VALUES = ["planned", "sent", "accepted", "rejected", "cancelled"] as const;
+export type OfferStatus = (typeof OFFER_STATUS_VALUES)[number];
+/** Single source for task-status values — shared by the gateway validator and the editor select. */
+export const TASK_STATUS_VALUES = ["planned", "in_progress", "completed", "cancelled", "skipped"] as const;
+export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 export type ConditionTargetEntity = "client" | "campaign" | "lead";
 export type ConditionScopeType = "global" | "client" | "manager";
 export type ConditionApplyTo = "row" | "cell" | "badge" | "section";
@@ -88,16 +117,13 @@ export interface ClientRecord {
   kpi_meetings: number | null;
   contracted_amount: number | null;
   contract_due_date: string | null;
-  external_workspace_id: number | null;
   status: ClientStatus;
-  external_api_key: string | null;
   min_daily_sent: number;
   inboxes_count: number;
   crm_config: Record<string, unknown> | null;
   sms_phone_numbers: string[] | null;
   notification_emails: string[] | null;
   auto_ooo_enabled: boolean;
-  linkedin_api_key: string | null;
   prospects_signed: number;
   prospects_added: number;
   setup_info: string | null;
@@ -114,6 +140,37 @@ export interface ClientUserRecord {
   user_id: string;
 }
 
+// ── Sequencers (ADR-0012) ─────────────────────────────────────────────────────
+// External sending tools (Smartlead / EmailBison / Aimfox). Catalog rows carry
+// fixed load-bearing UUIDs (column defaults + n8n constants); per-client
+// credentials live in client_sequencers (replaced clients.external_api_key /
+// external_workspace_id / linkedin_api_key).
+
+export type SequencerChannel = "email" | "linkedin";
+
+export interface SequencerRecord {
+  id: string;
+  /** Stable machine key: 'smartlead' | 'emailbison' | 'aimfox' | future additions. */
+  key: string;
+  name: string;
+  channel: SequencerChannel;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface ClientSequencerRecord {
+  id: string;
+  client_id: string;
+  sequencer_id: string;
+  api_key: string | null;
+  /** Text on purpose — workspace id formats differ per platform. */
+  external_workspace_id: string | null;
+  settings: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CampaignRecord {
   id: string;
   created_at: string;
@@ -127,6 +184,8 @@ export interface CampaignRecord {
   positive_responses: number;
   start_date: string | null;
   gender_target: string | null;
+  /** ADR-0012: owning sequencer. Set at creation (DB default = EmailBison); immutable via portal. */
+  sequencer_id: string;
 }
 
 export interface LeadRecord {
@@ -170,6 +229,85 @@ export interface LeadRecord {
   coldunicorn_note: string | null;
   /** Manual report row highlight; `null` when unset. */
   highlight: LeadHighlight | null;
+  /** Sequencer attribution (ADR-0012); DEFAULT EmailBison. */
+  sequencer_id: string;
+  // Lead CRM columns (ADR-0013).
+  linkedin_invitation_sent_at: string | null;
+  contact_made_at: string | null;
+  contact_method: ContactMethod | null;
+  negotiation_started_at: string | null;
+  /** Free-text conclusion recorded with a terminal `final_outcome`. */
+  conclusion: string | null;
+  concluded_at: string | null;
+  /** Explicit terminal outcome; `null` = non-terminal (funnel stage is derived). */
+  final_outcome: FinalOutcome | null;
+  /** Persisted contact disposition (n8n-owned), independent of `qualification`; `null` = active. */
+  contact_disposition: ContactDisposition | null;
+}
+
+/** Meeting attached to a lead (spec §8.2). Intro/summary are one-per-lead; general repeats. */
+export interface LeadMeetingRecord {
+  id: string;
+  lead_id: string;
+  meeting_type: MeetingType;
+  status: MeetingStatus;
+  call_script: string | null;
+  scheduled_at: string | null;
+  held_at: string | null;
+  meeting_url: string | null;
+  calendar_event_id: string | null;
+  transcription_url: string | null;
+  pre_meeting_insights: string | null;
+  pre_meeting_insights_generated_at: string | null;
+  process_score: number | null;
+  conversion_insights: string | null;
+  post_meeting_analysis_generated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Offer attached to a lead (spec §8.3). Multiple offers/revisions allowed. */
+export interface LeadOfferRecord {
+  id: string;
+  lead_id: string;
+  status: OfferStatus;
+  contracted_send_date: string | null;
+  sent_at: string | null;
+  offer_url: string | null;
+  notes: string | null;
+  source_meeting_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Next-step task attached to a lead (spec §8.4). No `task_type` in MVP. */
+export interface LeadTaskRecord {
+  id: string;
+  lead_id: string;
+  title: string;
+  due_at: string | null;
+  status: TaskStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  source_meeting_id: string | null;
+  notes: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Additional-value delivery attached to a lead (spec §8.5). `sequence_number` 1/2 shown in the view. */
+export interface LeadValueDeliveryRecord {
+  id: string;
+  lead_id: string;
+  sequence_number: number;
+  planned_date: string | null;
+  value_items: string[];
+  sent_at: string | null;
+  source_meeting_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ReplyRecord {
@@ -227,17 +365,18 @@ export interface DailyStatRecord {
 export interface DomainRecord {
   id: string;
   created_at: string;
-  client_id: string;
+  /** Null for Winnr-synced domains not yet linked to a client (no linking UI yet). */
+  client_id: string | null;
   domain_name: string;
-  setup_email: string;
-  purchase_date: string;
-  exchange_date: string;
+  /** Null on Winnr-synced domains; only portal-created domains require it. */
+  setup_email: string | null;
+  /** Null on Winnr-synced domains; only portal-created domains require it. */
+  purchase_date: string | null;
   updated_at: string;
+  /** Local, portal-editable lifecycle status. */
   status: DomainStatus | null;
-  reputation: string | null;
-  exchange_cost: number | null;
-  campaign_verified_at: string | null;
-  warmup_verified_at: string | null;
+  /** Winnr mailbox-provider status (ingestion-only, read-only in the portal). Separate from `status`. */
+  winnr_status: string | null;
 }
 
 export interface InvoiceRecord {
@@ -248,6 +387,57 @@ export interface InvoiceRecord {
   amount: number;
   status: string | null;
   updated_at: string | null;
+}
+
+/**
+ * A Winnr mailbox and its current warming snapshot. Ingestion-only: n8n populates this from
+ * Winnr (/v1/email-users + /v1/warming); the portal only reads. Warming statuses are free `text`
+ * because the taxonomy is owned by the external API. History lives in EmailAccountWarmingDailyRecord.
+ */
+export interface EmailAccountRecord {
+  id: string;
+  domain_id: string;
+  winnr_email_user_id: string;
+  email_address: string;
+  username: string | null;
+  display_name: string | null;
+  status: string | null;
+  warming_status: string | null;
+  warming_health_score: number | null;
+  warming_inbox_rate: number | null;
+  warming_spam_rate: number | null;
+  warming_daily_volume: number | null;
+  warming_progress: number | null;
+  winnr_created_at: string | null;
+  last_seen_at: string;
+  last_synced_at: string | null;
+  missing_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One day of a mailbox's warming history (from /v1/warming/{id}/metrics). Ingestion-only. */
+export interface EmailAccountWarmingDailyRecord {
+  email_account_id: string;
+  metric_date: string;
+  warming_status: string | null;
+  emails_sent: number | null;
+  health_score: number | null;
+  inbox_rate: number | null;
+  spam_rate: number | null;
+  daily_volume: number | null;
+  warmup_progress: number | null;
+  synced_at: string;
+}
+
+/** Domain-level warming aggregate from the domain_warming_summary view. */
+export interface DomainWarmingSummaryRecord {
+  domain_id: string;
+  email_accounts_count: number;
+  active_warming_accounts_count: number;
+  average_health_score: number | null;
+  lowest_inbox_rate: number | null;
+  highest_spam_rate: number | null;
 }
 
 export interface EmailExcludeRecord {

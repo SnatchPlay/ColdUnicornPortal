@@ -3,13 +3,14 @@ import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
-import { formatDate, formatMoney } from "../lib/format";
-import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
+import { formatDate, formatNumber } from "../lib/format";
+import { DomainsSectionTabs } from "../components/domains-tabs";
+import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useDomainsPage } from "../lib/use-domains";
 import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import type { ClientRecord, DomainRecord, DomainStatus } from "../types/core";
+import type { ClientRecord, DomainRecord, DomainStatus, EmailAccountRecord } from "../types/core";
 
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
 const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
@@ -19,20 +20,14 @@ interface CreateDomainDraft {
   domainName: string;
   setupEmail: string;
   purchaseDate: string;
-  exchangeDate: string;
-  exchangeCost: number | null;
   status: DomainStatus | "";
 }
 
 type SortDirection = "asc" | "desc";
-type DomainSortKey = "domain" | "client" | "status" | "reputation";
+type DomainSortKey = "domain" | "client" | "status" | "winnr";
 
 interface DomainDraft {
   status: DomainStatus | "";
-  reputation: string;
-  exchangeCost: number | null;
-  campaignVerifiedAt: string;
-  warmupVerifiedAt: string;
 }
 
 function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
@@ -50,34 +45,15 @@ function sortIndicator(active: boolean, direction: SortDirection) {
 function toDomainDraft(domain: DomainRecord): DomainDraft {
   return {
     status: domain.status ?? "",
-    reputation: domain.reputation ?? "",
-    exchangeCost: domain.exchange_cost,
-    campaignVerifiedAt: domain.campaign_verified_at ?? "",
-    warmupVerifiedAt: domain.warmup_verified_at ?? "",
   };
 }
 
 function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<DomainRecord> {
   const patch: Partial<DomainRecord> = {};
   const nextStatus = draft.status || null;
-  const nextReputation = draft.reputation.trim() || null;
-  const nextCampaignDate = draft.campaignVerifiedAt.trim() || null;
-  const nextWarmupDate = draft.warmupVerifiedAt.trim() || null;
 
   if ((domain.status ?? null) !== nextStatus) {
     patch.status = nextStatus;
-  }
-  if ((domain.reputation ?? null) !== nextReputation) {
-    patch.reputation = nextReputation;
-  }
-  if (domain.exchange_cost !== draft.exchangeCost) {
-    patch.exchange_cost = draft.exchangeCost;
-  }
-  if ((domain.campaign_verified_at ?? null) !== nextCampaignDate) {
-    patch.campaign_verified_at = nextCampaignDate;
-  }
-  if ((domain.warmup_verified_at ?? null) !== nextWarmupDate) {
-    patch.warmup_verified_at = nextWarmupDate;
   }
 
   return patch;
@@ -86,6 +62,7 @@ function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<Dom
 // Stable empty-array fallbacks — prevents new-reference cascades during loading.
 const EMPTY_CLIENTS: ClientRecord[] = [];
 const EMPTY_DOMAINS: DomainRecord[] = [];
+const EMPTY_ACCOUNTS: EmailAccountRecord[] = [];
 
 // ── CreateDomainSheetHost ──────────────────────────────────────────────────────────────────────
 // Owns the "is sheet open" boolean so that opening/closing New Domain does NOT re-render
@@ -129,8 +106,6 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
       domainName: "",
       setupEmail: "",
       purchaseDate: "",
-      exchangeDate: "",
-      exchangeCost: null,
       status: "",
     });
     setIsOpen(true);
@@ -142,8 +117,7 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
       !draft.clientId ||
       !draft.domainName.trim() ||
       !draft.setupEmail.trim() ||
-      !draft.purchaseDate ||
-      !draft.exchangeDate
+      !draft.purchaseDate
     ) return;
     setIsSubmitting(true);
     try {
@@ -221,31 +195,6 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
             </label>
 
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange date *</span>
-              <input
-                type="date"
-                value={draft.exchangeDate}
-                onChange={(e) => setDraft((d) => d ? { ...d, exchangeDate: e.target.value } : d)}
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-sky-400/40"
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange cost</span>
-              <input
-                type="number"
-                min={0}
-                value={draft.exchangeCost ?? ""}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setDraft((d) => d ? { ...d, exchangeCost: Number.isFinite(v) && e.target.value !== "" ? Math.max(0, v) : null } : d);
-                }}
-                placeholder="Optional"
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500 focus:border-sky-400/40"
-              />
-            </label>
-
-            <label className="block space-y-2">
               <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
               <Select
                 value={draft.status || DOMAIN_UNSET_VALUE}
@@ -270,8 +219,7 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
                 !draft.clientId ||
                 !draft.domainName.trim() ||
                 !draft.setupEmail.trim() ||
-                !draft.purchaseDate ||
-                !draft.exchangeDate
+                !draft.purchaseDate
               }
               className="w-full rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -316,6 +264,11 @@ export function DomainsPage() {
     [clients, identity],
   );
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
+  const emailAccounts = data?.emailAccounts ?? EMPTY_ACCOUNTS;
+  const scopedAccounts = useMemo(
+    () => (identity ? scopeEmailAccounts(identity, clients, domains, emailAccounts) : []),
+    [clients, domains, emailAccounts, identity],
+  );
 
   const filteredDomains = useMemo(() => {
     return scopedDomains.filter((item) => {
@@ -323,7 +276,7 @@ export function DomainsPage() {
       const matchesQuery =
         search.length === 0 ||
         item.domain_name.toLowerCase().includes(search) ||
-        item.setup_email.toLowerCase().includes(search);
+        (item.setup_email ?? "").toLowerCase().includes(search);
       const matchesStatus = statusFilter === "all" || (item.status ?? "") === statusFilter;
       return matchesQuery && matchesStatus;
     });
@@ -342,7 +295,7 @@ export function DomainsPage() {
       if (domainSort.key === "status") {
         return compareText(left.status, right.status, domainSort.direction);
       }
-      return compareText(left.reputation, right.reputation, domainSort.direction);
+      return compareText(left.winnr_status, right.winnr_status, domainSort.direction);
     });
   }, [domainSort.direction, domainSort.key, filteredDomains, scopedClients]);
 
@@ -351,8 +304,14 @@ export function DomainsPage() {
 
   const selectedClientName = useMemo(() => {
     if (!selectedDomain) return "Unknown client";
+    if (selectedDomain.client_id === null) return "Unlinked";
     return scopedClients.find((item) => item.id === selectedDomain.client_id)?.name ?? "Unknown client";
   }, [scopedClients, selectedDomain]);
+
+  const domainAccounts = useMemo(
+    () => (selectedDomain ? scopedAccounts.filter((item) => item.domain_id === selectedDomain.id) : []),
+    [scopedAccounts, selectedDomain],
+  );
 
   useEffect(() => {
     if (!selectedDomain) {
@@ -377,12 +336,7 @@ export function DomainsPage() {
         domain_name: d.domainName.trim(),
         setup_email: d.setupEmail.trim(),
         purchase_date: d.purchaseDate,
-        exchange_date: d.exchangeDate,
-        exchange_cost: d.exchangeCost,
         status: (d.status as DomainStatus) || null,
-        reputation: null,
-        campaign_verified_at: null,
-        warmup_verified_at: null,
       });
       refresh();
     },
@@ -453,6 +407,8 @@ export function DomainsPage() {
         }
       />
 
+      <DomainsSectionTabs />
+
       {sortedDomains.length === 0 ? (
         <EmptyState
           title="No domains in current scope"
@@ -501,7 +457,7 @@ export function DomainsPage() {
                     { key: "domain" as const, label: "Domain" },
                     { key: "client" as const, label: "Client" },
                     { key: "status" as const, label: "Status" },
-                    { key: "reputation" as const, label: "Reputation" },
+                    { key: "winnr" as const, label: "Winnr status" },
                   ].map((column, index, collection) => (
                     <div key={column.key} className="relative min-w-0">
                       <button
@@ -525,7 +481,10 @@ export function DomainsPage() {
                 <div className="divide-y divide-border md:min-w-[1200px]">
                   {sortedDomains.map((domain) => {
                     const active = selectedDomain?.id === domain.id;
-                    const clientName = scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
+                    const clientName =
+                      domain.client_id === null
+                        ? "Unlinked"
+                        : scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
                     return (
                       <button
                         key={domain.id}
@@ -540,14 +499,14 @@ export function DomainsPage() {
                             <span className="truncate text-sm text-white">{domain.domain_name}</span>
                             <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
                           </div>
-                          <p className="mt-1 text-xs text-neutral-500">{clientName}{domain.reputation ? ` · ${domain.reputation}` : ""}</p>
+                          <p className="mt-1 text-xs text-neutral-500">{clientName}{domain.winnr_status ? ` · Winnr: ${domain.winnr_status}` : ""}</p>
                         </div>
                         {/* Desktop table row */}
                         <div className="hidden min-w-[1200px] items-center gap-3 [grid-template-columns:var(--domains-table-columns)] md:grid">
                           <span className="truncate text-sm text-white">{domain.domain_name}</span>
                           <span className="truncate text-sm text-neutral-300">{clientName}</span>
                           <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
-                          <span className="truncate text-sm text-neutral-300">{domain.reputation ?? "—"}</span>
+                          <span className="truncate text-sm text-neutral-300">{domain.winnr_status ?? "—"}</span>
                         </div>
                       </button>
                     );
@@ -557,7 +516,7 @@ export function DomainsPage() {
             </div>
           </Surface>
 
-          <Surface title="Domain detail" subtitle="Edit verification and reputation metadata.">
+          <Surface title="Domain detail" subtitle="Edit local status; Winnr warming is read-only.">
             {!selectedDomain || !draft ? (
               <EmptyState
                 title="Select a domain"
@@ -591,19 +550,19 @@ export function DomainsPage() {
                   </div>
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup email</p>
-                    <p className="mt-2 text-sm">{selectedDomain.setup_email}</p>
+                    <p className="mt-2 text-sm">{selectedDomain.setup_email ?? "—"}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Purchase date</p>
                     <p className="mt-2 text-sm">{formatDate(selectedDomain.purchase_date)}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange date</p>
-                    <p className="mt-2 text-sm">{formatDate(selectedDomain.exchange_date)}</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Winnr status</p>
+                    <p className="mt-2 text-sm">{selectedDomain.winnr_status ?? "—"}</p>
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="max-w-sm">
                   <label className="space-y-2">
                     <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
                     <Select
@@ -638,65 +597,35 @@ export function DomainsPage() {
                       </SelectContent>
                     </Select>
                   </label>
+                </div>
 
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Reputation</span>
-                    <input
-                      value={draft.reputation}
-                      onChange={(event) =>
-                        setDraft((current) => (current ? { ...current, reputation: event.target.value } : current))
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Exchange cost</span>
-                    <input
-                      type="number"
-                      value={draft.exchangeCost ?? 0}
-                      onChange={(event) =>
-                        setDraft((current) => {
-                          if (!current) return current;
-                          const next = Number(event.target.value);
-                          return {
-                            ...current,
-                            exchangeCost: Number.isFinite(next) ? Math.max(0, next) : null,
-                          };
-                        })
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                    <p className="text-xs text-muted-foreground">Current: {formatMoney(selectedDomain.exchange_cost)}</p>
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Campaign verified at</span>
-                    <input
-                      type="date"
-                      value={draft.campaignVerifiedAt}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current ? { ...current, campaignVerifiedAt: event.target.value } : current,
-                        )
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Warmup verified at</span>
-                    <input
-                      type="date"
-                      value={draft.warmupVerifiedAt}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current ? { ...current, warmupVerifiedAt: event.target.value } : current,
-                        )
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
+                <div className="rounded-2xl border border-border bg-black/10 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email accounts</p>
+                    <span className="text-xs text-neutral-500">{domainAccounts.length} mailboxes</span>
+                  </div>
+                  {domainAccounts.length === 0 ? (
+                    <p className="mt-3 text-sm text-neutral-500">No mailboxes synced for this domain yet.</p>
+                  ) : (
+                    <div className="mt-3 overflow-hidden rounded-xl border border-border">
+                      <div className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] gap-2 border-b border-border bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                        <span>Email</span>
+                        <span>Warming</span>
+                        <span className="text-right">Health</span>
+                        <span className="text-right">Inbox</span>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {domainAccounts.map((account) => (
+                          <div key={account.id} className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] items-center gap-2 px-3 py-2 text-sm">
+                            <span className="truncate text-white">{account.email_address}</span>
+                            <span className="truncate text-xs uppercase tracking-[0.12em] text-neutral-400">{account.warming_status ?? "unset"}</span>
+                            <span className="text-right text-neutral-300">{formatNumber(account.warming_health_score)}</span>
+                            <span className="text-right text-neutral-300">{formatNumber(account.warming_inbox_rate)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

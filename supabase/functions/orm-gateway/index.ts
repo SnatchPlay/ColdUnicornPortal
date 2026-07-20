@@ -1,4 +1,4 @@
-﻿import { and, asc, desc, eq, gte, sql } from "npm:drizzle-orm@0.45.2";
+﻿import { and, asc, desc, eq, gte, ne, sql } from "npm:drizzle-orm@0.45.2";
 import { inArray } from "npm:drizzle-orm@0.45.2";
 import { drizzle } from "npm:drizzle-orm@0.45.2/postgres-js";
 import postgres from "npm:postgres@3.4.9";
@@ -9,6 +9,8 @@ import {
   type OrmGatewayEnvelope,
   type OrmGatewayRequest,
 } from "../../../src/app/data/orm-gateway-contract.ts";
+import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
+import { MEETING_STATUS_VALUES, OFFER_STATUS_VALUES, TASK_STATUS_VALUES } from "../../../src/app/types/core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -142,16 +144,13 @@ function toClientRecord(row: typeof schema.clients.$inferSelect) {
     kpi_meetings: row.kpiMeetings,
     contracted_amount: normalizeNumeric(row.contractedAmount),
     contract_due_date: row.contractDueDate,
-    external_workspace_id: row.externalWorkspaceId,
     status: row.status,
-    external_api_key: row.externalApiKey,
     min_daily_sent: row.minDailySent,
     inboxes_count: row.inboxesCount,
     crm_config: row.crmConfig,
     sms_phone_numbers: row.smsPhoneNumbers,
     notification_emails: row.notificationEmails,
     auto_ooo_enabled: row.autoOooEnabled,
-    linkedin_api_key: row.linkedinApiKey,
     prospects_signed: row.prospectsSigned,
     prospects_added: row.prospectsAdded,
     setup_info: row.setupInfo,
@@ -185,6 +184,7 @@ function toCampaignRecord(row: typeof schema.campaigns.$inferSelect) {
     positive_responses: row.positiveResponses,
     start_date: row.startDate,
     gender_target: row.genderTarget,
+    sequencer_id: row.sequencerId,
   };
 }
 
@@ -227,6 +227,15 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     client_note: row.clientNote,
     coldunicorn_note: row.coldunicornNote,
     highlight: row.highlight,
+    // Lead CRM columns (ADR-0013). Mapped so mutation returns (updateLead/concludeLead) are authoritative.
+    linkedin_invitation_sent_at: row.linkedinInvitationSentAt,
+    contact_made_at: row.contactMadeAt,
+    contact_method: row.contactMethod,
+    negotiation_started_at: row.negotiationStartedAt,
+    conclusion: row.conclusion,
+    concluded_at: row.concludedAt,
+    final_outcome: row.finalOutcome,
+    contact_disposition: row.contactDisposition,
   };
 }
 
@@ -238,13 +247,48 @@ function toDomainRecord(row: typeof schema.domains.$inferSelect) {
     domain_name: row.domainName,
     setup_email: row.setupEmail,
     purchase_date: row.purchaseDate,
-    exchange_date: row.exchangeDate,
     updated_at: row.updatedAt,
     status: row.status,
-    reputation: row.reputation,
-    exchange_cost: normalizeNumeric(row.exchangeCost),
-    campaign_verified_at: row.campaignVerifiedAt,
-    warmup_verified_at: row.warmupVerifiedAt,
+    winnr_status: row.winnrStatus,
+  };
+}
+
+function toEmailAccountRecord(row: typeof schema.emailAccounts.$inferSelect) {
+  return {
+    id: row.id,
+    domain_id: row.domainId,
+    winnr_email_user_id: row.winnrEmailUserId,
+    email_address: row.emailAddress,
+    username: row.username,
+    display_name: row.displayName,
+    status: row.status,
+    warming_status: row.warmingStatus,
+    warming_health_score: normalizeNumeric(row.warmingHealthScore),
+    warming_inbox_rate: normalizeNumeric(row.warmingInboxRate),
+    warming_spam_rate: normalizeNumeric(row.warmingSpamRate),
+    warming_daily_volume: row.warmingDailyVolume,
+    warming_progress: normalizeNumeric(row.warmingProgress),
+    winnr_created_at: row.winnrCreatedAt,
+    last_seen_at: row.lastSeenAt,
+    last_synced_at: row.lastSyncedAt,
+    missing_since: row.missingSince,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+function toEmailAccountWarmingRecord(row: typeof schema.emailAccountWarmingDaily.$inferSelect) {
+  return {
+    email_account_id: row.emailAccountId,
+    metric_date: row.metricDate,
+    warming_status: row.warmingStatus,
+    emails_sent: row.emailsSent,
+    health_score: normalizeNumeric(row.healthScore),
+    inbox_rate: normalizeNumeric(row.inboxRate),
+    spam_rate: normalizeNumeric(row.spamRate),
+    daily_volume: row.dailyVolume,
+    warmup_progress: normalizeNumeric(row.warmupProgress),
+    synced_at: row.syncedAt,
   };
 }
 
@@ -302,16 +346,13 @@ function mapClientPatch(patch: Record<string, unknown>) {
   if ("kpi_meetings" in patch) mapped.kpiMeetings = patch.kpi_meetings;
   if ("contracted_amount" in patch) mapped.contractedAmount = patch.contracted_amount;
   if ("contract_due_date" in patch) mapped.contractDueDate = patch.contract_due_date;
-  if ("external_workspace_id" in patch) mapped.externalWorkspaceId = patch.external_workspace_id;
   if ("status" in patch) mapped.status = patch.status;
-  if ("external_api_key" in patch) mapped.externalApiKey = patch.external_api_key;
   if ("min_daily_sent" in patch) mapped.minDailySent = patch.min_daily_sent;
   if ("inboxes_count" in patch) mapped.inboxesCount = patch.inboxes_count;
   if ("crm_config" in patch) mapped.crmConfig = patch.crm_config;
   if ("sms_phone_numbers" in patch) mapped.smsPhoneNumbers = patch.sms_phone_numbers;
   if ("notification_emails" in patch) mapped.notificationEmails = patch.notification_emails;
   if ("auto_ooo_enabled" in patch) mapped.autoOooEnabled = patch.auto_ooo_enabled;
-  if ("linkedin_api_key" in patch) mapped.linkedinApiKey = patch.linkedin_api_key;
   if ("prospects_signed" in patch) mapped.prospectsSigned = patch.prospects_signed;
   if ("prospects_added" in patch) mapped.prospectsAdded = patch.prospects_added;
   if ("setup_info" in patch) mapped.setupInfo = patch.setup_info;
@@ -331,6 +372,21 @@ function mapCampaignPatch(patch: Record<string, unknown>) {
   if ("positive_responses" in patch) mapped.positiveResponses = patch.positive_responses;
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
+}
+
+/** Acceptable value for a timestamptz/date column edited via a date input: null or a `YYYY-MM-DD…`
+ *  string. Guards direct-date writes so a malformed value is skipped rather than reaching Postgres. */
+function isDateish(v: unknown): v is string | null {
+  return v === null || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v));
+}
+
+/** Empty patch → return the existing row unchanged (avoids an invalid empty `SET`); else update by id.
+ *  Shared by the keyed lead-child upserts (meeting / value delivery / current offer). */
+// deno-lint-ignore no-explicit-any
+async function updateOrKeep(tx: any, table: { id: unknown }, existingRow: { id: string }, input: Record<string, unknown>) {
+  if (Object.keys(input).length === 0) return existingRow;
+  // deno-lint-ignore no-explicit-any
+  return (await (tx as any).update(table).set(input).where(eq((table as any).id, existingRow.id)).returning())[0];
 }
 
 function mapLeadPatch(patch: Record<string, unknown>) {
@@ -364,18 +420,147 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   // OOO state
   if ("expected_return_date" in patch) mapped.expectedReturnDate = patch.expected_return_date;
   if ("added_to_ooo_campaign" in patch) mapped.addedToOooCampaign = patch.added_to_ooo_campaign;
+  // Lead CRM operational state (ADR-0013, Phase 5.2). Editable dates/method that drive the CRM health
+  // columns. Terminal-status columns (final_outcome/conclusion/concluded_at) are NOT here — only the
+  // atomic concludeLead action writes them. Dates are validated (null or a YYYY-MM-DD... string) so a
+  // malformed value is skipped rather than reaching Postgres as a 500.
+  const setDate = (key: string, drizzleKey: string) => {
+    if (key in patch && isDateish(patch[key])) mapped[drizzleKey] = patch[key];
+  };
+  setDate("linkedin_invitation_sent_at", "linkedinInvitationSentAt");
+  setDate("contact_made_at", "contactMadeAt");
+  setDate("negotiation_started_at", "negotiationStartedAt");
+  // contact_method has a DB CHECK (phone|email); coerce anything else to NULL rather than 500 on write.
+  if ("contact_method" in patch) mapped.contactMethod = patch.contact_method === "phone" || patch.contact_method === "email" ? patch.contact_method : null;
   // Bookkeeping
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }
 
+const MEETING_STATUSES = new Set<string>(MEETING_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned meeting fields (ADR-0013, Phase 5.3). AI-generated fields
+ *  (transcription/insights/score) are NOT writable here — n8n owns them. Every field is validated so
+ *  a malformed value is dropped rather than reaching Postgres as a 500. */
+function mapLeadMeetingInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("status" in patch && typeof patch.status === "string" && MEETING_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("scheduled_at" in patch && isDateish(patch.scheduled_at)) m.scheduledAt = patch.scheduled_at;
+  if ("held_at" in patch && isDateish(patch.held_at)) m.heldAt = patch.held_at;
+  if ("call_script" in patch && (patch.call_script === null || typeof patch.call_script === "string")) m.callScript = patch.call_script;
+  return m;
+}
+
+function toLeadMeetingRecord(row: typeof schema.leadMeetings.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    meeting_type: row.meetingType,
+    status: row.status,
+    call_script: row.callScript,
+    scheduled_at: row.scheduledAt,
+    held_at: row.heldAt,
+    meeting_url: row.meetingUrl,
+    calendar_event_id: row.calendarEventId,
+    transcription_url: row.transcriptionUrl,
+    pre_meeting_insights: row.preMeetingInsights,
+    pre_meeting_insights_generated_at: row.preMeetingInsightsGeneratedAt,
+    process_score: normalizeNumeric(row.processScore),
+    conversion_insights: row.conversionInsights,
+    post_meeting_analysis_generated_at: row.postMeetingAnalysisGeneratedAt,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+const OFFER_STATUSES = new Set<string>(OFFER_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned offer fields (ADR-0013, Phase 5.3). Validated so a malformed value
+ *  is dropped rather than 500. */
+function mapLeadOfferInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("status" in patch && typeof patch.status === "string" && OFFER_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("contracted_send_date" in patch && isDateish(patch.contracted_send_date)) m.contractedSendDate = patch.contracted_send_date;
+  return m;
+}
+
+function toLeadOfferRecord(row: typeof schema.leadOffers.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    status: row.status,
+    contracted_send_date: row.contractedSendDate,
+    sent_at: row.sentAt,
+    offer_url: row.offerUrl,
+    notes: row.notes,
+    source_meeting_id: row.sourceMeetingId,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+/** Whitelist the CS-manager-owned value-delivery fields (ADR-0013, Phase 5.3). Validated so malformed
+ *  values are dropped rather than 500. planned_date is a DATE; sent_at a timestamptz. */
+function mapLeadValueDeliveryInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("planned_date" in patch && isDateish(patch.planned_date)) m.plannedDate = patch.planned_date;
+  if ("sent_at" in patch && isDateish(patch.sent_at)) m.sentAt = patch.sent_at;
+  if ("value_items" in patch && Array.isArray(patch.value_items) && patch.value_items.every((x) => typeof x === "string")) {
+    m.valueItems = patch.value_items;
+  }
+  return m;
+}
+
+function toLeadValueDeliveryRecord(row: typeof schema.leadValueDeliveries.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    sequence_number: row.sequenceNumber,
+    planned_date: row.plannedDate,
+    value_items: row.valueItems ?? [],
+    sent_at: row.sentAt,
+    source_meeting_id: row.sourceMeetingId,
+    notes: row.notes,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+const TASK_STATUSES = new Set<string>(TASK_STATUS_VALUES);
+
+/** Whitelist the CS-manager-owned task fields (ADR-0013, Phase 5.3). Validated so malformed values are
+ *  dropped rather than 500. */
+function mapLeadTaskInput(patch: Record<string, unknown>) {
+  const m: Record<string, unknown> = {};
+  if ("title" in patch && typeof patch.title === "string") m.title = patch.title;
+  if ("due_at" in patch && isDateish(patch.due_at)) m.dueAt = patch.due_at;
+  if ("status" in patch && typeof patch.status === "string" && TASK_STATUSES.has(patch.status)) m.status = patch.status;
+  if ("notes" in patch && (patch.notes === null || typeof patch.notes === "string")) m.notes = patch.notes;
+  return m;
+}
+
+function toLeadTaskRecord(row: typeof schema.leadTasks.$inferSelect) {
+  return {
+    id: row.id,
+    lead_id: row.leadId,
+    title: row.title,
+    due_at: row.dueAt,
+    status: row.status,
+    started_at: row.startedAt,
+    completed_at: row.completedAt,
+    source_meeting_id: row.sourceMeetingId,
+    notes: row.notes,
+    position: row.position,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
 function mapDomainPatch(patch: Record<string, unknown>) {
+  // Only the local domain_status enum is portal-editable. winnr_status and the other Winnr sync
+  // columns are ingestion-only (n8n via service_role) — never accept them from a portal patch.
   const mapped: Record<string, unknown> = {};
   if ("status" in patch) mapped.status = patch.status;
-  if ("reputation" in patch) mapped.reputation = patch.reputation;
-  if ("exchange_cost" in patch) mapped.exchangeCost = patch.exchange_cost;
-  if ("campaign_verified_at" in patch) mapped.campaignVerifiedAt = patch.campaign_verified_at;
-  if ("warmup_verified_at" in patch) mapped.warmupVerifiedAt = patch.warmup_verified_at;
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }
@@ -423,15 +608,12 @@ function mapClientInsert(input: Record<string, unknown>) {
     kpiMeetings: input.kpi_meetings ?? null,
     contractedAmount: input.contracted_amount ?? null,
     contractDueDate: input.contract_due_date ?? null,
-    externalWorkspaceId: input.external_workspace_id ?? null,
-    externalApiKey: input.external_api_key ?? null,
     minDailySent: input.min_daily_sent ?? 0,
     inboxesCount: input.inboxes_count ?? 0,
     crmConfig: input.crm_config ?? null,
     smsPhoneNumbers: input.sms_phone_numbers ?? null,
     notificationEmails: input.notification_emails ?? null,
     autoOooEnabled: input.auto_ooo_enabled ?? false,
-    linkedinApiKey: input.linkedin_api_key ?? null,
     prospectsSigned: input.prospects_signed ?? 0,
     prospectsAdded: input.prospects_added ?? 0,
     setupInfo: input.setup_info ?? null,
@@ -452,6 +634,8 @@ function mapCampaignInsert(input: Record<string, unknown>) {
     positiveResponses: input.positive_responses ?? 0,
     startDate: input.start_date ?? null,
     genderTarget: input.gender_target ?? null,
+    // ADR-0012: omit when not provided → DB default (EmailBison) applies.
+    sequencerId: (input.sequencer_id as string | null | undefined) ?? undefined,
   };
 }
 
@@ -489,12 +673,7 @@ function mapDomainInsert(input: Record<string, unknown>) {
     domainName: input.domain_name,
     setupEmail: input.setup_email,
     purchaseDate: input.purchase_date,
-    exchangeDate: input.exchange_date,
     status: input.status ?? null,
-    reputation: input.reputation ?? null,
-    exchangeCost: input.exchange_cost ?? null,
-    campaignVerifiedAt: input.campaign_verified_at ?? null,
-    warmupVerifiedAt: input.warmup_verified_at ?? null,
   };
 }
 
@@ -597,6 +776,76 @@ function toClientCustomFieldValueRecord(row: Record<string, unknown>) {
         : String(row.updated_at ?? ""),
     updated_by: row.updated_by === null || row.updated_by === undefined ? null : String(row.updated_by),
   };
+}
+
+// ADR-0012 sequencer tables (raw SQL — not in drizzle schema).
+
+function toSequencerRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    key: String(row.key),
+    name: String(row.name),
+    channel: String(row.channel) as "email" | "linkedin",
+    enabled: Boolean(row.enabled),
+    created_at:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
+  };
+}
+
+function toClientSequencerRecord(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    client_id: String(row.client_id),
+    sequencer_id: String(row.sequencer_id),
+    api_key: row.api_key === null || row.api_key === undefined ? null : String(row.api_key),
+    external_workspace_id:
+      row.external_workspace_id === null || row.external_workspace_id === undefined
+        ? null
+        : String(row.external_workspace_id),
+    settings: (row.settings ?? {}) as Record<string, unknown>,
+    enabled: Boolean(row.enabled),
+    created_at:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
+    updated_at:
+      row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at ?? ""),
+  };
+}
+
+// Upsert one client↔sequencer settings row, resolving the sequencer by catalog key.
+// Only fields present in `patch` overwrite existing values (upsertColumnOverride pattern).
+async function upsertClientSequencerRow(
+  tx: any,
+  clientId: string,
+  sequencerKey: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const apiKeyProvided = "api_key" in patch;
+  const workspaceProvided = "external_workspace_id" in patch;
+  const settingsProvided = "settings" in patch;
+  const enabledProvided = "enabled" in patch;
+  const rows = await tx.execute(sql`
+    insert into public.client_sequencers (client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, updated_at)
+    select
+      ${clientId},
+      s.id,
+      ${apiKeyProvided ? (patch.api_key as string | null) ?? null : null},
+      ${workspaceProvided ? (patch.external_workspace_id as string | null) ?? null : null},
+      ${settingsProvided ? JSON.stringify(patch.settings ?? {}) : "{}"}::jsonb,
+      ${enabledProvided ? Boolean(patch.enabled) : true},
+      now()
+    from public.sequencers s
+    where s.key = ${sequencerKey}
+    on conflict (client_id, sequencer_id) do update set
+      api_key = case when ${apiKeyProvided} then excluded.api_key else public.client_sequencers.api_key end,
+      external_workspace_id = case when ${workspaceProvided} then excluded.external_workspace_id else public.client_sequencers.external_workspace_id end,
+      settings = case when ${settingsProvided} then excluded.settings else public.client_sequencers.settings end,
+      enabled = case when ${enabledProvided} then excluded.enabled else public.client_sequencers.enabled end,
+      updated_at = excluded.updated_at
+    returning id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
+  `);
+  const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
+  if (!result[0]) fail(400, `Unknown sequencer key "${sequencerKey}" or upsert rejected by RLS.`);
+  return result[0];
 }
 
 // Generic typed raw-SQL executor. Rows are returned as plain objects; caller is responsible for
@@ -1198,7 +1447,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer.
         tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
@@ -1240,6 +1489,20 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           SELECT client_id, field_id, value, updated_at, updated_by
           FROM public.client_custom_field_values
         `),
+
+        // Sequencer catalog (ADR-0012; 3 rows, no secrets).
+        safeRawSelect(tx, sql`
+          SELECT id, key, name, channel, enabled, created_at
+          FROM public.sequencers
+          ORDER BY key ASC
+        `),
+
+        // Per-client sequencer credentials — RLS (can_manage_client) already scopes
+        // rows to manager-own/admin; the client role gets zero rows.
+        safeRawSelect(tx, sql`
+          SELECT id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
+          FROM public.client_sequencers
+        `),
       ]);
 
     const durationMs = performance.now() - t0;
@@ -1247,7 +1510,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       `[PERF][orm-gateway] loadClientsOverview (shell): ${durationMs.toFixed(1)}ms ` +
         `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
-        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length})`,
+        `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
+        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length})`,
     );
 
     return {
@@ -1258,6 +1522,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       columnOverrides: (columnOverrideRows as Record<string, unknown>[]).map(toColumnOverrideRecord),
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
+      sequencers: (sequencerRows as Record<string, unknown>[]).map(toSequencerRecord),
+      clientSequencers: (clientSequencerRows as Record<string, unknown>[]).map(toClientSequencerRecord),
     };
   }
 
@@ -1732,6 +1998,344 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     };
   }
 
+  if (payload.action === "loadLeadCrmList") {
+    // CRM view read-model (ADR-0013): loadLeadsList's filter/sort/pagination + joined child records.
+    // Health colours + resolved status are FORMULAS the client computes from these facts + `asOf`.
+    const p = payload.params;
+    const t0 = performance.now();
+    const pageSize = Math.min(Math.max(1, p.pageSize ?? 50), 100);
+    const offset = (Math.max(1, p.page ?? 1) - 1) * pageSize;
+
+    // Resolve the caller's app role AND the server clock ONCE. The role lets us null internal-only CRM
+    // fields for the client role in the TS mapping (ADR-0013 §6) instead of an inline CASE per column
+    // (private.current_app_role() is unusable here — authenticated lacks USAGE). `now()` is the DB
+    // transaction clock: asOf must share the clock that wrote the child timestamps so health deadline
+    // math is not thrown off by edge-runtime clock skew.
+    const ctxRows = await rawQuery<{ role: string | null; server_now: unknown }>(tx, sql`
+      SELECT
+        (SELECT u.role FROM public.users u WHERE u.id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid) AS role,
+        now() AS server_now
+    `);
+    const isClient = ctxRows[0]?.role === "client";
+    // Normalize the DB clock to strict ISO — postgres.js may hand back `now()` as a raw
+    // "YYYY-MM-DD HH:MM:SS+00" string (toIsoString only ISO-formats Date instances), and the health
+    // evaluator's contract is an ISO `asOf`.
+    const parsedNow = ctxRows[0]?.server_now ? new Date(String(ctxRows[0].server_now)) : null;
+    const asOf = parsedNow && !Number.isNaN(parsedNow.getTime()) ? parsedNow.toISOString() : new Date().toISOString();
+
+    const stageExpr = sql`
+      CASE
+        WHEN l.won = true THEN 'won'
+        WHEN l.offer_sent = true THEN 'offer_sent'
+        WHEN l.meeting_held = true THEN 'meeting_held'
+        WHEN l.meeting_booked = true THEN 'meeting_scheduled'
+        WHEN l.qualification IS NULL THEN 'unqualified'
+        ELSE l.qualification::text
+      END
+    `;
+
+    const baseWhereParts: ReturnType<typeof sql>[] = [];
+    if (p.clientId) baseWhereParts.push(sql`l.client_id = ${p.clientId}`);
+    if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
+    if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
+    if (p.dateTo) baseWhereParts.push(sql`l.created_at <= ${p.dateTo}`);
+    if (p.replyScope === "ooo") baseWhereParts.push(sql`l.qualification = 'OOO'`);
+    if (p.replyScope === "active") baseWhereParts.push(sql`l.qualification IS DISTINCT FROM 'OOO'`);
+    if (p.search) {
+      const needle = `%${p.search.toLowerCase()}%`;
+      baseWhereParts.push(sql`(
+        LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.email, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.company_name, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.job_title, '')) LIKE ${needle}
+        OR LOWER(COALESCE(l.country, '')) LIKE ${needle}
+      )`);
+    }
+    const baseWhereClause = baseWhereParts.length > 0 ? sql`WHERE ${sql.join(baseWhereParts, sql` AND `)}` : sql``;
+    const dataWhereParts = p.stage ? [...baseWhereParts, sql`(${stageExpr}) = ${p.stage}`] : baseWhereParts;
+    const dataWhereClause = dataWhereParts.length > 0 ? sql`WHERE ${sql.join(dataWhereParts, sql` AND `)}` : sql``;
+
+    const dirSql = p.sortDir === "asc" ? sql`ASC` : sql`DESC`;
+    const dirSqlTie = sql`ASC`;
+    let orderClause: ReturnType<typeof sql>;
+    if (p.sortField === "lead") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "client") {
+      orderClause = sql`ORDER BY LOWER(c.name) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "company") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(l.company_name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "status") {
+      orderClause = sql`ORDER BY (${stageExpr}) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "campaign") {
+      orderClause = sql`ORDER BY LOWER(COALESCE(camp.name, '')) ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "step") {
+      orderClause = sql`ORDER BY l.message_number ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "replies") {
+      orderClause = sql`ORDER BY reply_count ${dirSql}, l.id ${dirSqlTie}`;
+    } else if (p.sortField === "lastReply") {
+      orderClause = sql`ORDER BY last_reply_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    } else {
+      orderClause = sql`ORDER BY l.created_at ${dirSql} NULLS LAST, l.id ${dirSqlTie}`;
+    }
+
+    const stageCountRows = await rawQuery<{ stage: string; count: number }>(tx, sql`
+      SELECT (${stageExpr}) AS stage, COUNT(*)::int AS count
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      ${baseWhereClause}
+      GROUP BY 1
+    `);
+
+    // One flat data query. Child cardinality is bounded (intro/summary unique per lead; LATERAL
+    // LIMIT 1 for current offer / next task; deliveries unique per sequence) → no N+1, no row fan-out.
+    const dataRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        l.id, l.created_at, l.updated_at, l.client_id,
+        l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
+        l.company_name, l.linkedin_url, l.gender, l.qualification,
+        l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+        l.industry, l.headcount_range, l.website, l.country,
+        l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
+        l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
+        l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+        l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id,
+        l.linkedin_invitation_sent_at, l.contact_made_at, l.contact_method,
+        l.negotiation_started_at, l.concluded_at, l.final_outcome, l.contact_disposition,
+        -- coldunicorn_note + conclusion are internal-only; nulled for the client role in TS via isClient.
+        l.coldunicorn_note, l.conclusion,
+        c.name AS client_name,
+        camp.name AS campaign_name,
+        COALESCE(r.reply_count, 0)::int AS reply_count,
+        r.last_reply_at,
+        im.status AS intro_status, im.scheduled_at AS intro_scheduled_at, im.held_at AS intro_held_at,
+        im.call_script AS intro_call_script, im.transcription_url AS intro_transcription_url,
+        im.pre_meeting_insights AS intro_pre_meeting_insights, im.process_score AS intro_process_score,
+        im.conversion_insights AS intro_conversion_insights,
+        sm.status AS summary_status, sm.scheduled_at AS summary_scheduled_at, sm.held_at AS summary_held_at,
+        sm.call_script AS summary_call_script, sm.transcription_url AS summary_transcription_url,
+        sm.pre_meeting_insights AS summary_pre_meeting_insights, sm.process_score AS summary_process_score,
+        sm.conversion_insights AS summary_conversion_insights,
+        co.status AS offer_status, co.contracted_send_date AS offer_contracted_send_date,
+        ot.open_tasks,
+        d1.planned_date AS d1_planned_date, d1.value_items AS d1_value_items, d1.sent_at AS d1_sent_at,
+        d2.planned_date AS d2_planned_date, d2.value_items AS d2_value_items, d2.sent_at AS d2_sent_at,
+        -- LinkedIn (Aimfox) integration applicability for col I (spec item 5): an Aimfox credential with
+        -- an api_key on the owning client. RLS-scoped like every other read in this transaction.
+        EXISTS (
+          SELECT 1 FROM client_sequencers cs
+          WHERE cs.client_id = l.client_id
+            AND cs.sequencer_id = '00000000-0000-4000-a000-000000000003'
+            AND cs.api_key IS NOT NULL
+        ) AS linkedin_integration_connected
+      FROM leads l
+      JOIN clients c ON c.id = l.client_id
+      LEFT JOIN campaigns camp ON camp.id = l.campaign_id
+      LEFT JOIN (
+        SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
+        FROM replies GROUP BY lead_id
+      ) r ON r.lead_id = l.id
+      LEFT JOIN lead_meetings im ON im.lead_id = l.id AND im.meeting_type = 'intro'
+      LEFT JOIN lead_meetings sm ON sm.lead_id = l.id AND sm.meeting_type = 'summary'
+      LEFT JOIN LATERAL (
+        SELECT o.status, o.contracted_send_date FROM lead_offers o
+        WHERE o.lead_id = l.id AND o.status <> 'cancelled'
+        ORDER BY o.created_at DESC LIMIT 1
+      ) co ON TRUE
+      LEFT JOIN LATERAL (
+        -- Open tasks as an ordered list (spec col Y). next_task_due_at + open_tasks_count are derived
+        -- from the first element / length in TS, so the ordering here is the single source of truth.
+        SELECT COALESCE(
+          json_agg(
+            json_build_object('id', t.id, 'title', t.title, 'due_at', t.due_at, 'status', t.status, 'position', t.position)
+            ORDER BY t.due_at ASC NULLS LAST, t.position ASC, t.created_at ASC
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'::json
+        ) AS open_tasks
+        FROM lead_tasks t
+        WHERE t.lead_id = l.id AND t.status IN ('planned', 'in_progress')
+      ) ot ON TRUE
+      LEFT JOIN lead_value_deliveries d1 ON d1.lead_id = l.id AND d1.sequence_number = 1
+      LEFT JOIN lead_value_deliveries d2 ON d2.lead_id = l.id AND d2.sequence_number = 2
+      ${dataWhereClause}
+      ${orderClause}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
+
+    const stageCounts: Record<string, number> = {};
+    let totalCount = 0;
+    for (const row of stageCountRows) {
+      stageCounts[String(row.stage)] = row.count ?? 0;
+      totalCount += row.count ?? 0;
+    }
+
+    const str = (v: unknown): string | null => (v ? String(v) : null);
+    const num = (v: unknown): number | null => (v != null ? Number(v) : null);
+    const mapMeeting = (r: Record<string, unknown>, prefix: string) => {
+      const status = r[`${prefix}_status`];
+      const scheduled = r[`${prefix}_scheduled_at`];
+      const held = r[`${prefix}_held_at`];
+      if (!status && !scheduled && !held) return null; // no meeting row joined
+      return {
+        status: status ? String(status) : null,
+        scheduled_at: scheduled ? toIsoString(scheduled) : null,
+        held_at: held ? toIsoString(held) : null,
+        // Internal-only fields (ADR-0013 §6): nulled for the client role.
+        call_script: isClient ? null : str(r[`${prefix}_call_script`]),
+        transcription_url: isClient ? null : str(r[`${prefix}_transcription_url`]),
+        pre_meeting_insights: isClient ? null : str(r[`${prefix}_pre_meeting_insights`]),
+        process_score: isClient ? null : num(r[`${prefix}_process_score`]),
+        conversion_insights: isClient ? null : str(r[`${prefix}_conversion_insights`]),
+      };
+    };
+    const mapOpenTasks = (r: Record<string, unknown>) => {
+      const raw = r.open_tasks;
+      let list: unknown[] = [];
+      if (Array.isArray(raw)) {
+        list = raw;
+      } else if (typeof raw === "string") {
+        // postgres.js normally returns json as a parsed array; the string path is a defensive fallback
+        // for a driver/config that hands back raw text. Never let a malformed blob crash the whole page.
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch {
+          list = [];
+        }
+      }
+      return list
+        .map((t) => t as Record<string, unknown>)
+        .map((t) => ({
+          id: String(t.id),
+          title: t.title == null ? "" : String(t.title),
+          due_at: t.due_at ? toIsoString(t.due_at) : null,
+          status: (t.status === "in_progress" ? "in_progress" : "planned") as "planned" | "in_progress",
+          position: Number(t.position ?? 0),
+        }));
+    };
+    const mapDelivery = (r: Record<string, unknown>, prefix: string) => {
+      const planned = r[`${prefix}_planned_date`];
+      const items = r[`${prefix}_value_items`];
+      const sent = r[`${prefix}_sent_at`];
+      if (!planned && !sent && !(Array.isArray(items) && items.length > 0)) return null;
+      return {
+        planned_date: planned ? String(planned) : null,
+        value_items: Array.isArray(items) ? items.map((x) => String(x)) : [],
+        sent_at: sent ? toIsoString(sent) : null,
+      };
+    };
+
+    const rows = dataRows.map((r) => {
+      // Ordered open-tasks list; next_task_due_at + open_tasks_count derive from it so the SQL ordering
+      // is the single source of truth (col X/Y).
+      const openTasks = mapOpenTasks(r);
+      return {
+      id: String(r.id),
+      created_at: r.created_at ? toIsoString(r.created_at) ?? "" : "",
+      updated_at: r.updated_at ? toIsoString(r.updated_at) ?? "" : "",
+      client_id: String(r.client_id),
+      campaign_id: str(r.campaign_id),
+      email: str(r.email),
+      first_name: str(r.first_name),
+      last_name: str(r.last_name),
+      job_title: str(r.job_title),
+      company_name: str(r.company_name),
+      linkedin_url: str(r.linkedin_url),
+      gender: str(r.gender),
+      qualification: str(r.qualification),
+      expected_return_date: str(r.expected_return_date),
+      external_id: str(r.external_id),
+      phone_number: str(r.phone_number),
+      phone_source: str(r.phone_source),
+      industry: str(r.industry),
+      headcount_range: str(r.headcount_range),
+      website: str(r.website),
+      country: str(r.country),
+      message_title: str(r.message_title),
+      message_number: num(r.message_number),
+      response_time_hours: num(r.response_time_hours),
+      response_time_label: str(r.response_time_label),
+      meeting_booked: Boolean(r.meeting_booked),
+      meeting_held: Boolean(r.meeting_held),
+      offer_sent: Boolean(r.offer_sent),
+      won: Boolean(r.won),
+      added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
+      external_blacklist_id: num(r.external_blacklist_id),
+      external_domain_blacklist_id: num(r.external_domain_blacklist_id),
+      source: r.source ? String(r.source) : "smartlead",
+      reply_text: str(r.reply_text),
+      client_note: str(r.client_note),
+      coldunicorn_note: isClient ? null : str(r.coldunicorn_note),
+      highlight: str(r.highlight),
+      sequencer_id: String(r.sequencer_id),
+      linkedin_invitation_sent_at: r.linkedin_invitation_sent_at ? toIsoString(r.linkedin_invitation_sent_at) : null,
+      contact_made_at: r.contact_made_at ? toIsoString(r.contact_made_at) : null,
+      contact_method: str(r.contact_method),
+      negotiation_started_at: r.negotiation_started_at ? toIsoString(r.negotiation_started_at) : null,
+      conclusion: isClient ? null : str(r.conclusion),
+      concluded_at: r.concluded_at ? toIsoString(r.concluded_at) : null,
+      final_outcome: str(r.final_outcome),
+      // Persisted disposition (n8n-owned). The client resolves persisted-or-legacy-fallback via
+      // deriveContactDisposition, keeping qualification untouched (spec item 10).
+      contact_disposition: str(r.contact_disposition),
+      clientName: String(r.client_name ?? ""),
+      campaignName: str(r.campaign_name),
+      replyCount: Number(r.reply_count ?? 0),
+      lastReplyAt: r.last_reply_at ? toIsoString(r.last_reply_at) : null,
+      intro_meeting: mapMeeting(r, "intro"),
+      summary_meeting: mapMeeting(r, "summary"),
+      current_offer: r.offer_status || r.offer_contracted_send_date
+        ? { status: str(r.offer_status), contracted_send_date: str(r.offer_contracted_send_date) }
+        : null,
+      value_delivery_1: mapDelivery(r, "d1"),
+      value_delivery_2: mapDelivery(r, "d2"),
+      linkedin_integration_connected: Boolean(r.linkedin_integration_connected),
+      open_tasks: openTasks,
+      next_task_due_at: openTasks[0]?.due_at ?? null,
+      open_tasks_count: openTasks.length,
+      };
+    });
+
+    const pageClientIds = Array.from(new Set(rows.map((r) => r.client_id)));
+    const pageLeadIds = rows.map((r) => r.id);
+    let customFields: Record<string, unknown>[] = [];
+    let customValues: Record<string, unknown>[] = [];
+    if (pageClientIds.length > 0) {
+      customFields = await safeRawSelect(
+        tx,
+        sql`select id, client_id, name, field_type, options, position, editable_by, created_by, created_at
+            from public.lead_custom_fields
+            where client_id in (${sql.join(pageClientIds.map((id) => sql`${id}`), sql`, `)})
+            order by position asc, created_at asc`,
+      );
+    }
+    if (pageLeadIds.length > 0) {
+      customValues = await safeRawSelect(
+        tx,
+        sql`select lead_id, field_id, value from public.lead_custom_field_values
+            where lead_id in (${sql.join(pageLeadIds.map((id) => sql`${id}`), sql`, `)})`,
+      );
+    }
+
+    console.log(
+      `[PERF][orm-gateway] loadLeadCrmList: totalHandlerMs=${(performance.now() - t0).toFixed(1)} ` +
+        `rows=${rows.length} totalCount=${totalCount} isClient=${isClient} page=${p.page} pageSize=${pageSize}`,
+    );
+
+    return {
+      rows,
+      totalCount,
+      stageCounts,
+      customFields: customFields.map(toLeadCustomFieldRecord),
+      customValues: customValues.map((r) => ({
+        lead_id: String(r.lead_id),
+        field_id: String(r.field_id),
+        value: r.value === null || r.value === undefined ? null : String(r.value),
+      })),
+      asOf,
+      businessDays: DEFAULT_BUSINESS_DAY_CONFIG,
+    };
+  }
+
   if (payload.action === "loadLeadsFilterOptions") {
     // Static filter option lists — loaded once on leads page mount, not on every filter/paginate.
     // Both lists are scoped by RLS via the JOIN through leads (only accessible leads are visible).
@@ -1847,7 +2451,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         camp.id, camp.created_at, camp.updated_at, camp.client_id,
         camp.external_id, camp.type, camp.name, camp.status,
         camp.database_size, camp.positive_responses, camp.start_date,
-        camp.gender_target,
+        camp.gender_target, camp.sequencer_id,
         c.name AS client_name
       FROM campaigns camp
       JOIN clients c ON c.id = camp.client_id
@@ -1874,6 +2478,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       positive_responses: r.positive_responses != null ? Number(r.positive_responses) : 0,
       start_date: r.start_date ? String(r.start_date) : null,
       gender_target: r.gender_target ? String(r.gender_target) : null,
+      sequencer_id: String(r.sequencer_id ?? ""),
       clientName: String(r.client_name ?? ""),
     }));
 
@@ -2077,20 +2682,31 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
   // ── Phase 7 remaining: domains / invoices / blacklist per-page loaders ─────────────────────────
 
-  if (payload.action === "loadDomainsPage") {
+  if (payload.action === "loadDomainsPage" || payload.action === "loadEmailAccountsPage") {
     const t0 = performance.now();
-    const [clientRows, domainRows] = await Promise.all([
+    const [clientRows, domainRows, emailAccountRows] = await Promise.all([
       tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
       tx.select().from(schema.domains).orderBy(desc(schema.domains.updatedAt)),
+      tx.select().from(schema.emailAccounts).orderBy(asc(schema.emailAccounts.emailAddress)),
     ]);
     console.log(
-      `[PERF][orm-gateway] loadDomainsPage: ${(performance.now() - t0).toFixed(1)}ms ` +
-        `(clients=${clientRows.length} domains=${domainRows.length})`,
+      `[PERF][orm-gateway] ${payload.action}: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length} domains=${domainRows.length} mailboxes=${emailAccountRows.length})`,
     );
     return {
       clients: clientRows.map(toClientRecord),
       domains: domainRows.map(toDomainRecord),
+      emailAccounts: emailAccountRows.map(toEmailAccountRecord),
     };
+  }
+
+  if (payload.action === "loadEmailAccountWarming") {
+    const rows = await tx
+      .select()
+      .from(schema.emailAccountWarmingDaily)
+      .where(eq(schema.emailAccountWarmingDaily.emailAccountId, payload.emailAccountId))
+      .orderBy(asc(schema.emailAccountWarmingDaily.metricDate));
+    return rows.map(toEmailAccountWarmingRecord);
   }
 
   if (payload.action === "loadInvoicesPage") {
@@ -2150,6 +2766,142 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     return toLeadRecord(rows[0]);
   }
 
+  if (payload.action === "concludeLead") {
+    // Atomic terminal write (ADR-0013 §Phase 5). The two-sided DB CHECK
+    // (leads_conclusion_consistency_check) requires the three terminal columns to be ALL-null or
+    // ALL-set; `won` is synced here because the meeting/offer recompute triggers never touch it.
+    // Un-concluding (finalOutcome=null) MUST clear conclusion + concluded_at too (all three null),
+    // else the two-sided check rejects the write.
+    const outcome = payload.finalOutcome;
+    // Invariant (spec item 3): a terminal outcome requires a non-empty conclusion. Enforced here, in the
+    // contract validator, AND by the DB CHECK as the backstop.
+    if (outcome !== null && !(typeof payload.conclusion === "string" && payload.conclusion.trim() !== "")) {
+      fail(400, "A conclusion is required to record a final outcome.");
+    }
+    const set = outcome === null
+      // Un-conclude: clear all three canonical terminal fields (no draft conclusion survives) + won.
+      ? { finalOutcome: null, concludedAt: null, conclusion: null, won: false }
+      // `coalesce(concluded_at, now())` preserves the FIRST conclusion time across later note/outcome
+      // edits (only un-concluding clears it); it must not drift forward when just the note changes.
+      : { finalOutcome: outcome, concludedAt: sql`coalesce(${schema.leads.concludedAt}, now())`, conclusion: payload.conclusion, won: outcome === "won" };
+    const rows = await tx.update(schema.leads).set(set).where(eq(schema.leads.id, payload.leadId)).returning();
+    if (!rows[0]) fail(404, "Lead record was not found.");
+    return toLeadRecord(rows[0]);
+  }
+
+  if (payload.action === "upsertLeadMeeting") {
+    // One intro + one summary per lead (partial unique index). Select-then-write on (lead_id,
+    // meeting_type) rather than ON CONFLICT — drizzle can't target a partial unique index. RLS gates
+    // both the read and the write to manager/admin of the lead's client. A scheduled/held status fires
+    // the boolean-recompute trigger (leads.meeting_booked / meeting_held).
+    const input = mapLeadMeetingInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadMeetings)
+      .where(and(eq(schema.leadMeetings.leadId, payload.leadId), eq(schema.leadMeetings.meetingType, payload.meetingType)))
+      .limit(1);
+    let row;
+    if (existing[0]) {
+      row = await updateOrKeep(tx, schema.leadMeetings, existing[0], input);
+    } else {
+      row = (await tx
+        .insert(schema.leadMeetings)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, meetingType: payload.meetingType, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Meeting could not be saved.");
+    return toLeadMeetingRecord(row);
+  }
+
+  if (payload.action === "upsertLeadOffer") {
+    // Offers are not unique per lead; operate on the "current offer" the CRM view shows — the latest
+    // non-cancelled one. Update it if present, else insert. A sent/accepted status fires the
+    // offer_sent recompute trigger. RLS gates read + write to manager/admin of the lead's client.
+    const input = mapLeadOfferInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadOffers)
+      .where(and(eq(schema.leadOffers.leadId, payload.leadId), ne(schema.leadOffers.status, "cancelled")))
+      .orderBy(desc(schema.leadOffers.createdAt))
+      .limit(1);
+    let row;
+    if (existing[0] && input.status === "cancelled") {
+      // Cancelling retracts the offer, so cancel EVERY non-cancelled offer — otherwise offer_sent could
+      // linger true on an older parallel offer (e.g. one n8n created). Return the one the UI was editing.
+      const rows = await tx
+        .update(schema.leadOffers)
+        .set(input)
+        .where(and(eq(schema.leadOffers.leadId, payload.leadId), ne(schema.leadOffers.status, "cancelled")))
+        .returning();
+      row = rows.find((r: { id: string }) => r.id === existing[0].id) ?? rows[0];
+    } else if (existing[0]) {
+      row = await updateOrKeep(tx, schema.leadOffers, existing[0], input);
+    } else {
+      row = (await tx
+        .insert(schema.leadOffers)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Offer could not be saved.");
+    return toLeadOfferRecord(row);
+  }
+
+  if (payload.action === "upsertLeadValueDelivery") {
+    // Keyed on (lead_id, sequence_number) — unique, sequence 1 or 2 (same select-then-write shape as
+    // meetings; no boolean trigger — value deliveries feed only the CRM columns). RLS gates read+write.
+    const input = mapLeadValueDeliveryInput(payload.patch as Record<string, unknown>);
+    const existing = await tx
+      .select()
+      .from(schema.leadValueDeliveries)
+      .where(and(eq(schema.leadValueDeliveries.leadId, payload.leadId), eq(schema.leadValueDeliveries.sequenceNumber, payload.sequenceNumber)))
+      .limit(1);
+    let row;
+    if (existing[0]) {
+      row = await updateOrKeep(tx, schema.leadValueDeliveries, existing[0], input);
+    } else {
+      row = (await tx
+        .insert(schema.leadValueDeliveries)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, sequenceNumber: payload.sequenceNumber, ...input })
+        .returning())[0];
+    }
+    if (!row) fail(500, "Value delivery could not be saved.");
+    return toLeadValueDeliveryRecord(row);
+  }
+
+  if (payload.action === "loadLeadTasks") {
+    // Lazy per-lead task list (RLS-scoped read). Ordered by manual position then creation.
+    const rows = await tx
+      .select()
+      .from(schema.leadTasks)
+      .where(eq(schema.leadTasks.leadId, payload.leadId))
+      .orderBy(asc(schema.leadTasks.position), asc(schema.leadTasks.createdAt));
+    return rows.map(toLeadTaskRecord);
+  }
+
+  if (payload.action === "upsertLeadTask") {
+    // Create (no id) or update (id set, scoped to the lead so a mismatched id/leadId can't cross leads).
+    // RLS gates read+write to manager/admin. A completed/cancelled/skipped status drops the task out of
+    // the CRM open-task count + next-due date (recomputed by the read-model on the next refresh).
+    const input = mapLeadTaskInput(payload.patch as Record<string, unknown>);
+    let row;
+    if (payload.id) {
+      if (Object.keys(input).length === 0) {
+        row = (await tx.select().from(schema.leadTasks)
+          .where(and(eq(schema.leadTasks.id, payload.id), eq(schema.leadTasks.leadId, payload.leadId))).limit(1))[0];
+      } else {
+        row = (await tx.update(schema.leadTasks).set(input)
+          .where(and(eq(schema.leadTasks.id, payload.id), eq(schema.leadTasks.leadId, payload.leadId))).returning())[0];
+      }
+    } else {
+      if (typeof input.title !== "string" || !(input.title as string).trim()) fail(400, "A task title is required.");
+      row = (await tx.insert(schema.leadTasks)
+        .values({ id: crypto.randomUUID(), leadId: payload.leadId, ...input, title: input.title as string })
+        .returning())[0];
+    }
+    if (!row) fail(404, "Task could not be saved.");
+    return toLeadTaskRecord(row);
+  }
+
   if (payload.action === "updateDomain") {
     const patch = mapDomainPatch(payload.patch as Record<string, unknown>);
     const rows = await tx.update(schema.domains).set(patch).where(eq(schema.domains.id, payload.domainId)).returning();
@@ -2171,7 +2923,23 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       .values({ id: crypto.randomUUID(), ...mapClientInsert(payload.input as Record<string, unknown>), createdAt: now, updatedAt: now })
       .returning();
     if (!rows[0]) fail(500, "Client could not be created.");
-    return toClientRecord(rows[0]);
+    const client = toClientRecord(rows[0]);
+    // ADR-0012: optional per-sequencer credentials created alongside the client
+    // (new-client sheet sends EmailBison workspace/key + Aimfox key here).
+    for (const cred of payload.sequencerCredentials ?? []) {
+      await upsertClientSequencerRow(tx, client.id, cred.sequencer_key, cred);
+    }
+    return client;
+  }
+
+  if (payload.action === "upsertClientSequencer") {
+    const row = await upsertClientSequencerRow(
+      tx,
+      payload.clientId,
+      payload.sequencerKey,
+      payload.patch as Record<string, unknown>,
+    );
+    return toClientSequencerRecord(row);
   }
 
   if (payload.action === "createCampaign") {

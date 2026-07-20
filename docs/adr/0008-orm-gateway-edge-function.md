@@ -28,8 +28,10 @@ gateway: `supabase/functions/orm-gateway/` (Deno + Drizzle ORM + postgres.js).
 
 - **Transport.** The frontend POSTs to `${VITE_SUPABASE_URL}/functions/v1/${ormGatewayFunction}`
   with `{ action, ...payload }` and gets back an envelope `{ ok, data, _serverMs, _requestId }`.
-  `VITE_ORM_GATEWAY_FUNCTION` selects the deployed function (`orm-gateway`, or `orm-gateway-next`
-  for a staged deploy — a thin twin that re-exports the same handler).
+  `VITE_ORM_GATEWAY_FUNCTION` selects the deployed function; **production uses the single canonical
+  `orm-gateway`** (the default). The override exists only to point a dev build at a separately-named
+  WIP function during a risky change. (A `orm-gateway-next` staging twin existed during the
+  snapshot→per-page migration and was removed once that shipped.)
 - **Typed contract.** Every action's request/response is declared in
   [`src/app/data/orm-gateway-contract.ts`](../../src/app/data/orm-gateway-contract.ts) and
   [`src/app/types/view-contracts.ts`](../../src/app/types/view-contracts.ts). The edge function
@@ -64,10 +66,9 @@ gateway: `supabase/functions/orm-gateway/` (Deno + Drizzle ORM + postgres.js).
 alarming and is deliberate:
 
 - Supabase's Edge Function runtime **already verified the JWT** before our handler runs. This is
-  not an assumption — it is deployment state, verified 2026-07-14: `orm-gateway` and
-  `orm-gateway-next` are both deployed with **`verify_jwt: true`**
-  (`supabase functions list --project-ref bnetnuzxynmdftiadwef`). A request with a forged token
-  never reaches this code.
+  not an assumption — it is deployment state (verified via the Management API 2026-07-20):
+  `orm-gateway` is deployed with **`verify_jwt: true`**. A request with a forged token never
+  reaches this code.
 - Even if it did, the claims are only ever used to *narrow* privilege — they are fed into
   `set_config` and Postgres then re-enforces **every** RLS policy against them. A forged `sub`
   would have to correspond to a real user row to see anything, and the role is clamped to the

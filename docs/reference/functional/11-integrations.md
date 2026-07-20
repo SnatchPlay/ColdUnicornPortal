@@ -18,7 +18,7 @@ Where the portal ends and n8n / Smartlead / Bison begin. This file is the implem
 ## 1. Topology
 
 ```
-Smartlead / Bison ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
+Smartlead / Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
                                     │                    │
                                     │ webhooks           │
                                     ▼                    ▼
@@ -31,7 +31,7 @@ Three actors that touch Supabase:
 - **Portal** — anon-key writes through RLS. Owns configuration + qualification.
 - **Edge functions** (`send-invite`, `manage-invites`) — service-role inside Supabase, invoked by the portal with a JWT, used only for invitation flows.
 
-The portal **never** reaches Smartlead/Bison directly. n8n is the only system that talks to those vendors.
+The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
 
 ---
 
@@ -46,8 +46,13 @@ Read windows are enforced **server-side** in the `orm-gateway` edge function ([A
 | `replies` | n8n: insert + classify | never bulk-loaded. List/dashboard actions read **server-side aggregates only** (reply count + last reply per lead, e.g. [orm-gateway/index.ts:1807](../../../supabase/functions/orm-gateway/index.ts#L1807)); the full thread for **one** lead is fetched on demand by `loadLeadDetail` ([index.ts:1949](../../../supabase/functions/orm-gateway/index.ts#L1949), full history, no window) | scoped via RLS |
 | `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** — `CAMPAIGN_DAILY_STATS_WINDOW_DAYS` ([index.ts:19](../../../supabase/functions/orm-gateway/index.ts#L19)) | scoped via set-based RLS |
 | `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** — `DAILY_STATS_WINDOW_DAYS` ([index.ts:20](../../../supabase/functions/orm-gateway/index.ts#L20)) | scoped via RLS |
+| `sequencer_daily_stats` (ADR-0012) | n8n ("Get Metrics from Aimfox", 2-hourly): UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas). `profile_id` = Aimfox account id, `''` = client rollup (current workflow) | not read by the portal yet (phase-2 UI) | scoped via set-based RLS |
+| `email_accounts` (`20260720e`) | **n8n from Winnr**: UPSERT on `winnr_email_user_id` from `/v1/email-users` (mailbox identity) + `/v1/warming` (current health score, inbox/spam rate, daily volume, warm-up progress) | read whole by `loadEmailAccountsPage` / `loadDomainsPage` (no window; one row per mailbox) | scoped via set-based RLS (through `domain → client`) |
+| `email_account_warming_daily` (`20260720e`) | **n8n from Winnr**: UPSERT on (`email_account_id`, `metric_date`) from `/v1/warming/{id}/metrics` | fetched per-mailbox on demand by `loadEmailAccountWarming` (full history, no window) | scoped via set-based RLS (through `email_account → domain → client`) |
 
-The `domains` and `invoices` tables sit in the middle: rows arrive from ingestion, but the portal **mutates operational fields** (status, reputation, dates for domains; status, amount, issue date for invoices). New row creation is ingestion-only.
+**Winnr** is the mailbox/warming provider. n8n owns the puller (`/v1/domains → /v1/email-users → /v1/warming → /v1/warming/{id}/metrics`); the portal never calls Winnr directly (ADR-0001, [OoS-12](13-out-of-scope.md)). Passwords are intentionally not stored — Winnr does not return them. `domains` carries Winnr sync columns (`winnr_status`, `winnr_domain_id`, `last_synced_at`, `missing_since`, `raw_payload`, …) written only by n8n (`20260720f`); the daily sync **does not create unknown domains** (they need a local `client_id`) — it reports them as unmatched. Each n8n run is logged to **`integration_sync_runs`** (per-provider counters: domains/mailboxes/warming seen·resolved·upserted·unmatched, `status`, `error_message`) — n8n-owned, RLS-enabled with no policy (service_role only).
+
+The `domains` and `invoices` tables sit in the middle: rows arrive from ingestion, but the portal **mutates operational fields** (status, reputation, dates for domains; status, amount, issue date for invoices). New row creation is ingestion-only. (`email_accounts` warming fields are the mailbox equivalent — but those are ingestion-only, never portal-edited.)
 
 `leads` similarly: ingestion creates and enriches; the portal mutates only the ADR-0004 whitelist.
 
@@ -67,10 +72,24 @@ These exist primarily so the portal can write configuration that downstream syst
 | `clients.sms_phone_numbers` (text[]) | Where n8n sends SMS alerts | n8n |
 | `clients.auto_ooo_enabled` (bool) | Is OOO auto-routing on? | n8n (gate) |
 | `client_ooo_routing` (table) | Mapping of `(client, gender?)` → follow-up `campaign_id` | n8n (rule source) |
-| `clients.linkedin_api_key` | Authenticator for LinkedIn outreach automation | n8n / future LinkedIn integration |
+| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (smartlead / emailbison / aimfox — fixed UUIDs `…0001`/`…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
 | `email_exclude_list` | Agency-wide domain blacklist | n8n (pre-send filter) |
 
 Editing these in the portal does not produce immediate side-effects. n8n picks up changes on its next run (timing depends on n8n flow schedule).
+
+### n8n cutover for the 2026-07-04 sequencer migration
+
+Between `20260704_sequencers_catalog.sql` (applied) and `20260704b_drop_client_sequencer_credentials.sql` (deferred), both the old `clients.*` columns and `client_sequencers` are readable. Before the drop is applied, every n8n workflow reading the old columns must switch to:
+
+```sql
+select cs.client_id, cs.api_key, cs.external_workspace_id, cs.settings
+from client_sequencers cs join sequencers s on s.id = cs.sequencer_id
+where s.key = 'emailbison' and cs.enabled;  -- aimfox: s.key = 'aimfox'
+```
+
+Notes for n8n: `external_workspace_id` is now **text** (cast if an int is needed); email campaign/lead inserts keep working unchanged (`sequencer_id` defaults to EmailBison) but Aimfox flows **must** set `sequencer_id = '00000000-0000-4000-a000-000000000003'`; new write target `sequencer_daily_stats` (see §2). The Aimfox token moves from the PDCA sheet's `col_105` to the aimfox `client_sequencers.api_key`; the sheet's `col_5` workspace id maps to the emailbison row's `external_workspace_id` for client resolution.
+
+Known workflow quirk to fix at cutover: the sheet's "Invitations limit" cell stores `daily_limit − buckets[1] − buckets[0]` while `sent_today = buckets[1] − buckets[0]` — the remaining-limit formula double-subtracts and can understate the limit; in `sequencer_daily_stats` the two quantities are separate columns (`invite_limit` weekly cap vs `invite_limit_remaining`).
 
 ---
 
@@ -115,6 +134,26 @@ The follow-up campaigns themselves have `campaigns.type = 'ooo_followup'` and ar
 Every reply that arrives is classified by n8n using LLM + heuristic rules. The classification value lands in `replies.classification` (one of `OOO | Interested | NRR | Left_Company | Spam_Inbound | other`).
 
 The portal **does not classify** and **does not provide a manual triage UI** ([decision in BUSINESS_LOGIC §10](../../BUSINESS_LOGIC.md#10-out-of-scope-legacy)). If unclassified replies appear in raw data, that indicates ingestion/classification lag in n8n rather than a portal action item.
+
+### 6a. Contact disposition write-path (ADR-0013, CRM split status model)
+
+The CRM view's disposition dimension (OOO / NRR) is stored in its **own** column, `leads.contact_disposition`
+(`out_of_office | not_right_role | NULL`), independent of `leads.qualification`. This is a deliberate split
+(spec item 10): a disposition change must **not** overwrite the funnel stage.
+
+**Required n8n contract:**
+
+| Reply classification | n8n MUST write | n8n MUST NOT do |
+|---|---|---|
+| `OOO` | `leads.contact_disposition = 'out_of_office'` | overwrite `leads.qualification` |
+| `NRR` | `leads.contact_disposition = 'not_right_role'` | set `final_outcome = 'lost'` (a lost outcome is an explicit human decision) |
+| active again | `leads.contact_disposition = NULL` | — |
+
+- **Stage independence:** `crm_stage` derives from `qualification` + offer/meeting facts only. With this contract, `MQL + OOO` stays `MQL` and `SQL + OOO` stays `SQL`.
+- **Legacy fallback (display-only):** for OLD rows where `qualification` is already `'OOO'`/`'NRR'`, the read-model maps that legacy value to a display disposition (`deriveContactDisposition`). This is a **fallback for display**, not a data fix — the prior qualification of a legacy OOO/NRR row **cannot be reconstructed** without historical data, so there is **no backfill** into preMQL/MQL/lost.
+- **CHECK:** `leads_contact_disposition_check` restricts the column to `out_of_office | not_right_role | NULL`.
+
+Until n8n is updated to write the column, existing OOO/NRR rows still render correctly via the legacy fallback; new OOO/NRR events keep overwriting `qualification` (the pre-existing behaviour) until the cutover lands.
 
 ---
 

@@ -7,17 +7,23 @@ import type {
   ClientCustomFieldType,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
   DomainRecord,
   EmailExcludeRecord,
+  FinalOutcome,
   InviteRecord,
   InviteRequest,
   InvoiceRecord,
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
+  LeadMeetingRecord,
+  LeadOfferRecord,
   LeadRecord,
+  LeadTaskRecord,
+  LeadValueDeliveryRecord,
   ManagedUserRecord,
   UserRecord,
 } from "../types/core";
@@ -34,22 +40,30 @@ import type {
   ClientsOverviewPayload,
   ClientsStatsPayload,
   DomainsPagePayload,
+  EmailAccountsPagePayload,
+  EmailAccountWarmingPayload,
   InvoicesPagePayload,
   LeadDetailResult,
   LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
+  LeadCrmListResponse,
   ManagerDashboardOverview,
   ManagerDashboardParams,
   ShellData,
   TablePreferencesPayload,
 } from "../types/view-contracts";
 import type {
+  LeadMeetingInput,
+  LeadOfferInput,
+  LeadTaskInput,
+  LeadValueDeliveryInput,
   LoadIdentityResult,
   OrmGatewayAction,
   OrmGatewayEnvelope,
   OrmGatewayRequest,
   OrmGatewayResponseMap,
+  SequencerCredentialInput,
 } from "./orm-gateway-contract";
 
 type RepositoryOperation = "select" | "insert" | "update" | "upsert" | "delete";
@@ -66,11 +80,14 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadClientsStats: { table: "clients", operation: "select" },
   loadClientsMetricsSummary: { table: "clients", operation: "select" },
   loadLeadsList: { table: "leads", operation: "select" },
+  loadLeadCrmList: { table: "leads", operation: "select" },
   loadLeadDetail: { table: "leads", operation: "select" },
   loadLeadsFilterOptions: { table: "leads", operation: "select" },
   loadAnalyticsOverview: { table: "analytics", operation: "select" },
   loadAdminSettings: { table: "settings", operation: "select" },
   loadDomainsPage: { table: "domains", operation: "select" },
+  loadEmailAccountsPage: { table: "email_accounts", operation: "select" },
+  loadEmailAccountWarming: { table: "email_account_warming_daily", operation: "select" },
   loadInvoicesPage: { table: "invoices", operation: "select" },
   loadBlacklistPage: { table: "email_exclude_list", operation: "select" },
   loadCampaignsList: { table: "campaigns", operation: "select" },
@@ -79,6 +96,12 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
   updateLead: { table: "leads", operation: "update" },
+  concludeLead: { table: "leads", operation: "update" },
+  upsertLeadMeeting: { table: "lead_meetings", operation: "upsert" },
+  upsertLeadOffer: { table: "lead_offers", operation: "upsert" },
+  upsertLeadValueDelivery: { table: "lead_value_deliveries", operation: "upsert" },
+  loadLeadTasks: { table: "lead_tasks", operation: "select" },
+  upsertLeadTask: { table: "lead_tasks", operation: "upsert" },
   updateDomain: { table: "domains", operation: "update" },
   updateInvoice: { table: "invoices", operation: "update" },
   createClient: { table: "clients", operation: "insert" },
@@ -103,6 +126,7 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   updateClientCustomField: { table: "client_custom_fields", operation: "update" },
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
   upsertClientCustomFieldValue: { table: "client_custom_field_values", operation: "upsert" },
+  upsertClientSequencer: { table: "client_sequencers", operation: "upsert" },
   loadLeadCustomFields: { table: "lead_custom_fields", operation: "select" },
   createLeadCustomField: { table: "lead_custom_fields", operation: "insert" },
   updateLeadCustomField: { table: "lead_custom_fields", operation: "update" },
@@ -403,7 +427,9 @@ async function invokeOrmGatewayAction<TAction extends OrmGatewayAction>(
     action === "loadClientsStats" ||
     action === "loadClientsMetricsSummary" ||
     action === "loadLeadsList" ||
+    action === "loadLeadCrmList" ||
     action === "loadLeadDetail" ||
+    action === "loadLeadTasks" ||
     action === "loadLeadsFilterOptions" ||
     action === "loadAnalyticsOverview" ||
     action === "loadAdminSettings" ||
@@ -548,23 +574,44 @@ export interface Repository {
   loadClientsStats(): Promise<ClientsStatsPayload>;
   loadClientsMetricsSummary(): Promise<ClientsMetricsSummaryPayload>;
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
+  loadLeadCrmList(params: LeadsListParams): Promise<LeadCrmListResponse>;
   loadLeadDetail(leadId: string): Promise<LeadDetailResult>;
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
   loadAdminSettings(): Promise<AdminSettingsPayload>;
   loadDomainsPage(): Promise<DomainsPagePayload>;
+  loadEmailAccountsPage(): Promise<EmailAccountsPagePayload>;
+  loadEmailAccountWarming(emailAccountId: string): Promise<EmailAccountWarmingPayload>;
   loadInvoicesPage(): Promise<InvoicesPagePayload>;
   loadBlacklistPage(): Promise<BlacklistPagePayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
-  createClient(input: Omit<ClientRecord, "id" | "created_at" | "updated_at">): Promise<ClientRecord>;
-  createCampaign(input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">): Promise<CampaignRecord>;
+  createClient(
+    input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
+    sequencerCredentials?: SequencerCredentialInput[],
+  ): Promise<ClientRecord>;
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0012) applies. */
+  createCampaign(
+    input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string },
+  ): Promise<CampaignRecord>;
   createLead(input: Omit<LeadRecord, "id" | "created_at" | "updated_at">): Promise<LeadRecord>;
   createDomain(input: Omit<DomainRecord, "id" | "created_at" | "updated_at">): Promise<DomainRecord>;
   updateClient(clientId: string, patch: Partial<ClientRecord>): Promise<ClientRecord>;
   updateCampaign(campaignId: string, patch: Partial<CampaignRecord>): Promise<CampaignRecord>;
   updateLead(leadId: string, patch: Partial<LeadRecord>): Promise<LeadRecord>;
+  /** Atomic terminal conclusion (ADR-0013): sets final_outcome + conclusion + concluded_at + syncs `won`. */
+  concludeLead(leadId: string, finalOutcome: FinalOutcome | null, conclusion: string | null): Promise<LeadRecord>;
+  /** Upsert the intro/summary meeting for a lead (ADR-0013). Fires the boolean-recompute trigger. */
+  upsertLeadMeeting(leadId: string, meetingType: "intro" | "summary", patch: LeadMeetingInput): Promise<LeadMeetingRecord>;
+  /** Upsert the current (latest non-cancelled) offer for a lead (ADR-0013). Fires the offer_sent trigger. */
+  upsertLeadOffer(leadId: string, patch: LeadOfferInput): Promise<LeadOfferRecord>;
+  /** Upsert value delivery 1 or 2 for a lead (ADR-0013). Keyed on (lead_id, sequence_number). */
+  upsertLeadValueDelivery(leadId: string, sequenceNumber: 1 | 2, patch: LeadValueDeliveryInput): Promise<LeadValueDeliveryRecord>;
+  /** Lazily load a lead's task list (ADR-0013). Ordered by position then creation. */
+  loadLeadTasks(leadId: string): Promise<LeadTaskRecord[]>;
+  /** Create (no id) or update (id set) a single lead task (ADR-0013). */
+  upsertLeadTask(leadId: string, id: string | undefined, patch: LeadTaskInput): Promise<LeadTaskRecord>;
   updateDomain(domainId: string, patch: Partial<DomainRecord>): Promise<DomainRecord>;
   updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>): Promise<InvoiceRecord>;
   createConditionRule(
@@ -630,6 +677,12 @@ export interface Repository {
     fieldId: string,
     value: string | null,
   ): Promise<ClientCustomFieldValueRecord>;
+  /** ADR-0012: upsert one client↔sequencer settings row, keyed by sequencers.key. */
+  upsertClientSequencer(
+    clientId: string,
+    sequencerKey: string,
+    patch: Omit<SequencerCredentialInput, "sequencer_key">,
+  ): Promise<ClientSequencerRecord>;
   // Lead custom fields (Batch 4, Task 4F) — per-client report columns.
   loadLeadCustomFields(clientId?: string): Promise<LeadCustomFieldRecord[]>;
   createLeadCustomField(input: {
@@ -736,6 +789,9 @@ export const repository: Repository = {
     return result;
   },
 
+  async loadLeadCrmList(params) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadCrmList", { params });
+  },
   async loadLeadsList(params) {
     return invokeOrmGatewaySelectWithRetry("loadLeadsList", { params });
   },
@@ -754,6 +810,14 @@ export const repository: Repository = {
 
   async loadDomainsPage() {
     return invokeOrmGatewaySelectWithRetry("loadDomainsPage", {});
+  },
+
+  async loadEmailAccountsPage() {
+    return invokeOrmGatewaySelectWithRetry("loadEmailAccountsPage", {});
+  },
+
+  async loadEmailAccountWarming(emailAccountId: string) {
+    return invokeOrmGatewayAction("loadEmailAccountWarming", { emailAccountId });
   },
 
   async loadInvoicesPage() {
@@ -798,8 +862,8 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadConditionRules", {});
   },
 
-  async createClient(input) {
-    return invokeOrmGatewayAction("createClient", { input });
+  async createClient(input, sequencerCredentials) {
+    return invokeOrmGatewayAction("createClient", { input, sequencerCredentials });
   },
 
   async createCampaign(input) {
@@ -824,6 +888,30 @@ export const repository: Repository = {
 
   async updateLead(leadId, patch) {
     return invokeOrmGatewayAction("updateLead", { leadId, patch });
+  },
+
+  async concludeLead(leadId, finalOutcome, conclusion) {
+    return invokeOrmGatewayAction("concludeLead", { leadId, finalOutcome, conclusion });
+  },
+
+  async upsertLeadMeeting(leadId, meetingType, patch) {
+    return invokeOrmGatewayAction("upsertLeadMeeting", { leadId, meetingType, patch });
+  },
+
+  async upsertLeadOffer(leadId, patch) {
+    return invokeOrmGatewayAction("upsertLeadOffer", { leadId, patch });
+  },
+
+  async upsertLeadValueDelivery(leadId, sequenceNumber, patch) {
+    return invokeOrmGatewayAction("upsertLeadValueDelivery", { leadId, sequenceNumber, patch });
+  },
+
+  async loadLeadTasks(leadId) {
+    return invokeOrmGatewaySelectWithRetry("loadLeadTasks", { leadId });
+  },
+
+  async upsertLeadTask(leadId, id, patch) {
+    return invokeOrmGatewayAction("upsertLeadTask", { leadId, id, patch });
   },
 
   async updateDomain(domainId, patch) {
@@ -991,6 +1079,10 @@ export const repository: Repository = {
 
   async upsertClientCustomFieldValue(clientId, fieldId, value) {
     return invokeOrmGatewayAction("upsertClientCustomFieldValue", { clientId, fieldId, value });
+  },
+
+  async upsertClientSequencer(clientId, sequencerKey, patch) {
+    return invokeOrmGatewayAction("upsertClientSequencer", { clientId, sequencerKey, patch });
   },
 
   async loadLeadCustomFields(clientId) {

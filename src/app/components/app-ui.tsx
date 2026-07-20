@@ -8,14 +8,14 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   actions?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0 space-y-1">
         <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)] sm:text-[30px] sm:leading-none">{title}</h1>
-        <p className="mt-2 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:mt-3 sm:text-base">{subtitle}</p>
+        {subtitle && <p className="mt-2 text-sm text-neutral-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] sm:mt-3 sm:text-base">{subtitle}</p>}
       </div>
       {actions ? <div className="w-full sm:w-auto">{actions}</div> : null}
     </div>
