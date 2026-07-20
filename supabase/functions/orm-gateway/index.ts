@@ -563,10 +563,13 @@ function toLeadTaskRecord(row: typeof schema.leadTasks.$inferSelect) {
 }
 
 function mapDomainPatch(patch: Record<string, unknown>) {
-  // Only the local domain_status enum is portal-editable. winnr_status and the other Winnr sync
+  // Portal-editable: the local domain_status enum and client_id (linking a Winnr-synced domain to a
+  // client). RLS still gates the write — domains_update_scoped USING/​WITH CHECK = can_manage_client,
+  // so only admin-tier callers can link an unlinked domain. winnr_status and the other Winnr sync
   // columns are ingestion-only (n8n via service_role) — never accept them from a portal patch.
   const mapped: Record<string, unknown> = {};
   if ("status" in patch) mapped.status = patch.status;
+  if ("client_id" in patch) mapped.clientId = patch.client_id;
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }
