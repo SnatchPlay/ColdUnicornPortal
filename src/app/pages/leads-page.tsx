@@ -732,7 +732,28 @@ function InternalLeadsPage() {
         }
       />
 
-      <Surface title="Lead filters" subtitle={`Current timeframe: ${timeframeLabel}`}>
+      <Surface
+        title="Lead filters"
+        subtitle={`Current timeframe: ${timeframeLabel}`}
+        actions={
+          <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs">
+            {([["pdca", "PDCA"], ["crm", "CRM"], ["combined", "Combined"]] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                aria-pressed={viewMode === mode}
+                className={cn(
+                  "rounded-lg px-3 py-1.5 transition",
+                  viewMode === mode ? "bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      >
         <div className="space-y-4">
           <div className={`grid gap-4 ${clientsLite.length > 1 ? "xl:grid-cols-[1fr_180px_220px_180px]" : "xl:grid-cols-[1fr_260px_220px]"}`}>
             <div className="relative">
@@ -813,23 +834,6 @@ function InternalLeadsPage() {
           </div>
         </div>
       </Surface>
-
-      <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs w-fit">
-        {([["pdca", "PDCA"], ["crm", "CRM"], ["combined", "PDCA + CRM"]] as const).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setViewMode(mode)}
-            aria-pressed={viewMode === mode}
-            className={cn(
-              "rounded-lg px-3 py-1.5 transition",
-              viewMode === mode ? "bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
 
       {rows.length === 0 && !loading ? (
         <EmptyState title="No leads match the current filters" description="Leads are scoped by role and searchable across core enrichment fields." />

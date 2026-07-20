@@ -29,6 +29,18 @@ import { cn } from "./ui/utils";
 
 const STAGE_LABEL: Record<CrmStage, string> = Object.fromEntries(CRM_STAGES.map((s) => [s.key, s.label])) as Record<CrmStage, string>;
 
+/** Per-stage accent so the grouped sections read as clearly distinct blocks (ADR-0013 spec §3.2):
+ *  `bar` = top accent strip, `label` = heading colour, `tint` = faint band wash, `divider`/`line` =
+ *  the stage-boundary rule in the header + a hairline carried down the body. */
+const STAGE_ACCENT: Record<CrmStage, { label: string; bar: string; tint: string; divider: string; line: string }> = {
+  lead:          { label: "text-sky-300",     bar: "bg-sky-400",     tint: "bg-sky-500/[0.05]",     divider: "border-sky-400/30",     line: "bg-sky-400/20" },
+  qualification: { label: "text-violet-300",  bar: "bg-violet-400",  tint: "bg-violet-500/[0.05]",  divider: "border-violet-400/30",  line: "bg-violet-400/20" },
+  offering:      { label: "text-amber-300",   bar: "bg-amber-400",   tint: "bg-amber-500/[0.05]",   divider: "border-amber-400/30",   line: "bg-amber-400/20" },
+  expert_brand:  { label: "text-emerald-300", bar: "bg-emerald-400", tint: "bg-emerald-500/[0.05]", divider: "border-emerald-400/30", line: "bg-emerald-400/20" },
+  finalization:  { label: "text-orange-300",  bar: "bg-orange-400",  tint: "bg-orange-500/[0.05]",  divider: "border-orange-400/30",  line: "bg-orange-400/20" },
+  conclusions:   { label: "text-rose-300",    bar: "bg-rose-400",    tint: "bg-rose-500/[0.05]",    divider: "border-rose-400/30",    line: "bg-rose-400/20" },
+};
+
 const HEALTH_CLASS: Partial<Record<HealthState, string>> = {
   green: "crm-cell-green",
   yellow: "crm-cell-yellow",
@@ -107,6 +119,18 @@ export function LeadCrmTable({
   const stickyOffsets = useMemo(() => stickyLeftOffsets(widths, stickyLeftCount), [widths, stickyLeftCount]);
   const bands = useMemo(() => computeStageBands(columns, (s) => STAGE_LABEL[s]), [columns]);
   const style = useMemo(() => ({ "--crm-columns": gridTemplate }) as CSSProperties, [gridTemplate]);
+  // Stage boundaries: which column index starts each stage (for the header rule) and its x offset (for
+  // the body hairline). Skip the first band — it starts at the table's left edge.
+  const stageBoundaries = useMemo(() => {
+    const prefix: number[] = [0];
+    for (let i = 0; i < widths.length; i += 1) prefix[i + 1] = prefix[i] + widths[i];
+    return bands.slice(1).map((b) => ({ stage: b.stage, index: b.startIndex, left: prefix[b.startIndex] }));
+  }, [widths, bands]);
+  const stageStartAccent = useMemo(() => {
+    const map = new Map<number, (typeof STAGE_ACCENT)[CrmStage]>();
+    for (const b of stageBoundaries) map.set(b.index, STAGE_ACCENT[b.stage]);
+    return map;
+  }, [stageBoundaries]);
   // Deadlines render in the SLA timezone; only ever read when a coloured cell exists (health present).
   const tz = healthContext?.businessDays.timezone ?? "UTC";
 
@@ -127,21 +151,36 @@ export function LeadCrmTable({
   return (
     <TooltipProvider delayDuration={0}>
       <div className="overflow-x-auto" style={style}>
-        <div className="w-max min-w-full">
+        <div className="relative w-max min-w-full">
+          {/* Stage-boundary hairlines carried down the body so the grouped sections stay visually
+              separated across every row. z-[1] sits above the row cells but below the sticky columns
+              (z-2) and header (z-20); pointer-events-none keeps rows clickable. */}
+          {showStageStrip
+            ? stageBoundaries.map((b) => (
+                <div key={`divider-${b.index}`} className={cn("pointer-events-none absolute inset-y-0 z-[1] w-px", b.stage ? STAGE_ACCENT[b.stage].line : "")} style={{ left: b.left }} />
+              ))
+            : null}
           {/* Sticky header block — the stage strip + the column labels scroll together vertically, so
               the column header does not need a magic pixel offset for the strip's height. */}
           <div className="sticky top-0 z-20">
             {showStageStrip ? (
               <div className="grid [grid-template-columns:var(--crm-columns)] border-b border-[#242424] bg-[#0d0d0d]">
-                {bands.map((band) => (
-                  <div
-                    key={`${band.stage}-${band.startIndex}`}
-                    style={{ gridColumn: `span ${band.span}` }}
-                    className="truncate border-r border-[#1c1c1c] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-300/80"
-                  >
-                    {band.label}
-                  </div>
-                ))}
+                {bands.map((band, i) => {
+                  const accent = STAGE_ACCENT[band.stage];
+                  return (
+                    <div
+                      key={`${band.stage}-${band.startIndex}`}
+                      style={{ gridColumn: `span ${band.span}` }}
+                      className={cn(
+                        "relative truncate px-2.5 pt-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                        accent.label, accent.tint, i > 0 && cn("border-l", accent.divider),
+                      )}
+                    >
+                      <span className={cn("absolute inset-x-0 top-0 h-0.5", accent.bar)} />
+                      {band.label}
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
 
@@ -149,7 +188,11 @@ export function LeadCrmTable({
               {columns.map((column, index) => (
                 <div
                   key={column.id}
-                  className={cn("flex min-w-0 items-center px-2.5 py-2", alignClass(column.align))}
+                  className={cn(
+                    "flex min-w-0 items-center px-2.5 py-2",
+                    alignClass(column.align),
+                    stageStartAccent.has(index) && cn("border-l", stageStartAccent.get(index)!.divider),
+                  )}
                   style={stickyStyle(index, "#0d0d0d")}
                 >
                   {column.headerHelp ? (
