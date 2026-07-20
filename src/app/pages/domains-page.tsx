@@ -1,16 +1,16 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
-import { formatDate, formatNumber } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { DomainsSectionTabs } from "../components/domains-tabs";
-import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
+import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useDomainsPage } from "../lib/use-domains";
 import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import type { ClientRecord, DomainRecord, DomainStatus, EmailAccountRecord } from "../types/core";
+import type { ClientRecord, DomainRecord, DomainStatus } from "../types/core";
 
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
 const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
@@ -24,17 +24,7 @@ interface CreateDomainDraft {
 }
 
 type SortDirection = "asc" | "desc";
-type DomainSortKey = "domain" | "client" | "status";
-
-// Single status shown in the list: the local lifecycle status when set, otherwise the Winnr
-// provider status. Winnr-synced domains have no local status, so this surfaces "complete" etc.
-function domainStatusLabel(domain: DomainRecord): string {
-  return domain.status ?? domain.winnr_status ?? "unset";
-}
-
-interface DomainDraft {
-  status: DomainStatus | "";
-}
+type DomainSortKey = "domain" | "client" | "mailboxes" | "winnr";
 
 function compareText(left: string | null | undefined, right: string | null | undefined, direction: SortDirection) {
   const safeLeft = (left ?? "").toLowerCase();
@@ -48,27 +38,30 @@ function sortIndicator(active: boolean, direction: SortDirection) {
   return direction === "asc" ? "asc" : "desc";
 }
 
-function toDomainDraft(domain: DomainRecord): DomainDraft {
-  return {
-    status: domain.status ?? "",
-  };
-}
-
-function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<DomainRecord> {
-  const patch: Partial<DomainRecord> = {};
-  const nextStatus = draft.status || null;
-
-  if ((domain.status ?? null) !== nextStatus) {
-    patch.status = nextStatus;
-  }
-
-  return patch;
-}
-
 // Stable empty-array fallbacks — prevents new-reference cascades during loading.
 const EMPTY_CLIENTS: ClientRecord[] = [];
 const EMPTY_DOMAINS: DomainRecord[] = [];
-const EMPTY_ACCOUNTS: EmailAccountRecord[] = [];
+
+// Columns shown in the wide read-only table. Only fields the Winnr sync actually populates —
+// client_id / setup_email / purchase_date / local status are empty for synced domains and omitted.
+const DOMAIN_COLUMNS: {
+  key: string;
+  label: string;
+  sortKey?: DomainSortKey;
+  width: number;
+  minWidth: number;
+  align?: "right";
+  render: (domain: DomainRecord, clientLabel: string) => ReactNode;
+}[] = [
+  { key: "domain", label: "Domain", sortKey: "domain", width: 280, minWidth: 180, render: (d) => d.domain_name },
+  { key: "client", label: "Client", sortKey: "client", width: 130, minWidth: 100, render: (_d, c) => c },
+  { key: "mailboxes", label: "Mailboxes", sortKey: "mailboxes", width: 110, minWidth: 90, align: "right", render: (d) => d.winnr_email_user_count ?? "—" },
+  { key: "dns", label: "DNS provider", width: 150, minWidth: 110, render: (d) => d.dns_provider ?? "—" },
+  { key: "tags", label: "Tags", width: 180, minWidth: 120, render: (d) => (d.winnr_tags?.length ? d.winnr_tags.join(", ") : "—") },
+  { key: "winnr", label: "Winnr status", sortKey: "winnr", width: 130, minWidth: 110, render: (d) => d.winnr_status ?? "—" },
+  { key: "created", label: "Created", width: 120, minWidth: 100, render: (d) => formatDate(d.winnr_created_at) },
+  { key: "synced", label: "Last synced", width: 130, minWidth: 100, render: (d) => formatDate(d.last_synced_at) },
+];
 
 // ── CreateDomainSheetHost ──────────────────────────────────────────────────────────────────────
 // Owns the "is sheet open" boolean so that opening/closing New Domain does NOT re-render
@@ -244,25 +237,17 @@ export function DomainsPage() {
   const clients = data?.clients ?? EMPTY_CLIENTS;
   const domains = data?.domains ?? EMPTY_DOMAINS;
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<DomainDraft | null>(null);
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [domainSort, setDomainSort] = useState<{ key: DomainSortKey; direction: SortDirection }>({
     key: "domain",
     direction: "asc",
   });
   const domainColumns = useResizableColumns({
-    storageKey: "table:domains:columns:v4",
-    defaultWidths: [540, 300, 200],
-    minWidths: [260, 180, 140],
+    storageKey: "table:domains:columns:v5",
+    defaultWidths: DOMAIN_COLUMNS.map((c) => c.width),
+    minWidths: DOMAIN_COLUMNS.map((c) => c.minWidth),
   });
   const domainTableStyle = useMemo(
-    () =>
-      ({
-        "--domains-table-columns": domainColumns.template,
-      }) as CSSProperties,
+    () => ({ "--domains-table-columns": domainColumns.template }) as CSSProperties,
     [domainColumns.template],
   );
 
@@ -271,66 +256,35 @@ export function DomainsPage() {
     [clients, identity],
   );
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
-  const emailAccounts = data?.emailAccounts ?? EMPTY_ACCOUNTS;
-  const scopedAccounts = useMemo(
-    () => (identity ? scopeEmailAccounts(identity, clients, domains, emailAccounts) : []),
-    [clients, domains, emailAccounts, identity],
+  const clientNameById = useMemo(() => new Map(scopedClients.map((c) => [c.id, c.name])), [scopedClients]);
+  const clientLabel = useCallback(
+    (d: DomainRecord) => (d.client_id === null ? "Unlinked" : clientNameById.get(d.client_id) ?? "Unknown client"),
+    [clientNameById],
   );
 
   const filteredDomains = useMemo(() => {
-    return scopedDomains.filter((item) => {
-      const search = query.trim().toLowerCase();
-      const matchesQuery =
-        search.length === 0 ||
+    const search = query.trim().toLowerCase();
+    if (!search) return scopedDomains;
+    return scopedDomains.filter(
+      (item) =>
         item.domain_name.toLowerCase().includes(search) ||
-        (item.setup_email ?? "").toLowerCase().includes(search);
-      const matchesStatus = statusFilter === "all" || (item.status ?? "") === statusFilter;
-      return matchesQuery && matchesStatus;
-    });
-  }, [query, scopedDomains, statusFilter]);
+        (item.dns_provider ?? "").toLowerCase().includes(search) ||
+        (item.winnr_tags ?? []).some((tag) => tag.toLowerCase().includes(search)),
+    );
+  }, [query, scopedDomains]);
 
   const sortedDomains = useMemo(() => {
     return filteredDomains.slice().sort((left, right) => {
-      if (domainSort.key === "domain") {
-        return compareText(left.domain_name, right.domain_name, domainSort.direction);
+      if (domainSort.key === "client") return compareText(clientLabel(left), clientLabel(right), domainSort.direction);
+      if (domainSort.key === "mailboxes") {
+        const l = left.winnr_email_user_count ?? -1;
+        const r = right.winnr_email_user_count ?? -1;
+        return domainSort.direction === "asc" ? l - r : r - l;
       }
-      if (domainSort.key === "client") {
-        const leftClient = scopedClients.find((item) => item.id === left.client_id)?.name ?? "";
-        const rightClient = scopedClients.find((item) => item.id === right.client_id)?.name ?? "";
-        return compareText(leftClient, rightClient, domainSort.direction);
-      }
-      return compareText(domainStatusLabel(left), domainStatusLabel(right), domainSort.direction);
+      if (domainSort.key === "winnr") return compareText(left.winnr_status, right.winnr_status, domainSort.direction);
+      return compareText(left.domain_name, right.domain_name, domainSort.direction);
     });
-  }, [domainSort.direction, domainSort.key, filteredDomains, scopedClients]);
-
-  const selectedDomain =
-    sortedDomains.find((item) => item.id === selectedDomainId) ?? sortedDomains[0] ?? null;
-
-  const selectedClientName = useMemo(() => {
-    if (!selectedDomain) return "Unknown client";
-    if (selectedDomain.client_id === null) return "Unlinked";
-    return scopedClients.find((item) => item.id === selectedDomain.client_id)?.name ?? "Unknown client";
-  }, [scopedClients, selectedDomain]);
-
-  const domainAccounts = useMemo(
-    () => (selectedDomain ? scopedAccounts.filter((item) => item.domain_id === selectedDomain.id) : []),
-    [scopedAccounts, selectedDomain],
-  );
-
-  useEffect(() => {
-    if (!selectedDomain) {
-      setDraft(null);
-      return;
-    }
-    setDraft(toDomainDraft(selectedDomain));
-  }, [selectedDomain?.id]);
-
-  const draftPatch = useMemo(() => {
-    if (!selectedDomain || !draft) return {};
-    return buildDomainPatch(selectedDomain, draft);
-  }, [draft, selectedDomain]);
-
-  const isDraftDirty = Object.keys(draftPatch).length > 0;
+  }, [clientLabel, domainSort.direction, domainSort.key, filteredDomains]);
 
   // Stable callback for CreateDomainSheetHost — only recreates when refresh changes.
   const handleCreateDomainStable = useCallback(
@@ -346,22 +300,6 @@ export function DomainsPage() {
     },
     [refresh],
   );
-
-  async function saveDraft() {
-    if (!selectedDomain || !isDraftDirty) return;
-    setIsSavingDraft(true);
-    try {
-      await repository.updateDomain(selectedDomain.id, draftPatch);
-      refresh();
-    } finally {
-      setIsSavingDraft(false);
-    }
-  }
-
-  function cancelDraft() {
-    if (!selectedDomain) return;
-    setDraft(toDomainDraft(selectedDomain));
-  }
 
   if (!identity || identity.role === "client") {
     return (
@@ -419,249 +357,60 @@ export function DomainsPage() {
           description="When domains are synced, they will appear here with health and verification details."
         />
       ) : (
-        <>
-          <Surface title="Domain list" subtitle={`${sortedDomains.length} domains in current scope`}>
-            <div className="mb-4 flex flex-wrap gap-3">
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search domain or setup email"
-                className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:min-w-[16rem]"
-              />
-              <Select
-                value={statusFilter === "" ? DOMAIN_UNSET_VALUE : statusFilter}
-                onValueChange={(value) => setStatusFilter(value === DOMAIN_UNSET_VALUE ? "" : value)}
-              >
-                <SelectTrigger
-                  aria-label="Filter domains by status"
-                  className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-2.5 text-sm text-white"
-                >
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                  <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                    All statuses
-                  </SelectItem>
-                  {DOMAIN_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                      {status}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                    unset
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <Surface title="Domain list" subtitle={`${sortedDomains.length} domains in current scope`}>
+          <div className="mb-4">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search domain, DNS provider, or tag"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:max-w-md"
+            />
+          </div>
 
-            <div className="overflow-hidden rounded-2xl border border-border">
-              <div className="overflow-x-auto" style={domainTableStyle}>
-                <div className="hidden min-w-[640px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--domains-table-columns)]">
-                  {[
-                    { key: "domain" as const, label: "Domain" },
-                    { key: "client" as const, label: "Client" },
-                    { key: "status" as const, label: "Status" },
-                  ].map((column, index, collection) => (
-                    <div key={column.key} className="relative min-w-0">
+          <div className="overflow-hidden rounded-2xl border border-border">
+            <div className="overflow-x-auto" style={domainTableStyle}>
+              <div className="grid gap-3 border-b border-border bg-black/20 px-4 py-3 [grid-template-columns:var(--domains-table-columns)]">
+                {DOMAIN_COLUMNS.map((column, index) => (
+                  <div key={column.key} className={`relative min-w-0 ${column.align === "right" ? "text-right" : ""}`}>
+                    {column.sortKey ? (
                       <button
                         onClick={() =>
                           setDomainSort((current) =>
-                            current.key === column.key
-                              ? { key: column.key, direction: current.direction === "asc" ? "desc" : "asc" }
-                              : { key: column.key, direction: "asc" },
+                            current.key === column.sortKey
+                              ? { key: column.sortKey!, direction: current.direction === "asc" ? "desc" : "asc" }
+                              : { key: column.sortKey!, direction: "asc" },
                           )
                         }
-                        className="w-full pr-3 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white"
+                        className={`text-xs uppercase tracking-[0.16em] text-muted-foreground transition hover:text-white ${column.align === "right" ? "w-full text-right" : "w-full pr-3 text-left"}`}
                       >
-                        {column.label} ({sortIndicator(domainSort.key === column.key, domainSort.direction)})
+                        {column.label} ({sortIndicator(domainSort.key === column.sortKey, domainSort.direction)})
                       </button>
-                      {index < collection.length - 1 && (
-                        <div onMouseDown={domainColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="divide-y divide-border md:min-w-[640px]">
-                  {sortedDomains.map((domain) => {
-                    const active = selectedDomain?.id === domain.id;
-                    const clientName =
-                      domain.client_id === null
-                        ? "Unlinked"
-                        : scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
-                    return (
-                      <button
-                        key={domain.id}
-                        onClick={() => {
-                          setSelectedDomainId(domain.id);
-                          setDetailOpen(true);
-                        }}
-                        className={`block w-full px-4 py-3 text-left transition ${
-                          active ? "bg-white/5" : "hover:bg-white/3"
-                        }`}
+                    ) : (
+                      <span className="block text-xs uppercase tracking-[0.16em] text-muted-foreground">{column.label}</span>
+                    )}
+                    {index < DOMAIN_COLUMNS.length - 1 && (
+                      <div onMouseDown={domainColumns.getResizeMouseDown(index)} className="absolute -right-1 top-0 h-full w-2 cursor-col-resize rounded-sm bg-transparent transition hover:bg-white/20" />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="divide-y divide-border">
+                {sortedDomains.map((domain) => (
+                  <div key={domain.id} className="grid items-center gap-3 px-4 py-3 [grid-template-columns:var(--domains-table-columns)]">
+                    {DOMAIN_COLUMNS.map((column) => (
+                      <span
+                        key={column.key}
+                        className={`truncate text-sm ${column.key === "domain" ? "text-white" : "text-neutral-300"} ${column.align === "right" ? "text-right" : ""}`}
                       >
-                        {/* Mobile card */}
-                        <div className="md:hidden">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-sm text-white">{domain.domain_name}</span>
-                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{domainStatusLabel(domain)}</span>
-                          </div>
-                          <p className="mt-1 text-xs text-neutral-500">{clientName}</p>
-                        </div>
-                        {/* Desktop table row */}
-                        <div className="hidden min-w-[640px] items-center gap-3 [grid-template-columns:var(--domains-table-columns)] md:grid">
-                          <span className="truncate text-sm text-white">{domain.domain_name}</span>
-                          <span className="truncate text-sm text-neutral-300">{clientName}</span>
-                          <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domainStatusLabel(domain)}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                        {column.render(domain, clientLabel(domain))}
+                      </span>
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
-          </Surface>
-
-          <LightweightSheet
-            open={detailOpen}
-            onOpenChange={setDetailOpen}
-            title={<span className="text-white">Domain detail</span>}
-            description="Edit local status; Winnr data is read-only."
-            className="overflow-y-auto border-l border-[#242424] bg-[#050505] sm:max-w-xl"
-          >
-            {!selectedDomain || !draft ? (
-              <EmptyState
-                title="Select a domain"
-                description="Select a row from the list to inspect and update domain metadata."
-              />
-            ) : (
-              <div className="space-y-5 px-6 pb-6">
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={() => cancelDraft()}
-                    disabled={!isDraftDirty || isSavingDraft}
-                    className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Cancel changes
-                  </button>
-                  <button
-                    onClick={() => {
-                      void saveDraft();
-                    }}
-                    disabled={!isDraftDirty || isSavingDraft}
-                    className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isSavingDraft ? "Saving..." : "Save changes"}
-                  </button>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client</p>
-                    <p className="mt-2 text-sm">{selectedClientName}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup email</p>
-                    <p className="mt-2 text-sm">{selectedDomain.setup_email ?? "—"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Purchase date</p>
-                    <p className="mt-2 text-sm">{formatDate(selectedDomain.purchase_date)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Winnr status</p>
-                    <p className="mt-2 text-sm">{selectedDomain.winnr_status ?? "—"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">DNS provider</p>
-                    <p className="mt-2 text-sm">{selectedDomain.dns_provider ?? "—"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Mailboxes (Winnr)</p>
-                    <p className="mt-2 text-sm">{selectedDomain.winnr_email_user_count ?? "—"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Winnr tags</p>
-                    <p className="mt-2 text-sm">{selectedDomain.winnr_tags?.length ? selectedDomain.winnr_tags.join(", ") : "—"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last synced</p>
-                    <p className="mt-2 text-sm">{formatDate(selectedDomain.last_synced_at)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-black/10 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Missing since</p>
-                    <p className="mt-2 text-sm">{selectedDomain.missing_since ? formatDate(selectedDomain.missing_since) : "—"}</p>
-                  </div>
-                </div>
-
-                <div className="max-w-sm">
-                  <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</span>
-                    <Select
-                      value={draft.status === "" ? DOMAIN_UNSET_VALUE : draft.status}
-                      onValueChange={(value) =>
-                        setDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                status: value === DOMAIN_UNSET_VALUE ? "" : (value as DomainStatus),
-                              }
-                            : current,
-                        )
-                      }
-                    >
-                      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                        <SelectItem value={DOMAIN_UNSET_VALUE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-                          unset
-                        </SelectItem>
-                        {DOMAIN_STATUSES.map((status) => (
-                          <SelectItem
-                            key={status}
-                            value={status}
-                            className="text-white focus:bg-[#1a1a1a] focus:text-white"
-                          >
-                            {status}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                </div>
-
-                <div className="rounded-2xl border border-border bg-black/10 p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email accounts</p>
-                    <span className="text-xs text-neutral-500">{domainAccounts.length} mailboxes</span>
-                  </div>
-                  {domainAccounts.length === 0 ? (
-                    <p className="mt-3 text-sm text-neutral-500">No mailboxes synced for this domain yet.</p>
-                  ) : (
-                    <div className="mt-3 overflow-hidden rounded-xl border border-border">
-                      <div className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] gap-2 border-b border-border bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                        <span>Email</span>
-                        <span>Warming</span>
-                        <span className="text-right">Health</span>
-                        <span className="text-right">Inbox</span>
-                      </div>
-                      <div className="divide-y divide-border">
-                        {domainAccounts.map((account) => (
-                          <div key={account.id} className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] items-center gap-2 px-3 py-2 text-sm">
-                            <span className="truncate text-white">{account.email_address}</span>
-                            <span className="truncate text-xs uppercase tracking-[0.12em] text-neutral-400">{account.warming_status ?? "unset"}</span>
-                            <span className="text-right text-neutral-300">{formatNumber(account.warming_health_score)}</span>
-                            <span className="text-right text-neutral-300">{formatNumber(account.warming_inbox_rate)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </LightweightSheet>
-        </>
+          </div>
+        </Surface>
       )}
     </div>
   );

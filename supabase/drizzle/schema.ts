@@ -411,10 +411,11 @@ export const clientUsers = pgTable("client_users", {
 export const domains = pgTable("domains", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	clientId: uuid("client_id").notNull(),
+	// Nullable since 20260720h — Winnr-synced domains have no agency link/setup/purchase data.
+	clientId: uuid("client_id"),
 	domainName: text("domain_name").notNull(),
-	setupEmail: text("setup_email").notNull(),
-	purchaseDate: date("purchase_date").notNull(),
+	setupEmail: text("setup_email"),
+	purchaseDate: date("purchase_date"),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: domainStatus(),
 	// Winnr sync fields (20260720f), ingestion-only — n8n writes them via service_role; the portal
