@@ -74,23 +74,16 @@ describe("Sprint B module operations", () => {
     mockedRepo.deleteEmailExcludeDomain.mockResolvedValue(undefined as never);
   });
 
-  it("saves domain draft changes", async () => {
+  it("renders the read-only domains table", async () => {
     mockedUseAuth.mockReturnValue(makeAuth("manager") as never);
 
     render(<MemoryRouter><DomainsPage /></MemoryRouter>);
     await act(async () => {});
 
-    // Detail is a drawer now — click the domain row to open it before editing.
-    fireEvent.click(screen.getAllByText("acme.com")[0]);
-    await act(async () => {});
-
-    await chooseOptionByLabel("Status", "blocked");
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => {
-      expect(mockedRepo.updateDomain).toHaveBeenCalledTimes(1);
-    });
-    expect(mockedRepo.updateDomain).toHaveBeenCalledWith("domain-1", expect.objectContaining({ status: "blocked" }));
+    // Domains is now a wide read-only table (no per-domain edit drawer). The synced domain
+    // and its Winnr status should render.
+    expect(screen.getAllByText("acme.com").length).toBeGreaterThan(0);
+    expect(screen.getByText(/445 domains|1 domains|domains in current scope/)).toBeInTheDocument();
   });
 
   // Invoice writes are admin-only in RLS (invoices_update_admin = private.is_admin_user()).
