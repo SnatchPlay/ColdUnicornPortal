@@ -285,14 +285,12 @@ function is protected** (verified 2026-07-14 via `supabase functions list`):
 | Function | `verify_jwt` | Who enforces auth |
 |---|---|---|
 | `orm-gateway` | **`true`** | The platform, before the handler runs. This is what makes it safe for `parseJwtClaims` to decode the JWT **without** re-verifying the signature ([ADR-0008](../../adr/0008-orm-gateway-edge-function.md)). If this ever flips to `false`, the gateway must verify the signature itself. |
-| `orm-gateway-next` | **`true`** | same |
 | `send-invite` | **`false`** | **The handler itself**, deliberately: 401 on a missing bearer token → `auth.getUser()` (verifies the signature server-side via the Auth API) → re-reads the actor's role from `public.users` and gates on it (403). |
 | `manage-invites` | **`false`** | same pattern — 401 → `auth.getUser()` → `isAdminActor(role)` → 403. |
 
 | Function | Purpose | Privileges |
 |---|---|---|
-| `orm-gateway` | All runtime reads/writes (~46 actions). Drizzle + `postgres.js`, RLS passthrough. | Holds a **`DATABASE_URL` transaction-pooler credential** ([index.ts:23-32](../../../supabase/functions/orm-gateway/index.ts#L23-L32)) but never bypasses RLS: `executeAsCaller` sets `role` to the caller's JWT role inside the transaction ([index.ts:694-728](../../../supabase/functions/orm-gateway/index.ts#L694-L728), [`rls-context.ts`](../../../supabase/functions/orm-gateway/rls-context.ts)). Unknown JWT roles fall back to `authenticated`. |
-| `orm-gateway-next` | Deploy-only twin: `import "../orm-gateway/index.ts"` — identical code, separate deployment slot so WIP gateway changes can be tested without touching production. Targeted via `VITE_ORM_GATEWAY_FUNCTION`. | same |
+| `orm-gateway` | The **single canonical** gateway — all runtime reads/writes (~46 actions). Drizzle + `postgres.js`, RLS passthrough. | Holds a **`DATABASE_URL` transaction-pooler credential** ([index.ts:23-32](../../../supabase/functions/orm-gateway/index.ts#L23-L32)) but never bypasses RLS: `executeAsCaller` sets `role` to the caller's JWT role inside the transaction ([index.ts:694-728](../../../supabase/functions/orm-gateway/index.ts#L694-L728), [`rls-context.ts`](../../../supabase/functions/orm-gateway/rls-context.ts)). Unknown JWT roles fall back to `authenticated`. |
 | `send-invite` | Creates the auth user + `public.users` (+ `client_users` for clients) and emails the invite. | service role |
 | `manage-invites` | `list` / `resend` / `revoke`. | service role |
 

@@ -70,7 +70,11 @@ export function scopeDailyStats(identity: Identity, clients: ClientRecord[], sta
 
 export function scopeDomains(identity: Identity, clients: ClientRecord[], domains: DomainRecord[]) {
   const clientIds = new Set(scopeClients(identity, clients).map((item) => item.id));
-  return domains.filter((item) => clientIds.has(item.client_id));
+  // Winnr-synced domains not yet linked to a client have `client_id = null` (there is no linking UI
+  // yet). RLS only returns those to admin-tier callers — `private.can_access_client(null)` is true for
+  // admins, false for managers/clients — so surfacing unlinked domains here shows *all* domains to
+  // admins without ever leaking them to managers/clients, who never receive them in the first place.
+  return domains.filter((item) => item.client_id === null || clientIds.has(item.client_id));
 }
 
 /**

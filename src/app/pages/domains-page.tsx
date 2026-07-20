@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { formatDate, formatNumber } from "../lib/format";
+import { DomainsSectionTabs } from "../components/domains-tabs";
 import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useDomainsPage } from "../lib/use-domains";
@@ -275,7 +276,7 @@ export function DomainsPage() {
       const matchesQuery =
         search.length === 0 ||
         item.domain_name.toLowerCase().includes(search) ||
-        item.setup_email.toLowerCase().includes(search);
+        (item.setup_email ?? "").toLowerCase().includes(search);
       const matchesStatus = statusFilter === "all" || (item.status ?? "") === statusFilter;
       return matchesQuery && matchesStatus;
     });
@@ -303,6 +304,7 @@ export function DomainsPage() {
 
   const selectedClientName = useMemo(() => {
     if (!selectedDomain) return "Unknown client";
+    if (selectedDomain.client_id === null) return "Unlinked";
     return scopedClients.find((item) => item.id === selectedDomain.client_id)?.name ?? "Unknown client";
   }, [scopedClients, selectedDomain]);
 
@@ -405,6 +407,8 @@ export function DomainsPage() {
         }
       />
 
+      <DomainsSectionTabs />
+
       {sortedDomains.length === 0 ? (
         <EmptyState
           title="No domains in current scope"
@@ -477,7 +481,10 @@ export function DomainsPage() {
                 <div className="divide-y divide-border md:min-w-[1200px]">
                   {sortedDomains.map((domain) => {
                     const active = selectedDomain?.id === domain.id;
-                    const clientName = scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
+                    const clientName =
+                      domain.client_id === null
+                        ? "Unlinked"
+                        : scopedClients.find((item) => item.id === domain.client_id)?.name ?? "Unknown client";
                     return (
                       <button
                         key={domain.id}
@@ -543,7 +550,7 @@ export function DomainsPage() {
                   </div>
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Setup email</p>
-                    <p className="mt-2 text-sm">{selectedDomain.setup_email}</p>
+                    <p className="mt-2 text-sm">{selectedDomain.setup_email ?? "—"}</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-black/10 p-4">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Purchase date</p>

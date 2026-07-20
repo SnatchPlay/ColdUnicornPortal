@@ -108,7 +108,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 - **Source of truth** for every table.
 - **RLS enforcement** of role boundaries (`public.is_admin_user`, `is_manager_of_client`, `can_access_client`, `is_internal_user`). RLS is *the* security boundary — the portal has no server of its own to enforce access in.
 - **Edge functions:**
-  - **`orm-gateway`** — the portal's entire data path. The SPA does not query Postgres directly: it POSTs `{ action, ...payload }` to this function, which runs Drizzle + postgres.js and re-establishes the caller's JWT claims and role *inside each transaction*, so RLS still applies. It also computes the server-side aggregates the dashboards need. (`orm-gateway-next` is a staging twin.) → [ADR-0008](adr/0008-orm-gateway-edge-function.md)
+  - **`orm-gateway`** — the portal's entire data path. The SPA does not query Postgres directly: it POSTs `{ action, ...payload }` to this function, which runs Drizzle + postgres.js and re-establishes the caller's JWT claims and role *inside each transaction*, so RLS still applies. It also computes the server-side aggregates the dashboards need. It is the **single canonical** gateway function. → [ADR-0008](adr/0008-orm-gateway-edge-function.md)
   - **`send-invite`, `manage-invites`** — privileged invitation flows.
 
 ### Hard rule
