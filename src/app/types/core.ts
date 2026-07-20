@@ -375,8 +375,14 @@ export interface DomainRecord {
   updated_at: string;
   /** Local, portal-editable lifecycle status. */
   status: DomainStatus | null;
-  /** Winnr mailbox-provider status (ingestion-only, read-only in the portal). Separate from `status`. */
+  /** Winnr sync fields (ingestion-only, read-only in the portal). Separate from local `status`. */
   winnr_status: string | null;
+  dns_provider: string | null;
+  winnr_tags: string[] | null;
+  winnr_email_user_count: number | null;
+  winnr_created_at: string | null;
+  last_synced_at: string | null;
+  missing_since: string | null;
 }
 
 export interface InvoiceRecord {
