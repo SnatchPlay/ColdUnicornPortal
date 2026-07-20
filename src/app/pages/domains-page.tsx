@@ -42,6 +42,88 @@ function sortIndicator(active: boolean, direction: SortDirection) {
 const EMPTY_CLIENTS: ClientRecord[] = [];
 const EMPTY_DOMAINS: DomainRecord[] = [];
 
+// Deterministic per-tag colour so the same tag always reads the same everywhere. Hash → hue, drawn
+// as a translucent pill on the dark surface. Data-driven inline colour is allowed (CLAUDE.md §5).
+function tagHue(tag: string): number {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i += 1) hash = (hash * 31 + tag.charCodeAt(i)) | 0;
+  return Math.abs(hash) % 360;
+}
+
+function TagChips({ tags }: { tags: string[] | null }) {
+  if (!tags?.length) return <span className="text-neutral-500">—</span>;
+  return (
+    <>
+      {tags.map((tag) => {
+        const hue = tagHue(tag);
+        return (
+          <span
+            key={tag}
+            style={{
+              backgroundColor: `hsl(${hue} 70% 50% / 0.16)`,
+              color: `hsl(${hue} 85% 78%)`,
+              borderColor: `hsl(${hue} 70% 55% / 0.4)`,
+            }}
+            className="whitespace-nowrap rounded-full border px-2 py-0.5 text-xs leading-tight"
+          >
+            {tag}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+// Inline client-linking cell. Winnr-synced domains have no client; an admin can assign one here
+// without leaving the table. RLS (domains_update_scoped = can_manage_client) gates the write, so a
+// manager cannot link an unlinked domain (they never receive those rows). The dropdown content is
+// portalled by Radix, so it is not clipped by the cell.
+const CLIENT_UNLINKED = "__unlinked_client__";
+
+function ClientLinkCell({
+  domain,
+  clients,
+  onLink,
+}: {
+  domain: DomainRecord;
+  clients: ClientRecord[];
+  onLink: (domainId: string, clientId: string | null) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  return (
+    <Select
+      value={domain.client_id ?? CLIENT_UNLINKED}
+      onValueChange={async (value) => {
+        const next = value === CLIENT_UNLINKED ? null : value;
+        if (next === (domain.client_id ?? null)) return;
+        setSaving(true);
+        try {
+          await onLink(domain.id, next);
+        } finally {
+          setSaving(false);
+        }
+      }}
+    >
+      <SelectTrigger
+        aria-label="Link client"
+        className={`h-auto w-full rounded-lg border-white/10 bg-black/20 px-2 py-1 text-left text-sm ${domain.client_id ? "text-white" : "text-neutral-500"} ${saving ? "opacity-60" : ""}`}
+      >
+        <SelectValue placeholder="Unlinked" />
+      </SelectTrigger>
+      <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+        <SelectItem value={CLIENT_UNLINKED} className="text-neutral-400 focus:bg-[#1a1a1a] focus:text-white">
+          Unlinked
+        </SelectItem>
+        {clients.map((client) => (
+          <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+            {client.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // Columns shown in the wide read-only table. Only fields the Winnr sync actually populates —
 // client_id / setup_email / purchase_date / local status are empty for synced domains and omitted.
 const DOMAIN_COLUMNS: {
@@ -51,13 +133,15 @@ const DOMAIN_COLUMNS: {
   width: number;
   minWidth: number;
   align?: "right";
+  /** When false the cell wraps chips in a flex row instead of truncating text. */
+  truncate?: boolean;
   render: (domain: DomainRecord, clientLabel: string) => ReactNode;
 }[] = [
   { key: "domain", label: "Domain", sortKey: "domain", width: 280, minWidth: 180, render: (d) => d.domain_name },
-  { key: "client", label: "Client", sortKey: "client", width: 130, minWidth: 100, render: (_d, c) => c },
+  { key: "client", label: "Client", sortKey: "client", width: 190, minWidth: 140, truncate: false, render: (_d, c) => c },
   { key: "mailboxes", label: "Mailboxes", sortKey: "mailboxes", width: 110, minWidth: 90, align: "right", render: (d) => d.winnr_email_user_count ?? "—" },
   { key: "dns", label: "DNS provider", width: 150, minWidth: 110, render: (d) => d.dns_provider ?? "—" },
-  { key: "tags", label: "Tags", width: 180, minWidth: 120, render: (d) => (d.winnr_tags?.length ? d.winnr_tags.join(", ") : "—") },
+  { key: "tags", label: "Tags", width: 220, minWidth: 140, truncate: false, render: (d) => <TagChips tags={d.winnr_tags} /> },
   { key: "winnr", label: "Winnr status", sortKey: "winnr", width: 130, minWidth: 110, render: (d) => d.winnr_status ?? "—" },
   { key: "created", label: "Created", width: 120, minWidth: 100, render: (d) => formatDate(d.winnr_created_at) },
   { key: "synced", label: "Last synced", width: 130, minWidth: 100, render: (d) => formatDate(d.last_synced_at) },
@@ -286,6 +370,14 @@ export function DomainsPage() {
     });
   }, [clientLabel, domainSort.direction, domainSort.key, filteredDomains]);
 
+  const handleLinkClient = useCallback(
+    async (domainId: string, clientId: string | null) => {
+      await repository.updateDomain(domainId, { client_id: clientId });
+      refresh();
+    },
+    [refresh],
+  );
+
   // Stable callback for CreateDomainSheetHost — only recreates when refresh changes.
   const handleCreateDomainStable = useCallback(
     async (d: CreateDomainDraft) => {
@@ -400,9 +492,15 @@ export function DomainsPage() {
                     {DOMAIN_COLUMNS.map((column) => (
                       <span
                         key={column.key}
-                        className={`truncate text-sm ${column.key === "domain" ? "text-white" : "text-neutral-300"} ${column.align === "right" ? "text-right" : ""}`}
+                        className={`min-w-0 text-sm ${column.key === "domain" ? "text-white" : "text-neutral-300"} ${column.align === "right" ? "text-right" : ""} ${
+                          column.truncate === false ? "flex flex-wrap items-center gap-1 overflow-hidden" : "truncate"
+                        }`}
                       >
-                        {column.render(domain, clientLabel(domain))}
+                        {column.key === "client" ? (
+                          <ClientLinkCell domain={domain} clients={scopedClients} onLink={handleLinkClient} />
+                        ) : (
+                          column.render(domain, clientLabel(domain))
+                        )}
                       </span>
                     ))}
                   </div>
