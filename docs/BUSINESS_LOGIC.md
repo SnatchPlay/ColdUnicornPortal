@@ -149,7 +149,7 @@ Capabilities:
 - **Edit lead state:** `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments` (the ADR-0004 whitelist).
 - **Edit client config:** name, status, contracted KPIs, min daily sent, inboxes count, notification emails, SMS phone numbers, auto-OOO toggle, setup info, manager (admin only вЂ” manager cannot reassign themselves).
 - **Edit campaigns:** name, status, database size, positive responses.
-- **Edit domains:** status, reputation, exchange cost, verification dates.
+- **Edit domains:** local `status` only (legacy reputation / exchange / verification-date fields dropped in `20260720f`; Winnr warming is read-only).
 - **Edit invoices:** issue date, amount, status (within ingested invoice rows; managers do not create invoices in the portal).
 - **Read** the email blacklist; cannot modify it.
 - **Invite** users for assigned clients (admin role inherits the same).
@@ -205,7 +205,7 @@ This is the canonical scope. Anything not listed here is **legacy** and out of s
 | Internal leads | Editable qualification + milestones + comments drawer. Reply history inline. |
 | Internal campaigns | Editable metadata drawer + per-campaign daily performance line chart. |
 | Internal statistics | Trend lines, qualification donut, campaign portfolio cards. |
-| Domains | Editable status, reputation, exchange cost, verification dates. |
+| Domains | Editable local `status`; Winnr status + per-domain mailbox warming shown read-only. |
 | Invoices | Editable issue date, amount, status. **Creation is ingestion-only.** |
 | Blacklist | Admin: add/remove. Manager: read-only banner. |
 | Admin user management | Send/resend/revoke invitations. Tabs: Overview / Pending / Accepted / Expired. |
@@ -288,7 +288,7 @@ Source: created via the New-client sheet (manager/admin). Portal mutates everyth
 
 ### 5.4 Domain (sending domain)
 
-Source: created/updated by ingestion when domains are provisioned. Portal mutates operational fields: `status`, `reputation`, `exchange_cost`, `campaign_verified_at`, `warmup_verified_at`.
+Source: created/updated by ingestion when domains are provisioned. Portal mutates only the local `status` field (the legacy `reputation`, `exchange_cost`, `exchange_date`, `campaign_verified_at`, `warmup_verified_at` were dropped in `20260720f`). Winnr provider state lives in `winnr_status` + the mailbox tables (`email_accounts`, `email_account_warming_daily`), all ingestion-only.
 
 `status` lifecycle: `warmup в†’ active в†’ blocked в†’ retired`.
 
@@ -410,7 +410,7 @@ Who **may write** which table from where. RLS is the authoritative gate; ingesti
 | `daily_stats` | **never** | yes вЂ” daily UPSERT on (`client_id`, `report_date`) | Portal reads only; not loaded for client role |
 | `leads` | manager / admin (ADR-0004 whitelist) | yes вЂ” INSERT + enrichment UPDATE | Clients never write |
 | `replies` | **never** | yes вЂ” INSERT + classification UPDATE | Read-only from portal |
-| `domains` | manager / admin (operational fields) | yes вЂ” provisioning + reputation updates | |
+| `domains` | manager / admin (local `status` only) | yes вЂ” provisioning + Winnr sync (winnr_status, mailbox tables) | |
 | `invoices` | manager / admin (operational fields) | yes вЂ” invoice rows are ingested | Portal does not currently insert |
 | `email_exclude_list` | admin only | rarely | Used by n8n as block list before sends |
 | `client_ooo_routing` | (planned) manager / admin | rarely | n8n reads to act |

@@ -355,13 +355,11 @@ export interface DomainRecord {
   domain_name: string;
   setup_email: string;
   purchase_date: string;
-  exchange_date: string;
   updated_at: string;
+  /** Local, portal-editable lifecycle status. */
   status: DomainStatus | null;
-  reputation: string | null;
-  exchange_cost: number | null;
-  campaign_verified_at: string | null;
-  warmup_verified_at: string | null;
+  /** Winnr mailbox-provider status (ingestion-only, read-only in the portal). Separate from `status`. */
+  winnr_status: string | null;
 }
 
 export interface InvoiceRecord {

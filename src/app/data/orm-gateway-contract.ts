@@ -340,7 +340,8 @@ export interface CreateLeadPayload {
 
 export interface CreateDomainPayload {
   action: "createDomain";
-  input: Omit<DomainRecord, "id" | "created_at" | "updated_at">;
+  // winnr_status is ingestion-only (n8n), never set on portal create.
+  input: Omit<DomainRecord, "id" | "created_at" | "updated_at" | "winnr_status">;
 }
 
 export interface CreateConditionRulePayload {

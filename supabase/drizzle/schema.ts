@@ -414,13 +414,13 @@ export const domains = pgTable("domains", {
 	domainName: text("domain_name").notNull(),
 	setupEmail: text("setup_email").notNull(),
 	purchaseDate: date("purchase_date").notNull(),
-	exchangeDate: date("exchange_date").notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	status: domainStatus(),
-	reputation: text(),
-	exchangeCost: numeric("exchange_cost", { precision: 8, scale:  2 }),
-	campaignVerifiedAt: date("campaign_verified_at"),
-	warmupVerifiedAt: date("warmup_verified_at"),
+	// Winnr mailbox-provider status, kept separate from the local domain_status enum above
+	// (20260720f). Ingestion-only — n8n writes it via service_role. Other Winnr sync columns
+	// (winnr_domain_id, dns_provider, winnr_tags, last_synced_at, raw_payload, …) exist in the DB
+	// but are not declared here because the gateway neither reads nor writes them.
+	winnrStatus: text("winnr_status"),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],

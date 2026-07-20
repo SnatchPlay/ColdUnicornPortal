@@ -119,7 +119,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Table:** `domains`.
 - **RLS (verified live):** `domains_update_scoped` — `using`/`with check` = `private.can_manage_client(client_id)` (manager of the client + admin tier).
 - **Called from:** Domains page drawer save ([domains-page.tsx:396](../../../src/app/pages/domains-page.tsx#L396)).
-- **Fields:** `status`, `reputation`, `exchange_cost`, `campaign_verified_at`, `warmup_verified_at`.
+- **Fields:** `status` (the only editable field; the other legacy columns were dropped in `20260720f`). `winnr_status` and the Winnr sync columns are ingestion-only — `mapDomainPatch` rejects them.
 
 ### 2.5 `updateInvoice(invoiceId, patch)` — [repository.ts:824-826](../../../src/app/data/repository.ts#L824-L826) · gateway [index.ts:2337](../../../supabase/functions/orm-gateway/index.ts#L2337)
 
@@ -194,7 +194,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **RLS policy:** `domains_insert_internal` — same scoping as campaigns. Migration: `20260517_entity_insert_policies.sql`.
 - **Allowed roles:** admin, super_admin, manager (scoped).
 - **Called from:** Domains page "New domain" Sheet ([domains-page.tsx:375](../../../src/app/pages/domains-page.tsx#L375)).
-- **Fields:** `client_id`, `domain_name`, `setup_email`, `purchase_date`, `exchange_date` (all required), `exchange_cost`, `status` (optional).
+- **Fields:** `client_id`, `domain_name`, `setup_email`, `purchase_date` (all required), `status` (optional). (`exchange_date` / `exchange_cost` dropped in `20260720f`.)
 - **Update pattern:** no optimistic update; the page calls `refresh()`.
 
 ### 2.13b Lead custom fields (Batch 4, Task 4F) — [ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)
