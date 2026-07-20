@@ -374,6 +374,57 @@ export interface InvoiceRecord {
   updated_at: string | null;
 }
 
+/**
+ * A Winnr mailbox and its current warming snapshot. Ingestion-only: n8n populates this from
+ * Winnr (/v1/email-users + /v1/warming); the portal only reads. Warming statuses are free `text`
+ * because the taxonomy is owned by the external API. History lives in EmailAccountWarmingDailyRecord.
+ */
+export interface EmailAccountRecord {
+  id: string;
+  domain_id: string;
+  winnr_email_user_id: string;
+  email_address: string;
+  username: string | null;
+  display_name: string | null;
+  status: string | null;
+  warming_status: string | null;
+  warming_health_score: number | null;
+  warming_inbox_rate: number | null;
+  warming_spam_rate: number | null;
+  warming_daily_volume: number | null;
+  warming_progress: number | null;
+  winnr_created_at: string | null;
+  last_seen_at: string;
+  last_synced_at: string | null;
+  missing_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One day of a mailbox's warming history (from /v1/warming/{id}/metrics). Ingestion-only. */
+export interface EmailAccountWarmingDailyRecord {
+  email_account_id: string;
+  metric_date: string;
+  warming_status: string | null;
+  emails_sent: number | null;
+  health_score: number | null;
+  inbox_rate: number | null;
+  spam_rate: number | null;
+  daily_volume: number | null;
+  warmup_progress: number | null;
+  synced_at: string;
+}
+
+/** Domain-level warming aggregate from the domain_warming_summary view. */
+export interface DomainWarmingSummaryRecord {
+  domain_id: string;
+  email_accounts_count: number;
+  active_warming_accounts_count: number;
+  average_health_score: number | null;
+  lowest_inbox_rate: number | null;
+  highest_spam_rate: number | null;
+}
+
 export interface EmailExcludeRecord {
   domain: string;
   created_at: string;

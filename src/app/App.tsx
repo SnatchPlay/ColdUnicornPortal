@@ -22,6 +22,9 @@ const StatisticsPage = lazy(() =>
 );
 const ClientsPage = lazy(() => import("./pages/clients-page").then((module) => ({ default: module.ClientsPage })));
 const DomainsPage = lazy(() => import("./pages/domains-page").then((module) => ({ default: module.DomainsPage })));
+const EmailAccountsPage = lazy(() =>
+  import("./pages/email-accounts-page").then((module) => ({ default: module.EmailAccountsPage })),
+);
 const InvoicesPage = lazy(() => import("./pages/invoices-page").then((module) => ({ default: module.InvoicesPage })));
 const BlacklistPage = lazy(() => import("./pages/blacklist-page").then((module) => ({ default: module.BlacklistPage })));
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
@@ -202,8 +205,9 @@ function ProtectedApp() {
                 <Route path="statistics" element={<StatisticsPage />} />
                 {/* settings — per-page loader */}
                 <Route path="settings" element={<SettingsPage />} />
-                {/* domains / invoices / blacklist — per-page loader */}
+                {/* domains / email accounts / invoices / blacklist — per-page loader */}
                 <Route path="domains" element={<DomainsPage />} />
+                <Route path="email-accounts" element={<EmailAccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="blacklist" element={<BlacklistPage />} />
               </Route>
@@ -224,6 +228,7 @@ function ProtectedApp() {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="users" element={<AdminUserManagementPage />} />
                 <Route path="domains" element={<DomainsPage />} />
+                <Route path="email-accounts" element={<EmailAccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="blacklist" element={<BlacklistPage />} />
               </Route>

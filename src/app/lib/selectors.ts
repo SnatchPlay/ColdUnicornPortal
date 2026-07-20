@@ -5,6 +5,7 @@ import type {
   ClientRecord,
   DailyStatRecord,
   DomainRecord,
+  EmailAccountRecord,
   Identity,
   InvoiceRecord,
   LeadQualification,
@@ -70,6 +71,20 @@ export function scopeDailyStats(identity: Identity, clients: ClientRecord[], sta
 export function scopeDomains(identity: Identity, clients: ClientRecord[], domains: DomainRecord[]) {
   const clientIds = new Set(scopeClients(identity, clients).map((item) => item.id));
   return domains.filter((item) => clientIds.has(item.client_id));
+}
+
+/**
+ * Scope mailboxes to the caller's accessible clients via their owning domain. Mirrors the
+ * email_accounts RLS predicate (domain → client); keeps the UI honest under impersonation.
+ */
+export function scopeEmailAccounts(
+  identity: Identity,
+  clients: ClientRecord[],
+  domains: DomainRecord[],
+  accounts: EmailAccountRecord[],
+) {
+  const domainIds = new Set(scopeDomains(identity, clients, domains).map((item) => item.id));
+  return accounts.filter((item) => domainIds.has(item.domain_id));
 }
 
 export function scopeInvoices(identity: Identity, clients: ClientRecord[], invoices: InvoiceRecord[]) {

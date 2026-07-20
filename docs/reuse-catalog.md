@@ -95,9 +95,9 @@ There is **no** `useCoreData()` and no global snapshot. Both were deleted.
 
 ### Per-page hooks — [`lib/`](../src/app/lib/)
 
-`use-leads`, `use-campaigns`, `use-domains`, `use-invoices`, `use-blacklist`, `use-settings`,
-`use-analytics`, `use-lead-custom-columns` — plus co-located ones (`useClientsOverview` in
-`clients-page.tsx`, `useAdminDashboard`, `useManagerDashboard`).
+`use-leads`, `use-campaigns`, `use-domains`, `use-email-accounts`, `use-invoices`, `use-blacklist`,
+`use-settings`, `use-analytics`, `use-lead-custom-columns` — plus co-located ones (`useClientsOverview`
+in `clients-page.tsx`, `useAdminDashboard`, `useManagerDashboard`).
 
 All follow the same shape: `useState` + `useEffect` + a **`loadIdRef` stale guard**. Copy
 [`use-campaigns.ts`](../src/app/lib/use-campaigns.ts) — do not invent a variant.
@@ -110,7 +110,7 @@ it.)
 
 | Thing | Where |
 |---|---|
-| Role scoping | [`lib/selectors.ts`](../src/app/lib/selectors.ts) — `scopeClients`, `scopeCampaigns`, `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeInvoices`, `getLeadStage`, `getRoleLabel`, `isInternalAdmin` |
+| Role scoping | [`lib/selectors.ts`](../src/app/lib/selectors.ts) — `scopeClients`, `scopeCampaigns`, `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeEmailAccounts` (mailboxes via `domain → client`), `scopeInvoices`, `getLeadStage`, `getRoleLabel`, `isInternalAdmin` |
 | Client KPIs / view models | [`lib/client-view-models.ts`](../src/app/lib/client-view-models.ts) — `getClientKpis`, `getDailySentSeries`, `getPipelineCounts`, `getCampaignPerformance`, `getConversionRates`, `getClientLeadRows`, `formatCompact`, `PIPELINE_STAGES` |
 | Heavy aggregations (DoD / 3-DoD / WoW / MoM) | [`lib/client-metrics.ts`](../src/app/lib/client-metrics.ts) — `createClientMetrics`, `sumInRange`, `valueByDayOffset`, `toRate`, `startOfWeek`, `startOfMonth` |
 | Dashboard momentum + trend lines | [`lib/dashboard-momentum.ts`](../src/app/lib/dashboard-momentum.ts) — `linearRegression`, `DASHBOARD_CHART_TOOLTIP` |

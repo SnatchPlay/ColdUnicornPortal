@@ -18,6 +18,9 @@ import type {
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
+  DomainRecord,
+  EmailAccountRecord,
+  EmailAccountWarmingDailyRecord,
   LeadCustomFieldRecord,
   LeadRecord,
   ReplyRecord,
@@ -597,11 +600,23 @@ export interface AnalyticsClientLite {
 // Per-page focused payloads replacing the 16MB global loadSnapshot for these three routes.
 // Mutations go through repository.X() directly; refresh() re-runs the loader.
 
-/** Payload for DomainsPage — full client rows (scopeClients/scopeDomains need manager_id). */
+/** Payload for DomainsPage — full client rows (scopeClients/scopeDomains need manager_id).
+ *  emailAccounts powers the per-domain mailbox panel in the detail view. */
 export interface DomainsPagePayload {
   clients: ClientRecord[];
   domains: DomainRecord[];
+  emailAccounts: EmailAccountRecord[];
 }
+
+/** Payload for EmailAccountsPage — clients + domains for scoping/labels, plus the mailboxes. */
+export interface EmailAccountsPagePayload {
+  clients: ClientRecord[];
+  domains: DomainRecord[];
+  emailAccounts: EmailAccountRecord[];
+}
+
+/** Lazily-loaded per-mailbox warming history for the trend chart (metric_date asc). */
+export type EmailAccountWarmingPayload = EmailAccountWarmingDailyRecord[];
 
 /** Payload for InvoicesPage — full client rows (scopeClients/scopeInvoices need manager_id). */
 export interface InvoicesPagePayload {

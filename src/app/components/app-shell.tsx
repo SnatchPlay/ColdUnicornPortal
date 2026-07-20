@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
+  AtSign,
   BarChart3,
   Building2,
   Eye,
@@ -58,6 +59,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/campaigns", label: "Campaigns", icon: Rocket },
   { to: "/admin/statistics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/domains", label: "Domains", icon: Globe2 },
+  { to: "/admin/email-accounts", label: "Email accounts", icon: AtSign },
   { to: "/admin/invoices", label: "Invoices", icon: ReceiptText },
   { to: "/admin/users", label: "User management", icon: UserCog },
   { to: "/admin/settings", label: "Settings", icon: Settings },
@@ -78,6 +80,7 @@ const NAV_BY_ROLE: Record<AppRole, NavItem[]> = {
     { to: "/manager/campaigns", label: "Campaigns", icon: Rocket },
     { to: "/manager/statistics", label: "Analytics", icon: BarChart3 },
     { to: "/manager/domains", label: "Domains", icon: Globe2 },
+    { to: "/manager/email-accounts", label: "Email accounts", icon: AtSign },
     { to: "/manager/invoices", label: "Invoices", icon: ReceiptText },
     { to: "/manager/settings", label: "Settings", icon: Settings },
   ],

@@ -256,6 +256,45 @@ function toDomainRecord(row: typeof schema.domains.$inferSelect) {
   };
 }
 
+function toEmailAccountRecord(row: typeof schema.emailAccounts.$inferSelect) {
+  return {
+    id: row.id,
+    domain_id: row.domainId,
+    winnr_email_user_id: row.winnrEmailUserId,
+    email_address: row.emailAddress,
+    username: row.username,
+    display_name: row.displayName,
+    status: row.status,
+    warming_status: row.warmingStatus,
+    warming_health_score: normalizeNumeric(row.warmingHealthScore),
+    warming_inbox_rate: normalizeNumeric(row.warmingInboxRate),
+    warming_spam_rate: normalizeNumeric(row.warmingSpamRate),
+    warming_daily_volume: row.warmingDailyVolume,
+    warming_progress: normalizeNumeric(row.warmingProgress),
+    winnr_created_at: row.winnrCreatedAt,
+    last_seen_at: row.lastSeenAt,
+    last_synced_at: row.lastSyncedAt,
+    missing_since: row.missingSince,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+function toEmailAccountWarmingRecord(row: typeof schema.emailAccountWarmingDaily.$inferSelect) {
+  return {
+    email_account_id: row.emailAccountId,
+    metric_date: row.metricDate,
+    warming_status: row.warmingStatus,
+    emails_sent: row.emailsSent,
+    health_score: normalizeNumeric(row.healthScore),
+    inbox_rate: normalizeNumeric(row.inboxRate),
+    spam_rate: normalizeNumeric(row.spamRate),
+    daily_volume: row.dailyVolume,
+    warmup_progress: normalizeNumeric(row.warmupProgress),
+    synced_at: row.syncedAt,
+  };
+}
+
 function toInvoiceRecord(row: typeof schema.invoices.$inferSelect) {
   return {
     id: row.id,
@@ -2652,20 +2691,31 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
   // ── Phase 7 remaining: domains / invoices / blacklist per-page loaders ─────────────────────────
 
-  if (payload.action === "loadDomainsPage") {
+  if (payload.action === "loadDomainsPage" || payload.action === "loadEmailAccountsPage") {
     const t0 = performance.now();
-    const [clientRows, domainRows] = await Promise.all([
+    const [clientRows, domainRows, emailAccountRows] = await Promise.all([
       tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
       tx.select().from(schema.domains).orderBy(desc(schema.domains.updatedAt)),
+      tx.select().from(schema.emailAccounts).orderBy(asc(schema.emailAccounts.emailAddress)),
     ]);
     console.log(
-      `[PERF][orm-gateway] loadDomainsPage: ${(performance.now() - t0).toFixed(1)}ms ` +
-        `(clients=${clientRows.length} domains=${domainRows.length})`,
+      `[PERF][orm-gateway] ${payload.action}: ${(performance.now() - t0).toFixed(1)}ms ` +
+        `(clients=${clientRows.length} domains=${domainRows.length} mailboxes=${emailAccountRows.length})`,
     );
     return {
       clients: clientRows.map(toClientRecord),
       domains: domainRows.map(toDomainRecord),
+      emailAccounts: emailAccountRows.map(toEmailAccountRecord),
     };
+  }
+
+  if (payload.action === "loadEmailAccountWarming") {
+    const rows = await tx
+      .select()
+      .from(schema.emailAccountWarmingDaily)
+      .where(eq(schema.emailAccountWarmingDaily.emailAccountId, payload.emailAccountId))
+      .orderBy(asc(schema.emailAccountWarmingDaily.metricDate));
+    return rows.map(toEmailAccountWarmingRecord);
   }
 
   if (payload.action === "loadInvoicesPage") {
