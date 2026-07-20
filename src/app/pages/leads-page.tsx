@@ -955,7 +955,6 @@ function InternalLeadsPage() {
                     draft={draft}
                     updateDraft={(updater) => setDraft((current) => (current ? updater(current) : current))}
                     readOnly={identity?.role === "client"}
-                    hideWon={viewMode === "crm"}
                     showCrmFields={isCrmView}
                   />
 

@@ -1,4 +1,3 @@
-import { Checkbox } from "./ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import {
   CONTACT_METHOD_UNSET,
@@ -10,7 +9,8 @@ import {
 import type { ContactMethod, LeadGender, LeadQualification } from "../types/core";
 
 /**
- * Editable lead form (Identity / Pipeline / OOO sections). Shared by the Leads page drawer and the
+ * Editable lead form (Identity / Pipeline sections; OOO section is commented out — we don't surface OOO
+ * contacts). Shared by the Leads page drawer and the
  * Manager dashboard lead drawer. Pure presentational component driven by a `LeadDraft` + updater.
  */
 
@@ -60,12 +60,10 @@ export function SaveButton({ onClick, disabled, saving, label = "Save" }: {
   );
 }
 
-export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false, showCrmFields = false }: {
+export function LeadEditForm({ draft, updateDraft, readOnly, showCrmFields = false }: {
   draft: LeadDraft;
   updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;
   readOnly: boolean;
-  /** Hide the legacy `won` pipeline toggle — the CRM drawer's conclusion editor owns `won` (ADR-0013). */
-  hideWon?: boolean;
   /** Show the CRM operational fields (contact/method/negotiation/LinkedIn dates) — CRM view only. */
   showCrmFields?: boolean;
 }) {
@@ -125,24 +123,16 @@ export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false, sh
           <EditLabel>ColdUnicorn note (internal)</EditLabel>
           <textarea value={draft.coldunicornNote} onChange={(event) => set("coldunicornNote", event.target.value)} disabled={readOnly} rows={2} placeholder="Internal — not visible to the client" className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-white outline-none placeholder:text-muted-foreground disabled:opacity-60" />
         </label>
-        <div className="grid gap-3 md:grid-cols-4">
-          {[
-            { label: "Meeting booked", key: "meetingBooked" as const, value: draft.meetingBooked },
-            { label: "Meeting held", key: "meetingHeld" as const, value: draft.meetingHeld },
-            { label: "Offer sent", key: "offerSent" as const, value: draft.offerSent },
-            { label: "Won", key: "won" as const, value: draft.won },
-          ].filter((item) => !(hideWon && item.key === "won")).map((item) => (
-            <label key={item.label} className="rounded-2xl border border-white/10 bg-black/10 p-4">
-              <EditLabel>{item.label}</EditLabel>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-sm">{item.value ? "Yes" : "No"}</span>
-                <Checkbox checked={item.value} disabled={readOnly} onCheckedChange={(checked) => set(item.key, checked === true)} />
-              </div>
-            </label>
-          ))}
-        </div>
+        {/* Pipeline boolean checkboxes removed — `meeting_booked` / `meeting_held` / `offer_sent` / `won`
+            are all INTERNAL now: the recompute triggers derive the meeting/offer flags from the CRM
+            meeting/offer editors + n8n, and `won` is set by the conclusion editor (concludeLead) — the
+            dashboards read the columns, but no manual toggle can drift from the child-table / conclusion
+            source of truth. To restore a manual checkbox, re-add a `<Checkbox>` grid here + its import. */}
       </section>
 
+      {/* OOO section hidden — we don't surface OOO contacts in the product, so the fields are noise in
+          the drawer. Kept commented (not deleted) so it's a one-line restore; the `expectedReturnDate`
+          / `addedToOooCampaign` draft fields still round-trip through toLeadDraft/buildLeadPatch.
       <section className="space-y-3">
         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">OOO</p>
         <div className="grid gap-3 md:grid-cols-2">
@@ -156,6 +146,7 @@ export function LeadEditForm({ draft, updateDraft, readOnly, hideWon = false, sh
           </label>
         </div>
       </section>
+      */}
 
       {/* CRM operational state (ADR-0013, Phase 5.2) — dates driving the CRM health columns. Shown only
           in the CRM view; edited via the shared draft/Save flow (not a separate action). */}
