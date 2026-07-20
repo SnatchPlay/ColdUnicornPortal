@@ -688,7 +688,7 @@ function InternalLeadsPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Leads" subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly." />
+        <PageHeader title="Leads" />
         <Banner tone="warning">{error}</Banner>
         <InlineLinkButton onClick={() => void refresh()}>Retry data sync</InlineLinkButton>
       </div>
@@ -699,7 +699,6 @@ function InternalLeadsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Leads"
-        subtitle="One shared lead workspace with role-aware visibility. Admin and managers can update operational lead state directly."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />

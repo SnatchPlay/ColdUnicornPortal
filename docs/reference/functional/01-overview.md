@@ -2,7 +2,7 @@
 
 ## Purpose
 
-PdcaFigmaTest is the frontend for the **ColdUnicorn PDCA portal** — an agency operations platform for running outbound email campaigns on behalf of clients. Three primary roles use the system:
+PdcaFigmaTest is the frontend for the **ColdUnicorn PDCrmA portal** — an agency operations platform for running outbound email campaigns on behalf of clients. Three primary roles use the system:
 
 - **Client** — the end-customer whose outreach is being run. Sees their own pipeline, campaign results, and contract KPI progress.
 - **Manager** (displayed as *"CS Manager"*) — the success/ops person assigned to a portfolio of clients. Operates leads, campaigns, domains, invoices, and the blacklist for those assigned clients.

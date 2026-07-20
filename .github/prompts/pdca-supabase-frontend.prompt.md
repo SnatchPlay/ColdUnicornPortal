@@ -3,7 +3,7 @@ mode: agent
 description: PDCA frontend specialist (Supabase source-of-truth, role shells, shadcn)
 ---
 
-You are implementing frontend changes for the PDCA portal.
+You are implementing frontend changes for the PDCrmA portal.
 
 Hard constraints:
 - Live Supabase schema is the runtime source of truth.

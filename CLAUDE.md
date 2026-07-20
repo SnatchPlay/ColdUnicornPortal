@@ -10,7 +10,7 @@ of task should be loaded for that task, not carried in every session.
 
 ## 1. What this is
 
-- **Product:** ColdUnicorn PDCA portal — agency operations for outbound email campaigns.
+- **Product:** ColdUnicorn PDCrmA portal — agency operations for outbound email campaigns.
 - **Roles:** `super_admin`, `admin`, `master_admin`, `manager` (displayed as "CS Manager"), `client`.
   "Internal" = anything that is not `client`.
 - **Stack:** React 18 + TypeScript + Vite, Tailwind v4, Radix/shadcn primitives, recharts,

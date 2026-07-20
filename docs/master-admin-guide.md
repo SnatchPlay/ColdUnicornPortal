@@ -1,6 +1,6 @@
 # Master Admin — User Guide
 
-This is a plain-language guide for the **Master Admin** of the ColdUnicorn PDCA portal. It explains the three things only you can do, with no technical background needed:
+This is a plain-language guide for the **Master Admin** of the ColdUnicorn PDCrmA portal. It explains the three things only you can do, with no technical background needed:
 
 1. Rename or hide columns in the Clients table
 2. Add your own custom columns (text / number / currency / checkbox / dropdown / link)
