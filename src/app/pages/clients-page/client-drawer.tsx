@@ -4,7 +4,7 @@ import { useDeferredMount } from "../../lib/use-deferred-mount";
 import { measureAfterRaf2 } from "../../lib/perf-mark";
 import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
-import { Badge } from "../../components/ui/badge";
+import { SatisfactionHearts, satisfactionLabel } from "../../components/satisfaction-hearts";
 import { Checkbox } from "../../components/ui/checkbox";
 import {
   Select,
@@ -16,20 +16,20 @@ import {
 import { cn } from "../../components/ui/utils";
 import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
 import { getCellCondition, getSeverityClassName } from "../../lib/conditions/evaluator";
-import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatDate, formatMoney } from "../../lib/format";
 import { CLIENT_STATUSES } from "../../types/core";
-import type { ClientRecord, ClientSequencerRecord, ClientUserRecord, UserRecord } from "../../types/core";
+import type { ClientRecord, ClientSequencerRecord, ClientUserRecord, SatisfactionLevel, UserRecord } from "../../types/core";
 
 const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 // Sentinel for the "no owner" choice — Radix <Select> forbids an empty-string item value.
 const UNASSIGNED_MANAGER = "__unassigned__";
 
-const LOST_REASON_STATUSES: ClientRecord["status"][] = ["Inactive", "Offboarding", "Abo"];
+const LOST_REASON_STATUSES: ClientRecord["status"][] = ["Inactive", "Offboarding", "Subscription"];
 
 export interface ClientDraft {
   name: string;
   status: ClientRecord["status"];
+  satisfaction: SatisfactionLevel | null;
   minDailySent: number;
   inboxesCount: number;
   notificationEmails: string[];
@@ -52,14 +52,6 @@ export interface ClientDraft {
   kpiMeetings: string;
   contractedAmount: string;
   contractDueDate: string;
-}
-
-function severityLabel(severity: ConditionSeverity): string {
-  if (severity === "critical_over") return "Critical";
-  if (severity === "danger") return "Danger";
-  if (severity === "warning") return "Warning";
-  if (severity === "info") return "Info";
-  return "Good";
 }
 
 function normalizeStringList(items: string[]): string[] {
@@ -220,35 +212,6 @@ function MaskedField({ label, value, mask = false }: MaskedFieldProps) {
   );
 }
 
-interface IssuesTimelineProps {
-  issues: ConditionEvaluationResult[];
-  emptyLabel: string;
-}
-
-function IssuesTimeline({ issues, emptyLabel }: IssuesTimelineProps) {
-  if (issues.length === 0) {
-    return <p className="text-sm text-emerald-200">{emptyLabel}</p>;
-  }
-  return (
-    <div className="space-y-2">
-      {issues.map((issue) => (
-        <div key={issue.ruleId} className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="flex items-center gap-2">
-            <Badge className={cn("text-[10px]", getSeverityClassName(issue.severity))}>
-              {severityLabel(issue.severity)}
-            </Badge>
-            <p className="text-sm">{issue.label}</p>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
-          <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Rule: {issue.ruleName}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /** Per-client sequencer credential rows relevant to the drawer (ADR-0012). */
 export interface ClientSequencerCreds {
   emailbison: ClientSequencerRecord | null;
@@ -261,6 +224,7 @@ export function toClientDraft(client: ClientRecord, creds: ClientSequencerCreds)
   return {
     name: client.name,
     status: client.status,
+    satisfaction: client.satisfaction,
     minDailySent: client.min_daily_sent,
     inboxesCount: client.inboxes_count,
     notificationEmails: client.notification_emails ?? [],
@@ -291,6 +255,7 @@ export function buildClientPatch(
 
   if (client.name !== draft.name) patch.name = draft.name;
   if (client.status !== draft.status) patch.status = draft.status;
+  if (client.satisfaction !== draft.satisfaction) patch.satisfaction = draft.satisfaction;
   if (client.min_daily_sent !== draft.minDailySent) patch.min_daily_sent = draft.minDailySent;
   if (client.inboxes_count !== draft.inboxesCount) patch.inboxes_count = draft.inboxesCount;
 
@@ -432,14 +397,6 @@ export function ClientDrawer({
   onRemoveClientUserMapping,
   onInviteUser,
 }: ClientDrawerProps) {
-  const operationalIssues = (conditionPack?.allResults ?? [])
-    .filter((r) => r.severity === "critical_over" || r.severity === "danger" || r.severity === "warning")
-    .filter((r, idx, list) => list.findIndex((c) => c.ruleKey === r.ruleKey) === idx);
-
-  const setupGaps = (conditionPack?.setupResults ?? [])
-    .filter((r) => r.severity !== "good")
-    .filter((r, idx, list) => list.findIndex((c) => c.ruleKey === r.ruleKey) === idx);
-
   const setupMinSentCondition = getCellCondition(conditionPack?.setupResults ?? [], "min_sent");
 
   const clientById = new Map(allClients.map((c) => [c.id, c.name] as const));
@@ -521,25 +478,6 @@ export function ClientDrawer({
 
           {/* Phase 2: deferred sections — mount after overlay has painted */}
           {bodyReady ? (<>
-          <section className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="border-l-2 border-white/25 pl-3">
-              <p className="text-sm font-medium text-white">Operational issues</p>
-              <p className="text-xs text-white/50">
-                Rule-driven issues that currently need CS attention.
-              </p>
-            </div>
-            <IssuesTimeline issues={operationalIssues} emptyLabel="No operational issues. All tracked metrics are healthy." />
-          </section>
-
-          {/* Setup gaps */}
-          <section className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="border-l-2 border-white/25 pl-3">
-              <p className="text-sm font-medium text-white">Setup gaps</p>
-              <p className="text-xs text-white/50">Configuration gaps for this client.</p>
-            </div>
-            <IssuesTimeline issues={setupGaps} emptyLabel="No setup gaps found for this client." />
-          </section>
-
           {/* Credentials & IDs */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <div className="border-l-2 border-sky-400/50 pl-3">
@@ -738,6 +676,20 @@ export function ClientDrawer({
                   </SelectContent>
                 </Select>
               </label>
+
+              {/* Not a <label>: the hearts are a radiogroup of buttons, which a label must not wrap. */}
+              <div className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  Customer satisfaction
+                </span>
+                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <SatisfactionHearts
+                    value={draft.satisfaction}
+                    onChange={(next) => setDraft((current) => (current ? { ...current, satisfaction: next } : current))}
+                  />
+                  <span className="text-xs text-muted-foreground">{satisfactionLabel(draft.satisfaction)}</span>
+                </div>
+              </div>
 
               <label
                 className={cn(

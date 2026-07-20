@@ -1,8 +1,21 @@
 export type AppRole = "super_admin" | "admin" | "master_admin" | "manager" | "client";
 export type InviteRole = "admin" | "manager" | "client";
 export type InviteStatus = "pending" | "accepted" | "expired";
-export const CLIENT_STATUSES = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"] as const;
+// Display order of the client lifecycle. This tuple — not the Postgres enum, whose label order
+// cannot be changed in place — is what orders every status dropdown and the filter chips.
+export const CLIENT_STATUSES = [
+  "Onboarding",
+  "Active",
+  "On hold",
+  "Offboarding",
+  "Inactive",
+  "Subscription",
+] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
+
+// Manual customer-satisfaction rating ("hearts"). null = not rated yet.
+export const SATISFACTION_LEVELS = [1, 2, 3] as const;
+export type SatisfactionLevel = (typeof SATISFACTION_LEVELS)[number];
 export type CampaignType = "outreach" | "ooo" | "nurture" | "ooo_followup";
 export type CampaignStatus = "draft" | "launching" | "active" | "stopped" | "completed";
 export type LeadGender = "male" | "female";
@@ -117,6 +130,7 @@ export interface ClientRecord {
   bi_setup_done: boolean;
   lost_reason: string | null;
   notes: string | null;
+  satisfaction: SatisfactionLevel | null;
 }
 
 export interface ClientUserRecord {

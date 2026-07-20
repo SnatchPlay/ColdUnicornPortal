@@ -303,20 +303,23 @@
 [data-color-theme="contrast"] .sev-badge-warning { border-color: #F9F909; background-color: rgba(249,249,9,0.15); color: #F9F909; font-weight: 700; }
 [data-color-theme="contrast"] .sev-badge-critical{ border-color: #ff00ff; background-color: rgba(255,0,255,0.15); color: #ff66ff; font-weight: 700; }
 
-/* --- Client status badges (Active / Inactive / Abo / Sales / …) --- */
-.status-badge-active   { border-color: #10b981; background-color: rgb(6 78 59 / 0.4);   color: #6ee7b7; }
-.status-badge-inactive { border-color: #ef4444; background-color: rgb(127 29 29 / 0.4); color: #fca5a5; }
-.status-badge-abo      { border-color: #38bdf8; background-color: rgb(12 74 110 / 0.4); color: #7dd3fc; }
-.status-badge-sales    { border-color: #a78bfa; background-color: rgb(76 29 149 / 0.4); color: #c4b5fd; }
-.status-badge-onhold   { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.4); color: #fde68a; }
-.status-badge-offboard { border-color: #fb923c; background-color: rgb(124 45 18 / 0.4); color: #fdba74; }
+/* --- Client status badges — lifecycle order: Onboarding → Active → On hold → Offboarding →
+   Inactive, with Subscription off to the side. The hue ramp is the lifecycle: lime → emerald →
+   amber → orange → red. Subscription is deliberately off-ramp (pink) because it is not a health
+   stage. --- */
+.status-badge-onboarding   { border-color: #84cc16; background-color: rgb(54 83 20 / 0.4);   color: #bef264; }
+.status-badge-active       { border-color: #10b981; background-color: rgb(6 78 59 / 0.4);    color: #6ee7b7; }
+.status-badge-onhold       { border-color: #fbbf24; background-color: rgb(120 53 15 / 0.4);  color: #fde68a; }
+.status-badge-offboard     { border-color: #fb923c; background-color: rgb(124 45 18 / 0.4);  color: #fdba74; }
+.status-badge-inactive     { border-color: #ef4444; background-color: rgb(127 29 29 / 0.4);  color: #fca5a5; }
+.status-badge-subscription { border-color: #ec4899; background-color: rgb(131 24 67 / 0.4);  color: #f9a8d4; }
 
-[data-color-theme="contrast"] .status-badge-active   { border-color: #05cc00; background-color: #06F701; color: #000; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-inactive { border-color: #c80000; background-color: #FA0200; color: #fff; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-abo      { border-color: #00b8cc; background-color: #00e5ff; color: #000; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-sales    { border-color: #9900cc; background-color: #bf00ff; color: #fff; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-onhold   { border-color: #cc8400; background-color: #ffa500; color: #000; font-weight: 800; }
-[data-color-theme="contrast"] .status-badge-offboard { border-color: #cc5200; background-color: #ff6600; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-onboarding   { border-color: #6aa80f; background-color: #a3e635; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-active       { border-color: #05cc00; background-color: #06F701; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-onhold       { border-color: #cc8400; background-color: #ffa500; color: #000; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-offboard     { border-color: #cc5200; background-color: #ff6600; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-inactive     { border-color: #c80000; background-color: #FA0200; color: #fff; font-weight: 800; }
+[data-color-theme="contrast"] .status-badge-subscription { border-color: #cc0066; background-color: #ff0080; color: #fff; font-weight: 800; }
 
 /* --- Reply classification badges (Interested / OOO / NRR / Left_Company / Spam) --- */
 .reply-badge-interested { background-color: rgb(16 185 129 / 0.15);  color: #6ee7b7; }

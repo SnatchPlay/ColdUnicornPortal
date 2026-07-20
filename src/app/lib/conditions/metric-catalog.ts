@@ -16,6 +16,7 @@
 // `dod:{bucket}:{kind}` column key handled by a separate evaluation path
 // in client-condition-results.ts. Authoring DoD rules stays in raw mode.
 
+import { CLIENT_STATUSES } from "../../types/core";
 import type { ClientCustomFieldRecord } from "../../types/core";
 import type { ConditionOperator } from "./types";
 
@@ -71,7 +72,7 @@ export const OPERATORS_BY_VALUE_TYPE: Record<MetricValueType, ConditionOperator[
   text: TEXT_OPS,
 };
 
-const CLIENT_STATUS_OPTIONS = ["Active", "Abo", "On hold", "Offboarding", "Inactive", "Sales"];
+const CLIENT_STATUS_OPTIONS = [...CLIENT_STATUSES];
 
 // --- Built-in metric catalog ---------------------------------------------
 //

@@ -124,7 +124,7 @@ One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/meg
 |  | WoW SQL | 0/-1/-2/-3 — `wowRows[bucket].sqlLeads` |
 | **Month over Month** | MoM SQL / Mtg / Won | 0/-1/-2/-3 per metric — `momRows[bucket]` |
 
-Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `health asc` (worst first).
+Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
@@ -137,12 +137,15 @@ Opens on row click. Draft pattern: local `draft` state deviates from `selectedCl
 Sections (top → bottom):
 
 1. **Header** — name, status pill, manager, contract amount + due.
-2. **Operational issues** — timeline of warning/danger/critical condition results (deduped by `ruleKey`).
-3. **Setup gaps** — condition results from the `setup` surface that aren't `good`.
-4. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0008): EmailBison workspace ID + API key, Aimfox API key; CRM status from `crm_config`.
-5. **Client configuration** — editable form.
-6. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
-7. **User access management** — invite + map client portal users.
+2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): EmailBison workspace ID + API key, Aimfox API key; CRM status from `crm_config` (read-only badge).
+3. **Client configuration** — editable form (includes the **Customer satisfaction** hearts, §2.7).
+4. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
+5. **User access management** — invite + map client portal users.
+
+> The former **Operational issues** and **Setup gaps** sections were removed when the automatic
+> health rollup was replaced by the manual satisfaction rating (§2.7). The `condition_rules` engine
+> still runs — it tints individual mega-table cells (each with a tooltip carrying the rule, value,
+> threshold and message) — it just no longer summarises the row.
 
 Editable fields — **Credentials & IDs** section:
 
@@ -168,13 +171,14 @@ Editable fields — **Client configuration** section:
 |-------|---------|---------------|-------|
 | Name | text input | `clients.name` | manager + admin |
 | Status | Select | `clients.status` | manager + admin |
+| Customer satisfaction | 3 hearts (`SatisfactionHearts`) | `clients.satisfaction` | manager + admin |
 | Manager | Select (users where `role='manager'`) | `clients.manager_id` | **admin only** |
 | Min daily sent | number input | `clients.min_daily_sent` | manager + admin |
 | Inboxes count | number input | `clients.inboxes_count` | manager + admin |
 | Prospects signed | number input | `clients.prospects_signed` | manager + admin |
 | Prospects added | number input | `clients.prospects_added` | manager + admin |
 | Auto OOO enabled | checkbox | `clients.auto_ooo_enabled` | manager + admin |
-| Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Abo}` |
+| Lost reason | textarea | `clients.lost_reason` | Shown only when `status` ∈ `{Inactive, Offboarding, Subscription}` |
 | Internal notes | textarea | `clients.notes` | Always visible; also inline-editable from the mega-table (§2.2) |
 | Setup notes | textarea | `clients.setup_info` | manager + admin |
 
@@ -188,39 +192,52 @@ Save calls `repository.updateClient(clientId, patch)` directly from the page ([c
 - **Admin / super_admin:** `manager_id` shown as a Select of users with `role='manager'`.
 - Calls `repository.createClient(input)` ([clients-page.tsx:245](../../../src/app/pages/clients-page.tsx#L245)). On success the returned row is prepended to the page hook's local `clients` array (no optimistic update). See [09-mutations §2.10](./09-mutations-rls.md).
 
-### 2.5 Filtering and health segmentation
+### 2.5 Filtering
 
-- Search box by client name.
-- Status filter dropdown (one of `client_status` enum, or "All").
+- Search box by client name (not persisted).
+- Status filter chips (any subset of the `client_status` enum; empty = all). The chip order follows
+  the `CLIENT_STATUSES` tuple in [`types/core.ts`](../../../src/app/types/core.ts): Onboarding,
+  Active, On hold, Offboarding, Inactive, Subscription.
 - Manager filter (admin only sees non-trivial values; for managers the dropdown is redundant).
-- One segmented health filter with live counts, based on row highest severity:
+- One segmented **satisfaction filter** (`ToggleGroup`) with live counts, based on
+  `clients.satisfaction`:
   - `All`
-  - `Warning`
-  - `Danger`
-  - `Critical`
-  - `Healthy`
+  - `♥` / `♥♥` / `♥♥♥` (satisfaction = 1 / 2 / 3)
+  - `Not rated` (`satisfaction IS NULL` — where every client starts)
 
-`Healthy` includes rows with no matched severity or only `good/info` outcomes.
+Filters (except the search box) persist per-user in `user_table_preferences` under
+`clients:mega`. A stored sort key that no longer names a real column (e.g. the old `"health"`) is
+ignored on load.
 
-### 2.5 Condition highlighting, rollup, and explainability
+### 2.6 Condition highlighting (cells only)
 
-Rule results are loaded from `condition_rules` and evaluated at runtime per client.
+Rule results are loaded from `condition_rules` and evaluated at runtime per client. **There is no
+longer a per-row severity rollup or `healthScore`** — the manual satisfaction rating (§2.7) replaced
+it. What the engine still drives:
 
-- Row rollup model:
-  - one severity badge per row (highest severity only)
-  - per-row `healthScore` (0..100, lower = worse) with default sort `worst first`
-  - lifecycle and health split into separate overview columns
-- Row tint: highest non-good severity.
-- Cell highlight: per-column condition result (`cell` rules), with reduced fill noise (problem-cell emphasis only).
+- Cell highlight: per-column condition result (`cell` rules), with reduced fill noise (problem-cell
+  emphasis only).
 - Distinct `critical_over` style (fuchsia/magenta family) separate from danger.
-- Tooltip on highlighted values includes rule name, value, message, and source sheet/range.
-- DoD table uses dynamic runtime keys (`dod:{bucket}:{schedule|sent}`) to evaluate one reusable rule across multiple cells.
-- Drawer issue model (post-redesign):
-  - `Operational issues`: warning/danger/critical items rendered as a timeline
-  - `Setup gaps`: setup/info-like gaps from the `setup` surface
-  - DoD/3-DoD/WoW/MoM per-bucket condition badges are no longer in the drawer — they live directly in the mega-table cells.
+- Tooltip on highlighted values includes rule name, value, message, and source sheet/range — this is
+  now the only place the "why" (e.g. "SQL below daily target") is surfaced.
+- DoD table uses dynamic runtime keys (`dod:{bucket}:{schedule|sent}`) to evaluate one reusable rule
+  across multiple cells.
 
-### 2.6 Empty / loading / error
+### 2.7 Customer satisfaction (manual rating)
+
+A manually-set 1–3 heart rating on `clients.satisfaction` (`smallint`, `CHECK 1..3`, NULL = not
+rated). Component: [`SatisfactionHearts`](../../../src/app/components/satisfaction-hearts.tsx) —
+read-only where no change handler is passed, an accessible radiogroup of buttons where one is.
+
+- **Grid:** hearts sit under the client name in the sticky Client cell, inline-editable for any
+  internal user (`identity.role !== "client"`), same gate as the inline Status cell. Clicking the
+  already-selected level clears back to NULL.
+- **Drawer:** the same control in the Client configuration section, saved through the draft's
+  Save/Cancel like every other field.
+- Both paths write via the `updateClient` gateway action (§09-mutations); the value is range-checked
+  in the contract *and* by the DB CHECK.
+
+### 2.8 Empty / loading / error
 
 - `<EmptyState>` when scoped list is empty.
 - `LoadingState` / `<Banner>` as above.

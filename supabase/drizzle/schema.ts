@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm"
 
 export const campaignStatus = pgEnum("campaign_status", ['draft', 'launching', 'active', 'stopped', 'completed'])
 export const campaignType = pgEnum("campaign_type", ['outreach', 'ooo', 'nurture', 'ooo_followup'])
-export const clientStatus = pgEnum("client_status", ['Active', 'Abo', 'On hold', 'Offboarding', 'Inactive', 'Sales'])
+export const clientStatus = pgEnum("client_status", ['Active', 'Subscription', 'On hold', 'Offboarding', 'Inactive', 'Onboarding'])
 export const crmPipelineStage = pgEnum("crm_pipeline_stage", ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost'])
 export const domainStatus = pgEnum("domain_status", ['active', 'warmup', 'blocked', 'retired'])
 export const leadGender = pgEnum("lead_gender", ['male', 'female'])
@@ -214,6 +214,7 @@ export const clients = pgTable("clients", {
 	biSetupDone: boolean("bi_setup_done").default(false).notNull(),
 	lostReason: text("lost_reason"),
 	notes: text(),
+	satisfaction: smallint(),
 }, (table) => [
 	foreignKey({
 			columns: [table.managerId],

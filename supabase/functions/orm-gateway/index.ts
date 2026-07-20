@@ -157,6 +157,7 @@ function toClientRecord(row: typeof schema.clients.$inferSelect) {
     bi_setup_done: row.biSetupDone,
     lost_reason: row.lostReason,
     notes: row.notes,
+    satisfaction: row.satisfaction,
   };
 }
 
@@ -358,6 +359,7 @@ function mapClientPatch(patch: Record<string, unknown>) {
   if ("bi_setup_done" in patch) mapped.biSetupDone = patch.bi_setup_done;
   if ("lost_reason" in patch) mapped.lostReason = patch.lost_reason;
   if ("notes" in patch) mapped.notes = patch.notes;
+  if ("satisfaction" in patch) mapped.satisfaction = patch.satisfaction;
   if ("updated_at" in patch) mapped.updatedAt = patch.updated_at;
   return mapped;
 }

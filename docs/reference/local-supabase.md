@@ -70,12 +70,38 @@ with `pnpm db:migrate:local`.
 
 ## Daily local loop
 
+**One-time setup** (fills the two env files the app + gateway read):
+
+```bash
+cp .env.local.example .env.local                  # fill VITE_SUPABASE_PUBLISHABLE_KEY from `supabase start` output
+cp supabase/functions/.env.local.example supabase/functions/.env.local
+```
+
+**Every day:**
+
+```bash
+pnpm dev                                           # app at http://127.0.0.1:5173 → local stack
+```
+
+`pnpm dev` ([scripts/dev-local.mjs](../../scripts/dev-local.mjs)) now runs the whole stack:
+`supabase start` → `pnpm db:migrate:local` → `supabase functions serve` → `vite`, all in one
+process. Ctrl-C stops the edge runtime + Vite it started; the core `supabase start` containers keep
+running (fast restart next time). It resolves the `supabase` CLI from `PATH` or `npx`, so a global
+install is optional.
+
+> Serving the edge functions is **not** optional: the frontend talks only to the `orm-gateway` edge
+> function, so if the edge runtime is down every page 503s with `name resolution failed` (that's Kong
+> failing to reach the function, not the function erroring). This is exactly why `pnpm dev` bundles
+> it — the old `pnpm dev` was just `vite` and left the gateway dead.
+
+Need the app alone against an already-running stack? `pnpm dev:web` is the old bare `vite`.
+
+**By hand** (what `pnpm dev` automates, if you want the pieces separately):
+
 ```bash
 supabase start                                    # fast after the first boot — the DB volume persists
-cp .env.local.example .env.local                  # fill VITE_SUPABASE_PUBLISHABLE_KEY from the start output
-cp supabase/functions/.env.local.example supabase/functions/.env.local
 supabase functions serve --env-file supabase/functions/.env.local   # serve the gateway + invite fns
-pnpm dev                                           # app at http://127.0.0.1:5173 → local stack
+pnpm dev:web                                       # just vite
 ```
 
 **Studio** (DB browser / auth users): http://127.0.0.1:54323 · **Inbucket** (captured invite /

@@ -73,12 +73,14 @@ function makeConditionRule(overrides: Record<string, unknown>) {
 function makeClientsOverview({
   conditionRules,
   minDailySent = 100,
+  satisfaction = null,
 }: {
   sentToday?: number;
   scheduleToday?: number;
   bounceCount?: number;
   conditionRules: unknown[];
   minDailySent?: number;
+  satisfaction?: 1 | 2 | 3 | null;
 }) {
   const today = getDateKey(0);
   return {
@@ -106,6 +108,7 @@ function makeClientsOverview({
         bi_setup_done: false,
         lost_reason: null,
         notes: null,
+        satisfaction,
       },
     ],
     usersLite: [
@@ -198,7 +201,10 @@ describe("clients condition surfaces", () => {
     mockedRepo.loadClientsMetricsSummary.mockResolvedValue(makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never);
   });
 
-  it("shows danger highlight and explanation for bounce >= 2%", async () => {
+  // The row-level severity rollup (badge + reason string) was replaced by the manual satisfaction
+  // rating, so a danger rule now shows up only as a tinted cell — the label lives in the cell's
+  // tooltip, which Radix mounts on hover.
+  it("tints the cell for bounce >= 2%", async () => {
     const wowBounceRule = makeConditionRule({
       key: "wow_bounce_rate",
       name: "WoW Bounce Rate",
@@ -222,7 +228,6 @@ describe("clients condition surfaces", () => {
 
     const cell = screen.getByText("3.0%").closest("div");
     expect(cell?.className).toContain("cond-cell-danger");
-    expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
   });
 
   it("shows DoD danger highlight when value is below 80% of min sent", async () => {
@@ -251,54 +256,60 @@ describe("clients condition surfaces", () => {
     expect(highlighted).toBeTruthy();
   });
 
-  it("supports healthy filter on segmented control", async () => {
-    const wowBounceRule = makeConditionRule({
-      key: "wow_bounce_rate",
-      name: "WoW Bounce Rate",
-      surface: "clients_wow",
-      metric_key: "wow_bounce_rate",
-      column_key: "wow_bounce_rate",
-      branches: [
-        { severity: "good", when: { left: { metric: "value" }, op: "lte", right: { value: 0.01 } }, label: "Healthy bounce", message: "Healthy." },
-      ],
-    });
+  it("keeps an unrated client only under All and Not rated", async () => {
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ conditionRules: [wowBounceRule] }) as never,
+      makeClientsOverview({ conditionRules: [], satisfaction: null }) as never,
     );
     mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
       makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
     );
 
     await renderPage();
-    fireEvent.click(screen.getByRole("radio", { name: /Healthy \(1\)/i }));
-
     expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
-    expect(screen.getByText("Healthy")).toBeInTheDocument();
+
+    // Every client starts unrated; without its own chip this row would be unreachable.
+    fireEvent.click(screen.getByRole("radio", { name: /Not rated \(1\)/i }));
+    expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
+
+    // Anchored: an unanchored /Happy/ also matches the "Unhappy" chip.
+    fireEvent.click(screen.getByRole("radio", { name: /^Happy \(0\)/i }));
+    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
   });
 
-  it("filters by danger severity", async () => {
-    const wowBounceRule = makeConditionRule({
-      key: "wow_bounce_rate",
-      name: "WoW Bounce Rate",
-      surface: "clients_wow",
-      metric_key: "wow_bounce_rate",
-      column_key: "wow_bounce_rate",
-      branches: [
-        { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 0.02 } }, label: "Bounce danger", message: "Bounce rate is above 2%." },
-      ],
-    });
+  it("filters by satisfaction rating", async () => {
     mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ conditionRules: [wowBounceRule] }) as never,
+      makeClientsOverview({ conditionRules: [], satisfaction: 2 }) as never,
     );
     mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
-      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 3 }) as never,
+      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
     );
 
     await renderPage();
-    expect(screen.getByText(/Bounce danger/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Healthy \(0\)/i }));
-    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Danger \(1\)/i }));
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Neutral \(1\)/i }));
     expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Unhappy \(0\)/i }));
+    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Not rated \(0\)/i }));
+    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
+  });
+
+  it("writes a satisfaction rating from the grid's Client cell", async () => {
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ conditionRules: [], satisfaction: null }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
+      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
+    );
+    mockedRepo.updateClient.mockResolvedValue({} as never);
+
+    await renderPage();
+    // The row's hearts are a radiogroup; "Happy" is the third one.
+    const hearts = screen.getAllByRole("radio", { name: "Happy" });
+    fireEvent.click(hearts[0]);
+
+    expect(mockedRepo.updateClient).toHaveBeenCalledWith("client-1", { satisfaction: 3 });
   });
 });
