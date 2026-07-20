@@ -24,7 +24,13 @@ interface CreateDomainDraft {
 }
 
 type SortDirection = "asc" | "desc";
-type DomainSortKey = "domain" | "client" | "status" | "winnr";
+type DomainSortKey = "domain" | "client" | "status";
+
+// Single status shown in the list: the local lifecycle status when set, otherwise the Winnr
+// provider status. Winnr-synced domains have no local status, so this surfaces "complete" etc.
+function domainStatusLabel(domain: DomainRecord): string {
+  return domain.status ?? domain.winnr_status ?? "unset";
+}
 
 interface DomainDraft {
   status: DomainStatus | "";
@@ -247,9 +253,9 @@ export function DomainsPage() {
     direction: "asc",
   });
   const domainColumns = useResizableColumns({
-    storageKey: "table:domains:columns",
-    defaultWidths: [420, 320, 220, 220],
-    minWidths: [240, 200, 150, 150],
+    storageKey: "table:domains:columns:v2",
+    defaultWidths: [480, 260, 200],
+    minWidths: [220, 160, 130],
   });
   const domainTableStyle = useMemo(
     () =>
@@ -292,10 +298,7 @@ export function DomainsPage() {
         const rightClient = scopedClients.find((item) => item.id === right.client_id)?.name ?? "";
         return compareText(leftClient, rightClient, domainSort.direction);
       }
-      if (domainSort.key === "status") {
-        return compareText(left.status, right.status, domainSort.direction);
-      }
-      return compareText(left.winnr_status, right.winnr_status, domainSort.direction);
+      return compareText(domainStatusLabel(left), domainStatusLabel(right), domainSort.direction);
     });
   }, [domainSort.direction, domainSort.key, filteredDomains, scopedClients]);
 
@@ -452,12 +455,11 @@ export function DomainsPage() {
 
             <div className="overflow-hidden rounded-2xl border border-border">
               <div className="overflow-x-auto" style={domainTableStyle}>
-                <div className="hidden min-w-[1200px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--domains-table-columns)]">
+                <div className="hidden min-w-[640px] gap-3 border-b border-border bg-black/20 px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted-foreground md:grid md:[grid-template-columns:var(--domains-table-columns)]">
                   {[
                     { key: "domain" as const, label: "Domain" },
                     { key: "client" as const, label: "Client" },
                     { key: "status" as const, label: "Status" },
-                    { key: "winnr" as const, label: "Winnr status" },
                   ].map((column, index, collection) => (
                     <div key={column.key} className="relative min-w-0">
                       <button
@@ -478,7 +480,7 @@ export function DomainsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="divide-y divide-border md:min-w-[1200px]">
+                <div className="divide-y divide-border md:min-w-[640px]">
                   {sortedDomains.map((domain) => {
                     const active = selectedDomain?.id === domain.id;
                     const clientName =
@@ -497,16 +499,15 @@ export function DomainsPage() {
                         <div className="md:hidden">
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate text-sm text-white">{domain.domain_name}</span>
-                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
+                            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-neutral-400">{domainStatusLabel(domain)}</span>
                           </div>
-                          <p className="mt-1 text-xs text-neutral-500">{clientName}{domain.winnr_status ? ` · Winnr: ${domain.winnr_status}` : ""}</p>
+                          <p className="mt-1 text-xs text-neutral-500">{clientName}</p>
                         </div>
                         {/* Desktop table row */}
-                        <div className="hidden min-w-[1200px] items-center gap-3 [grid-template-columns:var(--domains-table-columns)] md:grid">
+                        <div className="hidden min-w-[640px] items-center gap-3 [grid-template-columns:var(--domains-table-columns)] md:grid">
                           <span className="truncate text-sm text-white">{domain.domain_name}</span>
                           <span className="truncate text-sm text-neutral-300">{clientName}</span>
-                          <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domain.status ?? "unset"}</span>
-                          <span className="truncate text-sm text-neutral-300">{domain.winnr_status ?? "—"}</span>
+                          <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{domainStatusLabel(domain)}</span>
                         </div>
                       </button>
                     );

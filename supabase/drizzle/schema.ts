@@ -436,8 +436,10 @@ export const domains = pgTable("domains", {
 
 // Ingestion-only (n8n via service_role writes; portal reads). Set-based SELECT RLS scoped through
 // domain → client, mirroring replies / campaign_daily_stats (ADR-0006). See 20260720e migration.
-const emailAccountSelect = sql`(domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))`;
-const warmingDailySelect = sql`(email_account_id IN ( SELECT ea.id FROM email_accounts ea WHERE (ea.domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))))`;
+// 20260720g: include unlinked (client_id null) domains for admin-tier callers so their mailboxes
+// surface, matching domain visibility. is_admin_user() is a hoisted scalar — stays set-based.
+const emailAccountSelect = sql`(domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id))) OR (d.client_id IS NULL AND private.is_admin_user())))`;
+const warmingDailySelect = sql`(email_account_id IN ( SELECT ea.id FROM email_accounts ea WHERE (ea.domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id))) OR (d.client_id IS NULL AND private.is_admin_user())))))`;
 
 export const emailAccounts = pgTable("email_accounts", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
