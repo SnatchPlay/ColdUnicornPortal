@@ -73,8 +73,10 @@ locally: deploy. On push to `main`, the CI `deploy-functions` job runs `supabase
 (gated behind `ENABLE_FUNCTION_DEPLOY`); for a one-off, `supabase functions deploy <name>
 --project-ref bnetnuzxynmdftiadwef`, the Supabase MCP (`deploy_edge_function`), or the dashboard.
 
-`orm-gateway-next` is a thin twin that re-exports the same handler, for staging a deploy behind
-`VITE_ORM_GATEWAY_FUNCTION` without touching the live function.
+`orm-gateway` is the single canonical function. To stage a risky change without touching the live
+function, deploy a temporarily-named copy and point a dev build at it via `VITE_ORM_GATEWAY_FUNCTION`,
+then delete it after cutover. (The old `orm-gateway-next` twin was removed once the per-page
+migration shipped.)
 
 **After any deploy, confirm the security invariant still holds:**
 

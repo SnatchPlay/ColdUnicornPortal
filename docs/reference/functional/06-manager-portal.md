@@ -382,7 +382,7 @@ File: [`src/app/pages/domains-page.tsx`](../../../src/app/pages/domains-page.tsx
 | Status | `domains.status` (local badge) |
 | Winnr status | `domains.winnr_status` (read-only, from Winnr) |
 
-Resizable columns as elsewhere. A per-domain **email-accounts panel** (mailboxes + warming health) shows in the detail view — see [email-accounts-page](../../../src/app/pages/email-accounts-page.tsx) for the full mailbox list.
+Resizable columns as elsewhere. A per-domain **email-accounts panel** (mailboxes + warming health) shows in the detail view. The full mailbox list ([email-accounts-page](../../../src/app/pages/email-accounts-page.tsx)) is a **sub-page of Domains**, not a separate sidebar entry: route `…/domains/email-accounts`, reached via the in-page `Domains | Email accounts` tabs ([domains-tabs.tsx](../../../src/app/components/domains-tabs.tsx)). Same for admin.
 
 ### 6.3 Drawer (editable)
 

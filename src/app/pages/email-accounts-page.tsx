@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DomainsSectionTabs } from "../components/domains-tabs";
 import { formatDate, formatNumber } from "../lib/format";
 import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -238,6 +239,8 @@ export function EmailAccountsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Email accounts" subtitle="Mailbox warming health and inbox performance across scoped domains." />
+
+      <DomainsSectionTabs />
 
       {sortedAccounts.length === 0 ? (
         <EmptyState

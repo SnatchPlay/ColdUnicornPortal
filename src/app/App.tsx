@@ -205,9 +205,9 @@ function ProtectedApp() {
                 <Route path="statistics" element={<StatisticsPage />} />
                 {/* settings — per-page loader */}
                 <Route path="settings" element={<SettingsPage />} />
-                {/* domains / email accounts / invoices / blacklist — per-page loader */}
+                {/* domains (+ email-accounts sub-page) / invoices / blacklist — per-page loader */}
                 <Route path="domains" element={<DomainsPage />} />
-                <Route path="email-accounts" element={<EmailAccountsPage />} />
+                <Route path="domains/email-accounts" element={<EmailAccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="blacklist" element={<BlacklistPage />} />
               </Route>
@@ -228,7 +228,7 @@ function ProtectedApp() {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="users" element={<AdminUserManagementPage />} />
                 <Route path="domains" element={<DomainsPage />} />
-                <Route path="email-accounts" element={<EmailAccountsPage />} />
+                <Route path="domains/email-accounts" element={<EmailAccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="blacklist" element={<BlacklistPage />} />
               </Route>

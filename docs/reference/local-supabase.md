@@ -115,8 +115,9 @@ no-op (nothing to migrate / unchanged function code redeploys harmlessly).
   (gitignored) and in your local Docker volume. Do not copy it elsewhere or commit it.
 - **Legacy CRM** ([ADR-0010](../adr/0010-legacy-crm-integration.md)) is a separate cloud project;
   leave `VITE_LEGACY_CRM_*` blank locally — the CRM card degrades to empty.
-- **`orm-gateway-next`** runs identical code to `orm-gateway`; it exists so dev traffic can target a
-  WIP function without touching production. Point `VITE_ORM_GATEWAY_FUNCTION` at it when needed.
+- **`orm-gateway`** is the single canonical gateway function. To target a WIP copy from a dev build
+  without touching production, deploy it under a temporary name and point `VITE_ORM_GATEWAY_FUNCTION`
+  at it. (The old always-deployed `orm-gateway-next` twin was removed once the per-page migration shipped.)
 - **TLS.** `db:migrate` auto-disables TLS for localhost and requires it for the cloud pooler;
   override with `SUPABASE_DB_SSL=require|disable` if your connection string is unusual. The gateway
   (`orm-gateway/index.ts`) applies the same rule to its own connection.

@@ -76,9 +76,6 @@ inspector_port = 8083
 [functions.orm-gateway]
 verify_jwt = true
 
-[functions.orm-gateway-next]
-verify_jwt = true
-
 [functions.send-invite]
 verify_jwt = true
 

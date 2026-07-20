@@ -39,7 +39,7 @@ Every runtime read and write goes through **one edge function** — the `orm-gat
                                               Postgres + RLS
 ```
 
-- **Transport:** `POST ${VITE_SUPABASE_URL}/functions/v1/${runtimeConfig.ormGatewayFunction}` ([repository.ts:323-339](../../../src/app/data/repository.ts#L323-L339)). Default function `orm-gateway`; set `VITE_ORM_GATEWAY_FUNCTION=orm-gateway-next` to point dev at the WIP twin ([env.ts:29](../../../src/app/lib/env.ts#L29)).
+- **Transport:** `POST ${VITE_SUPABASE_URL}/functions/v1/${runtimeConfig.ormGatewayFunction}` ([repository.ts:323-339](../../../src/app/data/repository.ts#L323-L339)). Production uses the single canonical `orm-gateway` (the default); `VITE_ORM_GATEWAY_FUNCTION` overrides it only for a dev build targeting a temporary WIP function ([env.ts:29](../../../src/app/lib/env.ts#L29)).
 - **Contract:** a discriminated union of ~46 actions in [`data/orm-gateway-contract.ts`](../../../src/app/data/orm-gateway-contract.ts) (shared verbatim by the frontend and the Deno function), with page-level response shapes in [`types/view-contracts.ts`](../../../src/app/types/view-contracts.ts).
 - **Envelope:** `{ ok, data, _serverMs: { total, setup, handler, … }, _requestId }` ([orm-gateway/index.ts:2810-2820](../../../supabase/functions/orm-gateway/index.ts#L2810-L2820)).
 
@@ -150,7 +150,6 @@ src/
     test/                      — vitest setup
 supabase/
   functions/orm-gateway/       — Drizzle runtime data gateway (RLS passthrough) + rls-context.ts
-  functions/orm-gateway-next/  — deploy-only twin: re-imports orm-gateway/index.ts
   functions/send-invite/       — invite creation (service role)
   functions/manage-invites/    — list / resend / revoke (service role)
   drizzle/schema.ts            — authoritative Drizzle schema; imported by the gateway
@@ -190,7 +189,7 @@ Optional:
 | Variable | Default | Effect |
 |---|---|---|
 | `VITE_APP_ENV` | `production` in prod builds | Sets `isProduction`, which also **disables impersonation** (`allowInternalImpersonation = !isProduction`, [env.ts:34](../../../src/app/lib/env.ts#L34)). There is no separate impersonation flag. |
-| `VITE_ORM_GATEWAY_FUNCTION` | `orm-gateway` | Which deployed edge function the gateway calls (`orm-gateway-next` during migrations). |
+| `VITE_ORM_GATEWAY_FUNCTION` | `orm-gateway` | Which deployed edge function the gateway calls. Production uses the canonical `orm-gateway`; override only for a dev build targeting a temporary WIP function. |
 | `VITE_AUTH_INVITE_ONLY` | `true` | When true, forces self-signup off. |
 | `VITE_AUTH_ALLOW_SELF_SIGNUP` | `false` | Ignored while `VITE_AUTH_INVITE_ONLY` is true. |
 | `VITE_AUTH_ALLOW_MAGIC_LINK` | `true` | Shows the magic-link mode on the login page. |

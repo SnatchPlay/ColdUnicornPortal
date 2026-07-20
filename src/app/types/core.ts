@@ -351,10 +351,13 @@ export interface DailyStatRecord {
 export interface DomainRecord {
   id: string;
   created_at: string;
-  client_id: string;
+  /** Null for Winnr-synced domains not yet linked to a client (no linking UI yet). */
+  client_id: string | null;
   domain_name: string;
-  setup_email: string;
-  purchase_date: string;
+  /** Null on Winnr-synced domains; only portal-created domains require it. */
+  setup_email: string | null;
+  /** Null on Winnr-synced domains; only portal-created domains require it. */
+  purchase_date: string | null;
   updated_at: string;
   /** Local, portal-editable lifecycle status. */
   status: DomainStatus | null;
