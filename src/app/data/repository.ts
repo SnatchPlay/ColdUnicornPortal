@@ -40,6 +40,8 @@ import type {
   ClientsOverviewPayload,
   ClientsStatsPayload,
   DomainsPagePayload,
+  EmailAccountsPagePayload,
+  EmailAccountWarmingPayload,
   InvoicesPagePayload,
   LeadDetailResult,
   LeadsFilterOptions,
@@ -84,6 +86,8 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadAnalyticsOverview: { table: "analytics", operation: "select" },
   loadAdminSettings: { table: "settings", operation: "select" },
   loadDomainsPage: { table: "domains", operation: "select" },
+  loadEmailAccountsPage: { table: "email_accounts", operation: "select" },
+  loadEmailAccountWarming: { table: "email_account_warming_daily", operation: "select" },
   loadInvoicesPage: { table: "invoices", operation: "select" },
   loadBlacklistPage: { table: "email_exclude_list", operation: "select" },
   loadCampaignsList: { table: "campaigns", operation: "select" },
@@ -576,6 +580,8 @@ export interface Repository {
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
   loadAdminSettings(): Promise<AdminSettingsPayload>;
   loadDomainsPage(): Promise<DomainsPagePayload>;
+  loadEmailAccountsPage(): Promise<EmailAccountsPagePayload>;
+  loadEmailAccountWarming(emailAccountId: string): Promise<EmailAccountWarmingPayload>;
   loadInvoicesPage(): Promise<InvoicesPagePayload>;
   loadBlacklistPage(): Promise<BlacklistPagePayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
@@ -804,6 +810,14 @@ export const repository: Repository = {
 
   async loadDomainsPage() {
     return invokeOrmGatewaySelectWithRetry("loadDomainsPage", {});
+  },
+
+  async loadEmailAccountsPage() {
+    return invokeOrmGatewaySelectWithRetry("loadEmailAccountsPage", {});
+  },
+
+  async loadEmailAccountWarming(emailAccountId: string) {
+    return invokeOrmGatewayAction("loadEmailAccountWarming", { emailAccountId });
   },
 
   async loadInvoicesPage() {

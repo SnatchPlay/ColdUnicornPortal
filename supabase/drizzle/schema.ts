@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, pgPolicy, uuid, timestamp, text, date, varchar, smallint, numeric, boolean, integer, unique, jsonb, pgView, pgEnum } from "drizzle-orm/pg-core"
+import { pgTable, index, foreignKey, pgPolicy, primaryKey, uuid, timestamp, text, date, varchar, smallint, numeric, boolean, integer, unique, jsonb, pgView, pgEnum } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const campaignStatus = pgEnum("campaign_status", ['draft', 'launching', 'active', 'stopped', 'completed'])
@@ -432,6 +432,71 @@ export const domains = pgTable("domains", {
 	pgPolicy("domains_update_scoped", { as: "permissive", for: "update", to: ["authenticated"] }),
 	pgPolicy("domains_delete_scoped", { as: "permissive", for: "delete", to: ["authenticated"] }),
 ]);
+
+// Ingestion-only (n8n via service_role writes; portal reads). Set-based SELECT RLS scoped through
+// domain → client, mirroring replies / campaign_daily_stats (ADR-0006). See 20260720e migration.
+const emailAccountSelect = sql`(domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))`;
+const warmingDailySelect = sql`(email_account_id IN ( SELECT ea.id FROM email_accounts ea WHERE (ea.domain_id IN ( SELECT d.id FROM domains d WHERE (d.client_id IN ( SELECT clients.id FROM clients WHERE private.can_access_client(clients.id)))))))`;
+
+export const emailAccounts = pgTable("email_accounts", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	domainId: uuid("domain_id").notNull(),
+	winnrEmailUserId: text("winnr_email_user_id").notNull(),
+	emailAddress: text("email_address").notNull(),
+	username: text(),
+	displayName: text("display_name"),
+	status: text(),
+	warmingStatus: text("warming_status"),
+	warmingHealthScore: numeric("warming_health_score"),
+	warmingInboxRate: numeric("warming_inbox_rate"),
+	warmingSpamRate: numeric("warming_spam_rate"),
+	warmingDailyVolume: integer("warming_daily_volume"),
+	warmingProgress: numeric("warming_progress"),
+	winnrCreatedAt: timestamp("winnr_created_at", { withTimezone: true, mode: 'string' }),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
+	missingSince: timestamp("missing_since", { withTimezone: true, mode: 'string' }),
+	rawPayload: jsonb("raw_payload").default({}).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("email_accounts_domain_id_idx").using("btree", table.domainId.asc().nullsLast()),
+	index("email_accounts_warming_status_idx").using("btree", table.warmingStatus.asc().nullsLast()),
+	// NOTE: the case-insensitive unique index email_accounts_email_uq on lower(email_address) lives
+	// only in 20260720e_email_accounts_warming.sql — drizzle-kit does not model the lower() expression.
+	foreignKey({ columns: [table.domainId], foreignColumns: [domains.id], name: "email_accounts_domain_id_fkey" }).onDelete("cascade"),
+	unique("email_accounts_winnr_email_user_id_key").on(table.winnrEmailUserId),
+	pgPolicy("email_accounts_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: emailAccountSelect }),
+]);
+
+export const emailAccountWarmingDaily = pgTable("email_account_warming_daily", {
+	emailAccountId: uuid("email_account_id").notNull(),
+	metricDate: date("metric_date").notNull(),
+	warmingStatus: text("warming_status"),
+	emailsSent: integer("emails_sent"),
+	healthScore: numeric("health_score"),
+	inboxRate: numeric("inbox_rate"),
+	spamRate: numeric("spam_rate"),
+	dailyVolume: integer("daily_volume"),
+	warmupProgress: numeric("warmup_progress"),
+	rawPayload: jsonb("raw_payload").default({}).notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("email_account_warming_date_idx").using("btree", table.metricDate.asc().nullsLast()),
+	foreignKey({ columns: [table.emailAccountId], foreignColumns: [emailAccounts.id], name: "email_account_warming_daily_email_account_id_fkey" }).onDelete("cascade"),
+	primaryKey({ columns: [table.emailAccountId, table.metricDate], name: "email_account_warming_daily_pkey" }),
+	pgPolicy("email_account_warming_daily_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: warmingDailySelect }),
+]);
+
+export const domainWarmingSummary = pgView("domain_warming_summary", {
+	domainId: uuid("domain_id"),
+	emailAccountsCount: integer("email_accounts_count"),
+	activeWarmingAccountsCount: integer("active_warming_accounts_count"),
+	averageHealthScore: numeric("average_health_score"),
+	lowestInboxRate: numeric("lowest_inbox_rate"),
+	highestSpamRate: numeric("highest_spam_rate"),
+}).with({"securityInvoker":"on"}).as(sql`SELECT d.id AS domain_id, count(ea.id)::integer AS email_accounts_count, count(ea.id) FILTER (WHERE ea.warming_status = 'active')::integer AS active_warming_accounts_count, avg(ea.warming_health_score) AS average_health_score, min(ea.warming_inbox_rate) AS lowest_inbox_rate, max(ea.warming_spam_rate) AS highest_spam_rate FROM domains d LEFT JOIN email_accounts ea ON ea.domain_id = d.id GROUP BY d.id`);
+
 export const adminDashboardDaily = pgView("admin_dashboard_daily", {	reportDate: date("report_date"),
 	clientId: uuid("client_id"),
 	sentCount: integer("sent_count"),

@@ -3,13 +3,13 @@ import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
-import { formatDate, formatMoney } from "../lib/format";
-import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
+import { formatDate, formatMoney, formatNumber } from "../lib/format";
+import { scopeClients, scopeDomains, scopeEmailAccounts, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useDomainsPage } from "../lib/use-domains";
 import { repository } from "../data/repository";
 import { useAuth } from "../providers/auth";
-import type { ClientRecord, DomainRecord, DomainStatus } from "../types/core";
+import type { ClientRecord, DomainRecord, DomainStatus, EmailAccountRecord } from "../types/core";
 
 const DOMAIN_STATUSES: DomainStatus[] = ["active", "warmup", "blocked", "retired"];
 const DOMAIN_UNSET_VALUE = "__unset_domain_status__";
@@ -86,6 +86,7 @@ function buildDomainPatch(domain: DomainRecord, draft: DomainDraft): Partial<Dom
 // Stable empty-array fallbacks — prevents new-reference cascades during loading.
 const EMPTY_CLIENTS: ClientRecord[] = [];
 const EMPTY_DOMAINS: DomainRecord[] = [];
+const EMPTY_ACCOUNTS: EmailAccountRecord[] = [];
 
 // ── CreateDomainSheetHost ──────────────────────────────────────────────────────────────────────
 // Owns the "is sheet open" boolean so that opening/closing New Domain does NOT re-render
@@ -316,6 +317,11 @@ export function DomainsPage() {
     [clients, identity],
   );
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
+  const emailAccounts = data?.emailAccounts ?? EMPTY_ACCOUNTS;
+  const scopedAccounts = useMemo(
+    () => (identity ? scopeEmailAccounts(identity, clients, domains, emailAccounts) : []),
+    [clients, domains, emailAccounts, identity],
+  );
 
   const filteredDomains = useMemo(() => {
     return scopedDomains.filter((item) => {
@@ -353,6 +359,11 @@ export function DomainsPage() {
     if (!selectedDomain) return "Unknown client";
     return scopedClients.find((item) => item.id === selectedDomain.client_id)?.name ?? "Unknown client";
   }, [scopedClients, selectedDomain]);
+
+  const domainAccounts = useMemo(
+    () => (selectedDomain ? scopedAccounts.filter((item) => item.domain_id === selectedDomain.id) : []),
+    [scopedAccounts, selectedDomain],
+  );
 
   useEffect(() => {
     if (!selectedDomain) {
@@ -697,6 +708,35 @@ export function DomainsPage() {
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
                     />
                   </label>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-black/10 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Email accounts</p>
+                    <span className="text-xs text-neutral-500">{domainAccounts.length} mailboxes</span>
+                  </div>
+                  {domainAccounts.length === 0 ? (
+                    <p className="mt-3 text-sm text-neutral-500">No mailboxes synced for this domain yet.</p>
+                  ) : (
+                    <div className="mt-3 overflow-hidden rounded-xl border border-border">
+                      <div className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] gap-2 border-b border-border bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                        <span>Email</span>
+                        <span>Warming</span>
+                        <span className="text-right">Health</span>
+                        <span className="text-right">Inbox</span>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {domainAccounts.map((account) => (
+                          <div key={account.id} className="grid grid-cols-[1.6fr_0.8fr_0.6fr_0.6fr] items-center gap-2 px-3 py-2 text-sm">
+                            <span className="truncate text-white">{account.email_address}</span>
+                            <span className="truncate text-xs uppercase tracking-[0.12em] text-neutral-400">{account.warming_status ?? "unset"}</span>
+                            <span className="text-right text-neutral-300">{formatNumber(account.warming_health_score)}</span>
+                            <span className="text-right text-neutral-300">{formatNumber(account.warming_inbox_rate)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

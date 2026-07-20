@@ -38,6 +38,8 @@ import type {
   ClientsOverviewPayload,
   ClientsStatsPayload,
   DomainsPagePayload,
+  EmailAccountsPagePayload,
+  EmailAccountWarmingPayload,
   InvoicesPagePayload,
   LeadDetailResult,
   LeadsFilterOptions,
@@ -157,6 +159,15 @@ export interface LoadAdminSettingsPayload {
 
 export interface LoadDomainsPagePayload {
   action: "loadDomainsPage";
+}
+
+export interface LoadEmailAccountsPagePayload {
+  action: "loadEmailAccountsPage";
+}
+
+export interface LoadEmailAccountWarmingPayload {
+  action: "loadEmailAccountWarming";
+  emailAccountId: string;
 }
 
 export interface LoadInvoicesPagePayload {
@@ -519,6 +530,8 @@ export type OrmGatewayRequest =
   | LoadAnalyticsOverviewPayload
   | LoadAdminSettingsPayload
   | LoadDomainsPagePayload
+  | LoadEmailAccountsPagePayload
+  | LoadEmailAccountWarmingPayload
   | LoadInvoicesPagePayload
   | LoadBlacklistPagePayload
   | LoadCampaignsListPayload
@@ -590,6 +603,8 @@ export interface OrmGatewayResponseMap {
   loadAnalyticsOverview: AnalyticsOverviewPayload;
   loadAdminSettings: AdminSettingsPayload;
   loadDomainsPage: DomainsPagePayload;
+  loadEmailAccountsPage: EmailAccountsPagePayload;
+  loadEmailAccountWarming: EmailAccountWarmingPayload;
   loadInvoicesPage: InvoicesPagePayload;
   loadBlacklistPage: BlacklistPagePayload;
   loadCampaignsList: CampaignsListResponse;
@@ -805,6 +820,17 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
 
   if (action === "loadDomainsPage") {
     return { ok: true, value: { action } };
+  }
+
+  if (action === "loadEmailAccountsPage") {
+    return { ok: true, value: { action } };
+  }
+
+  if (action === "loadEmailAccountWarming") {
+    if (!hasStringField(payload, "emailAccountId")) {
+      return { ok: false, error: "loadEmailAccountWarming requires emailAccountId." };
+    }
+    return { ok: true, value: { action, emailAccountId: String(payload.emailAccountId) } };
   }
 
   if (action === "loadInvoicesPage") {

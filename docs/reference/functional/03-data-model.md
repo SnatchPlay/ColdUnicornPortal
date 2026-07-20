@@ -455,6 +455,34 @@ Outreach sending domains.
 
 RLS (verified live): `domains_select_scoped` = `private.can_access_client(client_id)` (client role can read its own domains); `domains_insert_scoped` / `_update_scoped` / `_delete_scoped` = `private.can_manage_client(client_id)` (assigned manager + admin tier). `domains_insert_internal` (`20260517`) is the additional permissive INSERT policy used by the "New domain" sheet.
 
+#### `email_accounts` — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+Individual Winnr mailboxes and their **current** warming snapshot. Warming is a mailbox-level concept, not a domain-level one: one domain has many mailboxes with independent health scores. **Ingestion-only** — n8n populates this from Winnr (`/v1/email-users` + `/v1/warming`) as `service_role`; the portal never writes it. Warming statuses are free `text` (the taxonomy is owned by the external API).
+
+| Column | Type |
+|--------|------|
+| `id` | uuid PK |
+| `domain_id` | uuid FK → `domains(id)` on delete cascade |
+| `winnr_email_user_id` | text unique (idempotent upsert key) |
+| `email_address` | text not null (unique on `lower(email_address)`) |
+| `username`, `display_name`, `status` | text |
+| `warming_status` | text |
+| `warming_health_score`, `warming_inbox_rate`, `warming_spam_rate`, `warming_progress` | numeric |
+| `warming_daily_volume` | integer |
+| `winnr_created_at`, `last_seen_at`, `last_synced_at`, `missing_since` | timestamptz |
+| `raw_payload` | jsonb |
+| `created_at`, `updated_at` | timestamptz |
+
+RLS: `email_accounts_select_scoped` — set-based (ADR-0006), scoped through the parent domain: `domain_id IN (SELECT d.id FROM domains d WHERE d.client_id IN (SELECT id FROM clients WHERE private.can_access_client(id)))`. No `authenticated` write policy (writes are `service_role`/n8n), mirroring `replies` / `campaign_daily_stats`.
+
+#### `email_account_warming_daily` — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+Per-mailbox daily warming history (from Winnr `/v1/warming/{id}/metrics`). Ingestion-only. PK `(email_account_id, metric_date)`. Columns: `warming_status` text, `emails_sent`/`daily_volume` integer, `health_score`/`inbox_rate`/`spam_rate`/`warmup_progress` numeric, `raw_payload` jsonb, `synced_at` timestamptz. RLS: `email_account_warming_daily_select_scoped` — set-based, scoped through `email_account → domain → client`.
+
+#### `domain_warming_summary` (view) — [schema.ts](../../../supabase/drizzle/schema.ts) (`20260720e`)
+
+`security_invoker` aggregation over `email_accounts`, one row per domain: `email_accounts_count`, `active_warming_accounts_count`, `average_health_score`, `lowest_inbox_rate`, `highest_spam_rate`. Runs with the caller's privileges so `email_accounts` RLS still scopes the rows. Provides the domain-level rollup without duplicating warming columns onto `domains`. **Not yet read by a page** — it exists for the planned aggregate column on the Domains list; the per-domain mailbox panel derives its numbers client-side from the mailbox list already in the payload. `active_warming_accounts_count` assumes Winnr's status literal is `'active'` — reconcile once the n8n→Winnr mapping is confirmed.
+
 #### `invoices` — [schema.ts:264-283](../../../supabase/drizzle/schema.ts#L264-L283)
 
 | Column | Type |
