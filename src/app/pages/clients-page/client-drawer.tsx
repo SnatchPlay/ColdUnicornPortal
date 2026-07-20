@@ -19,7 +19,7 @@ import { getCellCondition, getSeverityClassName } from "../../lib/conditions/eva
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatDate, formatMoney } from "../../lib/format";
 import { CLIENT_STATUSES } from "../../types/core";
-import type { ClientRecord, ClientUserRecord, UserRecord } from "../../types/core";
+import type { ClientRecord, ClientSequencerRecord, ClientUserRecord, UserRecord } from "../../types/core";
 
 const CLIENT_USER_PLACEHOLDER = "__select_client_user__";
 // Sentinel for the "no owner" choice — Radix <Select> forbids an empty-string item value.
@@ -37,7 +37,7 @@ export interface ClientDraft {
   autoOooEnabled: boolean;
   setupInfo: string;
   managerId: string;
-  // credentials (editable)
+  // sequencer credentials (editable; saved to client_sequencers, not clients — ADR-0012)
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
@@ -249,7 +249,15 @@ function IssuesTimeline({ issues, emptyLabel }: IssuesTimelineProps) {
   );
 }
 
-export function toClientDraft(client: ClientRecord): ClientDraft {
+/** Per-client sequencer credential rows relevant to the drawer (ADR-0012). */
+export interface ClientSequencerCreds {
+  emailbison: ClientSequencerRecord | null;
+  aimfox: ClientSequencerRecord | null;
+}
+
+export const EMPTY_SEQUENCER_CREDS: ClientSequencerCreds = { emailbison: null, aimfox: null };
+
+export function toClientDraft(client: ClientRecord, creds: ClientSequencerCreds): ClientDraft {
   return {
     name: client.name,
     status: client.status,
@@ -260,9 +268,9 @@ export function toClientDraft(client: ClientRecord): ClientDraft {
     autoOooEnabled: client.auto_ooo_enabled,
     setupInfo: client.setup_info ?? "",
     managerId: client.manager_id ?? "",
-    externalWorkspaceId: client.external_workspace_id != null ? String(client.external_workspace_id) : "",
-    externalApiKey: client.external_api_key ?? "",
-    linkedinApiKey: client.linkedin_api_key ?? "",
+    externalWorkspaceId: creds.emailbison?.external_workspace_id ?? "",
+    externalApiKey: creds.emailbison?.api_key ?? "",
+    linkedinApiKey: creds.aimfox?.api_key ?? "",
     prospectsSigned: client.prospects_signed,
     prospectsAdded: client.prospects_added,
     notes: client.notes ?? "",
@@ -309,19 +317,8 @@ export function buildClientPatch(
     patch.manager_id = draft.managerId || null;
   }
 
-  // credentials
-  const nextWorkspaceId = draft.externalWorkspaceId.trim()
-    ? parseInt(draft.externalWorkspaceId, 10) || null
-    : null;
-  if ((client.external_workspace_id ?? null) !== nextWorkspaceId) {
-    patch.external_workspace_id = nextWorkspaceId;
-  }
-  const nextApiKey = draft.externalApiKey.trim() || null;
-  if ((client.external_api_key ?? null) !== nextApiKey) patch.external_api_key = nextApiKey;
-  const nextLinkedinKey = draft.linkedinApiKey.trim() || null;
-  if ((client.linkedin_api_key ?? null) !== nextLinkedinKey) patch.linkedin_api_key = nextLinkedinKey;
-
-  // prospects
+  // prospects & setup flags
+  // Sequencer credentials are persisted separately via client_sequencers (ADR-0012), not on the client patch.
   if (client.prospects_signed !== draft.prospectsSigned) patch.prospects_signed = draft.prospectsSigned;
   if (client.prospects_added !== draft.prospectsAdded) patch.prospects_added = draft.prospectsAdded;
 
@@ -344,6 +341,34 @@ export function buildClientPatch(
   }
 
   return patch;
+}
+
+/**
+ * Diff the draft's credential fields against the current client_sequencers rows.
+ * Returns one upsert per touched sequencer (ADR-0012: EmailBison holds workspace
+ * id + API key; Aimfox holds the LinkedIn key).
+ */
+export function buildSequencerPatches(
+  creds: ClientSequencerCreds,
+  draft: ClientDraft,
+): Array<{ sequencerKey: "emailbison" | "aimfox"; patch: { api_key?: string | null; external_workspace_id?: string | null } }> {
+  const patches: Array<{ sequencerKey: "emailbison" | "aimfox"; patch: { api_key?: string | null; external_workspace_id?: string | null } }> = [];
+
+  const emailbisonPatch: { api_key?: string | null; external_workspace_id?: string | null } = {};
+  const nextWorkspaceId = draft.externalWorkspaceId.trim() || null;
+  if ((creds.emailbison?.external_workspace_id ?? null) !== nextWorkspaceId) {
+    emailbisonPatch.external_workspace_id = nextWorkspaceId;
+  }
+  const nextApiKey = draft.externalApiKey.trim() || null;
+  if ((creds.emailbison?.api_key ?? null) !== nextApiKey) emailbisonPatch.api_key = nextApiKey;
+  if (Object.keys(emailbisonPatch).length > 0) patches.push({ sequencerKey: "emailbison", patch: emailbisonPatch });
+
+  const nextAimfoxKey = draft.linkedinApiKey.trim() || null;
+  if ((creds.aimfox?.api_key ?? null) !== nextAimfoxKey) {
+    patches.push({ sequencerKey: "aimfox", patch: { api_key: nextAimfoxKey } });
+  }
+
+  return patches;
 }
 
 export interface ClientDrawerProps {
@@ -520,16 +545,16 @@ export function ClientDrawer({
             <div className="border-l-2 border-sky-400/50 pl-3">
               <p className="text-sm font-medium text-white">Credentials & IDs</p>
               <p className="text-xs text-white/50">
-                Integration identifiers for the n8n / Smartlead / Bison boundary.
+                Per-sequencer connection settings (EmailBison / Aimfox) read by n8n.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Workspace ID
+                  EmailBison workspace ID
                 </span>
                 <input
-                  type="number"
+                  type="text"
                   value={draft.externalWorkspaceId}
                   onChange={(event) =>
                     setDraft((current) =>
@@ -543,7 +568,7 @@ export function ClientDrawer({
 
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Workspace API key
+                  EmailBison API key
                 </span>
                 <SecretInput
                   value={draft.externalApiKey}
@@ -558,7 +583,7 @@ export function ClientDrawer({
 
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  LinkedIn API key
+                  Aimfox API key
                 </span>
                 <SecretInput
                   value={draft.linkedinApiKey}

@@ -269,6 +269,7 @@ Defined in [`theme.css:232-316`](../../src/styles/theme.css#L232), **deliberatel
 | Class family | Members | Base look | Contrast look | Used by |
 |---|---|---|---|---|
 | `.cond-cell` + `-good` / `-danger` / `-warning` / `-critical` | 4 | Translucent full-bleed cell fill (`rgb(… / 0.7)`), edge-to-edge inside a table cell | Solid neon fill, `font-weight: 800` | `clients-page/mega-table.tsx` condition columns |
+| `.crm-cell` + `-green` / `-yellow` / `-orange` / `-red` / `-pending` | 5 | Translucent full-bleed fill tuned to the CRM table's `px-2.5`/`py-2` cells; distinct **orange** + subtle **pending** the conditions engine lacks | Solid neon fill (`green #06F701`, `yellow #F9F909`, `orange #ff6600`, `red #FA0200`, `pending #2f2f2f`), weight 800 | `lead-crm-table.tsx` — Lead CRM per-cell health (ADR-0013), fed by `lib/crm/lead-health.ts` |
 | `.sev-badge-*` | 4 (same suffixes) | Tinted 12% bg + pale border + pale text | Neon border + 15% bg + neon text, weight 700 | Clients name-column rollup, condition chips, `settings/condition-rule-builder.tsx` |
 | `.status-badge-*` | 6 — `active`, `inactive`, `abo`, `sales`, `onhold`, `offboard` | 40% dark fill + saturated border + light text | Solid neon fill with black/white text, weight 800 | Client status column |
 | `.reply-badge-*` | 6 — `interested`, `ooo`, `nrr`, `left`, `spam`, `neutral` | 15% tint + light text | 20% neon tint + neon text, weight 700 | `ReplyClassificationBadge` ([`portal-ui.tsx:421-435`](../../src/app/components/portal-ui.tsx#L421)) |

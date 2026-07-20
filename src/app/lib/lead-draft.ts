@@ -1,4 +1,5 @@
-import type { LeadGender, LeadQualification, LeadRecord } from "../types/core";
+import { civilDateOf, DEFAULT_BUSINESS_DAY_CONFIG } from "./crm/business-days";
+import type { ContactMethod, LeadGender, LeadQualification, LeadRecord } from "../types/core";
 
 /**
  * Editable lead draft + diff helpers shared by the Leads page drawer and the Manager dashboard
@@ -18,6 +19,7 @@ export const EDITABLE_QUALIFICATIONS: LeadQualification[] = [
 
 export const LEAD_QUALIFICATION_UNSET = "__lead_unqualified__";
 export const LEAD_GENDER_UNSET = "__lead_gender_unset__";
+export const CONTACT_METHOD_UNSET = "__lead_contact_method_unset__";
 
 export interface LeadDraft {
   qualification: LeadQualification | "";
@@ -42,6 +44,23 @@ export interface LeadDraft {
   website: string;
   expectedReturnDate: string;
   addedToOooCampaign: boolean;
+  // Lead CRM operational fields (ADR-0013, Phase 5.2). Dates are edited as YYYY-MM-DD (stored as
+  // timestamptz midnight); the health engine only reads their civil date.
+  contactMadeAt: string;
+  contactMethod: ContactMethod | "";
+  negotiationStartedAt: string;
+  linkedinInvitationSentAt: string;
+}
+
+/**
+ * Civil date (YYYY-MM-DD) of a stored timestamp in the CRM business timezone — NOT a raw UTC slice.
+ * This matches the day the health engine reads (`civilDateOf`), so a `type="date"` input seeded/diffed
+ * with it shows the same day the SLA uses and re-saving never shifts a lead's health civil date.
+ */
+export function datePart(value: string | null): string | null {
+  if (!value) return null;
+  const d = civilDateOf(value, DEFAULT_BUSINESS_DAY_CONFIG);
+  return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
 }
 
 export function toLeadDraft(lead: LeadRecord): LeadDraft {
@@ -68,10 +87,15 @@ export function toLeadDraft(lead: LeadRecord): LeadDraft {
     website: lead.website ?? "",
     expectedReturnDate: lead.expected_return_date ?? "",
     addedToOooCampaign: lead.added_to_ooo_campaign,
+    contactMadeAt: datePart(lead.contact_made_at) ?? "",
+    contactMethod: lead.contact_method ?? "",
+    negotiationStartedAt: datePart(lead.negotiation_started_at) ?? "",
+    linkedinInvitationSentAt: datePart(lead.linkedin_invitation_sent_at) ?? "",
   };
 }
 
-function nullableString(value: string): string | null {
+/** Trim a form string to its stored value: empty/whitespace → null, else the trimmed text. */
+export function nullableString(value: string): string | null {
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
 }
@@ -117,6 +141,17 @@ export function buildLeadPatch(lead: LeadRecord, draft: LeadDraft): Partial<Lead
   const nextOooDate = nullableString(draft.expectedReturnDate);
   if ((lead.expected_return_date ?? null) !== nextOooDate) patch.expected_return_date = nextOooDate;
   if (lead.added_to_ooo_campaign !== draft.addedToOooCampaign) patch.added_to_ooo_campaign = draft.addedToOooCampaign;
+
+  // CRM operational fields — dates diffed on their civil date so re-opening a lead whose stored
+  // timestamp has a time component does not emit a spurious midnight-truncating patch.
+  const nextContactMade = draft.contactMadeAt || null;
+  if (datePart(lead.contact_made_at) !== nextContactMade) patch.contact_made_at = nextContactMade;
+  const nextMethod = (draft.contactMethod || null) as ContactMethod | null;
+  if ((lead.contact_method ?? null) !== nextMethod) patch.contact_method = nextMethod;
+  const nextNegotiation = draft.negotiationStartedAt || null;
+  if (datePart(lead.negotiation_started_at) !== nextNegotiation) patch.negotiation_started_at = nextNegotiation;
+  const nextLinkedInInvite = draft.linkedinInvitationSentAt || null;
+  if (datePart(lead.linkedin_invitation_sent_at) !== nextLinkedInInvite) patch.linkedin_invitation_sent_at = nextLinkedInInvite;
 
   return patch;
 }

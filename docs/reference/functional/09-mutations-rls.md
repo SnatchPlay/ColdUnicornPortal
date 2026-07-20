@@ -48,6 +48,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Allowed roles:** admin, super_admin, manager (assigned).
 - **Called from:** Clients page drawer save ([clients-page.tsx:267](../../../src/app/pages/clients-page.tsx#L267)) and the CRM integration card ([crm-integration-card.tsx:178](../../../src/app/components/crm-integration-card.tsx#L178), writes `crm_config`).
 - **Fields (whitelist `mapClientPatch`, [index.ts:354-381](../../../supabase/functions/orm-gateway/index.ts#L354-L381)):** `name`, `status`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`, `crm_config`, contract fields.
+- **ADR-0012:** the credential fields (`external_workspace_id`, `external_api_key`, `linkedin_api_key`) were removed from `mapClientPatch` — sequencer credentials now go through `upsertClientSequencer` (§2.15).
 
 ### 2.2 `updateCampaign(campaignId, patch)` — [repository.ts:812-814](../../../src/app/data/repository.ts#L812-L814) · gateway [index.ts:2316](../../../supabase/functions/orm-gateway/index.ts#L2316)
 
@@ -69,7 +70,49 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
   - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
   - Firmographics: `country`, `industry`, `headcount_range`, `website`
   - OOO: `expected_return_date`, `added_to_ooo_campaign`
+  - CRM operational (ADR-0013, Phase 5.2): `linkedin_invitation_sent_at`, `contact_made_at`, `negotiation_started_at` (dates edited as `YYYY-MM-DD`, stored midnight), `contact_method` (`phone|email` — any other value is coerced to `NULL` server-side to respect the DB CHECK)
 - **Never accepted by gateway (read-only):** `id`, `client_id`, `campaign_id`, `external_id`, `external_blacklist_id`, `external_domain_blacklist_id`, `source`, `reply_text`, `response_time_hours`, `response_time_label`, `message_title`, `message_number`, `created_at`. Keys outside the whitelist are silently dropped — they will not error, just no-op.
+- **Not editable via `mapLeadPatch`:** the terminal-status columns `final_outcome`, `conclusion`, `concluded_at`. They are written only by `concludeLead` (§2.3a), which sets all three atomically and syncs `won`.
+
+### 2.3a `concludeLead(leadId, finalOutcome, conclusion)` — atomic terminal write (ADR-0013, Phase 5)
+
+- **Table:** `leads`. Same RLS as `updateLead` (`leads_update_scoped`; **client write-blocked in Postgres**) — no new policy; this action reuses the leads UPDATE path.
+- **Purpose:** set `final_outcome` (`won|lost|lost_premql|null`), `conclusion`, and `concluded_at` together so the DB CHECK holds, and **sync the legacy `won` boolean** — the meeting/offer recompute triggers deliberately never touch `won`, so the conclusion action owns it. `won = (finalOutcome === 'won')`; `finalOutcome: null` un-concludes (clears all four, `won=false`).
+- **Invariant (two-sided, `20260720c`):** the CHECK is `leads_conclusion_consistency_check` — `(final_outcome IS NULL AND conclusion IS NULL AND concluded_at IS NULL) OR (final_outcome IS NOT NULL AND concluded_at IS NOT NULL AND nullif(btrim(conclusion),'') IS NOT NULL)`. The three terminal columns are **all-empty or all-set** (with a non-empty conclusion): an outcome without a conclusion **and** a conclusion/`concluded_at` without an outcome are both forbidden. `conclusion` is a canonical terminal field, **not** a draft store — a pre-conclusion draft would need a separate field/model. (Supersedes the one-sided `20260720b` and the timestamp-only `20260719d`.) Enforced in three places: the contract validator, the gateway handler (un-conclude clears all three), and the DB CHECK (the backstop for any direct/service-role/n8n write that bypasses the gateway). Verified on the local stack: all seven inconsistent states — incl. clearing only one of the three from a concluded row — reject; all-three-NULL and outcome + real conclusion + `concluded_at` succeed.
+- **Why separate from `updateLead`:** it must set `won` + the three terminal columns in one statement; routing it through the draft/`mapLeadPatch` flow would let two write paths race over `won`. Bypasses the whitelist by design (a dedicated action, not a free-form patch).
+- **Called from:** the Leads page CRM-view drawer conclusion editor ([lead-conclusion-editor.tsx](../../../src/app/components/lead-conclusion-editor.tsx)); `repository.concludeLead`.
+- **KPI:** `won` stays the source of truth for the win KPIs (funnel/dashboards/MoM); this action keeps it consistent with `final_outcome`. Verified end-to-end on the local stack (conclude→`won=true`+CHECK holds; un-conclude→all four cleared).
+
+### 2.3b `upsertLeadMeeting(leadId, meetingType, patch)` — intro/summary meeting write (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_meetings`. RLS `lead_meetings_write_scoped` (`for all`, set-based `can_manage_client` through the parent lead) — **client write-blocked in Postgres**.
+- **Upsert key:** `(lead_id, meeting_type)` — one intro + one summary per lead (partial unique index). The handler does select-then-insert/update (drizzle cannot target a partial unique index in `ON CONFLICT`), all inside the RLS transaction.
+- **Writable fields (CS-manager-owned):** `status` (`planned|scheduled|held|cancelled|no_show`, enum-validated), `scheduled_at`, `held_at` (dates, YYYY-MM-DD), `call_script`. **NOT writable:** the AI-generated `transcription_url`, `pre_meeting_insights`, `process_score`, `conversion_insights`, `*_generated_at`, `meeting_url`, `calendar_event_id` — n8n owns those (thin-surface principle).
+- **KPI sync:** a `scheduled`/`held` status fires `private.recompute_lead_meeting_flags` (`AFTER INSERT/UPDATE/DELETE`), recomputing `leads.meeting_booked` (any scheduled/held meeting) and `meeting_held` (any held meeting). RECOMPUTE, not latch: setting `cancelled` un-counts both. Verified end-to-end on the local stack: portal upsert scheduled→booked=true; held→held=true; cancelled→both false.
+- **Called from:** the CRM drawer's `LeadMeetingsEditor` ([lead-meetings-editor.tsx](../../../src/app/components/lead-meetings-editor.tsx)); `repository.upsertLeadMeeting`.
+
+### 2.3c `upsertLeadOffer(leadId, patch)` — current-offer write (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_offers`. RLS `lead_offers_write_scoped` (set-based `can_manage_client`) — **client write-blocked in Postgres**.
+- **Target:** offers are not unique per lead, but the CRM view shows one "current offer" (latest non-cancelled), so this operates on THAT offer — update the latest non-cancelled one if present, else insert. Empty/all-invalid patch on an existing offer returns it unchanged (no empty `SET`). **`status='cancelled'` retracts the offer entirely — it cancels EVERY non-cancelled offer for the lead**, so `offer_sent` can't linger true on an older parallel offer (e.g. one n8n created).
+- **Writable fields:** `status` (`planned|sent|accepted|rejected|cancelled`, enum-validated), `contracted_send_date` (date). `sent_at` / `offer_url` / `notes` and offer revisions are deferred (not projected by the read-model yet).
+- **KPI sync:** a `sent`/`accepted` status fires `private.recompute_lead_offer_flags`, recomputing `leads.offer_sent` (RECOMPUTE — `cancelled` un-counts). Verified end-to-end on the local stack: portal upsert sent→offer_sent=true; cancelled→false.
+- **Called from:** the CRM drawer's `LeadOfferEditor` ([lead-offer-editor.tsx](../../../src/app/components/lead-offer-editor.tsx)); `repository.upsertLeadOffer`.
+
+### 2.3d `upsertLeadValueDelivery(leadId, sequenceNumber, patch)` — value-delivery write (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_value_deliveries`. RLS `lead_value_deliveries_write_scoped` (set-based `can_manage_client`) — **client write-blocked in Postgres**.
+- **Upsert key:** `(lead_id, sequence_number)` — unique, sequence **1 or 2** (the two the CRM view shows). Select-then-insert/update like `upsertLeadMeeting`; empty patch on an existing row returns it unchanged. **No legacy-boolean trigger** — value deliveries feed only the CRM expert-brand columns.
+- **Writable fields:** `planned_date` (DATE), `sent_at` (timestamptz), `value_items` (`text[]`, edited as a comma-separated list, validated to a string array). Enum/date/array-validated so a malformed value is dropped, not 500.
+- **Called from:** the CRM drawer's `LeadValueDeliveriesEditor` ([lead-value-deliveries-editor.tsx](../../../src/app/components/lead-value-deliveries-editor.tsx)); `repository.upsertLeadValueDelivery`. Verified end-to-end on the local stack (comma list → `text[]` → CRM cell round-trip).
+
+### 2.3e `loadLeadTasks(leadId)` + `upsertLeadTask(leadId, id, patch)` — task list (ADR-0013, Phase 5.3)
+
+- **Table:** `lead_tasks`. RLS `lead_tasks_select_scoped` / `lead_tasks_write_scoped` (set-based) — **client write-blocked in Postgres**.
+- **Shape:** tasks are a genuine list (not a single keyed record), so — unlike meetings/offers/value — they are **lazily loaded per lead** (`loadLeadTasks`, a select action, ordered by `position` then `created_at`) when the CRM drawer opens, like the reply thread. `upsertLeadTask` **creates** (no `id`, `title` required) or **updates** (`id` set, scoped to `AND lead_id` so a mismatched id/leadId can't cross leads).
+- **Writable fields:** `title`, `due_at` (timestamptz), `status` (`planned|in_progress|completed|cancelled|skipped`, enum-validated), `notes`.
+- **CRM effect:** open tasks (`planned|in_progress`) feed the read-model's `open_tasks_count` + earliest-due `next_task_due_at`; a `completed|cancelled|skipped` status drops the task out (recomputed on `refresh()`). No legacy-boolean trigger. Verified end-to-end on the local stack: add planned task → open_count 1 + next-due set; complete it → open_count 0 + next-due null.
+- **Called from:** the CRM drawer's `LeadTasksEditor` ([lead-tasks-editor.tsx](../../../src/app/components/lead-tasks-editor.tsx)) via `useLeadTasks`; `repository.loadLeadTasks` / `repository.upsertLeadTask`.
 
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 
@@ -121,6 +164,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Allowed roles:** admin, super_admin, manager.
 - **Called from:** Clients page "New client" Sheet ([clients-page.tsx:245](../../../src/app/pages/clients-page.tsx#L245)).
 - **Fields:** `name` (required), `manager_id` (**optional** — `null` = Unassigned; pre-filled with `identity.userId` for the manager role, but an admin may leave it empty; the picker also offers admins, not just `manager`-role users), `status` (required), `kpi_leads`, `kpi_meetings`, `contracted_amount`, `contract_due_date`. `clients.manager_id` is nullable since `20260715_clients_manager_id_nullable.sql`.
+- **ADR-0012:** optional `sequencerCredentials` array (`{sequencer_key, api_key?, external_workspace_id?}`) — the gateway upserts `client_sequencers` rows in the same transaction after the client insert (New-client sheet sends EmailBison workspace/key + Aimfox key this way).
 - **Update pattern:** no optimistic update; the returned row is prepended to the page's local `clients` array.
 
 ### 2.11 `createCampaign(input)` — [repository.ts:796-798](../../../src/app/data/repository.ts#L796-L798) · gateway [index.ts:2354](../../../supabase/functions/orm-gateway/index.ts#L2354)
@@ -130,7 +174,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **RLS policy:** `campaigns_insert_internal` — admin/super_admin any client; manager scoped to own `clients.manager_id`. Migration: `20260517_entity_insert_policies.sql`.
 - **Allowed roles:** admin, super_admin, manager (scoped).
 - **Called from:** Campaigns page "New campaign" Sheet ([campaigns-page.tsx:480](../../../src/app/pages/campaigns-page.tsx#L480)).
-- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`.
+- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`, optional `sequencer_id` (omitted → DB default EmailBison; ADR-0012). `sequencer_id` is NOT in `mapCampaignPatch` — immutable via portal after creation.
 - **Update pattern:** no optimistic update; the page calls its hook's `refresh()` after the insert resolves.
 
 ### 2.12 `createLead(input)` — [repository.ts:800-802](../../../src/app/data/repository.ts#L800-L802) · gateway [index.ts:2364](../../../supabase/functions/orm-gateway/index.ts#L2364)
@@ -194,6 +238,14 @@ Admin-configurable Clients table, surfaced in the Settings page ([settings-page.
 
 Definitions are admin-tier only; values are gated by the field's `editable_by` array. Migrations: `20260520_client_custom_fields.sql`, `20260520_client_table_overrides.sql`, `20260524_column_override_position.sql`, `20260527_custom_field_editable_by.sql`, `20260616_custom_field_link_type.sql`.
 
+### 2.17 `upsertClientSequencer(clientId, sequencerKey, patch)` — [ADR-0012](../../adr/0012-multi-sequencer-model.md)
+
+- **Table:** `client_sequencers`.
+- **Statement:** raw-SQL `INSERT … SELECT` resolving `sequencer_key` → `sequencers.id`, `ON CONFLICT (client_id, sequencer_id) DO UPDATE` — only fields present in `patch` overwrite (`api_key`, `external_workspace_id`, `settings`, `enabled`); `updated_at = now()`.
+- **RLS:** `client_sequencers_{select,insert,update,delete}_scoped` — all gated `private.can_manage_client(client_id)`. Client role has zero visibility (API keys).
+- **Allowed roles:** admin, super_admin, master_admin, manager (assigned).
+- **Called from:** Clients page drawer save (`buildSequencerPatches` diffs the EmailBison workspace/key + Aimfox key fields against the loaded rows) and `createClient` (`sequencerCredentials` array, §2.4).
+
 ### Per-user table preferences
 
 | Repository method | Table | Gateway |
@@ -213,6 +265,15 @@ localStorage as a first-paint cache and Postgres as the source of truth, debounc
 must not be a gateway call per mousemove), and **degrades instead of failing**: if the action is
 rejected — an older gateway build, say — the table keeps working off the cache. Migration:
 `20260714b_user_table_preferences.sql`.
+
+### 2.18 Lead CRM child tables (ADR-0013)
+
+`lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` (migrations `20260719*`). Schema + RLS in [03-data-model §2.4b](03-data-model.md#24b-lead-crm-child-tables-adr-0013).
+
+- **RLS (verified live via EXPLAIN as `authenticated`):** `<table>_select_scoped` = set-based `can_access_client` through the parent lead (clients get read-only CRM data); `<table>_write_scoped` (`for all`) = set-based `can_manage_client`, so the **client role is write-blocked in Postgres**, mirroring `leads_update_scoped`.
+- **Portal gateway write actions** — the atomic conclusion action (`concludeLead`, §2.3a) landed in **Phase 5.1**; the direct-editable CRM lead columns (`contact_made_at`, `contact_method`, `negotiation_started_at`, `linkedin_invitation_sent_at`) landed in **Phase 5.2** via `mapLeadPatch` (§2.3, edited through the CRM drawer's "CRM operational" section). Child-table writes landed in **Phase 5.3** (complete): `lead_meetings` (`upsertLeadMeeting`, §2.3b), `lead_offers` (`upsertLeadOffer`, §2.3c), `lead_value_deliveries` (`upsertLeadValueDelivery`, §2.3d), and `lead_tasks` (`loadLeadTasks`/`upsertLeadTask`, §2.3e). All four child tables are now writable through the portal (CS-manager-owned fields only; AI/ingestion fields stay n8n-owned). n8n/service-role still writes them too — the RLS and the recompute triggers cover both paths.
+- **Legacy-boolean recompute trigger:** `AFTER INSERT/UPDATE/DELETE` on `lead_meetings`/`lead_offers` recomputes `leads.meeting_booked`/`meeting_held`/`offer_sent` from child rows (RECOMPUTE, not latch — cancelling un-counts; product decision 2026-07-19). It is a DB trigger, not gateway code, because n8n writes the child tables directly. `won` stays manual (whitelist). The trigger only *derives* booleans; `mapLeadPatch` remains the single whitelist for direct lead edits (ADR-0004).
+- **One-time backfill** (`20260720_backfill_lead_children_from_flags.sql`): seeds one intro `lead_meetings` row (`held` if `meeting_held` else `scheduled`) + one `sent` `lead_offers` row per lead that had the legacy boolean set but no child row, so the child tables become the uniform source of truth. Idempotent (guarded on "boolean set AND no child row" — safe after n8n starts populating); additive; timestamps left NULL (unknown). The recompute triggers then re-derive the booleans from the seeded rows — unchanged for consistent leads, and correcting the handful of `meeting_held=true AND meeting_booked=false` rows (held ⇒ booked). `won` is not a child table and is untouched.
 
 ---
 
@@ -305,6 +366,7 @@ Canonical authorization per entity, **verified against `pg_policies` on the live
 | `client_users` | ✖ | ✖ | ✓ | admin-only |
 | `campaigns` | ✖ | ✓ assigned | ✓ all | `campaigns_update_scoped` = `can_manage_client(client_id)` |
 | `leads` | ✖ | ✓ assigned | ✓ all | `leads_update_scoped` = `can_manage_client(client_id)` |
+| `lead_meetings` / `lead_offers` / `lead_tasks` / `lead_value_deliveries` | ✖ | ✓ assigned | ✓ all | `<table>_write_scoped` = set-based `can_manage_client` via parent lead (ADR-0013). Gateway write actions: Phase 5. |
 | `replies` | ✖ | ✖ | ✖ | ingestion only — no portal write policy |
 | `campaign_daily_stats` | ✖ | ✖ | ✖ | ingestion only |
 | `daily_stats` | ✖ | ✖ | ✖ | ingestion only |
@@ -313,6 +375,9 @@ Canonical authorization per entity, **verified against `pg_policies` on the live
 | `email_exclude_list` | ✖ | ✖ (read) | ✓ | `*_admin` = `is_admin_user()`; managers get `select_internal` only |
 | `condition_rules` | ✖ (no read) | ✖ (read, scoped) | ✓ | `condition_rules_admin_*` = `is_admin_user()` |
 | `client_table_column_overrides`, `client_custom_fields`(+values) | ✖ | ✖ (values only if in `editable_by`) | `master_admin` writes definitions | see [03 §2.8](./03-data-model.md#28-customization-tables--not-in-schemats) |
+| `sequencers` (catalog, ADR-0012) | read-only | read-only | read-only | `sequencers_select_authenticated` (`using true`); writes `sequencers_write_master` = master_admin |
+| `client_sequencers` (ADR-0012) | ✖ (invisible) | ✓ assigned | ✓ all | `client_sequencers_*_scoped` = `can_manage_client(client_id)` |
+| `sequencer_daily_stats` (ADR-0012) | ✖ | ✖ | ✖ | ingestion only — set-based select RLS |
 | `client_ooo_routing` | ✖ | ✓ assigned (not in UI) | ✓ | `can_manage_client(client_id)` |
 | `agency_crm_deals` | ✖ | ✓ own `salesperson_id` (not in UI) | ✓ | — |
 | Invite edge functions | ✖ | ✖ | ✓ | enforced inside the function |
@@ -373,6 +438,8 @@ Before any new SELECT action on a table with >1 k rows goes to production:
 | `campaign_daily_stats` | Set-based: `campaign_id IN (SELECT ...)` | `20260421` |
 | `daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260421` |
 | `clients` | Per-row: `can_access_client(id)` | — (48 rows — acceptable) |
+| `sequencer_daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260704` |
+| `sequencers`, `client_sequencers` | Per-row helper (tiny tables) | `20260704` |
 | `domains`, `invoices`, `condition_rules` | Per-row helper | Phase 7 audit pending |
 
 ### 5.4 `_serverMs` response field

@@ -4,16 +4,25 @@
   ClientCustomFieldType,
   ClientCustomFieldValueRecord,
   ClientRecord,
+  ClientSequencerRecord,
   ClientUserRecord,
   ColumnOverrideRecord,
   ConditionRuleRecord,
   DomainRecord,
   EmailExcludeRecord,
+  FinalOutcome,
   Identity,
   InvoiceRecord,
   LeadCustomFieldRecord,
   LeadCustomFieldValueRecord,
+  LeadMeetingRecord,
+  LeadOfferRecord,
   LeadRecord,
+  LeadTaskRecord,
+  LeadValueDeliveryRecord,
+  MeetingStatus,
+  OfferStatus,
+  TaskStatus,
   UserRecord,
 } from "../types/core.ts";
 import type {
@@ -34,6 +43,7 @@ import type {
   LeadsFilterOptions,
   LeadsListParams,
   LeadsListResponse,
+  LeadCrmListResponse,
   ManagerDashboardOverview,
   ShellData,
   TablePreferencesPayload,
@@ -122,6 +132,12 @@ export interface LoadLeadsListPayload {
   params: LeadsListParams;
 }
 
+/** CRM view read-model — same params/filters as loadLeadsList, plus joined child data + asOf. */
+export interface LoadLeadCrmListPayload {
+  action: "loadLeadCrmList";
+  params: LeadsListParams;
+}
+
 export interface LoadLeadDetailPayload {
   action: "loadLeadDetail";
   leadId: string;
@@ -180,6 +196,95 @@ export interface UpdateLeadPayload {
   patch: Partial<LeadRecord>;
 }
 
+/**
+ * Atomic terminal-conclusion write (ADR-0013, Phase 5). Sets `final_outcome` + `conclusion` +
+ * `concluded_at` together (the DB CHECK requires `final_outcome ⇒ concluded_at`) and syncs the legacy
+ * `won` boolean so the win KPIs stay correct (`won` is NOT trigger-managed — the meeting/offer
+ * recompute triggers never touch it). `finalOutcome: null` un-concludes the lead (clears all four).
+ */
+export interface ConcludeLeadPayload {
+  action: "concludeLead";
+  leadId: string;
+  finalOutcome: FinalOutcome | null;
+  conclusion: string | null;
+}
+
+/**
+ * Upsert the intro/summary meeting for a lead (ADR-0013, Phase 5.3). One intro + one summary per lead
+ * (partial unique index), so this keys on `(lead_id, meeting_type)` — no `id` needed. Only the fields a
+ * CS manager owns are writable (status/dates/call script); the AI-generated fields (transcription,
+ * insights, score) stay n8n-owned. A `scheduled`/`held` status fires the DB trigger that recomputes
+ * `leads.meeting_booked`/`meeting_held`.
+ */
+export interface LeadMeetingInput {
+  status?: MeetingStatus;
+  scheduled_at?: string | null;
+  held_at?: string | null;
+  call_script?: string | null;
+}
+export interface UpsertLeadMeetingPayload {
+  action: "upsertLeadMeeting";
+  leadId: string;
+  meetingType: "intro" | "summary";
+  patch: LeadMeetingInput;
+}
+
+/**
+ * Upsert the current offer for a lead (ADR-0013, Phase 5.3). Offers are not unique per lead, but the
+ * CRM view shows one "current offer" (latest non-cancelled), so this operates on THAT offer — update it
+ * if one exists, else insert a new one. A `sent`/`accepted` status fires the DB trigger that recomputes
+ * `leads.offer_sent`.
+ */
+export interface LeadOfferInput {
+  status?: OfferStatus;
+  contracted_send_date?: string | null;
+}
+export interface UpsertLeadOfferPayload {
+  action: "upsertLeadOffer";
+  leadId: string;
+  patch: LeadOfferInput;
+}
+
+/**
+ * Upsert one of the two value deliveries for a lead (ADR-0013, Phase 5.3). Keyed on
+ * `(lead_id, sequence_number)` (unique) — sequence 1 or 2, the two the CRM view shows. All fields are
+ * CS-manager-owned; no legacy-boolean trigger fires (value deliveries feed only the CRM columns).
+ */
+export interface LeadValueDeliveryInput {
+  planned_date?: string | null;
+  value_items?: string[];
+  sent_at?: string | null;
+}
+export interface UpsertLeadValueDeliveryPayload {
+  action: "upsertLeadValueDelivery";
+  leadId: string;
+  sequenceNumber: 1 | 2;
+  patch: LeadValueDeliveryInput;
+}
+
+/** Lazy per-lead task list (ADR-0013, Phase 5.3) — loaded when the CRM drawer opens, like the reply
+ *  thread. Tasks are a list (not projected into the CRM read-model beyond next-due + open count). */
+export interface LoadLeadTasksPayload {
+  action: "loadLeadTasks";
+  leadId: string;
+}
+export interface LeadTaskInput {
+  title?: string;
+  due_at?: string | null;
+  status?: TaskStatus;
+  notes?: string | null;
+}
+/**
+ * Create (no `id`) or update (`id` set) a single task. A completed/cancelled/skipped status drops the
+ * task out of the CRM's open-task count / next-due date (recomputed by the read-model on refresh).
+ */
+export interface UpsertLeadTaskPayload {
+  action: "upsertLeadTask";
+  leadId: string;
+  id?: string;
+  patch: LeadTaskInput;
+}
+
 export interface UpdateDomainPayload {
   action: "updateDomain";
   domainId: string;
@@ -192,14 +297,29 @@ export interface UpdateInvoicePayload {
   patch: Partial<InvoiceRecord>;
 }
 
+/**
+ * Per-sequencer credential patch (ADR-0012). Only present fields overwrite;
+ * `sequencer_key` is the sequencers catalog key ('smartlead' | 'emailbison' | 'aimfox' | …).
+ */
+export interface SequencerCredentialInput {
+  sequencer_key: string;
+  api_key?: string | null;
+  external_workspace_id?: string | null;
+  settings?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
 export interface CreateClientPayload {
   action: "createClient";
   input: Omit<ClientRecord, "id" | "created_at" | "updated_at">;
+  /** Optional client_sequencers rows created alongside the client (ADR-0012). */
+  sequencerCredentials?: SequencerCredentialInput[];
 }
 
 export interface CreateCampaignPayload {
   action: "createCampaign";
-  input: Omit<CampaignRecord, "id" | "created_at" | "updated_at">;
+  /** sequencer_id may be omitted — the DB default (EmailBison, ADR-0012) applies. */
+  input: Omit<CampaignRecord, "id" | "created_at" | "updated_at" | "sequencer_id"> & { sequencer_id?: string };
 }
 
 export interface CreateLeadPayload {
@@ -333,6 +453,14 @@ export interface UpsertClientCustomFieldValuePayload {
   value: string | null;
 }
 
+export interface UpsertClientSequencerPayload {
+  action: "upsertClientSequencer";
+  clientId: string;
+  /** Sequencers catalog key; resolved to sequencer_id server-side. */
+  sequencerKey: string;
+  patch: Omit<SequencerCredentialInput, "sequencer_key">;
+}
+
 export interface LoadLeadCustomFieldsPayload {
   action: "loadLeadCustomFields";
   /** Restrict to a single client; omit to load all accessible clients' definitions. */
@@ -385,6 +513,7 @@ export type OrmGatewayRequest =
   | LoadClientsStatsPayload
   | LoadClientsMetricsSummaryPayload
   | LoadLeadsListPayload
+  | LoadLeadCrmListPayload
   | LoadLeadDetailPayload
   | LoadLeadsFilterOptionsPayload
   | LoadAnalyticsOverviewPayload
@@ -397,6 +526,12 @@ export type OrmGatewayRequest =
   | UpdateClientPayload
   | UpdateCampaignPayload
   | UpdateLeadPayload
+  | ConcludeLeadPayload
+  | UpsertLeadMeetingPayload
+  | UpsertLeadOfferPayload
+  | UpsertLeadValueDeliveryPayload
+  | LoadLeadTasksPayload
+  | UpsertLeadTaskPayload
   | UpdateDomainPayload
   | UpdateInvoicePayload
   | CreateClientPayload
@@ -421,6 +556,7 @@ export type OrmGatewayRequest =
   | UpdateClientCustomFieldPayload
   | DeleteClientCustomFieldPayload
   | UpsertClientCustomFieldValuePayload
+  | UpsertClientSequencerPayload
   | LoadLeadCustomFieldsPayload
   | CreateLeadCustomFieldPayload
   | UpdateLeadCustomFieldPayload
@@ -448,6 +584,7 @@ export interface OrmGatewayResponseMap {
   loadClientsStats: ClientsStatsPayload;
   loadClientsMetricsSummary: ClientsMetricsSummaryPayload;
   loadLeadsList: LeadsListResponse;
+  loadLeadCrmList: LeadCrmListResponse;
   loadLeadDetail: LeadDetailResult;
   loadLeadsFilterOptions: LeadsFilterOptions;
   loadAnalyticsOverview: AnalyticsOverviewPayload;
@@ -461,6 +598,12 @@ export interface OrmGatewayResponseMap {
   updateClient: ClientRecord;
   updateCampaign: CampaignRecord;
   updateLead: LeadRecord;
+  concludeLead: LeadRecord;
+  upsertLeadMeeting: LeadMeetingRecord;
+  upsertLeadOffer: LeadOfferRecord;
+  upsertLeadValueDelivery: LeadValueDeliveryRecord;
+  loadLeadTasks: LeadTaskRecord[];
+  upsertLeadTask: LeadTaskRecord;
   updateDomain: DomainRecord;
   updateInvoice: InvoiceRecord;
   createClient: ClientRecord;
@@ -485,6 +628,7 @@ export interface OrmGatewayResponseMap {
   updateClientCustomField: ClientCustomFieldRecord;
   deleteClientCustomField: { ok: true };
   upsertClientCustomFieldValue: ClientCustomFieldValueRecord;
+  upsertClientSequencer: ClientSequencerRecord;
   loadLeadCustomFields: LeadCustomFieldRecord[];
   createLeadCustomField: LeadCustomFieldRecord;
   updateLeadCustomField: LeadCustomFieldRecord;
@@ -609,6 +753,37 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     };
   }
 
+  if (action === "loadLeadCrmList") {
+    if (!isObject(payload.params)) {
+      return { ok: false, error: "loadLeadCrmList requires a params object." };
+    }
+    const p = payload.params as Record<string, unknown>;
+    if (!isString(p.sortField) || !isString(p.sortDir)) {
+      return { ok: false, error: "loadLeadCrmList.params requires sortField and sortDir strings." };
+    }
+    const page = typeof p.page === "number" ? p.page : 1;
+    const pageSize = typeof p.pageSize === "number" ? Math.min(Math.max(1, p.pageSize), 100) : 50;
+    return {
+      ok: true,
+      value: {
+        action,
+        params: {
+          clientId: isString(p.clientId) ? p.clientId : undefined,
+          campaignId: isString(p.campaignId) ? p.campaignId : undefined,
+          stage: isString(p.stage) ? p.stage : undefined,
+          replyScope: (p.replyScope === "active" || p.replyScope === "ooo") ? p.replyScope : "all",
+          dateFrom: isString(p.dateFrom) ? p.dateFrom : undefined,
+          dateTo: isString(p.dateTo) ? p.dateTo : undefined,
+          search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,
+          sortField: String(p.sortField),
+          sortDir: p.sortDir === "asc" ? "asc" : "desc",
+          page: Math.max(1, Math.trunc(page)),
+          pageSize,
+        } as LeadsListParams,
+      },
+    };
+  }
+
   if (action === "loadLeadDetail") {
     if (!hasStringField(payload, "leadId")) {
       return { ok: false, error: "loadLeadDetail requires leadId." };
@@ -695,6 +870,87 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     return { ok: true, value: { action, leadId: String(payload.leadId), patch: payload.patch as Partial<LeadRecord> } };
   }
 
+  if (action === "concludeLead") {
+    if (!hasStringField(payload, "leadId")) {
+      return { ok: false, error: "concludeLead requires leadId." };
+    }
+    const outcome = payload.finalOutcome;
+    if (outcome !== null && outcome !== "won" && outcome !== "lost" && outcome !== "lost_premql") {
+      return { ok: false, error: "concludeLead finalOutcome must be won | lost | lost_premql | null." };
+    }
+    const conclusion = payload.conclusion;
+    if (conclusion !== null && conclusion !== undefined && !isString(conclusion)) {
+      return { ok: false, error: "concludeLead conclusion must be a string or null." };
+    }
+    // Invariant (spec item 4): a terminal outcome requires a non-empty conclusion. Un-concluding
+    // (finalOutcome === null) may pass any conclusion (including null) since it clears the field.
+    if (outcome !== null && !(isString(conclusion) && conclusion.trim() !== "")) {
+      return { ok: false, error: "concludeLead requires a non-empty conclusion when finalOutcome is set." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        leadId: String(payload.leadId),
+        finalOutcome: outcome as FinalOutcome | null,
+        conclusion: (conclusion ?? null) as string | null,
+      },
+    };
+  }
+
+  if (action === "upsertLeadMeeting") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadMeeting requires leadId and patch object." };
+    }
+    if (payload.meetingType !== "intro" && payload.meetingType !== "summary") {
+      return { ok: false, error: "upsertLeadMeeting meetingType must be intro | summary." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        leadId: String(payload.leadId),
+        meetingType: payload.meetingType,
+        patch: payload.patch as LeadMeetingInput,
+      },
+    };
+  }
+
+  if (action === "upsertLeadOffer") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadOffer requires leadId and patch object." };
+    }
+    return { ok: true, value: { action, leadId: String(payload.leadId), patch: payload.patch as LeadOfferInput } };
+  }
+
+  if (action === "upsertLeadValueDelivery") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadValueDelivery requires leadId and patch object." };
+    }
+    if (payload.sequenceNumber !== 1 && payload.sequenceNumber !== 2) {
+      return { ok: false, error: "upsertLeadValueDelivery sequenceNumber must be 1 or 2." };
+    }
+    return {
+      ok: true,
+      value: { action, leadId: String(payload.leadId), sequenceNumber: payload.sequenceNumber, patch: payload.patch as LeadValueDeliveryInput },
+    };
+  }
+
+  if (action === "loadLeadTasks") {
+    if (!hasStringField(payload, "leadId")) {
+      return { ok: false, error: "loadLeadTasks requires leadId." };
+    }
+    return { ok: true, value: { action, leadId: String(payload.leadId) } };
+  }
+
+  if (action === "upsertLeadTask") {
+    if (!hasStringField(payload, "leadId") || !hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertLeadTask requires leadId and patch object." };
+    }
+    const id = isString(payload.id) && payload.id.trim().length > 0 ? String(payload.id) : undefined;
+    return { ok: true, value: { action, leadId: String(payload.leadId), id, patch: payload.patch as LeadTaskInput } };
+  }
+
   if (action === "updateDomain") {
     if (!hasStringField(payload, "domainId") || !hasObjectField(payload, "patch")) {
       return { ok: false, error: "updateDomain requires domainId and patch object." };
@@ -713,7 +969,21 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
     if (!hasObjectField(payload, "input")) {
       return { ok: false, error: "createClient requires input object." };
     }
-    return { ok: true, value: { action, input: payload.input as CreateClientPayload["input"] } };
+    if (payload.sequencerCredentials !== undefined && !Array.isArray(payload.sequencerCredentials)) {
+      return { ok: false, error: "createClient.sequencerCredentials must be an array when provided." };
+    }
+    const credentialObjects = (payload.sequencerCredentials as unknown[] | undefined)?.filter(isObject);
+    if (credentialObjects?.some((cred) => !hasStringField(cred, "sequencer_key"))) {
+      return { ok: false, error: "createClient.sequencerCredentials entries require sequencer_key." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        input: payload.input as CreateClientPayload["input"],
+        sequencerCredentials: credentialObjects as SequencerCredentialInput[] | undefined,
+      },
+    };
   }
 
   if (action === "createCampaign") {
@@ -913,6 +1183,24 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         clientId: String(payload.clientId),
         fieldId: String(payload.fieldId),
         value: value as string | null,
+      },
+    };
+  }
+
+  if (action === "upsertClientSequencer") {
+    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "sequencerKey")) {
+      return { ok: false, error: "upsertClientSequencer requires clientId and sequencerKey." };
+    }
+    if (!hasObjectField(payload, "patch")) {
+      return { ok: false, error: "upsertClientSequencer requires a patch object." };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        clientId: String(payload.clientId),
+        sequencerKey: String(payload.sequencerKey),
+        patch: payload.patch as UpsertClientSequencerPayload["patch"],
       },
     };
   }

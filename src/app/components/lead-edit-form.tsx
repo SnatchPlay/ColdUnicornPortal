@@ -1,15 +1,16 @@
-import { Checkbox } from "./ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import {
+  CONTACT_METHOD_UNSET,
   EDITABLE_QUALIFICATIONS,
   LEAD_GENDER_UNSET,
   LEAD_QUALIFICATION_UNSET,
   type LeadDraft,
 } from "../lib/lead-draft";
-import type { LeadGender, LeadQualification } from "../types/core";
+import type { ContactMethod, LeadGender, LeadQualification } from "../types/core";
 
 /**
- * Editable lead form (Identity / Pipeline / OOO sections). Shared by the Leads page drawer and the
+ * Editable lead form (Identity / Pipeline sections; OOO section is commented out — we don't surface OOO
+ * contacts). Shared by the Leads page drawer and the
  * Manager dashboard lead drawer. Pure presentational component driven by a `LeadDraft` + updater.
  */
 
@@ -26,10 +27,45 @@ export function EditInput({ value, onChange, disabled, type = "text", placeholde
   );
 }
 
-export function LeadEditForm({ draft, updateDraft, readOnly }: {
+/** Shared enum `<Select>` for the lead editors — `options` are the values (incl. any leading "unset"
+ *  sentinel the caller manages), `labels` maps each to its display text. */
+export function EditSelect({ value, options, labels, disabled, onChange, placeholder }: {
+  value: string; options: readonly string[]; labels: Record<string, string>;
+  disabled?: boolean; onChange: (next: string) => void; placeholder?: string;
+}) {
+  return (
+    <Select value={value} disabled={disabled} onValueChange={onChange}>
+      <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder={placeholder} /></SelectTrigger>
+      <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+        {options.map((o) => (
+          <SelectItem key={o} value={o} className="text-white focus:bg-[#1a1a1a] focus:text-white">{labels[o]}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Shared dirty-gated Save pill used by all the CRM drawer editors. */
+export function SaveButton({ onClick, disabled, saving, label = "Save" }: {
+  onClick: () => void; disabled?: boolean; saving?: boolean; label?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {saving ? "Saving…" : label}
+    </button>
+  );
+}
+
+export function LeadEditForm({ draft, updateDraft, readOnly, showCrmFields = false }: {
   draft: LeadDraft;
   updateDraft: (updater: (current: LeadDraft) => LeadDraft) => void;
   readOnly: boolean;
+  /** Show the CRM operational fields (contact/method/negotiation/LinkedIn dates) — CRM view only. */
+  showCrmFields?: boolean;
 }) {
   const set = <K extends keyof LeadDraft>(key: K, value: LeadDraft[K]) =>
     updateDraft((current) => ({ ...current, [key]: value }));
@@ -87,24 +123,16 @@ export function LeadEditForm({ draft, updateDraft, readOnly }: {
           <EditLabel>ColdUnicorn note (internal)</EditLabel>
           <textarea value={draft.coldunicornNote} onChange={(event) => set("coldunicornNote", event.target.value)} disabled={readOnly} rows={2} placeholder="Internal — not visible to the client" className="w-full rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-white outline-none placeholder:text-muted-foreground disabled:opacity-60" />
         </label>
-        <div className="grid gap-3 md:grid-cols-4">
-          {[
-            { label: "Meeting booked", key: "meetingBooked" as const, value: draft.meetingBooked },
-            { label: "Meeting held", key: "meetingHeld" as const, value: draft.meetingHeld },
-            { label: "Offer sent", key: "offerSent" as const, value: draft.offerSent },
-            { label: "Won", key: "won" as const, value: draft.won },
-          ].map((item) => (
-            <label key={item.label} className="rounded-2xl border border-white/10 bg-black/10 p-4">
-              <EditLabel>{item.label}</EditLabel>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-sm">{item.value ? "Yes" : "No"}</span>
-                <Checkbox checked={item.value} disabled={readOnly} onCheckedChange={(checked) => set(item.key, checked === true)} />
-              </div>
-            </label>
-          ))}
-        </div>
+        {/* Pipeline boolean checkboxes removed — `meeting_booked` / `meeting_held` / `offer_sent` / `won`
+            are all INTERNAL now: the recompute triggers derive the meeting/offer flags from the CRM
+            meeting/offer editors + n8n, and `won` is set by the conclusion editor (concludeLead) — the
+            dashboards read the columns, but no manual toggle can drift from the child-table / conclusion
+            source of truth. To restore a manual checkbox, re-add a `<Checkbox>` grid here + its import. */}
       </section>
 
+      {/* OOO section hidden — we don't surface OOO contacts in the product, so the fields are noise in
+          the drawer. Kept commented (not deleted) so it's a one-line restore; the `expectedReturnDate`
+          / `addedToOooCampaign` draft fields still round-trip through toLeadDraft/buildLeadPatch.
       <section className="space-y-3">
         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">OOO</p>
         <div className="grid gap-3 md:grid-cols-2">
@@ -118,6 +146,32 @@ export function LeadEditForm({ draft, updateDraft, readOnly }: {
           </label>
         </div>
       </section>
+      */}
+
+      {/* CRM operational state (ADR-0013, Phase 5.2) — dates driving the CRM health columns. Shown only
+          in the CRM view; edited via the shared draft/Save flow (not a separate action). */}
+      {showCrmFields ? (
+        <section className="space-y-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">CRM operational</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-2"><EditLabel>Contact made</EditLabel><EditInput value={draft.contactMadeAt} onChange={(v) => set("contactMadeAt", v)} disabled={readOnly} type="date" /></label>
+            <label className="space-y-2">
+              <EditLabel>Contact method</EditLabel>
+              <Select value={draft.contactMethod === "" ? CONTACT_METHOD_UNSET : draft.contactMethod} disabled={readOnly}
+                onValueChange={(value) => set("contactMethod", value === CONTACT_METHOD_UNSET ? "" : (value as ContactMethod))}>
+                <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white disabled:opacity-60"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent className="rounded-xl border-[#242424] bg-[#050505] text-white">
+                  <SelectItem value={CONTACT_METHOD_UNSET} className="text-white focus:bg-[#1a1a1a] focus:text-white">—</SelectItem>
+                  <SelectItem value="phone" className="text-white focus:bg-[#1a1a1a] focus:text-white">phone</SelectItem>
+                  <SelectItem value="email" className="text-white focus:bg-[#1a1a1a] focus:text-white">email</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-2"><EditLabel>LinkedIn invite sent</EditLabel><EditInput value={draft.linkedinInvitationSentAt} onChange={(v) => set("linkedinInvitationSentAt", v)} disabled={readOnly} type="date" /></label>
+            <label className="space-y-2"><EditLabel>Negotiation start</EditLabel><EditInput value={draft.negotiationStartedAt} onChange={(v) => set("negotiationStartedAt", v)} disabled={readOnly} type="date" /></label>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # PdcaFigmaTest
 
-Production-oriented frontend foundation for the ColdUnicorn PDCA portal.
+Production-oriented frontend foundation for the ColdUnicorn PDCrmA portal.
 
 ## What This Repo Now Contains
 

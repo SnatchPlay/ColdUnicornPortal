@@ -139,7 +139,7 @@ Sections (top → bottom):
 1. **Header** — name, status pill, manager, contract amount + due.
 2. **Operational issues** — timeline of warning/danger/critical condition results (deduped by `ruleKey`).
 3. **Setup gaps** — condition results from the `setup` surface that aren't `good`.
-4. **Credentials & IDs** (read-only, masked + copy) — `external_workspace_id`, `external_api_key`, `linkedin_api_key`, CRM status from `crm_config`.
+4. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0008): EmailBison workspace ID + API key, Aimfox API key; CRM status from `crm_config`.
 5. **Client configuration** — editable form.
 6. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
 7. **User access management** — invite + map client portal users.
@@ -148,9 +148,9 @@ Editable fields — **Credentials & IDs** section:
 
 | Field | Control | Source column | Who |
 |-------|---------|---------------|-----|
-| Workspace ID | number input | `clients.external_workspace_id` | manager + admin |
-| Workspace API key | `SecretInput` (show/hide) | `clients.external_api_key` | manager + admin |
-| LinkedIn API key | `SecretInput` (show/hide) | `clients.linkedin_api_key` | manager + admin |
+| EmailBison workspace ID | text input | `client_sequencers.external_workspace_id` (emailbison row) | manager + admin |
+| EmailBison API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (emailbison row) | manager + admin |
+| Aimfox API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (aimfox row) | manager + admin |
 | CRM status | read-only badge | `clients.crm_config` | — |
 
 Editable fields — **Contract & KPIs** section (admin only, hidden for manager):
@@ -459,7 +459,7 @@ The manager drawer on Clients page now covers all `clients` columns except `crm_
 - **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.
 
-`linkedin_api_key`, `external_workspace_id`, `external_api_key`, `prospects_signed`, `prospects_added`, `notes`, `lost_reason` are now editable in the drawer (BL-3 shipped). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
+`prospects_signed`, `prospects_added`, `notes`, `lost_reason` are editable in the drawer (BL-3 shipped). Sequencer credentials (EmailBison workspace/key, Aimfox LinkedIn key) save via `upsertClientSequencer` to `client_sequencers` (ADR-0012), not to `clients` columns; saves are diffed separately from the client patch (`buildSequencerPatches`). `bi_setup_done` still exists on `clients` but is no longer surfaced or editable — the Bi column and its drawer checkbox were removed.
 
 ---
 

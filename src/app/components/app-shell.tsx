@@ -266,7 +266,7 @@ const SidebarPanel = memo(function SidebarPanel({
       <div className="flex items-start justify-between border-b border-[#1f1f1f] px-6 py-6">
         <Link to={homePath} onClick={onNavigate} className="min-w-0">
           <img src={coldUnicornLogo} alt="ColdUnicorn" className="h-10 w-auto object-contain" />
-          <p className="mt-3 text-sm leading-5 text-neutral-500">PDCA portal</p>
+          <p className="mt-3 text-sm leading-5 text-neutral-500">PDCrmA portal</p>
         </Link>
         <button
           onClick={onToggleCollapse}

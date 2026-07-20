@@ -93,16 +93,13 @@ function makeClientsOverview({
         kpi_meetings: 8,
         contracted_amount: 1000,
         contract_due_date: "2026-12-01",
-        external_workspace_id: 444,
         status: "Active",
-        external_api_key: null,
         min_daily_sent: minDailySent,
         inboxes_count: 8,
         crm_config: null,
         sms_phone_numbers: [],
         notification_emails: [],
         auto_ooo_enabled: false,
-        linkedin_api_key: null,
         prospects_signed: 100,
         prospects_added: 95,
         setup_info: null,
@@ -119,6 +116,8 @@ function makeClientsOverview({
     columnOverrides: [],
     clientCustomFields: [],
     clientCustomFieldValues: [],
+    sequencers: [],
+    clientSequencers: [],
   };
 }
 
