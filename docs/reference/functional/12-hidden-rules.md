@@ -283,3 +283,20 @@ The Clients page uses a single dense flex-row table with two-level header bands.
 
 End of constants reference. Next: [13 В· Out of scope](./13-out-of-scope.md).
 
+---
+
+## 9. OOO model constants and non-obvious rules (ADR-0015)
+
+| Rule | Value / behaviour | Where |
+|---|---|---|
+| **OOO fallback schedule** | When a reply carries no parseable return date, `scheduled_for = today + 2 days` and `expected_return_date` stays **NULL**. A fallback is never written as if it were a determined date (spec §3). | `record_ooo_followup` |
+| **Knowledge is only added** | A repeat OOO reply with NULL dates does **not** erase dates an earlier reply determined, and does not pull the schedule forward. Only supplied values move anything. | `record_ooo_followup` step 2 |
+| **"Active" excludes `submitted`** | Active = `pending \| processing \| failed`. `submitted` closes the episode, so a later OOO reply may open the next one; the redelivery guard is the separate `source_reply_id` unique index. | `uq_ooo_followups_active` |
+| **`submitted` ≠ enrolled** | It means the sequencer API accepted the request; a batch call can silently ignore a contact already in the campaign. Read it as "sent to sequencer", not "added to campaign". `confirmed` (verified membership) is optional and may never be used. | ADR-0015 §4 |
+| **Attempt fields are last-attempt-only** | `attempt_count` / `last_attempt_at` / `last_error` do **not** form an audit trail. `attempt_count` is incremented by `claim`, not by `mark_ooo_failed`, and `retry` does not reset it. | `20260722e` |
+| **Reopen keeps cancellation history** | `reopen_ooo_followup` leaves `cancelled_at` / `cancellation_reason` in place. Anything reading those columns must gate on `status = 'cancelled'`, or a reopened episode reads as both pending and cancelled. | `20260722e` |
+| **Routing snapshot freezes** | `routing_key` / `target_campaign_id` / `routing_source` are per-episode, so changing a client's routing rule does NOT rewrite finished episodes. `recover_skipped_ooo_followups` only re-resolves episodes still parked as `skipped`. | `20260722e` |
+| **Auto-recovery is limited** | `recover_skipped_ooo_followups` revives only `routing_missing` and `automation_disabled` (both mean "not configured", which the operator just fixed), only the newest skipped episode per contact, and only when no other episode is active. `contact_ineligible` needs a manual reopen. | `20260722e` |
+| **No portal view of episodes** | There is no follow-up list or editor by product decision ([OoS-16](13-out-of-scope.md)); n8n drives the lifecycle. `ooo_followups` still has SELECT+UPDATE policies because `recover_skipped_ooo_followups` runs as the caller from the routing editor. | `20260722d`, OoS-16 |
+| **Backfill status mapping** | `added_to_ooo_campaign` → `submitted`; future `expected_return_date` → `pending` (or `skipped` if unrouted); past or unknown date → `cancelled / superseded`. Historical episodes get **no** `target_campaign_id` — the real campaign is unknowable and guessing it would corrupt the snapshot. | `20260722f` |
+| **`formatDate` shifts bare dates** | Latent, unrelated to OOO but worth knowing before any `date` column is rendered: `formatDate` runs `new Date("2026-07-27")`, which parses as UTC midnight, so viewers west of UTC see the previous day. Affects existing `date` columns (e.g. `domains.purchase_date`). | `lib/format.ts` |

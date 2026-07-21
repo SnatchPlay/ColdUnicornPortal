@@ -5,6 +5,7 @@ import { measureAfterRaf2 } from "../../lib/perf-mark";
 import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { SatisfactionHearts, satisfactionLabel } from "../../components/satisfaction-hearts";
+import { OooRoutingEditor } from "./ooo-routing-editor";
 import { Checkbox } from "../../components/ui/checkbox";
 import {
   Select,
@@ -832,6 +833,13 @@ export function ClientDrawer({
                   />
                 </div>
               </label>
+
+              {/* Routing rows live in `client_ooo_routing`, so this section saves independently of
+                  the client draft above (BL-2 / ADR-0015). It is fed the PERSISTED
+                  `client.auto_ooo_enabled`, not `draft.autoOooEnabled`: this section writes
+                  immediately while the toggle above does not, so showing the draft value would let
+                  it claim rules are inactive (or active) before the client row is saved. */}
+              <OooRoutingEditor clientId={client.id} autoOooEnabled={client.auto_ooo_enabled} />
 
               {LOST_REASON_STATUSES.includes(draft.status) && (
                 <label className="space-y-2 md:col-span-2">

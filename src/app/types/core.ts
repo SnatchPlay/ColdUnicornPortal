@@ -29,13 +29,18 @@ export type LeadQualification =
   | "rejected"
   | "OOO"
   | "NRR";
+/** Mirrors the `reply_classification` Postgres enum. `negative`/`neutral` were added by 20260722b
+ *  so outreach analytics can count them separately — keep this union in step with the DB enum and
+ *  with `replyClassification` in supabase/drizzle/schema.ts. */
 export type ReplyClassification =
   | "OOO"
   | "Interested"
   | "NRR"
   | "Left_Company"
   | "Spam_Inbound"
-  | "other";
+  | "other"
+  | "negative"
+  | "neutral";
 export type DomainStatus = "active" | "warmup" | "blocked" | "retired";
 /** Manual report row highlight colour (Batch 4). `null` = no highlight. */
 export type LeadHighlight = "green" | "yellow" | "red";
@@ -243,6 +248,28 @@ export interface LeadRecord {
   final_outcome: FinalOutcome | null;
   /** Persisted contact disposition (n8n-owned), independent of `qualification`; `null` = active. */
   contact_disposition: ContactDisposition | null;
+  // NOTE: the ADR-0015 provenance columns (`source_sequencer_contact_id`, `origin_reply_id`) exist
+  // in the database and in the drizzle schema but are deliberately NOT projected here — no portal
+  // surface reads them, and the OOO view resolves the linked lead from the contact side instead.
+}
+
+// --- OOO model (ADR-0015, migrations 20260722*) ------------------------------------------------
+// OOO/NRR are OUTREACH states of an external contact, not CRM lead states. A CRM lead exists only
+// after a positive reply, so none of these types belong on `LeadRecord`.
+
+/** Explicit routing category. `general` is a value, never an implicit NULL (spec §11). */
+export const ROUTING_KEYS = ["male", "female", "general"] as const;
+export type RoutingKey = (typeof ROUTING_KEYS)[number];
+
+/** Per-client OOO routing configuration (spec §11). At most one active row per (client, key). */
+export interface ClientOooRoutingRecord {
+  id: string;
+  client_id: string;
+  routing_key: RoutingKey;
+  campaign_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Meeting attached to a lead (spec §8.2). Intro/summary are one-per-lead; general repeats. */

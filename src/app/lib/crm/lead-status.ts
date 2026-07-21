@@ -61,6 +61,17 @@ export function mapLegacyQualificationToDisposition(qualification?: string | nul
 }
 
 /**
+ * ⚠️ MIGRATION-WINDOW LEGACY (ADR-0015). Under the new model an OOO/NRR contact is NOT a CRM lead —
+ * the state lives in `ooo_followups` against a `sequencer_contacts` row, and the operational view
+ * owns it. This function therefore only describes rows n8n wrote under the OLD contract.
+ *
+ * It is kept deliberately, not removed: spec §18 allows these fields to "залишити лише тимчасово на
+ * період міграції", and deleting the read side at portal-deploy time would blind managers to OOO
+ * leads during the window between this deploy and the n8n cutover — leads that still exist and are
+ * still being written. `migrations/deferred/20260722z` drops the underlying columns; delete this
+ * function, `mapLegacyQualificationToDisposition`, the `ContactDisposition` type and the CRM
+ * "Disposition" column in the same change that applies it.
+ *
  * The effective contact disposition (spec item 10). Prefers the PERSISTED `contact_disposition` column
  * (n8n-owned, independent of `qualification`, so a disposition change never overwrites the funnel
  * stage). Falls back to mapping a LEGACY `qualification` of OOO/NRR to a display disposition — that

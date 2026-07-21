@@ -128,12 +128,25 @@ Planned (BL-1): expose the destination lists to the client themselves on `/clien
 
 ## 5. OOO routing
 
-When a reply lands and is classified as `OOO`, n8n optionally enrols the lead into a designated follow-up campaign in Smartlead/Bison. The portal owns the **rules**:
+> **Superseded for the OOO write-path by [ADR-0015](../../adr/0015-sequencer-contacts-and-ooo-followups.md).**
+> OOO is no longer a state on `leads`. An out-of-office reply now creates an `ooo_followups` **episode**
+> for a `sequencer_contacts` row; a CRM lead is created only by a positive reply. n8n writes through the
+> `SECURITY DEFINER` RPCs in `20260722e_ooo_rpcs.sql`, never by mutating `leads`. See §6a below.
 
-- `clients.auto_ooo_enabled` — global on/off per client. Today this is the only field exposed in the manager drawer.
-- `client_ooo_routing` rows — fine-grained mapping `(client_id, gender?, campaign_id, is_active)`. Each row tells n8n "for this client, leads of this gender go to this follow-up campaign". `gender = NULL` means "applies to all".
+The portal owns the **routing rules** that the RPCs consume:
 
-UI to manage `client_ooo_routing` rows is on the backlog (BL-2). Until it ships, rows are inserted by SQL or by n8n itself when bootstrapping a client.
+- `clients.auto_ooo_enabled` — global on/off per client. When `false`, `record_ooo_followup` records the
+  episode as `skipped / automation_disabled` (visible, not dropped).
+- `client_ooo_routing` rows — mapping `(client_id, routing_key, campaign_id, is_active)`. `routing_key` is
+  an **explicit** `male | female | general` (ADR-0015 replaced the nullable `gender`; `gender` is dropped by
+  the deferred `20260722z`). **`NULL` is never an implicit "general".** Resolution order is specific key →
+  `general` → NULL, and NULL surfaces as `skipped / routing_missing`. A partial unique index allows at most
+  one **active** row per `(client, routing_key)`; superseded rows are deactivated, never deleted.
+
+The routing UI ships in the client drawer (BL-2, closed by ADR-0015). Saving a rule also runs
+`recover_skipped_ooo_followups`, which pulls episodes parked as `routing_missing` / `automation_disabled`
+back to `pending`. There is **no** portal list or editor for the episodes themselves
+([OoS-16](13-out-of-scope.md)) — n8n owns the lifecycle end to end.
 
 The follow-up campaigns themselves have `campaigns.type = 'ooo_followup'` and are invisible to clients (ADR-0003). Managers and admins see them in the campaigns list.
 
@@ -141,29 +154,41 @@ The follow-up campaigns themselves have `campaigns.type = 'ooo_followup'` and ar
 
 ## 6. Reply classification
 
-Every reply that arrives is classified by n8n using LLM + heuristic rules. The classification value lands in `replies.classification` (one of `OOO | Interested | NRR | Left_Company | Spam_Inbound | other`).
+Every reply that arrives is classified by n8n using LLM + heuristic rules. The classification value lands in `replies.classification` (one of `OOO | Interested | NRR | Left_Company | Spam_Inbound | other | negative | neutral`). `negative` and `neutral` were added by `20260722b` so outreach analytics can count them separately (§15); the domain-name mapping the spec uses (`positive` = `Interested`, `out_of_office` = `OOO`, `not_right_role` = `NRR`, `other_automated` = `Spam_Inbound`/`Left_Company`/`other`) lives here, at the boundary — the stored labels are the live contract and are on every historical row, so they are **not** renamed.
 
 The portal **does not classify** and **does not provide a manual triage UI** ([decision in BUSINESS_LOGIC §10](../../BUSINESS_LOGIC.md#10-out-of-scope-legacy)). If unclassified replies appear in raw data, that indicates ingestion/classification lag in n8n rather than a portal action item.
 
-### 6a. Contact disposition write-path (ADR-0013, CRM split status model)
+### 6a. OOO / NRR write-path (ADR-0015 — the current contract)
 
-The CRM view's disposition dimension (OOO / NRR) is stored in its **own** column, `leads.contact_disposition`
-(`out_of_office | not_right_role | NULL`), independent of `leads.qualification`. This is a deliberate split
-(spec item 10): a disposition change must **not** overwrite the funnel stage.
+An OOO/NRR reply describes an **outreach contact**, not a CRM lead, so nothing about it is written to `leads`
+any more. n8n calls, idempotently and in order:
 
-**Required n8n contract:**
-
-| Reply classification | n8n MUST write | n8n MUST NOT do |
+| Step | RPC | Effect |
 |---|---|---|
-| `OOO` | `leads.contact_disposition = 'out_of_office'` | overwrite `leads.qualification` |
-| `NRR` | `leads.contact_disposition = 'not_right_role'` | set `final_outcome = 'lost'` (a lost outcome is an explicit human decision) |
-| active again | `leads.contact_disposition = NULL` | — |
+| 1 | `upsert_sequencer_contact(client_sequencer_id, external_contact_id, …)` | find/create the scoped contact identity |
+| 2 | `upsert_reply(external_id, sequencer_contact_id, …, classification)` | store the reply (idempotent on `external_id`; `lead_id` NULL — a reply needs no lead) |
+| 3 (OOO only) | `record_ooo_followup(sequencer_contact_id, source_reply_id, expected_return_date, scheduled_for, date_source)` | create/refresh the ONE active episode; resolves routing; missing config → visible `skipped` |
+| on positive reply | `promote_contact_to_lead(sequencer_contact_id, origin_reply_id, campaign_id, lead)` | create the CRM lead (one per contact), link the reply, cancel the active episode |
+| on OOO removed / correction | `cancel_active_ooo_followup(sequencer_contact_id, reason)` | cancel — never delete; the history stays |
 
-- **Stage independence:** `crm_stage` derives from `qualification` + offer/meeting facts only. With this contract, `MQL + OOO` stays `MQL` and `SQL + OOO` stays `SQL`.
-- **Legacy fallback (display-only):** for OLD rows where `qualification` is already `'OOO'`/`'NRR'`, the read-model maps that legacy value to a display disposition (`deriveContactDisposition`). This is a **fallback for display**, not a data fix — the prior qualification of a legacy OOO/NRR row **cannot be reconstructed** without historical data, so there is **no backfill** into preMQL/MQL/lost.
-- **CHECK:** `leads_contact_disposition_check` restricts the column to `out_of_office | not_right_role | NULL`.
+Key contract points n8n must respect:
 
-Until n8n is updated to write the column, existing OOO/NRR rows still render correctly via the legacy fallback; new OOO/NRR events keep overwriting `qualification` (the pre-existing behaviour) until the cutover lands.
+- **`expected_return_date` vs `scheduled_for` are different fields.** `expected_return_date` is the date
+  actually parsed from the reply and MUST be `NULL` when none was parseable — never a fallback date.
+  `scheduled_for` is when to re-enrol and may use the fallback (today + 2). `date_source` records which.
+- **A dateless refresh never erases a known date.** Passing `NULL` for `expected_return_date`/`scheduled_for`
+  on a repeat OOO reply leaves the stored values alone (an earlier reply may have determined them).
+- **NRR does NOT create a lead** and does NOT set `final_outcome = 'lost'` — a lost outcome is a human
+  decision on a lead that already exists.
+- **`promote_contact_to_lead` takes a strict whitelist.** `client_id`, `sequencer_id`, `external_id`,
+  `qualification`, `won`, timestamps etc. are derived inside the function; a repeat call returns the existing
+  lead with `created: false` rather than raising.
+
+**Legacy fallback (display-only, pre-cutover).** Until n8n is on this contract, old rows where
+`leads.qualification` is `'OOO'`/`'NRR'` still render via `deriveContactDisposition` (a display fallback, no
+backfill). The disposition columns and the `OOO`/`NRR` qualification values are removed by the **deferred**
+`supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql`, whose precondition is exactly that n8n
+has stopped writing them — see that file's header before applying.
 
 ---
 
