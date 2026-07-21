@@ -52,5 +52,10 @@ test-results/
 Thumbs.db
 
 
+# The `skills` CLI also emits a "universal" copy of every skill under agent/ for other agent
+# tools (Amp, Cline, Codex-universal, …). This repo drives Claude Code from .claude/skills and
+# Codex from the .agents/skills symlinks, so that copy is an unused duplicate of every SKILL.md.
+agent/
+
 #Legacy files
 legacy crm integration/
