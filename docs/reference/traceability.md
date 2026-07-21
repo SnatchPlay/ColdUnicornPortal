@@ -42,8 +42,9 @@ Legend: **✅** implemented and verified · **⚠️** implemented, diverges fro
 
 **Reading the ⚠️ column.** Rows 1–13 are ⚠️ for one reason: the database contract is in place and
 tested, and the automation has not started writing to it. The invariants exist but nothing exercises
-them, because n8n still writes only the Google Sheet — **phase 0** of the
-[dual-write transition](../adr/0017-sheets-to-supabase-dual-write-transition.md). These rows go ✅ at
+them under load. All four workflows reached **phase A** on 2026-07-21 — a Supabase branch now runs in
+parallel with the sheet — but the sheet is still authoritative
+([dual-write transition](../adr/0017-sheets-to-supabase-dual-write-transition.md)). These rows go ✅ at
 **phase B**, when Supabase becomes authoritative and the invariants are the ones actually enforcing.
 Closing them *is* [migration-backlog §1](n8n/migration-backlog.md#1-ooo-cutover).
 
@@ -54,6 +55,30 @@ semantic gap dual-write must reconcile, not paper over).
 
 Rows 3 and 6 additionally block
 [`20260722z_drop_legacy_ooo_columns.sql`](../../supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql).
+
+---
+
+## Process: LinkedIn outreach (Aimfox)
+
+[Process doc](processes/outreach/linkedin-aimfox.md) · [ADR-0012](../adr/0012-multi-sequencer-model.md)
+
+Every row is ⛔ or ⚠️ for the same reason: **no Aimfox workflow writes Supabase at all.** The model is
+specified, the automation is entirely Sheets-based ([migration-backlog §5](n8n/migration-backlog.md)).
+
+| # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | A LinkedIn contact is not a lead; `preMQL` creates it | `leads`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | CRM view | lead counts | `s0GqDtCzyLAvVnm1` ⛔ appends a spreadsheet row | — | ⛔ |
+| 2 | Contact identity is scoped `(client_sequencer_id, external_contact_id)` | `sequencer_contacts` | `upsert_sequencer_contact` | — | — | — | ⛔ no LinkedIn contact is stored anywhere | `ooo-invariants.sql` (contract only) | ⛔ |
+| 3 | A lead carries its channel (`sequencer_id` = aimfox) | `leads` | — | — | CRM view | per-channel splits | ⛔ | — | ⛔ |
+| 4 | `profile_id` is the Aimfox **account** id | `sequencer_daily_stats` | — | — | — | capacity per profile | `aimfox-daily-metrics` ⚠️ uses the sheet **row number** | — | ⚠️ |
+| 5 | Invite counters never mix channels | `sequencer_daily_stats`, `daily_stats` | — | — | — | invites vs sends | ⛔ table never written | — | ⛔ |
+| 6 | Snapshots are overwritten, per-day facts are keyed | `sequencer_daily_stats` | unique `(client, sequencer, profile, date)` | — | — | — | ⛔ | — | ⛔ |
+| 7 | Blacklisting follows an explicit classification only | — (no table) | — | — | — | — | `JnvRBXtRNar7ejeM` — **not importable**, literal secrets | — | ⛔ |
+| 8 | Audience loading is a live send; no blind second branch | — | — | — | — | — | `nG6Q4KEGeXk7tBHm` — A1 shadow required at cutover | — | ⛔ |
+
+**What closes these.** Row 4 is a defect in a workflow this repository now owns and can fix. Rows 5
+and 6 close together, with the capacity branch S. Rows 1–3 need `client_sequencers` seeded first;
+rows 7–8 need the secrets rotated before the workflows can even be committed.
 
 ---
 

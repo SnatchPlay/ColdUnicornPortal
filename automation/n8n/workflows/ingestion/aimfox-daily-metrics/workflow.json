@@ -1,0 +1,1716 @@
+{
+  "name": "Get Metrics from Aimfox",
+  "nodes": [
+    {
+      "id": "4e7c027e-f565-4ecf-b5de-61986b04ec9d",
+      "name": "Aggregate1",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        -176
+      ],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      }
+    },
+    {
+      "id": "ea93b87f-7c3d-44a7-bb0e-d1451d07def3",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -272
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "jsCode": "const toNumber = (value) => {\n  const number = Number(value);\n  return Number.isFinite(number) ? number : 0;\n};\n\nreturn {\n  json: {\n    account_id: $('Filter1').item.json.row_number,\n    workspace_id: $('Filter1').item.json.col_5, \n    campaign_id: $('Filter').item.json.campaigns.id,\n\n    sent: toNumber($json.metrics.sent_connections),\n    accepted: toNumber($json.metrics.accepted_connections),\n    audience: toNumber($('Get Campaign').item.json.campaign.audience_size),\n\n    // приклад показника, який треба віднімати\n    remaining_audience:\n      toNumber($('Get Campaign').item.json.campaign.audience_size) -\n      toNumber($json.metrics.sent_connections)\n  }\n};",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "70ba0401-8d82-4583-b562-53b1d28fada8",
+      "name": "Code in JavaScript2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -80
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "jsCode": "const toNumber = (value) => {\n  const number = Number(value);\n  return Number.isFinite(number) ? number : 0;\n};\n\nreturn {\n  json: {\n    account_id: $('Filter1').item.json.row_number,\n    daily_limit: toNumber($('Summarize1').item.json.sum_limit_connect)/5,\n    sent_today: toNumber($json.buckets[1].sent_connections-$json.buckets[0].sent_connections),\n    sent_connections: toNumber($json.buckets[1].sent_connections) - $json.buckets[0].sent_connections,\n    workspace_id: $('Filter1').item.json.col_5,\n\n    remaining_limit:\n      toNumber($('Summarize1').item.json.sum_limit_connect)/5 -\n      toNumber($json.buckets[1].sent_connections) -\n      toNumber($json.buckets[0].sent_connections)\n  }\n};",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "f256805a-5d41-4af1-b03e-289a5260d469",
+      "name": "Code in JavaScript3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2928,
+        -176
+      ],
+      "parameters": {
+        "jsCode": "const toNumber = (value) => {\n  const number = Number(value);\n  return Number.isFinite(number) ? number : 0;\n};\n\nconst aggregateData = $('Aggregate1').item.json.data || [];\n\nconst accountId =\n  aggregateData[1]?.account_id ??\n  aggregateData[0]?.account_id ??\n  aggregateData[1]?.average_account_id ??\n  aggregateData[0]?.average_account_id ??\n  null;\n\nconst dailyLimit = toNumber(\n  aggregateData[0]?.daily_limit ??\n  aggregateData[1]?.daily_limit\n);\n\nconst remainingAudience = toNumber(aggregateData[0]?.sum_remaining_audience);\n\nconst sentToday = toNumber(\n  aggregateData[0]?.sent_today ??\n  aggregateData[1]?.sent_today\n);\n\nreturn {\n  json: {\n    account_id: accountId,\n\n    schedule_today: Math.min(\n      dailyLimit,\n      remainingAudience + sentToday\n    ),\n\n    schedule_tomorrow: Math.min(\n      dailyLimit,\n      Math.max(remainingAudience - dailyLimit, 0)\n    ),\n\n    schedule_day_after_tomorrow: Math.min(\n      dailyLimit,\n      Math.max(remainingAudience - dailyLimit * 2, 0)\n    ),\n  }\n};",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "5c4d2a30-8e9d-42d9-b515-c2848609f01f",
+      "name": "Filter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        928,
+        -272
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "37cd7180-b921-4c7e-a36d-08b6553c656e",
+              "leftValue": "={{ $json.campaigns.state }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "ACTIVE"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "231bd98c-fb5e-4bd0-8987-7fbd26c7170d",
+      "name": "Filter1",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        -48,
+        -192
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a806bf59-8a56-49e5-80ac-ebc816f2399c",
+              "leftValue": "={{ $('Get row(s) in sheet').item.json.col_105 }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "456e3791-72e3-4d0c-84f4-eb721fe9430f",
+      "name": "Get Account Limits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        928,
+        -80
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Filter1').item.json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $json.accounts.id }}/limits"
+      }
+    },
+    {
+      "id": "cf8ea2e4-3395-49da-8951-975f1db5f819",
+      "name": "Get Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        -80
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/accounts"
+      }
+    },
+    {
+      "id": "80c099b8-a960-4092-b2ba-e265618db641",
+      "name": "Get Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1152,
+        -272
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Filter1').item.json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.campaigns.id }}"
+      }
+    },
+    {
+      "id": "9d495d02-7caf-4716-95b2-7404b2eaa15c",
+      "name": "Get Campaign Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1376,
+        -272
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Filter1').item.json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.campaign.id }}/metrics"
+      }
+    },
+    {
+      "id": "239e540d-5f9a-418d-bf56-91bada5cbcd4",
+      "name": "Get Interactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1376,
+        -80
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Filter1').item.json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "bucket",
+              "value": "1 day"
+            },
+            {
+              "name": "from",
+              "value": "={{ $now.startOf('day').toMillis() }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $now.endOf('day').minus(5,'minutes').toMillis() }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "sendQuery": true,
+        "url": "https://api.aimfox.com/api/v2/analytics/interactions"
+      }
+    },
+    {
+      "id": "680fbcbd-2521-4f9d-b4ab-ebbaf693f5e2",
+      "name": "Get row(s) in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -272,
+        -192
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_7",
+              "lookupValue": "Active"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1287241336",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "73fde0e1-8adf-4200-9d18-b05530064318",
+      "name": "Get row(s) in sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3376,
+        -176
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Date",
+              "lookupValue": "={{ $now.toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "lookupColumn": "Client",
+              "lookupValue": "={{\n  $if(\n    $('Code in JavaScript2').isExecuted,\n    $('Code in JavaScript2').item.json.workspace_id,\n    ''\n  )\n  ||\n  $('Aggregate1').item.json.data?.[0]?.average_workspace_id\n  ||\n  $('Aggregate1').item.json.data?.[1]?.average_workspace_id\n  ||\n  ''\n}}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "🤖Daily stats",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1622168806",
+          "mode": "list",
+          "value": 1622168806
+        }
+      }
+    },
+    {
+      "id": "418f6ab1-a70c-476a-bb18-62f03916f4f4",
+      "name": "List Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        -272
+      ],
+      "notesInFlow": false,
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/campaigns"
+      }
+    },
+    {
+      "id": "14a7afcb-6070-4f5f-b9de-9b016adf59b4",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        160,
+        -192
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "288a18f9-4c39-4797-8ce4-738aac1484b2",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2256,
+        -176
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "62e80968-249e-4583-86b3-41b42059a772",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -512,
+        -192
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "12d31eb5-a56b-4f0d-a633-7c252cea56cd",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        704,
+        -272
+      ],
+      "parameters": {
+        "fieldToSplitOut": "campaigns",
+        "include": "allOtherFields",
+        "options": {}
+      }
+    },
+    {
+      "id": "08a9da8f-5a62-4e9a-80af-a641ccdc7a0b",
+      "name": "Split Out1",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        704,
+        -80
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "fieldToSplitOut": "accounts",
+        "include": "allOtherFields",
+        "options": {}
+      }
+    },
+    {
+      "id": "3f505212-c55c-43f5-8e26-adb5a801511d",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.summarize",
+      "typeVersion": 1.1,
+      "position": [
+        1824,
+        -272
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "fieldsToSummarize": {
+          "values": [
+            {
+              "aggregation": "sum",
+              "field": "remaining_audience"
+            },
+            {
+              "aggregation": "average",
+              "field": "account_id"
+            },
+            {
+              "aggregation": "average",
+              "field": "workspace_id"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9834d0f5-0bb8-4059-b4ac-b98792d4b48d",
+      "name": "Summarize1",
+      "type": "n8n-nodes-base.summarize",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        -80
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "fieldsToSummarize": {
+          "values": [
+            {
+              "aggregation": "sum",
+              "field": "limit.connect"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b696dc90-881b-4d08-ad9e-a598d0bb12f2",
+      "name": "Update row in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2704,
+        -176
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Prospects Added",
+              "id": "Prospects Added",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Min Sent",
+              "id": "Min Sent",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Remaining database",
+              "id": "Remaining database",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Invitations limit",
+              "id": "Invitations limit",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "+2",
+              "id": "+2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "+1",
+              "id": "+1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "0",
+              "id": "0",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-1",
+              "id": "-1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-2",
+              "id": "-2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-3",
+              "id": "-3",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-4",
+              "id": "-4",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "L-KPI",
+              "id": "L-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "M-KPI",
+              "id": "M-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W-KPI",
+              "id": "W-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W1",
+              "id": "W1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W2",
+              "id": "W2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W",
+              "id": "W",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "X",
+              "id": "X",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "153 000 zł",
+              "id": "153 000 zł",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "38 125 zł",
+              "id": "38 125 zł",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "details",
+              "id": "details",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "Remaining database": "={{ $json.data[0].sum_remaining_audience || 0 }}",
+            "row_number": "={{ $json.data?.[1]?.account_id || $json.data?.[0]?.average_account_id || $json.data[0].account_id }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "update",
+        "options": {
+          "locationDefine": {
+            "values": {
+              "firstDataRow": 4,
+              "headerRow": 3
+            }
+          }
+        },
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1287241336",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "38597f88-e506-4cde-8274-b385508f52f9",
+      "name": "Update row in sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3152,
+        -176
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Prospects Added",
+              "id": "Prospects Added",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Min Sent",
+              "id": "Min Sent",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Remaining database",
+              "id": "Remaining database",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Invitations limit",
+              "id": "Invitations limit",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "+2",
+              "id": "+2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "+1",
+              "id": "+1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "0",
+              "id": "0",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-1",
+              "id": "-1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-2",
+              "id": "-2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-3",
+              "id": "-3",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "-4",
+              "id": "-4",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "L-KPI",
+              "id": "L-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "M-KPI",
+              "id": "M-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W-KPI",
+              "id": "W-KPI",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W1",
+              "id": "W1",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W2",
+              "id": "W2",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "W",
+              "id": "W",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "X",
+              "id": "X",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "153 000 zł",
+              "id": "153 000 zł",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "38 125 zł",
+              "id": "38 125 zł",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "details",
+              "id": "details",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "Invitations limit": "={{ $('Aggregate1').item.json.data[0].remaining_limit ||  $('Aggregate1').item.json.data[1].remaining_limit }}",
+            "row_number": "={{ $json.account_id }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "update",
+        "options": {
+          "locationDefine": {
+            "values": {
+              "firstDataRow": 4,
+              "headerRow": 3
+            }
+          }
+        },
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1287241336",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "4d30de17-3e78-4978-a3ac-8f5b20dd52ca",
+      "name": "Update row in sheet2",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3600,
+        -176
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Client",
+              "id": "Client",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-DMS",
+              "id": "E-DMS",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "PB-E",
+              "id": "PB-E",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MQL",
+              "id": "MQL",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "ME",
+              "id": "ME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Response Count",
+              "id": "Response Count",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Bounce count",
+              "id": "Bounce count",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Inboxes",
+              "id": "Inboxes",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Prospects Count",
+              "id": "Prospects Count",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Week",
+              "id": "Week",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Year",
+              "id": "Year",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MQL Diff",
+              "id": "MQL Diff",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "ME Diff",
+              "id": "ME Diff",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON Diff",
+              "id": "WON Diff",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Client Name",
+              "id": "Client Name",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Sequencer",
+              "id": "Sequencer",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Negative",
+              "id": "Negative",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Out of Office Accumulated",
+              "id": "Out of Office Accumulated",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Human Replies",
+              "id": "Human Replies",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Human Replies Accumulated",
+              "id": "Human Replies Accumulated",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Out of Office",
+              "id": "Out of Office",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Today",
+              "id": "Schedule volume for Today",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Tomorrow",
+              "id": "Schedule volume for Tomorrow",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Day after tomorrow",
+              "id": "Schedule volume for Day after tomorrow",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Invitations sent",
+              "id": "Invitations sent",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Today (Aimfox)",
+              "id": "Schedule volume for Today (Aimfox)",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Tomorrow (Aimfox)",
+              "id": "Schedule volume for Tomorrow (Aimfox)",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Schedule volume for Day after tomorrow (Aimfox)",
+              "id": "Schedule volume for Day after tomorrow (Aimfox)",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "Invitations sent": "={{ $('Aggregate1').item.json.data[0].sent_today || $('Aggregate1').item.json.data[1].sent_today }}",
+            "Schedule volume for Day after tomorrow (Aimfox)": "={{ $('Code in JavaScript3').item.json.schedule_day_after_tomorrow }}",
+            "Schedule volume for Today (Aimfox)": "={{ $('Code in JavaScript3').item.json.schedule_today }}",
+            "Schedule volume for Tomorrow (Aimfox)": "={{ $('Code in JavaScript3').item.json.schedule_tomorrow }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "🤖Daily stats",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1622168806",
+          "mode": "list",
+          "value": 1622168806
+        }
+      }
+    },
+    {
+      "id": "5cea2ca0-cc5a-4620-9c03-0a3708c96b82",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3824,
+        -112
+      ],
+      "parameters": {
+        "amount": 30
+      }
+    }
+  ],
+  "connections": {
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Update row in sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Summarize",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "index": 1,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Update row in sheet1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Account Limits": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Summarize1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Accounts": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split Out1",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Campaign Metrics",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Campaign Metrics": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Code in JavaScript",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Interactions": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Code in JavaScript2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Update row in sheet2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split Out",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "List Campaigns",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Get Accounts",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Aggregate1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get row(s) in sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Account Limits",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Summarize1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Interactions",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Update row in sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Code in JavaScript3",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Update row in sheet1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get row(s) in sheet1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Update row in sheet2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Wait",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}

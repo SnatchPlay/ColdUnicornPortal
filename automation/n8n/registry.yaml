@@ -79,6 +79,43 @@ workflows:
     lastRepositorySync: 2026-07-21
     lastValidation: 2026-07-21 phase A branch S published
 
+  # LinkedIn channel (Aimfox). Imported unchanged, phase 0 — no Supabase branch exists yet.
+  # The other three Aimfox workflows cannot be committed until their literal secrets move into n8n
+  # credentials: `pnpm n8n:export` refuses them (security.md §7, §8).
+  - id: aimfox-daily-metrics
+    name: "Get Metrics from Aimfox"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/aimfox-daily-metrics
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: sVev5d0N6rtrbcgI
+    lastRepositorySync: 2026-07-21
+
+  - id: aimfox-import-to-connection
+    name: "Import leads to Aimfox connection"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-import-to-connection
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # POSTs to a campaign audience — queues real LinkedIn invites
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: nG6Q4KEGeXk7tBHm
+    lastRepositorySync: 2026-07-21
+
   - id: nrr-daily-stats
     name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
     domain: outreach

@@ -1,0 +1,65 @@
+schemaVersion: 1
+
+id: aimfox-import-to-connection
+name: "Import leads to Aimfox connection"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # adding a profile to a campaign audience CAUSES LinkedIn invites
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "daily at 19:00"
+
+reads:
+  external:
+    - "Google Sheets · CS PDCA — active clients (col_7='Active'), client sheet id (col_4), Aimfox token (col_105)"
+    - "Google Sheets · <client>/Leads — rows where 'LEAD RECEIVED' = yesterday (M/d/yyyy)"
+    - "Aimfox API · GET /campaigns"
+
+writes:
+  external:
+    - "Aimfox API · POST /campaigns/{id}/audience  ← REAL SIDE EFFECT: queues LinkedIn invites"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+transition:
+  phase: 0                   # Sheets only — no Supabase branch exists yet
+  phaseState: none
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · CS PDCA + the client's Leads tab"
+  targetStore: "Supabase · leads (sequencer_id = aimfox) + sequencer_contacts"
+  design: docs/reference/processes/outreach/linkedin-aimfox.md
+  notes: >-
+    NOT an early phase-A candidate. This is the LinkedIn analogue of ooo-enrol-followups: a second
+    branch resolving a different campaign would send a second set of invites to a real person
+    (ADR-0017 §1b). When its turn comes it needs the A1 shadow treatment — build the request, log
+    it, measure agreement, only then send.
+  reconciliation: >-
+    Not applicable in phase 0. At A1: compare branch S's intended (campaign_id, profile_url) set
+    against branch L's actual POSTs for the same run.
+  parityEvidence: null
+
+idempotency:
+  key: "none locally — relies on Aimfox ignoring a profile already in the campaign audience (UNVERIFIED)"
+  notes: >-
+    The whole safety argument rests on an assumption nobody has tested against the Aimfox API. Every
+    run re-reads yesterday's leads and re-POSTs them; a manual re-run repeats the batch. Verify the
+    endpoint's duplicate behaviour before relying on it, exactly as ADR-0015 §4 pins down the Bison
+    attach-leads equivalent.
+
+retryPolicy:
+  notes: >-
+    None. No retry and no error branch on the audience POST — a failed import is lost with no trace
+    beyond the n8n execution list, and the lead simply never gets a connection request.
+
+knownViolations: []

@@ -1,0 +1,93 @@
+# aimfox-daily-metrics
+
+**Logical ID:** `aimfox-daily-metrics` · **Domain:** `ingestion` · **Criticality:** medium
+**Remote (production):** `sVev5d0N6rtrbcgI` — `Get Metrics from Aimfox`
+**Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
+**Phase:** **0 — Sheets only.** Imported unchanged 2026-07-21; nothing on the instance was modified.
+
+> **The table this workflow is documented as writing, it does not write.**
+> [`20260705_sequencer_daily_stats_schedule.sql`](../../../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)
+> was written *by reading this workflow* — the column comments quote its formulas. The write itself
+> was never built. `sequencer_daily_stats` has no Postgres node here and no Supabase URL anywhere in
+> the graph.
+
+## Business purpose
+
+Every 2 hours, answer "how many LinkedIn invites can this client still send today, tomorrow and the
+day after?" and write the answer where the team reads it — the PDCA spreadsheet.
+
+## Flow
+
+```
+Schedule (2h) ─ CS PDCA rows where col_7='Active'
+                └─ Filter1: col_105 (Aimfox token) not empty
+                   └─ Loop Over Items ─┬─ GET /campaigns ─ Split Out ─ Filter state=ACTIVE
+                                       │    └─ GET /campaigns/{id}     → audience_size
+                                       │       └─ GET /campaigns/{id}/metrics → sent, accepted
+                                       │          └─ Code: remaining_audience = audience − sent
+                                       │             └─ Summarize: Σ remaining_audience
+                                       └─ GET /accounts ─ Split Out1
+                                            └─ GET /accounts/{id}/limits
+                                               └─ Summarize1: Σ limit.connect   (weekly cap)
+                                                  └─ GET /analytics/interactions (bucket = 1 day)
+                                                     └─ Code2: daily_limit, sent_today, remaining_limit
+                    Merge ─ Aggregate1 ─ Update 'Remaining database'
+                                          └─ Code3: the three schedule volumes
+                                             └─ Update 'Invitations limit'
+                                                └─ Daily stats row for today ─ Update ─ Wait ─ next client
+```
+
+## The formulas
+
+| Output | Formula | Sheet cell |
+|---|---|---|
+| `remaining_audience` | Σ over ACTIVE campaigns of `audience_size − sent_connections` | Remaining database |
+| `daily_limit` | `Σ accounts.limit.connect / 5` | — (intermediate) |
+| `sent_today` | `buckets[1].sent_connections − buckets[0].sent_connections` | — |
+| `remaining_limit` | `daily_limit − buckets[1].sent − buckets[0].sent` | Invitations limit |
+| `schedule_today` | `min(daily_limit, remaining_audience + sent_today)` | Schedule volume today |
+| `schedule_tomorrow` | `min(daily_limit, max(remaining_audience − daily_limit, 0))` | + 1 |
+| `schedule_day_after` | `min(daily_limit, max(remaining_audience − 2·daily_limit, 0))` | + 2 |
+
+`/5` is the agency's working-week convention, not an Aimfox concept. Aimfox reports `limit.connect`
+as a **weekly** cap.
+
+## Known defects — imported as-is, not reproduced in any future branch S
+
+| # | Defect | Consequence |
+|---|---|---|
+| 1 | `remaining_limit` subtracts **both** buckets, while `sent_today` subtracts one from the other | the remaining limit is understated by `buckets[0].sent_connections`. This is the "double-subtraction quirk" [11-integrations §2](../../../../../docs/reference/functional/11-integrations.md) records; it is a bug, not a convention |
+| 2 | `account_id` is set to the CS PDCA **sheet row number** | violates invariant 4 of the process doc: `profile_id` must be the Aimfox account id. Capacity cannot be attributed to a LinkedIn account |
+| 3 | `Summarize` **averages** `account_id` and `workspace_id` | averaging identifiers. Correct only while every row in the batch shares one value; silently wrong otherwise |
+| 4 | sheet updates match on `row_number` | positional. A row inserted, deleted or sorted between the read and the update writes one client's capacity onto another client's row |
+| 5 | the Aimfox token comes from a spreadsheet cell (`col_105`) | [security finding 1](../../../../../docs/reference/n8n/security.md) |
+| 6 | no retry, no error branch, no error workflow | a failed API call leaves that client's sheets half-updated and reports nothing |
+| 7 | `Get row(s) in sheet1` matches the Daily stats row by `Client` = an **averaged** workspace id | inherits defect 3; a wrong average writes the wrong client's daily row |
+
+Defects 1–3 must be **fixed in branch S, not carried over**: an imported defect is still a defect
+([ADR-0016](../../../../../docs/adr/0016-repository-as-automation-source-of-truth.md) §1).
+
+## What phase A would add
+
+A parallel branch S ([ADR-0017 §1a](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md)):
+resolve the client from `client_sequencers` (aimfox row, `external_workspace_id`), then UPSERT
+`sequencer_daily_stats` on `(client_id, sequencer_id, profile_id, report_date)` — one row **per
+Aimfox account**, not one rollup.
+
+This is the safest phase-A candidate in the family: it is a pure UPSERT of derived numbers, it
+touches no person, and it calls no external write endpoint — so it needs no A1 shadow step, unlike
+[`ooo-enrol-followups`](../../outreach/ooo-enrol-followups/README.md).
+
+**Blocked on a precondition, not on design:** `client_sequencers` has no seeded `aimfox` rows, so
+branch S has nothing to resolve a `client_id` from. Seed them — from CS PDCA `col_105` (token) and
+the Aimfox workspace id — before writing any node.
+
+## Verification
+
+```bash
+pnpm n8n:validate
+pnpm n8n:check-drift --id aimfox-daily-metrics
+```
+
+Safe to `execute_workflow`? **No.** It writes live PDCA cells that the team reads for capacity
+planning.

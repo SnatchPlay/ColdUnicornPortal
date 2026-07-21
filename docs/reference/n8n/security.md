@@ -39,10 +39,12 @@ runs the secret scanner over fixtures too.
 
 Found during the 2026-07-21 inventory. None are fixed; all are recorded so they are not rediscovered.
 
-### 1. Per-client Bison API keys live in a Google Sheet — **high**
+### 1. Per-client vendor API keys live in a Google Sheet — **high**
 
-`ooo-detect-and-log` (and its siblings) read the CS PDCA sheet, take the API key from `col_6`, and
-interpolate it into an `Authorization: Bearer` header expression.
+`ooo-detect-and-log` (and its siblings) read the CS PDCA sheet, take the Bison API key from `col_6`,
+and interpolate it into an `Authorization: Bearer` header expression. The Aimfox workflows do the
+same with **`col_105`** (`aimfox-daily-metrics`, `aimfox-import-to-connection`) — so both channels'
+per-client credentials sit in one spreadsheet.
 
 Consequences: the keys sit in a spreadsheet with Google-Docs sharing as their only access control;
 they are outside n8n's credential store, so they are not encrypted at rest by n8n, not rotatable from
@@ -66,6 +68,12 @@ holding it can inject synthetic tag events and drive lead creation, blacklisting
 `scan.mjs` raises `unauthenticated-webhook` for exactly this shape. **Status: unverified** — the HUB
 is not yet imported, so nothing has scanned it. Verify when it is imported
 ([migration-backlog §2](migration-backlog.md#2-hub-dispatcher)).
+
+**Two Aimfox webhooks are confirmed unauthenticated** (scanned 2026-07-21): `aimfox-classifier`
+(`JnvRBXtRNar7ejeM`) and `preMQL-Aimfox` (`s0GqDtCzyLAvVnm1`). Holding either path is enough to
+drive lead creation, Lusha enrichment spend, outbound notifications and workspace blacklisting.
+Blacklisting is the worst of these: it permanently removes a company or contact from a client's
+reach ([process invariant 7](../processes/outreach/linkedin-aimfox.md#business-invariants)).
 
 ### 4. OOO state lives in a Google Sheet outside RLS — **medium**
 
@@ -108,6 +116,34 @@ large reduction in blast radius, and it makes `pnpm n8n:validate`'s business rul
 database level rather than only by review.
 
 Not fixed here — changing a credential is outside what an agent should do unattended.
+
+### 7. An Aimfox organisation token is written literally into three workflow graphs — **critical**
+
+Found 2026-07-21 while importing the Aimfox family. The node `Get Workspace Api Key` — present in
+`aimfox-classification` (`JnvRBXtRNar7ejeM`), `aimfox-leads-processing` (`4OjNRWLaG2IWK6kd`) and
+`aimfox-premql-to-pdca` (`s0GqDtCzyLAvVnm1`) — carries a **literal** `Authorization: Bearer <token>`
+value in its parameters and calls `GET /api/v2/workspaces/{id}/tokens`.
+
+That endpoint *mints* per-workspace tokens. The literal is therefore not one client's key: it is the
+key that issues keys, for every client's LinkedIn workspace. It is the same value in all three
+graphs, so rotating it means editing three workflows.
+
+Unlike finding 1, this **is** caught by `scan.mjs` (`hardcoded-auth-header`), which is why those three
+workflows are not in this repository: `pnpm n8n:export` refuses to write them (layer 4). They stay
+uncommitted and undiffable until the value moves into an n8n credential.
+
+Fix, in order: rotate the token in Aimfox → store it as an n8n credential → replace the literal in
+all three nodes → re-export and commit.
+
+### 8. An OpenAI API key is written literally into `aimfox-classification` — **critical**
+
+Same import, same workflow file. Both `OpenAI - Classify Email` and
+`OpenAI - Search for the company name` carry a literal `sk-…` in an `Authorization` header, calling
+`https://api.openai.com/v1/responses`. Caught by `scan.mjs` (`secret/openai-key`); the workflow is
+blocked from import for this reason as well as finding 7.
+
+A leaked OpenAI key is billable to the agency's account for as long as it is valid. Rotate first,
+then move it to a credential.
 
 ## Reviewing a workflow
 

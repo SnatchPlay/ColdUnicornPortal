@@ -1,6 +1,7 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-21: **33 workflows, 27 active, 1 managed, 32 orphan.**
+Inventory taken 2026-07-21: **33 workflows, 27 active, 6 managed, 27 orphan.**
+(Managed: the four OOO/NRR workflows of §1, plus the two importable Aimfox workflows of §5.)
 
 Reproduce with `pnpm n8n:inventory`.
 
@@ -131,10 +132,53 @@ A clean dispatcher + per-provider-child pattern; likely the best-structured grou
 
 ## 5 · Aimfox / LinkedIn
 
-**Priority: low-medium.** `JnvRBXtRNar7ejeM` (classification), `4OjNRWLaG2IWK6kd` (leads
-processing), `nG6Q4KEGeXk7tBHm` (import to connection), `s0GqDtCzyLAvVnm1` (preMQL → PDCA).
+**Priority: raised to high on 2026-07-21 — two critical secret findings, and a documented table that
+has never been written.**
 
-Note `4OjNRWLaG2IWK6kd` and `s0GqDtCzyLAvVnm1` create leads — check against invariants 1–3.
+The whole channel is now described in one place:
+[process · LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md).
+
+| Remote | Name | Repository state |
+|---|---|---|
+| `sVev5d0N6rtrbcgI` | `Get Metrics from Aimfox` | **imported** — [`ingestion/aimfox-daily-metrics`](../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md) |
+| `nG6Q4KEGeXk7tBHm` | `Import leads to Aimfox connection` | **imported** — [`outreach/aimfox-import-to-connection`](../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md) |
+| `JnvRBXtRNar7ejeM` | `AimFox Classification` | **blocked** — literal OpenAI key + literal Aimfox master token ([security §7](security.md), [§8](security.md)) |
+| `4OjNRWLaG2IWK6kd` | `AimFox Leads Processing` | **blocked** — literal Aimfox master token |
+| `s0GqDtCzyLAvVnm1` | `preMGL tag added (Aimfox) -> Add lead to PDCA` | **blocked** — literal Aimfox master token |
+
+`pnpm n8n:export` refuses the three blocked workflows by design (security.md layer 4). They cannot be
+committed, diffed or drift-checked until the secrets move into n8n credentials — so the most
+security-sensitive workflows in the family are the ones the repository currently cannot see.
+
+**The channel is phase 0.** Not one of the five contains a Postgres node or a Supabase URL. Meanwhile
+`sequencers` has an `aimfox` row, `client_sequencers` carries the token field, and
+`sequencer_daily_stats` was designed *by reading* `Get Metrics from Aimfox`
+([`20260705`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)). The model is
+specified and unused. [11-integrations §2](../functional/11-integrations.md) described that row as a
+live write until this inventory corrected it.
+
+**Blocking, in order:**
+
+1. **Rotate the two leaked secrets and move them to n8n credentials** (findings 7 and 8), then import
+   the three blocked workflows. Nothing else in this group can proceed while they are invisible.
+2. **Authenticate the two Aimfox webhooks** (`aimfox-classifier`, `preMQL-Aimfox`) — finding 3.
+3. **Seed `client_sequencers` for aimfox** — `api_key` from CS PDCA `col_105`, `external_workspace_id`
+   from the Aimfox workspace id. A precondition for every Supabase branch in this group: without it
+   branch S cannot resolve a `client_id`.
+4. **Phase A on the capacity flow first** (`aimfox-daily-metrics`): a pure UPSERT of derived numbers,
+   no person touched, no external write endpoint — the only part of this channel that needs no A1
+   shadow. Fix defects 1–3 in branch S rather than porting them.
+5. **Then the lead flows.** `4OjNRWLaG2IWK6kd` and `s0GqDtCzyLAvVnm1` create leads — check against
+   invariants 1–3 of the process doc before any cutover, and note that neither can store a contact
+   identity today, so `sequencer_contacts` comes first.
+6. **`aimfox-import-to-connection` last.** It POSTs to a campaign audience, which queues LinkedIn
+   invites to real people — the A1 shadow case ([ADR-0017 §1b](../../adr/0017-sheets-to-supabase-dual-write-transition.md)).
+   Its idempotency claim is **unverified**: nobody has tested whether the audience endpoint ignores a
+   profile it already holds.
+
+**Risk if not done:** a master credential and an OpenAI key stay in plaintext on the instance; two
+open webhooks can drive blacklisting; and the LinkedIn channel contributes nothing to any portal
+metric, because none of its data exists in the database.
 
 ---
 

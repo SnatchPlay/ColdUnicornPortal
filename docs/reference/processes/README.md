@@ -52,7 +52,8 @@ to prevent.
 
 | Process | Domain | Status |
 |---|---|---|
-| [OOO follow-ups (and NRR)](outreach/ooo-followups.md) | outreach | contract accepted; n8n cutover pending |
+| [OOO follow-ups (and NRR)](outreach/ooo-followups.md) | outreach | contract accepted; phase A live on all four workflows |
+| [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase 0** — Sheets only; the database model exists and is unwritten |
 
 ## Traceability
 

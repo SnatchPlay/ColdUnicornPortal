@@ -1,0 +1,66 @@
+schemaVersion: 1
+
+id: aimfox-daily-metrics
+name: "Get Metrics from Aimfox"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: medium          # drives how much audience the team loads; wrong numbers waste capacity
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "every 2 hours"
+
+reads:
+  external:
+    - "Google Sheets · CS PDCA — active clients (col_7='Active'), Aimfox token (col_105), workspace id (col_5)"
+    - "Aimfox API · GET /campaigns, /campaigns/{id}, /campaigns/{id}/metrics"
+    - "Aimfox API · GET /accounts, /accounts/{id}/limits"
+    - "Aimfox API · GET /analytics/interactions?bucket=1 day"
+
+writes:
+  external:
+    - "Google Sheets · CS PDCA — 'Remaining database', 'Invitations limit', schedule volumes"
+    - "Google Sheets · 🤖Daily stats — today's row for the client"
+  tables: []
+  rpcs: []
+  tablesWritten: []          # NOTHING reaches Supabase. sequencer_daily_stats was designed for this
+                             # workflow (20260705) and has never been written.
+
+transition:
+  phase: 0                   # Sheets only — no Supabase branch exists yet
+  phaseState: none
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · CS PDCA + 🤖Daily stats"
+  targetStore: "Supabase · sequencer_daily_stats"
+  design: docs/reference/processes/outreach/linkedin-aimfox.md
+  notes: >-
+    The safest phase-A candidate in the whole Aimfox family: a pure UPSERT of derived numbers that
+    touches no person and calls no write endpoint. Blocked only on a precondition — client_sequencers
+    has no seeded aimfox rows, so branch S cannot resolve a client_id.
+  reconciliation: >-
+    Once branch S exists, per report_date compare the PDCA cells against the sequencer_daily_stats
+    row for the same client. Record the agreeing date range in parityEvidence.
+  parityEvidence: null
+
+idempotency:
+  key: "sheet row matched on row_number; a re-run overwrites the same cells with fresher values"
+  notes: >-
+    Idempotent by overwrite, NOT by key. Matching on row_number is positional: inserting, deleting or
+    sorting a CS PDCA row between the read and the update writes one client's capacity onto another
+    client's row, silently. A keyed match (client id) would remove the hazard.
+
+retryPolicy:
+  notes: >-
+    None. No retry, no error branch, no error workflow. A failed API call leaves the sheets partially
+    updated for that client and the run reports success for the others.
+
+knownViolations: []
