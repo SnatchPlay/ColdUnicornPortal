@@ -42,8 +42,6 @@ export interface LeadDraft {
   industry: string;
   headcountRange: string;
   website: string;
-  expectedReturnDate: string;
-  addedToOooCampaign: boolean;
   // Lead CRM operational fields (ADR-0013, Phase 5.2). Dates are edited as YYYY-MM-DD (stored as
   // timestamptz midnight); the health engine only reads their civil date.
   contactMadeAt: string;
@@ -85,8 +83,6 @@ export function toLeadDraft(lead: LeadRecord): LeadDraft {
     industry: lead.industry ?? "",
     headcountRange: lead.headcount_range ?? "",
     website: lead.website ?? "",
-    expectedReturnDate: lead.expected_return_date ?? "",
-    addedToOooCampaign: lead.added_to_ooo_campaign,
     contactMadeAt: datePart(lead.contact_made_at) ?? "",
     contactMethod: lead.contact_method ?? "",
     negotiationStartedAt: datePart(lead.negotiation_started_at) ?? "",
@@ -138,9 +134,9 @@ export function buildLeadPatch(lead: LeadRecord, draft: LeadDraft): Partial<Lead
   if ((lead.headcount_range ?? null) !== nextHeadcount) patch.headcount_range = nextHeadcount;
   const nextWebsite = nullableString(draft.website);
   if ((lead.website ?? null) !== nextWebsite) patch.website = nextWebsite;
-  const nextOooDate = nullableString(draft.expectedReturnDate);
-  if ((lead.expected_return_date ?? null) !== nextOooDate) patch.expected_return_date = nextOooDate;
-  if (lead.added_to_ooo_campaign !== draft.addedToOooCampaign) patch.added_to_ooo_campaign = draft.addedToOooCampaign;
+  // OOO fields are gone from the draft (ADR-0015): the portal no longer writes out-of-office state
+  // onto a lead — that state belongs to `ooo_followups`, and the gateway's mapLeadPatch whitelist
+  // rejects these columns now.
 
   // CRM operational fields — dates diffed on their civil date so re-opening a lead whose stored
   // timestamp has a time component does not emit a spurious midnight-truncating patch.

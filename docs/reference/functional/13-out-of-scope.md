@@ -32,6 +32,7 @@ The **purpose** of this file is to prevent re-discovery: when an engineer or sta
 | OoS-13 | **Account-Based Selling (ABS) scoring** (`account_based_selling` table) | PROJECT_SPEC.md В§3.12 | 2026-04-25 |
 | OoS-14 | **`crm_prospects` / `lg_pipeline` separate from `agency_crm_deals`** | PROJECT_SPEC.md В§3.10-3.11 | 2026-04-25 |
 | OoS-15 | **Server-side metric rollup tables / pre-computed `daily_snapshots` with diff columns** | PROJECT_SPEC.md В§3.7 | 2026-04-25 |
+| OoS-16 | **OOO operational view + outreach analytics dashboard** (follow-up list, episode editor, reply-mix charts) | OOO spec В§13/В§15 | 2026-07-22 |
 
 ---
 
@@ -93,6 +94,24 @@ Account-Based Selling scoring (CLV, market size, target dates) is not part of th
 
 The original spec introduced multiple CRM-related tables. Reality consolidated into the single `agency_crm_deals` table. UI for that table is on the [open backlog](#4-open-backlog-cross-reference) as **BL-5**, not duplicated into separate tables.
 
+### OoS-16 вЂ” OOO operational view & outreach dashboard
+
+The OOO business spec asked for an operational list of follow-up episodes (В§13) and an outreach
+analytics section (В§15). Both were built and then **removed before release** (2026-07-22): OOO is
+driven end-to-end by n8n, and the agency does not work the episode queue by hand, so a portal screen
+for it would be a surface with no operator.
+
+What this means concretely:
+
+- there is **no** portal action that reads or mutates `ooo_followups` вЂ” the whole lifecycle is
+  `service_role` RPCs called by n8n ([03-data-model В§4b](./03-data-model.md));
+- `ooo_followups` / `sequencer_contacts` keep their RLS policies anyway, because the routing editor's
+  `recover_skipped_ooo_followups` runs as the caller;
+- the data model still records everything the spec required (episodes, attempts, cancellation
+  history), so a view can be added later without a migration вЂ” it is a UI decision, not a data one.
+
+**In scope and shipped:** the per-client OOO routing editor in the client drawer (BL-2).
+
 ### OoS-15 вЂ” Server-side rollup tables
 
 The original spec proposed `daily_snapshots` with `mql_diff`, `me_diff`, `won_diff` pre-computed columns. The actual implementation uses **client-side aggregation** over raw daily counters (`daily_stats`, `campaign_daily_stats`). This trade-off (more bytes shipped, more flexibility) is a deliberate choice to keep ingestion simple. The `admin_dashboard_daily` view is the only server-side rollup and it covers the 21-day admin chart only.
@@ -117,7 +136,7 @@ The same path applies in reverse: if a backlog item is decided **never**, move i
 What is in scope but **not yet built**. Single source: [BUSINESS_LOGIC.md В§11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built). Reproduced here as a quick checklist.
 
 - **BL-1** Client self-service notification preferences on `/client/settings`.
-- **BL-2** OOO routing rows management UI (`client_ooo_routing`).
+- ~~**BL-2** OOO routing rows management UI (`client_ooo_routing`).~~ **Shipped** (ADR-0015): the client drawer manages routing rows.
 - **BL-3** LinkedIn API key field in manager/admin client drawer.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields (schema + UI).
 - **BL-5** Agency CRM kanban for `agency_crm_deals`.

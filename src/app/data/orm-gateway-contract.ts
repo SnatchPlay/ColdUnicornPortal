@@ -22,9 +22,13 @@
   LeadValueDeliveryRecord,
   MeetingStatus,
   OfferStatus,
+  RoutingKey,
   TaskStatus,
   UserRecord,
 } from "../types/core.ts";
+// Value import: the OOO parser validates enum-valued fields against the same const tuples the UI
+// selects render from, so the transport and the widgets can never drift apart.
+import { ROUTING_KEYS } from "../types/core.ts";
 import type {
   AdminDashboardOverview,
   AdminSettingsPayload,
@@ -47,6 +51,7 @@ import type {
   LeadsListResponse,
   LeadCrmListResponse,
   ManagerDashboardOverview,
+  ClientOooRoutingPagePayload,
   ShellData,
   TablePreferencesPayload,
 } from "../types/view-contracts.ts";
@@ -515,6 +520,29 @@ export interface UpsertLeadCustomFieldValuePayload {
   value: string | null;
 }
 
+// --- OOO routing configuration (ADR-0015) ----------------------------------------------------
+// The portal's only OOO write surface. Follow-up episodes themselves are driven by n8n through the
+// service_role RPCs; there is no portal action that reads or mutates them.
+
+export interface LoadClientOooRoutingPayload {
+  action: "loadClientOooRouting";
+  clientId: string;
+}
+
+/** Upsert the ACTIVE routing row for (client, routingKey). Deactivates any previous one. */
+export interface UpsertClientOooRoutingPayload {
+  action: "upsertClientOooRouting";
+  clientId: string;
+  routingKey: RoutingKey;
+  campaignId: string;
+}
+
+/** Deactivates (never deletes) — past episodes must stay explainable by their configuration. */
+export interface DeactivateClientOooRoutingPayload {
+  action: "deactivateClientOooRouting";
+  routingId: string;
+}
+
 export type OrmGatewayRequest =
   | LoadConditionRulesPayload
   | LoadShellDataPayload
@@ -575,7 +603,10 @@ export type OrmGatewayRequest =
   | CreateLeadCustomFieldPayload
   | UpdateLeadCustomFieldPayload
   | DeleteLeadCustomFieldPayload
-  | UpsertLeadCustomFieldValuePayload;
+  | UpsertLeadCustomFieldValuePayload
+  | LoadClientOooRoutingPayload
+  | UpsertClientOooRoutingPayload
+  | DeactivateClientOooRoutingPayload;
 
 export type OrmGatewayAction = OrmGatewayRequest["action"];
 
@@ -650,6 +681,9 @@ export interface OrmGatewayResponseMap {
   updateLeadCustomField: LeadCustomFieldRecord;
   deleteLeadCustomField: { ok: true };
   upsertLeadCustomFieldValue: LeadCustomFieldValueRecord;
+  loadClientOooRouting: ClientOooRoutingPagePayload;
+  upsertClientOooRouting: ClientOooRoutingPagePayload;
+  deactivateClientOooRouting: ClientOooRoutingPagePayload;
 }
 
 interface ParseSuccess {
@@ -1294,6 +1328,43 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         value: value as string | null,
       },
     };
+  }
+
+  // --- OOO operational actions (ADR-0015) -----------------------------------------------------
+  // Enum-valued fields are validated HERE, against the shared const tuples, rather than being
+  // forwarded as free strings for Postgres to reject. The DB CHECK stays the backstop, but a typo
+  // should fail as a 400 with a readable message, not as a 500 from a constraint violation.
+
+  if (action === "loadClientOooRouting") {
+    if (!hasStringField(payload, "clientId")) {
+      return { ok: false, error: "loadClientOooRouting requires clientId." };
+    }
+    return { ok: true, value: { action, clientId: String(payload.clientId) } };
+  }
+
+  if (action === "upsertClientOooRouting") {
+    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "campaignId")) {
+      return { ok: false, error: "upsertClientOooRouting requires clientId and campaignId." };
+    }
+    if (!isString(payload.routingKey) || !(ROUTING_KEYS as readonly string[]).includes(payload.routingKey)) {
+      return { ok: false, error: `upsertClientOooRouting requires routingKey ∈ ${ROUTING_KEYS.join(" | ")}.` };
+    }
+    return {
+      ok: true,
+      value: {
+        action,
+        clientId: String(payload.clientId),
+        routingKey: payload.routingKey as RoutingKey,
+        campaignId: String(payload.campaignId),
+      },
+    };
+  }
+
+  if (action === "deactivateClientOooRouting") {
+    if (!hasStringField(payload, "routingId")) {
+      return { ok: false, error: "deactivateClientOooRouting requires routingId." };
+    }
+    return { ok: true, value: { action, routingId: String(payload.routingId) } };
   }
 
   return { ok: false, error: `Unsupported action: ${action}` };

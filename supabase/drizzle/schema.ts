@@ -8,13 +8,20 @@ export const crmPipelineStage = pgEnum("crm_pipeline_stage", ['new', 'contacted'
 export const domainStatus = pgEnum("domain_status", ['active', 'warmup', 'blocked', 'retired'])
 export const leadGender = pgEnum("lead_gender", ['male', 'female'])
 export const leadQualification = pgEnum("lead_qualification", ['preMQL', 'MQL', 'meeting_scheduled', 'meeting_held', 'offer_sent', 'won', 'rejected', 'OOO', 'NRR'])
-export const replyClassification = pgEnum("reply_classification", ['OOO', 'Interested', 'NRR', 'Left_Company', 'Spam_Inbound', 'other'])
+// `negative` + `neutral` added by 20260722b so outreach analytics can count them separately. The
+// legacy labels stay — they are the live n8n contract and the value on every historical row; the
+// mapping to the spec's domain names is documented in 11-integrations.md §6, not duplicated here.
+export const replyClassification = pgEnum("reply_classification", ['OOO', 'Interested', 'NRR', 'Left_Company', 'Spam_Inbound', 'other', 'negative', 'neutral'])
 export const userRole = pgEnum("user_role", ['super_admin', 'admin', 'master_admin', 'manager', 'client'])
 export const meetingType = pgEnum("meeting_type", ['intro', 'summary', 'general'])
 export const meetingStatus = pgEnum("meeting_status", ['planned', 'scheduled', 'held', 'cancelled', 'no_show'])
 export const offerStatus = pgEnum("offer_status", ['planned', 'sent', 'accepted', 'rejected', 'cancelled'])
 export const taskStatus = pgEnum("task_status", ['planned', 'in_progress', 'completed', 'cancelled', 'skipped'])
 export const finalOutcome = pgEnum("final_outcome", ['won', 'lost', 'lost_premql'])
+// ADR-0015 — OOO follow-up episode lifecycle. `submitted`/`confirmed` are NOT "active": see the
+// uq_ooo_followups_active partial index in 20260722_ooo_model_tables.sql.
+export const oooFollowupStatus = pgEnum("ooo_followup_status", ['pending', 'processing', 'submitted', 'confirmed', 'failed', 'skipped', 'cancelled'])
+export const oooRoutingSource = pgEnum("ooo_routing_source", ['automatic', 'manual_override'])
 
 
 export const leads = pgTable("leads", {
@@ -64,6 +71,11 @@ export const leads = pgTable("leads", {
 	concludedAt: timestamp("concluded_at", { withTimezone: true, mode: 'string' }),
 	finalOutcome: finalOutcome("final_outcome"),
 	contactDisposition: text("contact_disposition"),
+	// ADR-0015 provenance: which external contact this lead was promoted from, and the positive
+	// reply that caused it. Both carry partial unique indexes (uq_leads_source_sequencer_contact,
+	// uq_leads_origin_reply) — one contact never yields two leads, one reply never yields two leads.
+	sourceSequencerContactId: uuid("source_sequencer_contact_id"),
+	originReplyId: uuid("origin_reply_id"),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),
@@ -179,8 +191,13 @@ export const replies = pgTable("replies", {
 	shortReason: text("short_reason"),
 	languageDetected: varchar("language_detected", { length: 10 }),
 	isForwarded: boolean("is_forwarded").default(false).notNull(),
+	// ADR-0015: a reply is anchored to the external contact, so it can exist before (or without) any
+	// CRM lead. `leadId` stays nullable and is filled in when the contact is promoted.
+	sequencerContactId: uuid("sequencer_contact_id"),
 }, (table) => [
 	index("idx_replies_classification").using("btree", table.classification.asc().nullsLast().op("enum_ops")),
+	index("idx_replies_sequencer_contact").using("btree", table.sequencerContactId.asc().nullsLast().op("uuid_ops")),
+	unique("replies_external_id_uk").on(table.externalId),
 	index("idx_replies_client").using("btree", table.clientId.asc().nullsLast().op("uuid_ops")),
 	index("idx_replies_received").using("btree", table.receivedAt.asc().nullsLast().op("timestamptz_ops")),
 	foreignKey({
@@ -229,10 +246,18 @@ export const clientOooRouting = pgTable("client_ooo_routing", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	clientId: uuid("client_id").notNull(),
+	// `gender` is superseded by `routingKey` and is dropped by the deferred
+	// migrations/deferred/20260722z. Until then it is still written by pre-cutover n8n.
 	gender: leadGender(),
+	// ADR-0015: explicit 'male' | 'female' | 'general'. NULL is never an implicit "general" (spec §11).
+	routingKey: text("routing_key").notNull(),
 	campaignId: uuid("campaign_id").notNull(),
-	isActive: boolean("is_active").default(true),
+	isActive: boolean("is_active").default(true).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	// NOTE: the partial unique index uq_client_ooo_routing_active on (client_id, routing_key)
+	// WHERE is_active lives only in 20260722_ooo_model_tables.sql — drizzle-kit does not model
+	// partial indexes. At most one ACTIVE configuration per (client, routing key).
 	foreignKey({
 			columns: [table.campaignId],
 			foreignColumns: [campaigns.id],
@@ -605,4 +630,93 @@ export const leadValueDeliveries = pgTable("lead_value_deliveries", {
 	foreignKey({ columns: [table.sourceMeetingId], foreignColumns: [leadMeetings.id], name: "lead_value_deliveries_source_meeting_id_fkey" }).onDelete("set null"),
 	pgPolicy("lead_value_deliveries_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: leadChildSelect }),
 	pgPolicy("lead_value_deliveries_write_scoped", { as: "permissive", for: "all", to: ["authenticated"], using: leadChildWrite, withCheck: leadChildWrite }),
+]);
+
+// --- OOO model (ADR-0015, migrations 20260722*) ------------------------------------------------
+// Client scope is reached through client_sequencers, so both policies are one set-based semijoin
+// (ADR-0006). Both use can_manage_client, not can_access_client: an OOO/NRR contact is precisely a
+// person who is NOT a CRM lead, and the `client` role must not see that population (spec §17).
+const sequencerContactScope = sql`(client_sequencer_id IN ( SELECT cs.id FROM client_sequencers cs WHERE (cs.client_id IN ( SELECT clients.id FROM clients WHERE private.can_manage_client(clients.id)))))`;
+const oooFollowupScope = sql`(sequencer_contact_id IN ( SELECT sc.id FROM sequencer_contacts sc WHERE (sc.client_sequencer_id IN ( SELECT cs.id FROM client_sequencers cs WHERE (cs.client_id IN ( SELECT clients.id FROM clients WHERE private.can_manage_client(clients.id)))))))`;
+
+// Per-client sequencer credentials (ADR-0012). Previously read by the gateway through raw SQL only;
+// modelled here because sequencer_contacts hangs off it and the OOO read model joins through it.
+export const clientSequencers = pgTable("client_sequencers", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	clientId: uuid("client_id").notNull(),
+	sequencerId: uuid("sequencer_id").notNull(),
+	apiKey: text("api_key"),
+	externalWorkspaceId: text("external_workspace_id"),
+	settings: jsonb().default({}).notNull(),
+	enabled: boolean().default(true).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_client_sequencers_sequencer").using("btree", table.sequencerId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({ columns: [table.clientId], foreignColumns: [clients.id], name: "client_sequencers_client_id_fkey" }).onDelete("cascade"),
+	unique("client_sequencers_client_id_sequencer_id_key").on(table.clientId, table.sequencerId),
+]);
+
+// Local identity of an external contact. The natural key is SCOPED — an external contact id means
+// nothing without the workspace it came from (spec §2). Holds no CRM state by design.
+export const sequencerContacts = pgTable("sequencer_contacts", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	clientSequencerId: uuid("client_sequencer_id").notNull(),
+	externalContactId: text("external_contact_id").notNull(),
+	email: text(),
+	firstName: text("first_name"),
+	lastName: text("last_name"),
+	routingKey: text("routing_key").default('general').notNull(),
+	firstSeenAt: timestamp("first_seen_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	rawPayload: jsonb("raw_payload").default({}).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	// NOTE: idx_sequencer_contacts_email is on lower(email) — expression indexes are not modelled here.
+	foreignKey({ columns: [table.clientSequencerId], foreignColumns: [clientSequencers.id], name: "sequencer_contacts_client_sequencer_id_fkey" }).onDelete("cascade"),
+	unique("uq_sequencer_contacts_identity").on(table.clientSequencerId, table.externalContactId),
+	pgPolicy("sequencer_contacts_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: sequencerContactScope }),
+]);
+
+// One OOO episode. Never hard-deleted — cancel is a status change so the detection, the dates, the
+// attempts and the reason survive (spec §6).
+export const oooFollowups = pgTable("ooo_followups", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	sequencerContactId: uuid("sequencer_contact_id").notNull(),
+	sourceReplyId: uuid("source_reply_id"),
+	/** The date actually determined from the reply. NULL when undetermined — never a fallback. */
+	expectedReturnDate: date("expected_return_date"),
+	/** When to re-enrol. MAY come from a fallback rule; that is what date_source records. */
+	scheduledFor: date("scheduled_for").notNull(),
+	dateSource: text("date_source").notNull(),
+	status: oooFollowupStatus().default('pending').notNull(),
+	/** Routing SNAPSHOT — a finished episode keeps showing the campaign it actually went to. */
+	routingKey: text("routing_key").notNull(),
+	targetCampaignId: uuid("target_campaign_id"),
+	routingSource: oooRoutingSource("routing_source").default('automatic').notNull(),
+	/** Last attempt only — NOT a per-attempt audit trail. Do not document it as attempt history. */
+	attemptCount: integer("attempt_count").default(0).notNull(),
+	nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: 'string' }),
+	lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: 'string' }),
+	submittedAt: timestamp("submitted_at", { withTimezone: true, mode: 'string' }),
+	confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
+	cancelledAt: timestamp("cancelled_at", { withTimezone: true, mode: 'string' }),
+	cancellationReason: text("cancellation_reason"),
+	skipReason: text("skip_reason"),
+	lastError: text("last_error"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_ooo_followups_due").using("btree", table.status.asc().nullsLast(), table.scheduledFor.asc().nullsLast()),
+	index("idx_ooo_followups_contact").using("btree", table.sequencerContactId.asc().nullsLast().op("uuid_ops")),
+	// NOTE: the two partial unique indexes that carry the real invariants live only in
+	// 20260722_ooo_model_tables.sql (drizzle-kit does not model partial indexes):
+	//   uq_ooo_followups_active       — one ACTIVE (pending|processing|failed) episode per contact
+	//   uq_ooo_followups_source_reply — one episode per source reply, which survives `submitted`
+	foreignKey({ columns: [table.sequencerContactId], foreignColumns: [sequencerContacts.id], name: "ooo_followups_sequencer_contact_id_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.sourceReplyId], foreignColumns: [replies.id], name: "ooo_followups_source_reply_id_fkey" }).onDelete("set null"),
+	foreignKey({ columns: [table.targetCampaignId], foreignColumns: [campaigns.id], name: "ooo_followups_target_campaign_id_fkey" }).onDelete("set null"),
+	pgPolicy("ooo_followups_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: oooFollowupScope }),
+	pgPolicy("ooo_followups_update_scoped", { as: "permissive", for: "update", to: ["authenticated"], using: oooFollowupScope, withCheck: oooFollowupScope }),
 ]);

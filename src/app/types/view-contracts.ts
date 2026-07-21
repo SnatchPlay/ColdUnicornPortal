@@ -27,6 +27,7 @@ import type {
   SequencerRecord,
   MeetingStatus,
   OfferStatus,
+  ClientOooRoutingRecord,
 } from "./core.ts";
 import type { BusinessDayConfig } from "../lib/crm/business-days.ts";
 // DailyStatInput is the widened parameter accepted by createClientMetrics. Imported here for the
@@ -766,4 +767,23 @@ export interface TablePreferencesPayload {
   /** null when the user has never saved preferences for this table. */
   preferences: Record<string, unknown> | null;
   updatedAt: string | null;
+}
+
+// --- OOO routing configuration (ADR-0015) -----------------------------------------------------
+
+/**
+ * OOO routing configuration for one client (spec §11, BL-2). Returned by the read action AND by both
+ * mutations, so the drawer re-renders from one round-trip instead of refetching.
+ *
+ * `recoveredFollowups` reports how many episodes the change brought back from
+ * `skipped/routing_missing` to `pending`. Surfacing it matters: the operator's mental model is "I
+ * fixed the config", and the number tells them whether that actually unblocked anything.
+ */
+export interface ClientOooRoutingPagePayload {
+  clientId: string;
+  routes: ClientOooRoutingRecord[];
+  /** `campaigns.type = 'ooo_followup'` for this client — the only valid routing targets. */
+  campaigns: Array<{ id: string; name: string }>;
+  /** `null` on a plain read; a count on a mutation. */
+  recoveredFollowups: number | null;
 }

@@ -114,6 +114,23 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **CRM effect:** open tasks (`planned|in_progress`) feed the read-model's `open_tasks_count` + earliest-due `next_task_due_at`; a `completed|cancelled|skipped` status drops the task out (recomputed on `refresh()`). No legacy-boolean trigger. Verified end-to-end on the local stack: add planned task → open_count 1 + next-due set; complete it → open_count 0 + next-due null.
 - **Called from:** the CRM drawer's `LeadTasksEditor` ([lead-tasks-editor.tsx](../../../src/app/components/lead-tasks-editor.tsx)) via `useLeadTasks`; `repository.loadLeadTasks` / `repository.upsertLeadTask`.
 
+### 2.3f OOO routing actions (ADR-0015)
+
+The portal's **only** OOO write surface. Follow-up episodes themselves have no portal action at all —
+they are created and advanced by n8n through the `service_role` RPCs in `20260722e`.
+
+| Action | Writes | Notes |
+|---|---|---|
+| `loadClientOooRouting(clientId)` | — | Active + historical rules plus the client's `ooo_followup` campaigns. |
+| `upsertClientOooRouting(clientId, routingKey, campaignId)` | `client_ooo_routing` | Deactivates the previous active rule for `(client, key)` and inserts the new one (partial unique index allows one active row). Then runs `recover_skipped_ooo_followups` and returns how many episodes came back to `pending`. |
+| `deactivateClientOooRouting(routingId)` | `client_ooo_routing` | Sets `is_active = false`. **Never deletes** — a past follow-up must stay explainable by the configuration that produced it. |
+
+`recover_skipped_ooo_followups` runs under the CALLER's role, which is why `20260722d` keeps both a
+SELECT and an UPDATE policy on `ooo_followups` even though no portal screen lists episodes.
+
+**Removed from `mapLeadPatch`:** `expected_return_date` and `added_to_ooo_campaign` are no longer
+writable on a lead (spec §18). OOO state belongs to `ooo_followups`.
+
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 
 - **Table:** `domains`.

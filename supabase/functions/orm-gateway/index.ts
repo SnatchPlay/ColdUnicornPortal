@@ -424,8 +424,16 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   if ("headcount_range" in patch) mapped.headcountRange = patch.headcount_range;
   if ("website" in patch) mapped.website = patch.website;
   // OOO state
-  if ("expected_return_date" in patch) mapped.expectedReturnDate = patch.expected_return_date;
-  if ("added_to_ooo_campaign" in patch) mapped.addedToOooCampaign = patch.added_to_ooo_campaign;
+  // `expected_return_date` / `added_to_ooo_campaign` are NO LONGER writable (ADR-0015, spec §18).
+  // OOO is a state of an external contact, tracked in `ooo_followups`; letting the portal stamp it
+  // onto a lead is how the two models drifted apart in the first place. The columns still exist for
+  // the n8n cutover window and are removed by migrations/deferred/20260722z.
+  //
+  // REJECT rather than ignore: both fields are still declared on `LeadRecord`, so `Partial<LeadRecord>`
+  // accepts them and a caller would get a 200 with the write silently dropped.
+  if ("expected_return_date" in patch || "added_to_ooo_campaign" in patch) {
+    fail(400, "OOO state is no longer stored on a lead (ADR-0015) — it belongs to ooo_followups.");
+  }
   // Lead CRM operational state (ADR-0013, Phase 5.2). Editable dates/method that drive the CRM health
   // columns. Terminal-status columns (final_outcome/conclusion/concluded_at) are NOT here — only the
   // atomic concludeLead action writes them. Dates are validated (null or a YYYY-MM-DD... string) so a
@@ -2743,6 +2751,123 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     );
     return {
       emailExcludeList: rows.map(toEmailExcludeRecord),
+    };
+  }
+
+  // ── OOO routing configuration (ADR-0015) ────────────────────────────────────────────────────
+  // The only OOO surface the portal has. There is deliberately no operational list or follow-up
+  // editor: episodes are driven end-to-end by n8n through the service_role RPCs in 20260722e.
+  // These run under the caller's role, so client_ooo_routing / ooo_followups RLS does the scoping.
+
+  if (
+    payload.action === "loadClientOooRouting" ||
+    payload.action === "upsertClientOooRouting" ||
+    payload.action === "deactivateClientOooRouting"
+  ) {
+    let clientId = payload.action === "deactivateClientOooRouting" ? "" : payload.clientId;
+    let recovered: number | null = null;
+
+    if (payload.action === "upsertClientOooRouting") {
+      // The type check is NOT redundant with the UI dropdown: this is the contract boundary, and
+      // `client_ooo_routing.campaign_id` has only an FK to campaigns(id) with no type constraint.
+      // Without it a request could route returning OOO contacts into the main outreach sequence.
+      const owned = await safeRawSelect(tx, sql`
+        SELECT 1 FROM campaigns
+        WHERE id = ${payload.campaignId} AND client_id = ${payload.clientId} AND type = 'ooo_followup'
+      `);
+      if (!owned[0]) {
+        fail(400, "That campaign is not an OOO follow-up campaign for this client.");
+      }
+
+      // (7) Idempotency: re-saving the campaign that is already active would deactivate the current
+      // row and insert an identical replacement, growing a history of rows that explain nothing.
+      const unchanged = await safeRawSelect(tx, sql`
+        SELECT 1 FROM client_ooo_routing
+        WHERE client_id = ${payload.clientId} AND routing_key = ${payload.routingKey}
+          AND campaign_id = ${payload.campaignId} AND is_active
+      `);
+      if (unchanged[0]) {
+        recovered = 0;
+      } else {
+
+        // Deactivate rather than delete: a past episode must stay explainable by the configuration
+        // that produced it. The partial unique index allows only one active row per (client, key),
+        // so the old one has to step down before the new one lands.
+        await tx.execute(sql`
+          UPDATE client_ooo_routing SET is_active = false
+          WHERE client_id = ${payload.clientId} AND routing_key = ${payload.routingKey} AND is_active
+        `);
+        const inserted = await rawQuery<{ id: string }>(tx, sql`
+          INSERT INTO client_ooo_routing (client_id, routing_key, campaign_id, is_active)
+          VALUES (${payload.clientId}, ${payload.routingKey}, ${payload.campaignId}, true)
+          RETURNING id
+        `);
+        if (!inserted[0]) fail(403, "You do not have permission to configure OOO routing for this client.");
+
+        // §10: the configuration that was missing now exists, so episodes parked as
+        // skipped/routing_missing become actionable again. Runs under the caller's role, so RLS
+        // limits it to their clients.
+        // (1) Recover across ALL routing keys, not just the one saved. `general` is the FALLBACK for
+        // every unmatched key, so adding it must revive episodes parked as male/female too — filtering
+        // by the saved key would leave exactly those stuck, silently, reporting 0 recovered. The
+        // function re-resolves each episode individually and only revives ones that now route, so
+        // passing NULL is correct rather than merely broader.
+        const recoveredRows = await rawQuery<{ n: number }>(tx, sql`
+          SELECT public.recover_skipped_ooo_followups(${payload.clientId}::uuid, NULL) AS n
+        `);
+        recovered = Number(recoveredRows[0]?.n ?? 0);
+      }
+    }
+
+    if (payload.action === "deactivateClientOooRouting") {
+      const rows = await rawQuery<{ client_id: string }>(tx, sql`
+        UPDATE client_ooo_routing SET is_active = false
+        WHERE id = ${payload.routingId} AND is_active
+        RETURNING client_id::text AS client_id
+      `);
+      // Empty RETURNING is this action's only failure signal, so it must not also mean "already
+      // inactive" — otherwise a stale second click reports a change that never happened.
+      if (!rows[0]) {
+        const exists = await safeRawSelect(tx, sql`
+          SELECT 1 FROM client_ooo_routing WHERE id = ${payload.routingId}
+        `);
+        fail(
+          exists[0] ? 409 : 403,
+          exists[0]
+            ? "That OOO routing rule is already inactive — reload to see the current configuration."
+            : "You do not have permission to change this OOO routing rule.",
+        );
+      }
+      clientId = String(rows[0].client_id);
+    }
+
+    const [routeRows, campaignRows] = await Promise.all([
+      safeRawSelect(tx, sql`
+        SELECT id::text, client_id::text, routing_key, campaign_id::text, is_active,
+               created_at, updated_at
+        FROM client_ooo_routing
+        WHERE client_id = ${clientId}
+        ORDER BY is_active DESC, routing_key ASC, created_at DESC
+      `),
+      tx.select({ id: schema.campaigns.id, name: schema.campaigns.name })
+        .from(schema.campaigns)
+        .where(and(eq(schema.campaigns.clientId, clientId), eq(schema.campaigns.type, "ooo_followup")))
+        .orderBy(asc(schema.campaigns.name)),
+    ]);
+
+    return {
+      clientId,
+      routes: routeRows.map((r) => ({
+        id: String(r.id),
+        client_id: String(r.client_id),
+        routing_key: String(r.routing_key),
+        campaign_id: String(r.campaign_id),
+        is_active: Boolean(r.is_active),
+        created_at: toIsoString(r.created_at) ?? "",
+        updated_at: toIsoString(r.updated_at) ?? "",
+      })),
+      campaigns: campaignRows.map((c) => ({ id: String(c.id), name: String(c.name) })),
+      recoveredFollowups: recovered,
     };
   }
 

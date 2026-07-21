@@ -28,13 +28,15 @@ All `CREATE TYPE ... AS ENUM` definitions, [schema.ts:4-12](../../../supabase/dr
 | `crm_pipeline_stage` | `new`, `contacted`, `qualified`, `proposal`, `negotiation`, `won`, `lost` |
 | `domain_status` | `active`, `warmup`, `blocked`, `retired` |
 | `lead_gender` | `male`, `female` |
-| `lead_qualification` | `preMQL`, `MQL`, `meeting_scheduled`, `meeting_held`, `offer_sent`, `won`, `rejected`, `OOO`, `NRR` |
-| `reply_classification` | `OOO`, `Interested`, `NRR`, `Left_Company`, `Spam_Inbound`, `other` |
+| `lead_qualification` | `preMQL`, `MQL`, `meeting_scheduled`, `meeting_held`, `offer_sent`, `won`, `rejected`, `OOO`, `NRR` — `OOO`/`NRR` are LEGACY and removed by the deferred `20260722z` (ADR-0015) |
+| `reply_classification` | `OOO`, `Interested`, `NRR`, `Left_Company`, `Spam_Inbound`, `other`, `negative`, `neutral` (last two added by `20260722b`) |
 | `user_role` | `super_admin`, `admin`, **`master_admin`**, `manager`, `client` |
 | `meeting_type` | `intro`, `summary`, `general` — Lead CRM (ADR-0013) |
 | `meeting_status` | `planned`, `scheduled`, `held`, `cancelled`, `no_show` — Lead CRM |
 | `offer_status` | `planned`, `sent`, `accepted`, `rejected`, `cancelled` — Lead CRM |
 | `task_status` | `planned`, `in_progress`, `completed`, `cancelled`, `skipped` — Lead CRM |
+| `ooo_followup_status` | `pending`, `processing`, `submitted`, `confirmed`, `failed`, `skipped`, `cancelled` — ADR-0015. `submitted`/`confirmed` are **not** "active" |
+| `ooo_routing_source` | `automatic`, `manual_override` — ADR-0015 |
 
 Notes:
 
@@ -235,17 +237,74 @@ RLS:
 See [14 · Condition rules](./14-condition-rules.md) for DSL and runtime evaluation behavior.
 #### `client_ooo_routing` — [schema.ts:215-238](../../../supabase/drizzle/schema.ts#L215-L238)
 
-Maps OOO replies to a follow-up campaign, optionally per gender.
+Maps an OOO episode to a follow-up campaign, per explicit routing key (ADR-0015, spec §11).
 
 | Column | Type |
 |--------|------|
 | `id` | uuid PK |
 | `client_id` | uuid FK > `clients.id` not null |
-| `gender` | `lead_gender` nullable |
+| `routing_key` | text not null, CHECK `male \| female \| general` |
+| `gender` | `lead_gender` nullable — **LEGACY**, superseded by `routing_key`, dropped by the deferred `20260722z` |
 | `campaign_id` | uuid FK > `campaigns.id` not null |
-| `is_active` | boolean default true |
+| `is_active` | boolean not null default true |
+| `updated_at` | timestamptz not null default now() (trigger) |
 
-RLS: all four policies scoped by `private.can_manage_client(client_id)`. Not currently surfaced in the portal UI; exists for ingestion logic.
+`uq_client_ooo_routing_active` — partial UNIQUE on `(client_id, routing_key) WHERE is_active`: at most **one active** rule per client and key. Superseded rules are deactivated, never deleted, so a past follow-up stays explainable by the configuration that produced it.
+
+Resolution (`public.resolve_ooo_routing`): specific key → `general` → **NULL**. NULL means *no routing*, surfaced as `skipped / routing_missing`; it is never treated as an implicit `general`.
+
+RLS: all four policies scoped by `private.can_manage_client(client_id)`. Managed in the client drawer (`OooRoutingEditor`); saving also runs `public.recover_skipped_ooo_followups`.
+
+#### `sequencer_contacts` — ADR-0015, [`20260722_ooo_model_tables.sql`](../../../supabase/migrations/20260722_ooo_model_tables.sql)
+
+Local identity of an EXTERNAL contact. Holds **no CRM state** — a CRM lead exists only after a positive reply.
+
+| Column | Type |
+|--------|------|
+| `id` | uuid PK |
+| `client_sequencer_id` | uuid FK > `client_sequencers.id` on delete cascade, not null |
+| `external_contact_id` | text not null |
+| `email`, `first_name`, `last_name` | text nullable |
+| `routing_key` | text not null default `'general'`, CHECK `male \| female \| general` |
+| `first_seen_at`, `last_seen_at` | timestamptz not null default now() |
+| `raw_payload` | jsonb not null default `{}` |
+
+`uq_sequencer_contacts_identity` — UNIQUE `(client_sequencer_id, external_contact_id)`. The identity is **scoped**: an external contact id is meaningless without the workspace it came from.
+
+RLS: SELECT only, set-based through `client_sequencers → clients` via `private.can_manage_client`. Internal roles only — the `client` role must not see contacts that are not leads (spec §17). Rows are written exclusively by the `service_role` RPCs.
+
+#### `ooo_followups` — ADR-0015, [`20260722_ooo_model_tables.sql`](../../../supabase/migrations/20260722_ooo_model_tables.sql)
+
+One out-of-office **episode**. Never hard-deleted: cancelling is a status change, so the detection, dates, attempts and reason survive (spec §6).
+
+| Column | Type |
+|--------|------|
+| `id` | uuid PK |
+| `sequencer_contact_id` | uuid FK > `sequencer_contacts.id` on delete cascade, not null |
+| `source_reply_id` | uuid FK > `replies.id` on delete set null |
+| `expected_return_date` | date nullable — the date actually parsed from the reply; **NULL when undetermined, never a fallback** |
+| `scheduled_for` | date not null — when to re-enrol; may come from the fallback rule |
+| `date_source` | text not null, CHECK `reply_parsed \| fallback \| manual` |
+| `status` | `ooo_followup_status` not null default `pending` |
+| `routing_key` | text not null — snapshot of the episode |
+| `target_campaign_id` | uuid FK > `campaigns.id` on delete set null — snapshot |
+| `routing_source` | `ooo_routing_source` not null default `automatic` |
+| `attempt_count` | int not null default 0 — **last attempt only**, not an audit trail |
+| `next_attempt_at`, `last_attempt_at`, `submitted_at`, `confirmed_at`, `cancelled_at` | timestamptz nullable |
+| `cancellation_reason` | text, CHECK `ooo_removed \| positive_reply_received \| manual_cancel \| classification_corrected \| superseded` |
+| `skip_reason` | text, CHECK `routing_missing \| campaign_missing \| automation_disabled \| contact_ineligible` |
+| `last_error` | text |
+
+**Two distinct unique invariants — conflating them is the bug this model exists to avoid:**
+
+| Index | Guarantees |
+|---|---|
+| `uq_ooo_followups_active` on `(sequencer_contact_id) WHERE status IN ('pending','processing','failed')` | at most one **active** episode per contact. `submitted`/`confirmed` are excluded: `submitted` closes the episode, so a new OOO reply may open the next one |
+| `uq_ooo_followups_source_reply` on `(source_reply_id) WHERE source_reply_id IS NOT NULL` | the same OOO reply never opens a second episode — the redelivery guard that survives `submitted` |
+
+CHECKs: `cancelled ⇒ cancelled_at + cancellation_reason`; `skipped ⇒ skip_reason`; `submitted|confirmed ⇒ submitted_at`; `confirmed ⇒ confirmed_at`. (One-way implications: a **reopened** row keeps its old `cancelled_at`/`cancellation_reason` as history — the UI must gate those columns on the current status.)
+
+RLS: SELECT + UPDATE, set-based via `private.can_manage_client`; UPDATE carries both `using` and `with check`. No INSERT/DELETE policy — rows come from the RPCs, and cancel is a status change.
 
 ### 2.3 Campaigns
 
@@ -318,12 +377,14 @@ Columns of note:
 | `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url` | text | Enrichment. |
 | `gender` | `lead_gender` | Used for OOO routing. |
 | `qualification` | `lead_qualification` (indexed) | Editable by internal roles. |
-| `expected_return_date` | date | Applies when qualification=OOO. |
+| `expected_return_date` | date | **LEGACY** (ADR-0015) — OOO now lives in `ooo_followups`. No longer writable through the gateway; dropped by the deferred `20260722z`. |
 | `message_title` | varchar(500) | Subject of the step the lead replied to. |
 | `message_number` | smallint | Sequence step at which the last reply landed (denormalised from `replies`). |
 | `response_time_hours` / `response_time_label` | numeric / varchar | Time-to-reply metric from ingestion. |
 | `meeting_booked`, `meeting_held`, `offer_sent`, `won` | booleans default false | **Editable by internal roles; drive `getLeadStage`**. |
-| `added_to_ooo_campaign` | boolean | Routing flag. |
+| `added_to_ooo_campaign` | boolean | **LEGACY** (ADR-0015) — superseded by `ooo_followups.status`. Not writable; dropped by the deferred `20260722z`. |
+| `source_sequencer_contact_id` | uuid FK > `sequencer_contacts.id` | ADR-0015 provenance. Partial UNIQUE — **one contact yields at most one CRM lead**; a later positive reply attaches to the existing lead. |
+| `origin_reply_id` | uuid FK > `replies.id` | ADR-0015 provenance. Partial UNIQUE — one reply never creates two leads (reprocessing guard). |
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
 | `source` | varchar(30) default `'cold_email'` | Channel provenance (free text; gateway reply-path fallback `"smartlead"`). **Not** the sequencer link — see `sequencer_id`. |
 | `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. n8n/ingestion-owned; NOT in the portal lead-patch whitelist (ADR-0004). Index `idx_leads_client_sequencer (client_id, sequencer_id)`. |
@@ -344,8 +405,9 @@ Append-only history. Populated by ingestion; the portal never writes.
 
 | Column | Type | Role |
 |--------|------|------|
-| `lead_id` | uuid FK nullable (indexed) | Links to lead when matched. |
-| `external_id` | text UNIQUE not null | Ingestion dedupe key. |
+| `lead_id` | uuid FK nullable (indexed) | Links to lead when matched. Stays NULL for replies received before any lead exists (ADR-0015 — a reply needs no lead). |
+| `sequencer_contact_id` | uuid FK > `sequencer_contacts.id` nullable (indexed) | ADR-0015 — the contact anchor, so a reply is attributable without a lead. |
+| `external_id` | text UNIQUE not null | Ingestion dedupe key. The UNIQUE was **added by [`20260722c`](../../../supabase/migrations/20260722c_replies_external_id_unique.sql)** — this doc claimed it existed, but no such constraint was present until then. `public.upsert_reply` cannot be planned without it. |
 | `sequence_step` | smallint | |
 | `message_subject`, `message_text` | text | |
 | `received_at` | timestamptz not null (indexed) | |
@@ -603,6 +665,32 @@ All policies reference `private.*` helpers defined in `docs/reference/supabase-p
 | `private.can_access_reply(client_id uuid, lead_id uuid)` | `returns boolean` | Checks `can_access_client(client_id)` OR — when `client_id IS NULL` — looks up the owning client via `lead_id` and applies `can_access_client`. Admin short-circuits. |
 
 Pattern: wherever possible the new policies use **set-based subqueries** rather than per-row function calls, because Postgres would otherwise fail to hoist the check past an index. See [§5](#5-migrations-of-note).
+
+---
+
+## 4b. OOO ingestion & operator functions (ADR-0015)
+
+Defined in [`20260722e_ooo_rpcs.sql`](../../../supabase/migrations/20260722e_ooo_rpcs.sql). All use
+`SECURITY DEFINER` with **`set search_path = ''`** and fully qualified names — an empty search_path is
+the only configuration where a definer body cannot be redirected by objects in a schema the caller
+controls. Three privilege tiers:
+
+| Tier | Functions | Granted to |
+|---|---|---|
+| Whole episode lifecycle | `upsert_sequencer_contact`, `upsert_reply`, `record_ooo_followup`, `claim_ooo_followup`, `mark_ooo_submitted`, `mark_ooo_confirmed`, `mark_ooo_failed`, `skip_ooo_followup`, `cancel_ooo_followup`, `cancel_active_ooo_followup`, `retry_ooo_followup`, `reopen_ooo_followup`, `promote_contact_to_lead` | **`service_role` only** |
+| Plain (no DEFINER) | `resolve_ooo_routing`, `recover_skipped_ooo_followups` | `authenticated`, `service_role` |
+
+The portal has **no** path into the episode lifecycle — there is no operational view
+([OoS-16](13-out-of-scope.md)), so nothing needs an `authenticated` grant. n8n is the only caller.
+
+The two plain functions are deliberately not `SECURITY DEFINER`: called as `authenticated` from the
+client-drawer routing editor they are scoped by the `client_ooo_routing` / `ooo_followups` policies,
+and called as `service_role` (or the table owner) they see everything — each caller gets exactly what
+it needs, with no hand-written permission check to get wrong. This is also why `ooo_followups` keeps
+an UPDATE policy despite having no portal editor: `recover_skipped_ooo_followups` updates episodes on
+the caller's behalf.
+
+Invariants are covered by [`supabase/tests/ooo-invariants.sql`](../../../supabase/tests/ooo-invariants.sql).
 
 ---
 

@@ -712,6 +712,34 @@ confirmed exactly 3 of 8 synthetic leads counted (rejected, legacy OOO, legacy N
 canonical dispositions excluded); a 5-row boundary probe confirmed the half-open `yesterday` window
 and the 7/30/90 day cut-offs.
 
+---
+
+## 17. OOO counters — what exists and what does not (ADR-0015)
+
+There is **no outreach analytics surface in the portal**: OOO episodes are driven end-to-end by n8n,
+and the portal shows no follow-up list or reply-mix dashboard (product decision, 2026-07-22). The
+metrics below are therefore a definition of the underlying data, not of a rendered view.
+
+**`daily_stats.ooo_count` is kept and is NOT a CRM metric.** It counts OOO **replies/events** the
+sequencer reported for a `report_date`, written by the n8n daily UPSERT. It is never derived from
+`leads.qualification`, and it does not affect the CRM lead count or preMQL→MQL conversion (spec §14).
+It feeds §10.6 `wowOooRate` exactly as before.
+
+Anything counted from `ooo_followups` answers a different question — how much open work exists right
+now, accumulated over weeks — so "OOO replies today = 12" and "47 open episodes" can both be true:
+
+| Quantity | Source |
+|---|---|
+| OOO replies/events per day | `daily_stats.ooo_count` |
+| Active episodes (`pending`/`processing`/`failed`) | `ooo_followups`, matching `uq_ooo_followups_active` |
+| Episodes handed to the sequencer | `ooo_followups.status = 'submitted'` |
+| Overdue | active AND `scheduled_for < current_date` (server clock) |
+
+Should a dashboard ever be wanted, note that these are recomputable by `GROUP BY` over raw
+`replies` / `ooo_followups` rows — no stored counter is involved, so spec §16 holds by construction.
+
+---
+
 Next: [05 В· Client portal](./05-client-portal.md).
 
 

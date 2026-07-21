@@ -685,23 +685,11 @@ export function LeadDetailSections({ lead }: { lead: LeadDrawerData }) {
             <span className="text-xs uppercase tracking-[0.14em] text-neutral-500">Won</span>
             <YesNoPill value={record.won} />
           </div>
-          {record.qualification === "OOO" || record.added_to_ooo_campaign ? (
-            <div className="sm:col-span-2 flex items-center justify-between rounded-2xl bg-[#111] p-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">OOO return date</p>
-                <p className="mt-2 text-sm text-white">
-                  {record.expected_return_date
-                    ? formatDate(record.expected_return_date, { day: "numeric", month: "short", year: "numeric" })
-                    : <span className="text-neutral-500">unknown</span>}
-                </p>
-              </div>
-              {record.added_to_ooo_campaign && (
-                <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-300">
-                  In OOO campaign
-                </span>
-              )}
-            </div>
-          ) : null}
+          {/* The OOO block was removed here (ADR-0015). An out-of-office contact is not a CRM lead
+              at all under the new model — the episode lives in `ooo_followups` and is managed on the
+              internal OOO operational view. Surfacing it in the CLIENT drawer is the exact mixing of
+              outreach and CRM that spec §17 separates, and the fields it read are dropped by
+              migrations/deferred/20260722z. */}
         </div>
         {record.client_note && (
           <div className="mt-3 rounded-2xl bg-[#111] p-4">

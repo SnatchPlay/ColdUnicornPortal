@@ -25,6 +25,7 @@ import type {
   LeadTaskRecord,
   LeadValueDeliveryRecord,
   ManagedUserRecord,
+  RoutingKey,
   UserRecord,
 } from "../types/core";
 import type {
@@ -50,6 +51,7 @@ import type {
   LeadCrmListResponse,
   ManagerDashboardOverview,
   ManagerDashboardParams,
+  ClientOooRoutingPagePayload,
   ShellData,
   TablePreferencesPayload,
 } from "../types/view-contracts";
@@ -93,6 +95,9 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   loadCampaignsList: { table: "campaigns", operation: "select" },
   loadCampaignStats: { table: "campaign_daily_stats", operation: "select" },
   loadConditionRules: { table: "condition_rules", operation: "select" },
+  loadClientOooRouting: { table: "client_ooo_routing", operation: "select" },
+  upsertClientOooRouting: { table: "client_ooo_routing", operation: "upsert" },
+  deactivateClientOooRouting: { table: "client_ooo_routing", operation: "update" },
   updateClient: { table: "clients", operation: "update" },
   updateCampaign: { table: "campaigns", operation: "update" },
   updateLead: { table: "leads", operation: "update" },
@@ -587,6 +592,14 @@ export interface Repository {
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
   loadConditionRules(): Promise<ConditionRuleRecord[]>;
+  // --- OOO routing configuration (ADR-0015) ---
+  loadClientOooRouting(clientId: string): Promise<ClientOooRoutingPagePayload>;
+  upsertClientOooRouting(
+    clientId: string,
+    routingKey: RoutingKey,
+    campaignId: string,
+  ): Promise<ClientOooRoutingPagePayload>;
+  deactivateClientOooRouting(routingId: string): Promise<ClientOooRoutingPagePayload>;
   createClient(
     input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
     sequencerCredentials?: SequencerCredentialInput[],
@@ -986,6 +999,18 @@ export const repository: Repository = {
     if (!typedData.ok) {
       throw mapRepositoryError(typedData.error ?? "Could not revoke invitation.", "invites", "delete");
     }
+  },
+
+  async loadClientOooRouting(clientId) {
+    return invokeOrmGatewaySelectWithRetry("loadClientOooRouting", { clientId });
+  },
+
+  async upsertClientOooRouting(clientId, routingKey, campaignId) {
+    return invokeOrmGatewayAction("upsertClientOooRouting", { clientId, routingKey, campaignId });
+  },
+
+  async deactivateClientOooRouting(routingId) {
+    return invokeOrmGatewayAction("deactivateClientOooRouting", { routingId });
   },
 
   async upsertClientUserMapping(userId, clientId) {

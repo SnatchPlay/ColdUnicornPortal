@@ -63,6 +63,7 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 | New page, route, or tab | `portal-page` skill |
 | New data read/write, new gateway action | `gateway-action` skill |
 | Schema, RLS policy, migration, index | `rls-migration` skill |
+| OOO / NRR, sequencer contacts, follow-up episodes | [ADR-0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md) + [11-integrations §5/§6a](docs/reference/functional/11-integrations.md) |
 | Verify a UI change in the browser | `visual-verify` skill |
 | Find something reusable | [docs/reuse-catalog.md](docs/reuse-catalog.md) |
 | Colours, tokens, primitives, states, charts | [docs/reference/design-system.md](docs/reference/design-system.md) |
@@ -93,6 +94,7 @@ moved, fix the doc as part of your change.
 | [0008](docs/adr/0008-orm-gateway-edge-function.md) | All data goes through the ORM gateway. RLS stays the security boundary. The gateway's `DATABASE_URL` never reaches the browser. |
 | [0009](docs/adr/0009-per-page-data-contracts.md) | One page → one gateway action → one hook with a `loadIdRef` stale guard. No global store, no snapshot, no legacy fallback. |
 | [0010](docs/adr/0010-legacy-crm-integration.md) | `lib/crm-integration.ts` is the **single** sanctioned second Supabase client — read-only, config metadata only. A third data source needs a new ADR. |
+| [0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md) | OOO/NRR are **outreach** states of a `sequencer_contacts` row, never fields on a lead. A CRM lead is created only by a positive reply, at most one per contact. The whole episode lifecycle is `service_role` RPCs driven by n8n — the portal has **no** follow-up list or editor ([OoS-16](docs/reference/functional/13-out-of-scope.md)); its only OOO surface is the per-client routing editor. |
 
 Full index, including `master_admin` (0005), lead custom fields (0007) and the conditions engine
 (0011): [docs/ADR.md](docs/ADR.md).
