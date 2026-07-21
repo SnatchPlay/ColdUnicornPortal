@@ -77,6 +77,31 @@ keeps history so a past absence stays explainable.
 Consequence for reconciliation: a cancelled episode exists in Postgres and has no sheet counterpart.
 Compare on **active** rows only, or every cancellation reads as a divergence.
 
+## Configuration state in production (measured 2026-07-21)
+
+Branch S needs configuration that branch L keeps in spreadsheets. Some of it already exists in
+Postgres; the routing chain does not exist at all.
+
+| What branch S needs | Production | Verdict |
+|---|---|---|
+| Bison API key per workspace | `client_sequencers`: **35 enabled**, all with a plausible key (50–51 chars) and a numeric `external_workspace_id` | ✅ **ready** |
+| `clients.auto_ooo_enabled` | `false` on **all 53** clients | ⛔ blocker |
+| `client_ooo_routing` rows | **0 rows** | ⛔ blocker |
+| Campaigns to route to | `campaigns`: 704 `outreach`, 27 `nurture`, **0 `ooo_followup`** | ⛔ **blocker, and the deepest one** |
+
+Two consequences worth stating plainly.
+
+**The credential problem is already solved in the data.** All 35 enabled sequencer rows carry a real
+API key and workspace id, so branch S can authenticate from Postgres today. The workflows simply do
+not read it. [Security finding 1](security.md#1-per-client-bison-api-keys-live-in-a-google-sheet--high)
+is therefore about deleting the sheet lookup, not about a migration — much smaller than it looked.
+
+**The routing chain has no bottom.** `client_ooo_routing.campaign_id` is
+`REFERENCES campaigns(id)`, and there are **zero** campaigns of type `ooo_followup`. The OOO
+follow-up campaigns the ARM sheet points at exist in Bison and have never been ingested here, so
+routing rows cannot be inserted at all — there is nothing to point them at. Seeding routing is not a
+data-entry task; it needs the campaigns ingested first, with their Bison `external_id`.
+
 ## Preconditions for phase A
 
 1. **Make the sheet append idempotent** (`ooo-detect-and-log`). It is unconditional today, so a
@@ -88,15 +113,27 @@ Compare on **active** rows only, or every cancellation reads as a divergence.
    for clustering before porting extraction logic into branch S.
 3. **Remove the direct `leads` write.** Not part of dual-write — a second store does not license
    bypassing the RPC contract. It has never landed a row, so removal is free.
-4. **Move per-client Bison API keys** from CS PDCA to `client_sequencers.api_key`. Branch S needs a
-   key that does not come from a spreadsheet; this is also
-   [security finding 1](security.md#1-per-client-bison-api-keys-live-in-a-google-sheet--high).
-5. **Seed `client_ooo_routing`** from the ARM sheet, and confirm the campaigns exist in `campaigns`
-   with the right `external_id`. Without this every episode resolves to `skipped/routing_missing` and
-   branch S enrols nobody — which would look like agreement.
+4. **Read the Bison API key from `client_sequencers`, not from CS PDCA.** The data is already there
+   (35/35). This is deleting a sheet lookup in branch S, not a credential migration.
+5. **Build the routing chain**, in this order — it is three steps, not one:
+   1. **Ingest the OOO follow-up campaigns** into `campaigns` with `type='ooo_followup'` and their
+      Bison `external_id`. There are currently **0**, and `client_ooo_routing.campaign_id` is a
+      foreign key to `campaigns(id)`, so nothing can be seeded until these exist.
+   2. **Seed `client_ooo_routing`** from the ARM sheet: `(bison workspace id, gender)` →
+      `(client_id, routing_key, campaign_id)`. The `routing_key` CHECK is exactly
+      `male | female | general`, matching the sheet's values.
+   3. **Set `clients.auto_ooo_enabled`** per client. It is `false` on all 53 today, so every episode
+      would be recorded `skipped/automation_disabled` regardless of routing.
 
-Precondition 5 is the one most likely to produce a **false pass**: two branches that both do nothing
-agree perfectly.
+Precondition 5 governs whether phase A can produce a **meaningful** comparison at all. Skip any part
+of it and branch S enrols nobody: every episode lands as `skipped/routing_missing` or
+`skipped/automation_disabled`. That is not a silent failure — ADR-0015 made those states visible on
+purpose — but it does mean an A1 shadow run would compare a full branch L against an empty branch S
+and tell you nothing about the mapping.
+
+Step 5.1 is the real unit of work here and is currently owned by nobody: no workflow ingests
+`ooo_followup` campaigns, and `11-integrations` §2 documents campaign ingestion as creating
+`outreach` campaigns only.
 
 ## Exit criteria
 
