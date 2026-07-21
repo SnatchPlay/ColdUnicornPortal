@@ -188,10 +188,21 @@ select current_user::text as connected_as,
          'execute') as can_upsert_reply;
 ```
 
-Run it **from the n8n Postgres node** — running it anywhere else answers a different question. All
-three columns must be true. If not, branch S needs a credential connecting as `service_role` (or a
-role granted `execute` on those functions), which is a credential change and outside what an agent
-may do.
+**Answered 2026-07-21 — not a blocker.** Run from an n8n Postgres node using the auto-assigned
+`Postgres account` credential (the same one the OOO workflows use):
+
+```
+connected_as: postgres   session_as: postgres
+can_record_ooo_followup: true   can_upsert_reply: true   can_upsert_contact: true
+```
+
+Branch S can call all three RPCs.
+
+**But note what that answer is.** The credential connects as **`postgres`**, the database superuser —
+not as `service_role`. It therefore bypasses RLS entirely and can read and write every table in the
+database, far beyond the ingestion contract. The grants on these functions are not what is protecting
+anything here; a superuser would pass regardless. Recorded as
+[security finding 6](security.md#6-n8n-connects-to-postgres-as-a-superuser--high).
 
 ## Exit criteria
 

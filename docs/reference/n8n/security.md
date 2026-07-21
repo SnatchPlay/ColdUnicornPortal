@@ -81,6 +81,34 @@ Every ADR-0015 invariant is `SECURITY DEFINER`, `search_path = ''`, `service_rol
 None of it is reached, because automation still writes a spreadsheet. The security model is sound and
 unused; that gap is the migration.
 
+### 6. n8n connects to Postgres as a superuser — **high**
+
+Measured 2026-07-21 from an n8n Postgres node (credential `Postgres account`, the one the OOO
+workflows use):
+
+```
+current_user = postgres   session_user = postgres
+```
+
+That is the database **superuser**, not `service_role`. Consequences:
+
+- **RLS does not apply.** Every policy in the database — the set-based predicates of ADR-0006, the
+  `private.can_manage_client` gating that ADR-0015 §8 relies on to keep OOO data internal-only — is
+  bypassed for this connection.
+- **The `service_role`-only grants on the ingestion RPCs protect nothing here.** A superuser executes
+  them regardless, so the "invariants live behind `service_role` RPCs" argument holds only as long as
+  workflows *choose* to call the RPCs. Nothing stops a Postgres node writing `leads` directly — which
+  is exactly what `ooo-detect-and-log` does today.
+- The blast radius of a mistaken or malicious workflow edit is the entire database, including
+  `DROP`/`TRUNCATE`.
+
+`service_role` would be sufficient for every documented ingestion path: it also bypasses RLS, but it
+is not a superuser and its grants are enumerable. Switching the credential is a small change with a
+large reduction in blast radius, and it makes `pnpm n8n:validate`'s business rules enforceable at the
+database level rather than only by review.
+
+Not fixed here — changing a credential is outside what an agent should do unattended.
+
 ## Reviewing a workflow
 
 - [ ] `pnpm n8n:validate` passes

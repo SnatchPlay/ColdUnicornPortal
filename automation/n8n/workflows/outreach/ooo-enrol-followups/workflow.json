@@ -130,10 +130,8 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "cachedResultName": "Automated Replies Management",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit?usp=drivesdk",
-          "mode": "list",
-          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+          "mode": "id",
+          "value": "=1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
         },
         "filtersUI": {
           "values": [
@@ -267,6 +265,8 @@
   },
   "settings": {
     "binaryMode": "separate",
-    "executionOrder": "v1"
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed"
   }
 }
