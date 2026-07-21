@@ -31,26 +31,34 @@ reads:
     - "Bison API · GET /leads/{taggable_id}/replies"
     - "OpenAI · gpt-5-mini (expected return date extraction)"
   tables:
-    - client_sequencers
+    - client_sequencers        # branch S resolves the client here, not from the CS PDCA sheet
 
 writes:
   external:
-    - "Google Sheets · OOO Leads (append one row per OOO event)"
-  tables:
-    - leads
-  rpcs: []
+    - "Google Sheets · OOO Leads (append one row per OOO event) — branch L"
+  tables: []
+  rpcs:                        # branch S, through the ADR-0015 contract only
+    - upsert_sequencer_contact
+    - upsert_reply
+    - record_ooo_followup
 
 # ── Sheets → Supabase transition (ADR-0017) ───────────────────────────────────────────────────
 # The OOO Leads sheet is the system the business runs on today. Migration is by dual-write, not
 # replacement: the sheet keeps being written until Supabase has been proven against it.
 transition:
-  phase: 0                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
+  phase: A                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
+  phaseState: staged            # branch S exists as an n8n DRAFT; activeVersionId is still the old version
   authoritativeSource: sheets
   legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…)"
   targetStore: "Supabase · sequencer_contacts + ooo_followups"
+  ordering: "branch L and branch S are independent from the trigger; every S node is onError=continueRegularOutput"
+  goLive: >-
+    Publishing this workflow makes branch S run. Do NOT publish before migration 20260722g is
+    applied: without routing and auto_ooo_enabled every episode records as
+    skipped/automation_disabled, and the routing snapshot freezes on a skipped episode.
   blockedBy:
-    - "defect 9 — the two branches read the LLM node with incompatible shapes; resolve before porting extraction logic"
-    - "defect 5 — the sheet append is unconditional; must become append-or-update on a stable key or the stores diverge by construction"
+    - "defect 9 (branch L only) — [327] and the removed leads node read the LLM output with incompatible shapes; branch S derives its own date, so this no longer blocks S"
+    - "defect 5 — the sheet append is unconditional; must become append-or-update on a stable key or the two stores diverge by construction"
   reconciliation: null          # required to leave phase A; see ADR-0017 §5
   parityEvidence: null
 
@@ -116,36 +124,17 @@ environments:
 # only so the gate can be switched on before the cutover ships; every entry expires, and on expiry
 # `pnpm n8n:validate` fails again. Do not extend a date without the process owner.
 knownViolations:
-  - rule: business/direct-table-write
-    node: "Update rows in a table"
-    reason: >-
-      Writes public.leads directly instead of going through the ADR-0015 RPCs. Pre-dates the ADR.
-      Verified 2026-07-21: this node has written nothing to production — 0 leads carry
-      qualification='OOO' or a non-null expected_return_date — so the migration loses no data.
-    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
-    expires: 2026-10-31
-
-  - rule: business/ooo-as-qualification
-    node: "Update rows in a table"
-    reason: >-
-      Sets leads.qualification = 'OOO', which ADR-0015 removed from the funnel. Same node, same
-      cutover. The value is dropped by migrations/deferred/20260722z.
-    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
-    expires: 2026-10-31
-
-  - rule: business/legacy-ooo-column
-    node: "Update rows in a table"
-    reason: >-
-      Writes leads.expected_return_date, dropped by migrations/deferred/20260722z. The deferred
-      migration cannot be applied until this node is gone — that is the cutover gate.
-    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
-    expires: 2026-10-31
-
+  # RESOLVED 2026-07-21 by adding branch S: the "Update rows in a table" node is deleted, so
+  # business/direct-table-write, business/ooo-as-qualification and business/legacy-ooo-column no
+  # longer report. Their acceptances were removed rather than left to rot — a stale acceptance is
+  # itself an error (see conventions.md).
   - rule: business/fallback-date-as-fact
     node: "[327] Add OOO Leads row"
     reason: >-
-      Writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the LLM parsed
-      none, so a guess is stored in a column read as a fact — the exact defect ADR-0015 §2 names.
-      Note the fallback is also inconsistent with the RPC's today+2.
-    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
+      Branch L still writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the
+      LLM parsed none. Left as-is deliberately: branch L must keep behaving exactly as it did during
+      phase A, and changing it would invalidate the very comparison phase A exists to make. Branch S
+      does the right thing — NULL expected_return_date, fallback only in scheduled_for. Closed when
+      branch L is disconnected at phase C.
+    trackedIn: docs/reference/n8n/ooo-phase-a.md
     expires: 2026-10-31

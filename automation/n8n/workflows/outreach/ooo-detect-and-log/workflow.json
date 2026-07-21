@@ -3,7 +3,7 @@
   "description": "OOO add: fetches lead+replies, uses gpt-5-mini (Responses API) for return date extraction, appends to OOO Leads with full column mapping (LeadID, ReplyID, WorkspaceID, Expected Return Date, Formatted Expected Date pl-locale, Gender).",
   "nodes": [
     {
-      "id": "292e0a3f-3627-470f-b912-f3c0e6a7acb6",
+      "id": "4c549506-d0cd-4efe-b8d1-d2584dae6e98",
       "name": "[317] OOO expected return date (gpt-5-mini)",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
@@ -37,7 +37,7 @@
       }
     },
     {
-      "id": "fe4785f7-202c-4d26-871d-42cefecab543",
+      "id": "76f34165-2e22-40e9-a4e7-432872d7dbaf",
       "name": "[318] Bison: GET /leads/{taggable_id}",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
@@ -60,7 +60,7 @@
       }
     },
     {
-      "id": "8c63af4a-4369-4b3d-afcd-8b9c736e34e6",
+      "id": "43885fe9-b8d3-4c8a-bbaf-4be86a288bdd",
       "name": "[322] Bison: GET /leads/{taggable_id}/replies",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
@@ -83,7 +83,7 @@
       }
     },
     {
-      "id": "06884569-1908-4ea8-b90b-6f3f5d6c17b3",
+      "id": "5f35508f-1b17-42c7-add3-aecdf07e8bf7",
       "name": "[325] Find workspace in CS PDCA",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -92,8 +92,6 @@
         208
       ],
       "retryOnFail": true,
-      "maxTries": 5,
-      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -119,7 +117,7 @@
       }
     },
     {
-      "id": "e1d9e593-6339-49f0-8133-5af4eb5b90fc",
+      "id": "39174d21-c4f3-452e-b275-9edd4829e3b1",
       "name": "[326] Set last_reply (oldest by date_received)",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -142,7 +140,7 @@
       }
     },
     {
-      "id": "393f133b-5e32-409f-b5f2-5ee1a7157aaa",
+      "id": "a9c470dd-816c-45f0-951d-305c74762d6a",
       "name": "[327] Add OOO Leads row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -252,602 +250,218 @@
       }
     },
     {
-      "id": "ea710f3f-646b-4d78-8534-319e2071fc9c",
-      "name": "Select rows from a table",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
+      "id": "6833ea87-7cd2-4d43-a4d5-71784660e9c0",
+      "name": "[S] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
       "position": [
-        480,
-        48
+        688,
+        480
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
-        "limit": 1,
-        "operation": "select",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.api_key }}"
+            }
+          ]
+        },
         "options": {},
-        "schema": {
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "2154bdff-6c54-4481-8313-75d7c62fd9e0",
+      "name": "[S] Bison: GET /leads/{taggable_id}/replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('[S] Resolve client sequencer').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}/replies"
+      }
+    },
+    {
+      "id": "e80f29ca-4e9d-4de2-915b-b35cb766c1db",
+      "name": "[S] Extract expected return date",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1360,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "builtInTools": {},
+        "modelId": {
           "__rl": true,
           "mode": "list",
-          "value": "public"
+          "value": "gpt-5-mini"
         },
-        "table": {
-          "__rl": true,
-          "cachedResultName": "client_sequencers",
-          "mode": "list",
-          "value": "client_sequencers"
+        "options": {
+          "instructions": "Extract the expected return-from-office date from this out-of-office auto-reply. Respond with JSON {\"returnDate\": \"YYYY-MM-DD\"} or {\"returnDate\": null} when no clear date is present. Never guess a date.",
+          "store": true,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
         },
-        "where": {
+        "responses": {
           "values": [
             {
-              "column": "external_workspace_id",
-              "value": "={{ $json.event.workspace_id.toString() }}"
+              "content": "={{ $json.ooo_reply.text_body }}"
             }
           ]
         }
       }
     },
     {
-      "id": "c66608eb-72ec-43dd-bf4c-ae4740c8d6b3",
-      "name": "Update rows in a table",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
+      "id": "9095b62b-062a-42ee-a195-47d2338e19aa",
+      "name": "[S] Pick newest OOO reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
-        1696,
-        16
+        1136,
+        480
       ],
       "onError": "continueRegularOutput",
       "parameters": {
-        "columns": {
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false,
-          "mappingMode": "defineBelow",
-          "matchingColumns": [
-            "external_id"
-          ],
-          "schema": [
+        "assignments": {
+          "assignments": [
             {
-              "canBeUsedToMatch": true,
-              "defaultMatch": true,
-              "display": true,
-              "displayName": "id",
-              "id": "id",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "created_at",
-              "id": "created_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "client_id",
-              "id": "client_id",
-              "removed": true,
-              "required": true,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "campaign_id",
-              "id": "campaign_id",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "email",
-              "id": "email",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "first_name",
-              "id": "first_name",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "last_name",
-              "id": "last_name",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "job_title",
-              "id": "job_title",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "company_name",
-              "id": "company_name",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "linkedin_url",
-              "id": "linkedin_url",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "gender",
-              "id": "gender",
-              "options": [
-                {
-                  "name": "male",
-                  "value": "male"
-                },
-                {
-                  "name": "female",
-                  "value": "female"
-                }
-              ],
-              "removed": true,
-              "required": false,
-              "type": "options"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "qualification",
-              "id": "qualification",
-              "options": [
-                {
-                  "name": "preMQL",
-                  "value": "preMQL"
-                },
-                {
-                  "name": "MQL",
-                  "value": "MQL"
-                },
-                {
-                  "name": "meeting_scheduled",
-                  "value": "meeting_scheduled"
-                },
-                {
-                  "name": "meeting_held",
-                  "value": "meeting_held"
-                },
-                {
-                  "name": "offer_sent",
-                  "value": "offer_sent"
-                },
-                {
-                  "name": "won",
-                  "value": "won"
-                },
-                {
-                  "name": "rejected",
-                  "value": "rejected"
-                },
-                {
-                  "name": "OOO",
-                  "value": "OOO"
-                },
-                {
-                  "name": "NRR",
-                  "value": "NRR"
-                }
-              ],
-              "required": false,
-              "type": "options"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "expected_return_date",
-              "id": "expected_return_date",
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "updated_at",
-              "id": "updated_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "external_id",
-              "id": "external_id",
-              "removed": false,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "phone_number",
-              "id": "phone_number",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "phone_source",
-              "id": "phone_source",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "industry",
-              "id": "industry",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "headcount_range",
-              "id": "headcount_range",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "website",
-              "id": "website",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "country",
-              "id": "country",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "message_title",
-              "id": "message_title",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "message_number",
-              "id": "message_number",
-              "removed": true,
-              "required": false,
-              "type": "number"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "response_time_hours",
-              "id": "response_time_hours",
-              "removed": true,
-              "required": false,
-              "type": "number"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "response_time_label",
-              "id": "response_time_label",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "meeting_booked",
-              "id": "meeting_booked",
-              "removed": true,
-              "required": false,
-              "type": "boolean"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "meeting_held",
-              "id": "meeting_held",
-              "removed": true,
-              "required": false,
-              "type": "boolean"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "offer_sent",
-              "id": "offer_sent",
-              "removed": true,
-              "required": false,
-              "type": "boolean"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "won",
-              "id": "won",
-              "removed": true,
-              "required": false,
-              "type": "boolean"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "added_to_ooo_campaign",
-              "id": "added_to_ooo_campaign",
-              "removed": true,
-              "required": false,
-              "type": "boolean"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "external_blacklist_id",
-              "id": "external_blacklist_id",
-              "removed": true,
-              "required": false,
-              "type": "number"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "external_domain_blacklist_id",
-              "id": "external_domain_blacklist_id",
-              "removed": true,
-              "required": false,
-              "type": "number"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "source",
-              "id": "source",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "reply_text",
-              "id": "reply_text",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "client_note",
-              "id": "client_note",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "coldunicorn_note",
-              "id": "coldunicorn_note",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "highlight",
-              "id": "highlight",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "sequencer_id",
-              "id": "sequencer_id",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "linkedin_invitation_sent_at",
-              "id": "linkedin_invitation_sent_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "contact_made_at",
-              "id": "contact_made_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "contact_method",
-              "id": "contact_method",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "negotiation_started_at",
-              "id": "negotiation_started_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "conclusion",
-              "id": "conclusion",
-              "removed": true,
-              "required": false,
-              "type": "string"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "concluded_at",
-              "id": "concluded_at",
-              "removed": true,
-              "required": false,
-              "type": "dateTime"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "final_outcome",
-              "id": "final_outcome",
-              "options": [
-                {
-                  "name": "won",
-                  "value": "won"
-                },
-                {
-                  "name": "lost",
-                  "value": "lost"
-                },
-                {
-                  "name": "lost_premql",
-                  "value": "lost_premql"
-                }
-              ],
-              "removed": true,
-              "required": false,
-              "type": "options"
-            },
-            {
-              "canBeUsedToMatch": true,
-              "defaultMatch": false,
-              "display": true,
-              "displayName": "contact_disposition",
-              "id": "contact_disposition",
-              "removed": true,
-              "required": false,
-              "type": "string"
+              "id": "ooo_reply",
+              "name": "ooo_reply",
+              "type": "object",
+              "value": "={{ ($json.data || []).slice().sort((a, b) => new Date(b.date_received) - new Date(a.date_received))[0] || {} }}"
             }
-          ],
-          "value": {
-            "expected_return_date": "={{ $json.output[0].content[0].text.returnDate.toDateTime() }}",
-            "external_id": "={{ $('When Called by HUB').item.json.data.taggable_id.toString() }}",
-            "qualification": "OOO"
-          }
+          ]
         },
-        "operation": "update",
-        "options": {},
-        "schema": {
-          "__rl": true,
-          "mode": "list",
-          "value": "public"
-        },
-        "table": {
-          "__rl": true,
-          "cachedResultName": "leads",
-          "mode": "list",
-          "value": "leads"
-        }
+        "options": {}
       }
     },
     {
-      "id": "51f44ebd-1f7d-4551-b7f0-4e8510d34f96",
+      "id": "71a63a93-e46b-4f47-a093-4e109b1600c7",
+      "name": "[S] record_ooo_followup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2032,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, ($('[S] Extract expected return date').first().json.returnDate || ''), ($('[S] Extract expected return date').first().json.returnDate ? 'reply_parsed' : 'fallback')].join(',') }}"
+        },
+        "query": "select id::text as followup_id, status::text, skip_reason::text, expected_return_date::text, scheduled_for::text, date_source::text, routing_key::text from public.record_ooo_followup($1::uuid, $2::uuid, $3::date, null, $4)"
+      }
+    },
+    {
+      "id": "1fee1f8f-070d-415b-af96-2424ecc98954",
+      "name": "[S] Resolve client sequencer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.event.workspace_id }}"
+        },
+        "query": "select cs.id::text as client_sequencer_id, cs.client_id::text as client_id, cs.api_key from public.client_sequencers cs where cs.external_workspace_id = $1 and cs.enabled limit 1"
+      }
+    },
+    {
+      "id": "12e1a655-176f-4a32-a542-34a4533123ea",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1808,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('[S] Pick newest OOO reply').first().json.ooo_reply.id), $('[S] Pick newest OOO reply').first().json.ooo_reply.date_received, $json.sequencer_contact_id, ($('[S] Pick newest OOO reply').first().json.ooo_reply.subject || ''), ($('[S] Pick newest OOO reply').first().json.ooo_reply.text_body || ''), ($('[S] Pick newest OOO reply').first().json.ooo_reply.from_email_address || '')].join(',') }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'OOO', $4, $5, false, $6, null)::text as reply_id"
+      }
+    },
+    {
+      "id": "bfdc00d1-5729-40da-963e-69641094f1dd",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1584,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$('[S] Resolve client sequencer').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.first_name, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.last_name, (($('[S] Bison: GET /leads/{taggable_id}').first().json.data.custom_variables || []).find(v => v.name === 'gender') || {}).value || 'general'].join(',') }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, $6, null)::text as sequencer_contact_id"
+      }
+    },
+    {
+      "id": "ad021549-16b6-442d-81bc-f7533af9eb42",
+      "name": "Sticky Note 242167e2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        430
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (shadow, phase A)\n\nIndependent end to end: own client resolution, own Bison calls, own extraction, own field mapping. Writes through the ADR-0015 RPCs only.\n\nEvery node is onError: continueRegularOutput — a failure here must never break branch L.\n\nPhase C = delete this sticky's nodes' counterpart above and make this the only path.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 1868
+      }
+    },
+    {
+      "id": "843fe49a-65c1-4ce3-a362-75fffe5a9199",
+      "name": "Sticky Note c40d69cf",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        158
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nExactly what ran before. The business reads the OOO Leads sheet, so this path must keep working and must not be broken by branch S.",
+        "height": 200,
+        "width": 1548
+      }
+    },
+    {
+      "id": "f3f9e183-7601-4127-a20e-cf7b73bd8f31",
       "name": "When Called by HUB",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -871,7 +485,7 @@
           },
           {
             "index": 0,
-            "node": "Select rows from a table",
+            "node": "[S] Resolve client sequencer",
             "type": "main"
           }
         ]
@@ -883,11 +497,6 @@
           {
             "index": 0,
             "node": "[327] Add OOO Leads row",
-            "type": "main"
-          },
-          {
-            "index": 0,
-            "node": "Update rows in a table",
             "type": "main"
           }
         ]
@@ -932,6 +541,83 @@
           {
             "index": 0,
             "node": "[317] OOO expected return date (gpt-5-mini)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}/replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Pick newest OOO reply",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Extract expected return date": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Pick newest OOO reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Extract expected return date",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve client sequencer": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] record_ooo_followup",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
             "type": "main"
           }
         ]
