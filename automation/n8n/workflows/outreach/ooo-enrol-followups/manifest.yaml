@@ -4,7 +4,7 @@ id: ooo-enrol-followups
 name: "Add OOO Leads"
 domain: outreach
 owner: automation
-lifecycle: imported          # graph committed; README/contracts/fixtures pending
+lifecycle: managed
 status: active
 criticality: high            # the ONLY OOO workflow that calls a Bison write endpoint
 
@@ -29,10 +29,13 @@ writes:
   external:
     - "Bison API · POST /campaigns/{campaignId}/leads/attach-leads  ← REAL SIDE EFFECT"
   tables: []
-  rpcs: []
+  rpcs: []                     # A1 is read-only: no claim, no state transition
+  tablesWritten:
+    - integration_sync_runs    # shadow log only (provider=bison, sync_type=ooo_enrol_shadow)
 
 transition:
-  phase: 0
+  phase: A1                     # SHADOW: branch S records intent, sends nothing
+  phaseState: live              # published 2026-07-21
   authoritativeSource: sheets
   legacyStore: "Google Sheets · OOO Leads + ARM"
   targetStore: "Supabase · ooo_followups + client_ooo_routing"
@@ -41,7 +44,15 @@ transition:
     The only workflow in the family needing the A1 shadow step: two branches resolving DIFFERENT
     campaigns would enrol one contact into two follow-up sequences. Same campaign is a safe no-op —
     Bison ignores a lead already in the campaign (ADR-0015 §4).
-  reconciliation: null
+  reconciliation: >-
+    Per scheduled run, compare branch S's intent against branch L's actual attach calls:
+      select metadata->'intended_attach', metadata->>'due_count', metadata->>'unrouted_count'
+      from public.integration_sync_runs
+      where provider = 'bison' and sync_type = 'ooo_enrol_shadow'
+      order by started_at desc;
+    A1 -> A2 requires the (bison_lead_id, bison_campaign_id) sets to agree, EXCLUDING workspaces
+    75 and 130 (knowingly unrouted) and excluding rows branch L missed because its due filter is
+    an exact equality — branch S catching those up is correct, not a divergence.
   parityEvidence: null
 
 idempotency:

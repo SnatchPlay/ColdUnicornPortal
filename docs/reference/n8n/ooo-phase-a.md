@@ -14,7 +14,7 @@ Process rule: [OOO follow-ups](../processes/outreach/ooo-followups.md).
 | `ooo-detect-and-log` | contact → reply → episode | **live** |
 | `ooo-remove-on-tag-removed` | `cancel_active_ooo_followup` | **live** |
 | `nrr-daily-stats` | `upsert_reply` (NRR) | **live** |
-| `ooo-enrol-followups` | worker + Bison attach | **not started** — needs A1 shadow |
+| `ooo-enrol-followups` | shadow: records intent, sends nothing | **live (A1)** — A2 gated on measured parity |
 
 ## Shape
 

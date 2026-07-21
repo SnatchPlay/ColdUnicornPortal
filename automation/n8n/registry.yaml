@@ -50,7 +50,7 @@ workflows:
     path: automation/n8n/workflows/outreach/ooo-enrol-followups
     businessProcess: docs/reference/processes/outreach/ooo-followups.md
     owner: automation
-    lifecycle: imported
+    lifecycle: managed
     status: active
     criticality: high        # the only OOO workflow that calls a Bison WRITE endpoint
     trigger: schedule
