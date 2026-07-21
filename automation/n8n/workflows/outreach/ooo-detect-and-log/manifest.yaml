@@ -47,15 +47,17 @@ writes:
 # replacement: the sheet keeps being written until Supabase has been proven against it.
 transition:
   phase: A                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
-  phaseState: staged            # branch S exists as an n8n DRAFT; activeVersionId is still the old version
+  phaseState: live              # published 2026-07-21; branch S runs on every OOO TAG_ATTACHED
   authoritativeSource: sheets
   legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…)"
   targetStore: "Supabase · sequencer_contacts + ooo_followups"
   ordering: "branch L and branch S are independent from the trigger; every S node is onError=continueRegularOutput"
   goLive: >-
-    Publishing this workflow makes branch S run. Do NOT publish before migration 20260722g is
-    applied: without routing and auto_ooo_enabled every episode records as
-    skipped/automation_disabled, and the routing snapshot freezes on a skipped episode.
+    Done. Migration 20260722g was applied first (42 routing rules, 14 clients enabled), then the
+    workflow was published. Verified on real data from a manual run: record_ooo_followup returned
+    status=pending, routing_key=male, a resolved target_campaign_id, expected_return_date=NULL and
+    scheduled_for=today+2 with date_source=fallback — i.e. the fallback landed in scheduled_for and
+    NOT in expected_return_date (ADR-0015 §2).
   blockedBy:
     - "defect 9 (branch L only) — [327] and the removed leads node read the LLM output with incompatible shapes; branch S derives its own date, so this no longer blocks S"
     - "defect 5 — the sheet append is unconditional; must become append-or-update on a stable key or the two stores diverge by construction"

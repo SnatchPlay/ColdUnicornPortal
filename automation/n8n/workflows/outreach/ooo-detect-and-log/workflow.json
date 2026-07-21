@@ -369,7 +369,7 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, ($('[S] Extract expected return date').first().json.returnDate || ''), ($('[S] Extract expected return date').first().json.returnDate ? 'reply_parsed' : 'fallback')].join(',') }}"
+          "queryReplacement": "={{ [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, $('[S] Extract expected return date').first().json.returnDate || null, ($('[S] Extract expected return date').first().json.returnDate ? 'reply_parsed' : 'fallback') ] }}"
         },
         "query": "select id::text as followup_id, status::text, skip_reason::text, expected_return_date::text, scheduled_for::text, date_source::text, routing_key::text from public.record_ooo_followup($1::uuid, $2::uuid, $3::date, null, $4)"
       }
@@ -387,7 +387,7 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ $json.event.workspace_id }}"
+          "queryReplacement": "={{ [String($json.event.workspace_id)] }}"
         },
         "query": "select cs.id::text as client_sequencer_id, cs.client_id::text as client_id, cs.api_key from public.client_sequencers cs where cs.external_workspace_id = $1 and cs.enabled limit 1"
       }
@@ -405,7 +405,7 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [String($('[S] Pick newest OOO reply').first().json.ooo_reply.id), $('[S] Pick newest OOO reply').first().json.ooo_reply.date_received, $json.sequencer_contact_id, ($('[S] Pick newest OOO reply').first().json.ooo_reply.subject || ''), ($('[S] Pick newest OOO reply').first().json.ooo_reply.text_body || ''), ($('[S] Pick newest OOO reply').first().json.ooo_reply.from_email_address || '')].join(',') }}"
+          "queryReplacement": "={{ [String($('[S] Pick newest OOO reply').first().json.ooo_reply.id), $('[S] Pick newest OOO reply').first().json.ooo_reply.date_received, $json.sequencer_contact_id, $('[S] Pick newest OOO reply').first().json.ooo_reply.subject || null, $('[S] Pick newest OOO reply').first().json.ooo_reply.text_body || null, $('[S] Pick newest OOO reply').first().json.ooo_reply.from_email_address || null ] }}"
         },
         "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'OOO', $4, $5, false, $6, null)::text as reply_id"
       }
@@ -423,30 +423,14 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [$('[S] Resolve client sequencer').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.first_name, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.last_name, (($('[S] Bison: GET /leads/{taggable_id}').first().json.data.custom_variables || []).find(v => v.name === 'gender') || {}).value || 'general'].join(',') }}"
+          "queryReplacement": "={{ [$('[S] Resolve client sequencer').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.first_name || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.last_name || null, ((($('[S] Bison: GET /leads/{taggable_id}').first().json.data.custom_variables || []).find(v => v.name === 'gender') || {}).value) || 'general' ] }}"
         },
         "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, $6, null)::text as sequencer_contact_id"
       }
     },
     {
-      "id": "ad021549-16b6-442d-81bc-f7533af9eb42",
-      "name": "Sticky Note 242167e2",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        414,
-        430
-      ],
-      "parameters": {
-        "color": 5,
-        "content": "## Branch S — Supabase (shadow, phase A)\n\nIndependent end to end: own client resolution, own Bison calls, own extraction, own field mapping. Writes through the ADR-0015 RPCs only.\n\nEvery node is onError: continueRegularOutput — a failure here must never break branch L.\n\nPhase C = delete this sticky's nodes' counterpart above and make this the only path.\nRepo: docs/reference/n8n/ooo-phase-a.md",
-        "height": 200,
-        "width": 1868
-      }
-    },
-    {
-      "id": "843fe49a-65c1-4ce3-a362-75fffe5a9199",
-      "name": "Sticky Note c40d69cf",
+      "id": "46760823-9d73-49f5-a021-1c7ac785d810",
+      "name": "Sticky Note 8ca1ace2",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -458,6 +442,22 @@
         "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nExactly what ran before. The business reads the OOO Leads sheet, so this path must keep working and must not be broken by branch S.",
         "height": 200,
         "width": 1548
+      }
+    },
+    {
+      "id": "4c0daaee-4599-4846-b107-376a58981cc6",
+      "name": "Sticky Note 8ddb616c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        430
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (shadow, phase A)\n\nIndependent end to end: own client resolution, own Bison calls, own extraction, own field mapping. Writes through the ADR-0015 RPCs only.\n\nEvery node is onError: continueRegularOutput — a failure here must never break branch L.\n\nPhase C = delete this sticky's nodes' counterpart above and make this the only path.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 1868
       }
     },
     {
