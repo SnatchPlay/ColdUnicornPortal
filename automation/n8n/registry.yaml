@@ -1,0 +1,43 @@
+# Registry of every n8n workflow this repository knows about.
+#
+# The LOGICAL ID is the primary key. A workflow name is edited in the n8n UI and a remote id is
+# per-environment, so neither is an identity. See automation/n8n/conventions.md.
+#
+# lifecycle:
+#   managed   — repository owns it: workflow.json + manifest + contracts committed
+#   observed  — inventoried and documented, artifact not yet imported (mid-migration)
+#   orphan    — exists on the instance, nobody has claimed it
+#
+# `pnpm n8n:inventory` reconciles this file against the live instance.
+# `pnpm n8n:validate` checks it offline, on every pull request.
+
+schemaVersion: 1
+
+environments:
+  development:
+    # No development n8n instance exists yet. Until one does, every write path stays closed
+    # (docs/reference/n8n/environments.md).
+    available: false
+  production:
+    available: true
+    # The MCP token in .env.local points here. Read-only by policy.
+    writable: false
+
+workflows:
+  - id: ooo-detect-and-log
+    name: "[child-3] TAG_ATTACHED · OOO · Detect return date and log"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-detect-and-log
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: O4DqMEu1Z9LcxikE
+    lastRepositorySync: 2026-07-21
+    lastValidation: 2026-07-21 pnpm n8n:validate — 0 errors, accepted violations recorded in manifest

@@ -127,6 +127,27 @@ it.)
 
 ---
 
+## Automation (n8n) — [`scripts/n8n/`](../scripts/n8n/), [`automation/n8n/`](../automation/n8n/)
+
+Search here before writing any n8n tooling, contract or process document
+([ADR-0016](adr/0016-repository-as-automation-source-of-truth.md)).
+
+| Thing | Where |
+|---|---|
+| n8n MCP client (read-only by default) | [`scripts/n8n/lib/mcp.mjs`](../scripts/n8n/lib/mcp.mjs) — `callTool`, `callWriteTool` (dev-only guard), `listWorkflows`, `getWorkflow`, `currentEnvironment`. **Don't hand-roll `fetch` against the MCP**: it replies over SSE and reports tool failures as `isError` results, not JSON-RPC errors. |
+| Sanitize / normalize a workflow | [`scripts/n8n/lib/sanitize.mjs`](../scripts/n8n/lib/sanitize.mjs) — `sanitize`, `normalize`, `toCanonicalJson` |
+| Secret + leakage scanning | [`scripts/n8n/lib/scan.mjs`](../scripts/n8n/lib/scan.mjs) — `scanWorkflow` (also used on fixtures) |
+| Business-rule enforcement | [`scripts/n8n/lib/business-rules.mjs`](../scripts/n8n/lib/business-rules.mjs) — `validateBusinessRules`, `RPC_OWNED_TABLES` |
+| Registry / manifest loading | [`scripts/n8n/lib/registry.mjs`](../scripts/n8n/lib/registry.mjs) — `loadRegistry`, `loadManifest`, `discoverWorkflowDirs`, `validateManifest` |
+| Minimal JSON-Schema check | [`scripts/n8n/lib/json-schema.mjs`](../scripts/n8n/lib/json-schema.mjs) — `validateAgainstSchema` (subset; reports unsupported keywords rather than ignoring them) |
+| `.env.local` loading in scripts | [`scripts/n8n/lib/env.mjs`](../scripts/n8n/lib/env.mjs) — `loadEnv`, `requireEnv`, `REPO_ROOT` |
+| Workflow index | [`automation/n8n/registry.yaml`](../automation/n8n/registry.yaml) — logical ID is the primary key |
+| Artifact layout rules | [`automation/n8n/conventions.md`](../automation/n8n/conventions.md) |
+| Business processes | [`docs/reference/processes/`](reference/processes/README.md) |
+| Rule → table → RPC → portal → metric → workflow → test | [`docs/reference/traceability.md`](reference/traceability.md) |
+
+---
+
 ## Forbidden duplications
 
 - A second HTTP layer, a second auth context, a second global data store, a second metric
@@ -137,3 +158,8 @@ it.)
 - Re-declaring date helpers, percentage helpers, or chart tooltip styles. They exist.
 - A second lead drawer. Compose `LeadConversation` / `LeadMetaSection` / `LeadEditForm`.
 - Service-role keys or `DATABASE_URL` anywhere the browser can reach them.
+- A second n8n client, sanitizer or secret scanner — extend `scripts/n8n/lib/`.
+- Credentials, `pinData` or real personal data in a committed workflow artifact or fixture.
+- A database invariant reimplemented inside an n8n workflow. Where an ingestion RPC exists
+  (`leads`, `replies`, `ooo_followups`, `sequencer_contacts`), call it
+  ([ADR-0015](adr/0015-sequencer-contacts-and-ooo-followups.md) §5).

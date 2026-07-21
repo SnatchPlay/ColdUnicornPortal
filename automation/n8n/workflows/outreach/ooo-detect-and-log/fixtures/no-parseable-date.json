@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED",
+    "tag": "OOO"
+  },
+  "data": {
+    "taggable_id": 5500124,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "female"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. OOO body: 'I am currently away from my desk with limited access to email.' No date. Target: expected_return_date=NULL, scheduled_for=today+2, date_source=fallback."
+}

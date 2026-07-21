@@ -44,7 +44,13 @@ This reference documents the PdcaFigmaTest portal (ColdUnicorn PDCA) end-to-end:
 
 - **[`CLAUDE.md`](../../../CLAUDE.md)** — the working agreement. Rules + task routing.
 - **[`docs/BUSINESS_LOGIC.md`](../../BUSINESS_LOGIC.md)** — canonical product specification ("should we build this?").
-- **[`docs/ADR.md`](../../ADR.md)** — index of all 11 architecture decisions ("why is it like this?").
+- **[`docs/ADR.md`](../../ADR.md)** — index of all 16 architecture decisions ("why is it like this?").
+- **[`docs/reference/processes/`](../processes/README.md)** — business processes end to end (rule,
+  lifecycle, invariants) across portal + database + automation.
+- **[`docs/reference/n8n/`](../n8n/README.md)** — how n8n workflows are governed, imported and
+  validated ([ADR-0016](../../adr/0016-repository-as-automation-source-of-truth.md)).
+- **[`docs/reference/traceability.md`](../traceability.md)** — rule → table → RPC → gateway → portal
+  → metric → workflow → test.
 
 **Working docs**
 

@@ -1,0 +1,135 @@
+schemaVersion: 1
+
+id: ooo-detect-and-log
+name: "[child-3] TAG_ATTACHED · OOO · Detect return date and log"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0012-multi-sequencer-model.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+    event: TAG_ATTACHED
+    tag: OOO
+
+# ── What it actually touches TODAY (as imported 2026-07-21) ──────────────────────────────────
+# This is a description of the live workflow, not of the target contract. The gap between the two
+# is the migration, and it is recorded in `knownViolations` + the process document.
+reads:
+  external:
+    - "Google Sheets · CS PDCA (workspace → Bison API key, col_5 / col_6)"
+    - "Bison API · GET /leads/{taggable_id}"
+    - "Bison API · GET /leads/{taggable_id}/replies"
+    - "OpenAI · gpt-5-mini (expected return date extraction)"
+  tables:
+    - client_sequencers
+
+writes:
+  external:
+    - "Google Sheets · OOO Leads (append one row per OOO event)"
+  tables:
+    - leads
+  rpcs: []
+
+# ── The contract this workflow MUST move to (ADR-0015 §5, 11-integrations §6a) ────────────────
+targetContract:
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - record_ooo_followup
+  tables: []
+  notes: >-
+    OOO stops being a lead field entirely. The episode becomes an ooo_followups row against a
+    sequencer_contacts identity. See the process document for the step-by-step call order.
+
+portalSurfaces:
+  # ADR-0015 / OoS-16: there is deliberately NO portal list or editor for episodes.
+  - /manager/clients → client drawer → OOO routing editor (rules only)
+
+metrics:
+  - daily_stats.ooo_count  # sequencer-reported daily OOO events — NOT a CRM figure (ADR-0015 §9)
+
+credentials:
+  - alias: google-sheets-cs-pdca
+    type: googleSheetsOAuth2Api
+  - alias: openai-classification
+    type: openAiApi
+  - alias: supabase-postgres
+    type: postgres
+  # Bison is NOT an n8n credential: the per-workspace API key is read out of the CS PDCA sheet at
+  # runtime and injected as an Authorization header expression. That is itself a finding — see
+  # docs/reference/n8n/security.md.
+
+idempotency:
+  key: null
+  notes: >-
+    NONE TODAY. The Google Sheets append is unconditional, so a redelivered TAG_ATTACHED event
+    writes a second "OOO Leads" row for the same contact. The target contract fixes this with
+    record_ooo_followup's two partial unique indexes (uq_ooo_followups_active and
+    uq_ooo_followups_source_reply, ADR-0015 §3).
+
+retryPolicy:
+  notes: >-
+    Only "[325] Find workspace in CS PDCA" retries (5 tries, 5s apart). The Bison calls, the LLM
+    call and both writes have no retry and no error branch, so a failure loses the OOO event
+    silently.
+
+cancellation:
+  notes: >-
+    Handled by a sibling workflow, "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
+    (ZZ0ughB302WdDJOf), which DELETES the sheet row. ADR-0015 replaces deletion with
+    cancel_active_ooo_followup, which preserves history.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: O4DqMEu1Z9LcxikE
+
+# ── Accepted contradictions with the current business contract ────────────────────────────────
+# Each of these is a REAL defect in the live workflow. They are accepted (downgraded to warnings)
+# only so the gate can be switched on before the cutover ships; every entry expires, and on expiry
+# `pnpm n8n:validate` fails again. Do not extend a date without the process owner.
+knownViolations:
+  - rule: business/direct-table-write
+    node: "Update rows in a table"
+    reason: >-
+      Writes public.leads directly instead of going through the ADR-0015 RPCs. Pre-dates the ADR.
+      Verified 2026-07-21: this node has written nothing to production — 0 leads carry
+      qualification='OOO' or a non-null expected_return_date — so the migration loses no data.
+    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
+    expires: 2026-10-31
+
+  - rule: business/ooo-as-qualification
+    node: "Update rows in a table"
+    reason: >-
+      Sets leads.qualification = 'OOO', which ADR-0015 removed from the funnel. Same node, same
+      cutover. The value is dropped by migrations/deferred/20260722z.
+    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
+    expires: 2026-10-31
+
+  - rule: business/legacy-ooo-column
+    node: "Update rows in a table"
+    reason: >-
+      Writes leads.expected_return_date, dropped by migrations/deferred/20260722z. The deferred
+      migration cannot be applied until this node is gone — that is the cutover gate.
+    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
+    expires: 2026-10-31
+
+  - rule: business/fallback-date-as-fact
+    node: "[327] Add OOO Leads row"
+    reason: >-
+      Writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the LLM parsed
+      none, so a guess is stored in a column read as a fact — the exact defect ADR-0015 §2 names.
+      Note the fallback is also inconsistent with the RPC's today+2.
+    trackedIn: docs/reference/n8n/migration-backlog.md#1-ooo-cutover
+    expires: 2026-10-31

@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED",
+    "tag": "OOO"
+  },
+  "data": {
+    "taggable_id": 5500123,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "male"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. Same contact as valid-input.json, months later, after the first episode reached 'submitted'. Different source reply. Target: a NEW episode opens; history is preserved."
+}

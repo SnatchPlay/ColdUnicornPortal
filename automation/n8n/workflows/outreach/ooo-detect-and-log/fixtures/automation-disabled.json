@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900003,
+    "type": "TAG_ATTACHED",
+    "tag": "OOO"
+  },
+  "data": {
+    "taggable_id": 5500300,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "male"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. Client for workspace 900003 has auto_ooo_enabled=false. Target: status=skipped, skip_reason=automation_disabled."
+}

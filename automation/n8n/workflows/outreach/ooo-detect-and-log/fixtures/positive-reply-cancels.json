@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED",
+    "tag": "Interested"
+  },
+  "data": {
+    "taggable_id": 5500123,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "male"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. Positive reply for a contact holding an active OOO episode. Target: promote_contact_to_lead creates the CRM lead (one per contact) AND cancels the episode. An NRR tag in the same position must create NO lead."
+}

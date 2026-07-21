@@ -60,6 +60,8 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 
 | Task | Read / invoke |
 |---|---|
+| **Any n8n workflow change** | [reference/n8n/](docs/reference/n8n/README.md) — §6 below is binding |
+| **A business rule, end to end** | [reference/processes/](docs/reference/processes/README.md) |
 | New page, route, or tab | `portal-page` skill |
 | New data read/write, new gateway action | `gateway-action` skill |
 | Schema, RLS policy, migration, index | `rls-migration` skill |
@@ -68,7 +70,7 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 | Find something reusable | [docs/reuse-catalog.md](docs/reuse-catalog.md) |
 | Colours, tokens, primitives, states, charts | [docs/reference/design-system.md](docs/reference/design-system.md) |
 | Commands, quality gate, env, observability | [docs/development-standards-and-operations.md](docs/development-standards-and-operations.md) |
-| "Why is it like this?" | [docs/ADR.md](docs/ADR.md) → the 11 ADRs |
+| "Why is it like this?" | [docs/ADR.md](docs/ADR.md) → the 16 ADRs |
 | "Is this in scope?" | [docs/BUSINESS_LOGIC.md](docs/BUSINESS_LOGIC.md) + [13-out-of-scope.md](docs/reference/functional/13-out-of-scope.md) |
 | How a page/metric/chart currently works | [docs/reference/functional/INDEX.md](docs/reference/functional/INDEX.md) |
 | A metric formula | [04-metrics-catalog.md](docs/reference/functional/04-metrics-catalog.md) |
@@ -95,6 +97,7 @@ moved, fix the doc as part of your change.
 | [0009](docs/adr/0009-per-page-data-contracts.md) | One page → one gateway action → one hook with a `loadIdRef` stale guard. No global store, no snapshot, no legacy fallback. |
 | [0010](docs/adr/0010-legacy-crm-integration.md) | `lib/crm-integration.ts` is the **single** sanctioned second Supabase client — read-only, config metadata only. A third data source needs a new ADR. |
 | [0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md) | OOO/NRR are **outreach** states of a `sequencer_contacts` row, never fields on a lead. A CRM lead is created only by a positive reply, at most one per contact. The whole episode lifecycle is `service_role` RPCs driven by n8n — the portal has **no** follow-up list or editor ([OoS-16](docs/reference/functional/13-out-of-scope.md)); its only OOO surface is the per-client routing editor. |
+| [0016](docs/adr/0016-repository-as-automation-source-of-truth.md) | This repository is the source of truth for **automation**, not just for the portal. n8n is a deployment target. A workflow that contradicts a business rule, an ADR or a data contract is a defect **in the workflow**. |
 
 Full index, including `master_admin` (0005), lead custom fields (0007) and the conditions engine
 (0011): [docs/ADR.md](docs/ADR.md).
@@ -134,6 +137,46 @@ closes. `sonner` toasts for transient feedback, `<Banner>` for persistent contex
 **Never:** a second HTTP layer, a second auth context, a second global store, a second metric
 calculator, a second lead drawer. Never import `@supabase/supabase-js` outside `data/`,
 `lib/supabase.ts`, `lib/avatar-storage.ts`, `providers/auth.tsx`, `lib/crm-integration.ts`.
+
+---
+
+## 5a. n8n and automation
+
+The repository is the source of truth for automation too ([ADR-0016](docs/adr/0016-repository-as-automation-source-of-truth.md)).
+Five levels, and a conflict is always resolved **downward**:
+
+> business rules → architecture decisions → data contracts → application → **n8n workflows**
+
+**Routing.** OOO · NRR · positive reply · sequencer contact →
+[process doc](docs/reference/processes/outreach/ooo-followups.md) → data contracts
+([ADR-0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md),
+[11-integrations §6a](docs/reference/functional/11-integrations.md)) → portal/dashboard impact →
+**only then** the workflow.
+
+Before any n8n change, read: the business process → the ADRs → the workflow's `manifest.yaml` → the
+RPC/API contract. Then:
+
+1. **Never treat the current workflow as correct.** It is evidence of what runs, not of what should run.
+2. **Never write a credential into workflow JSON**, and never commit `pinData`.
+3. **Never change or activate a production workflow via MCP without explicit approval.** The only
+   instance is production and the token is unrestricted — see [environments.md](docs/reference/n8n/environments.md).
+4. **Use the RPC contract, not raw table writes.** `leads`, `replies`, `ooo_followups` and
+   `sequencer_contacts` are written through `SECURITY DEFINER` RPCs. Never move a database invariant
+   into n8n.
+5. **No new table, enum, RPC or metric** without checking [reuse-catalog.md](docs/reuse-catalog.md) first.
+6. **After any remote change, commit the canonical artifact** (`pnpm n8n:export`). Otherwise it is drift.
+7. **Update [traceability.md](docs/reference/traceability.md)**, and check portal + dashboard impact.
+8. **Register contradictions, don't hide them** — `knownViolations` with a reason, a tracking link and
+   an expiry date.
+
+```bash
+pnpm n8n:validate      # offline; runs in CI
+pnpm n8n:inventory     # live workflows, classified
+pnpm n8n:check-drift   # artifact vs instance
+```
+
+The 14 official `n8n-*-official` skills advise on building workflows well. Like the design skills,
+**they never override this file or the ADRs.**
 
 ---
 
