@@ -522,6 +522,31 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 
 Append-only. Each entry: date, decision, rationale, references.
 
+### Decision (2026-07-21): System boundary extended with a public aggregate lead counter (ADR-0014)
+
+The agency marketing website (Webflow) shows social-proof counters of leads received - yesterday,
+last 7 / 30 / 90 days, all time. Until now no surface served an unauthenticated caller: every read
+goes through the ORM gateway with the caller's JWT, and every RLS policy is granted to
+`authenticated` only.
+
+- **Decision:** expose exactly one argument-less `SECURITY DEFINER` function,
+  `public.public_lead_stats()`, with `EXECUTE` granted to `anon`. It returns five counters and a
+  timestamp - no rows, no `client_id`, no per-client or per-campaign breakdown.
+- **Rationale:** the smallest possible hole. A new edge function would have cost the
+  `verify_jwt = true` invariant or an extra deploy surface for the same exposure; extending the
+  gateway would mean inventing an anonymous caller inside the one mechanism the security boundary
+  rests on. The `apikey` used by the site is the publishable key, which already ships in the
+  portal's JS bundle - no new secret.
+- **Counting rule:** all `leads` rows except OOO / NRR / rejected. This is deliberately **not** any
+  existing portal KPI (`getClientKpis` counts MQLs only), so the public number is larger than the
+  dashboard's. Expected.
+- **Boundary:** aggregates only. Any sliced public metric - per client, per campaign, a time series,
+  a named logo - requires a new ADR.
+- References: [ADR-0014](adr/0014-public-marketing-stats-rpc.md),
+  [03-data-model §4a](reference/functional/03-data-model.md#4a-public-functions-anon-callable),
+  [04-metrics-catalog §16](reference/functional/04-metrics-catalog.md#16-public-marketing-counters),
+  [11-integrations §1](reference/functional/11-integrations.md).
+
 ### Decision (2026-07-14): Documentation + agent-contract overhaul; snapshot layer deleted
 
 No product-scope change. This entry records a **documentation and architecture-hygiene** pass that

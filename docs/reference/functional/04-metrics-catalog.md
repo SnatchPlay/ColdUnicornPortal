@@ -19,6 +19,7 @@ Every metric shown anywhere in the portal, with its formula, source columns, fil
 13. [Admin campaign momentum](#13-admin-campaign-momentum)
 14. [Supporting helpers](#14-supporting-helpers)
 15. [Condition-rule context metrics](#15-condition-rule-context-metrics)
+16. [Public marketing counters](#16-public-marketing-counters)
 
 ---
 
@@ -662,6 +663,54 @@ DoD condition checks do not hardcode per-column comparisons. Each DoD schedule/s
 ### 15.3 Legacy-rate parity keys
 
 For parity with CS PDCA sheet behavior, the WoW response/human/OOO rules preserve green branches for very low rates (`<0.10%`) and record this in seeded `notes`. See [14 · Condition rules](./14-condition-rules.md#10-known-legacy-quirks).
+
+---
+
+## 16. Public marketing counters
+
+The only metric in this catalogue that is **not** computed in TypeScript and **not** scoped to a
+signed-in user. Computed entirely in Postgres by `public.public_lead_stats()`
+([migration `20260721_public_lead_stats_rpc.sql`](../../../supabase/migrations/20260721_public_lead_stats_rpc.sql),
+[ADR-0014](../../adr/0014-public-marketing-stats-rpc.md)) and served to the agency's Webflow site as
+a PostgREST RPC.
+
+### 16.1 Leads received (yesterday / 7d / 30d / 90d / all time)
+
+- **Where:** the public marketing website. Not rendered anywhere in the portal.
+- **Formula:** `count(leads)` per window, excluding OOO / NRR / rejected:
+
+  ```sql
+  qualification IS DISTINCT FROM 'rejected'
+  AND coalesce(contact_disposition,
+        CASE qualification WHEN 'OOO' THEN 'out_of_office'
+                           WHEN 'NRR' THEN 'not_right_role' END) IS NULL
+  ```
+
+- **Source:** `leads.created_at`, `leads.qualification`, `leads.contact_disposition`.
+- **File:line:** the SQL is the single implementation. It deliberately duplicates
+  `deriveContactDisposition()` ([lead-status.ts:73](../../../src/app/lib/crm/lead-status.ts#L73))
+  because Postgres cannot import the TS module - a change to one is incomplete without the other.
+- **Time window:** anchored to UTC midnight (same convention as `isoDaysAgo()`,
+  [orm-gateway/index.ts:117](../../../supabase/functions/orm-gateway/index.ts#L117)).
+  `yesterday` = the previous whole UTC day, half-open `[midnight-1d, midnight)`. `last_7_days` /
+  `last_30_days` / `last_90_days` = `created_at >= midnight - Nd`, i.e. N whole days **plus** today
+  so far, so the site's number ticks up during the day. `all_time` = every row.
+- **Edge cases:** the legacy `CASE` branch must survive n8n's cutover to `contact_disposition`;
+  historical rows keep `OOO`/`NRR` in `qualification` forever
+  ([11-integrations §6](11-integrations.md)). Aggregation uses `count(created_at)`, not `count(*)`,
+  because the query left-joins the filtered set onto a one-row bounds CTE - `count(*)` would report
+  1 instead of 0 on an empty database.
+- **Does NOT match any portal KPI.** `getClientKpis` counts MQLs only
+  ([client-view-models.ts:37](../../../src/app/lib/client-view-models.ts#L37)); this counter
+  includes preMQL and unqualified leads and is therefore larger. Expected, not a bug.
+- **Visible to:** **everyone.** No authentication. This is the deliberate exception documented in
+  ADR-0014.
+
+Verified 2026-07-21 on a local copy of the production dump (4,723 leads): RPC output matched an
+independently written cross-check query exactly on all five windows; an 8-row insert/rollback probe
+confirmed exactly 3 of 8 synthetic leads counted (rejected, legacy OOO, legacy NRR, and both
+canonical dispositions excluded); a 5-row boundary probe confirmed the half-open `yesterday` window
+and the 7/30/90 day cut-offs.
 
 Next: [05 В· Client portal](./05-client-portal.md).
 

@@ -10,6 +10,7 @@ Authoritative source: [`supabase/drizzle/schema.ts`](../../../supabase/drizzle/s
 2. [Tables by domain](#2-tables-by-domain)
 3. [Views](#3-views)
 4. [Private helper functions (RLS predicates)](#4-private-helper-functions-rls-predicates)
+4a. [Public functions (anon-callable)](#4a-public-functions-anon-callable)
 5. [Migrations of note](#5-migrations-of-note)
 6. [Integrity rules](#6-integrity-rules-observed)
 
@@ -602,6 +603,26 @@ All policies reference `private.*` helpers defined in `docs/reference/supabase-p
 | `private.can_access_reply(client_id uuid, lead_id uuid)` | `returns boolean` | Checks `can_access_client(client_id)` OR — when `client_id IS NULL` — looks up the owning client via `lead_id` and applies `can_access_client`. Admin short-circuits. |
 
 Pattern: wherever possible the new policies use **set-based subqueries** rather than per-row function calls, because Postgres would otherwise fail to hoist the check past an index. See [§5](#5-migrations-of-note).
+
+---
+
+## 4a. Public functions (anon-callable)
+
+The **only** database object any unauthenticated caller can reach. Everything else in this file is
+gated behind `authenticated` policies, and `anon` reads zero rows from every table (verified
+2026-07-21 against the local stack: `GET /rest/v1/{leads,clients,campaigns,replies,users,daily_stats}`
+as `anon` all return `[]`).
+
+| Function | Signature | Behaviour |
+|----------|-----------|-----------|
+| `public.public_lead_stats()` | `returns json`, `stable`, `security definer`, `set search_path to 'public'` | Aggregate lead counters for the agency marketing site (ADR-0014). Migration [`20260721_public_lead_stats_rpc.sql`](../../../supabase/migrations/20260721_public_lead_stats_rpc.sql). Takes **no arguments**; returns `{yesterday, last_7_days, last_30_days, last_90_days, all_time, generated_at}` and nothing else. `revoke all ... from public` + `grant execute to anon, authenticated`. |
+
+`SECURITY DEFINER` is required because `anon` has no SELECT policy on `leads` and must never get
+one - the privilege lives in the function, not in the role. The function is safe to expose only
+because it is argument-less and emits aggregates with **no per-client or per-campaign dimension**.
+Adding a parameter, or a sliced counter, requires a new ADR
+([ADR-0014](../../adr/0014-public-marketing-stats-rpc.md) "The boundary"). Formula and windows:
+[04-metrics-catalog §16](04-metrics-catalog.md#16-public-marketing-counters).
 
 ---
 

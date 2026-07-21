@@ -39,6 +39,8 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 | `sequencer_daily_stats.profile_id` sentinel | `''` (empty string, NOT NULL) | `20260704_sequencers_catalog.sql` | Means "account-level rollup"; kept non-null so the UNIQUE(client, sequencer, profile, date) key stays honest. |
 | `invite_limit` vs `invite_limit_remaining` | weekly cap vs left-today | `sequencer_daily_stats` | `invite_limit` = Σ Aimfox accounts' `limit.connect` (≈195/account, weekly); `invite_limit_remaining` = what n8n says is left today. The legacy sheet's "Invitations limit" column held the REMAINING value — do not conflate. |
 | Aimfox `daily_limit` divisor | **5** working days | n8n "Get Metrics from Aimfox" + `schedule_*` column comments | `daily_limit = invite_limit / 5`; feeds the `schedule_today/tomorrow/day_after` min() formulas. |
+| `public_lead_stats()` window anchor | **UTC midnight** | [`20260721_public_lead_stats_rpc.sql`](../../../supabase/migrations/20260721_public_lead_stats_rpc.sql) | Not the browser's timezone and not Europe/London — matches `isoDaysAgo()` in the gateway. `yesterday` is the previous whole UTC day, half-open. |
+| `public_lead_stats()` rolling windows | **7 / 30 / 90** days | same migration | Marketing-site counters. Each is `created_at >= midnight - Nd`, so it covers N whole days **plus today so far** — the public number rises during the day and is not comparable to a "last N complete days" figure. |
 
 ---
 

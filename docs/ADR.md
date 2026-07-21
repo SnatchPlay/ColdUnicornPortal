@@ -50,6 +50,7 @@ functional reference and [design-system.md](reference/design-system.md).
 | [0011](adr/0011-conditions-rules-engine.md) | Conditions rules engine (JSON DSL) | Accepted 2026-07-14 | Client-health rules are a stored JSON DSL evaluated client-side — not free-form formulas, not SQL. |
 | [0012](adr/0012-multi-sequencer-model.md) | Multi-sequencer model (catalog + per-client credentials) | Accepted 2026-07-04 | Sequencers (Smartlead/EmailBison/Aimfox) are first-class: `sequencers` catalog + `client_sequencers` credentials; `campaigns`/`leads` carry `sequencer_id`. |
 | [0013](adr/0013-lead-crm-view-and-status-taxonomy.md) | Lead CRM view, child entities, and status taxonomy | Accepted 2026-07-19 | CRM view over `leads`: 4 child tables, derived health colours (shared TS module, not the conditions engine), split status model (derived `crm_stage` + stored `final_outcome` + derived `contact_disposition`), DB-trigger boolean recompute. KPIs untouched. |
+| [0014](adr/0014-public-marketing-stats-rpc.md) | Public marketing stats as a narrow anon RPC | Accepted 2026-07-21 | The marketing site reads lead counters via one argument-less `SECURITY DEFINER` function granted to `anon`. Aggregates only — no per-client or per-campaign dimension, ever. A sliced public metric needs a new ADR. |
 
 ## Superseded / amended
 

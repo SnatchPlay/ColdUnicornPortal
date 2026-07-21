@@ -32,7 +32,7 @@ Pages that use the draft pattern (campaigns, leads, clients, domains, invoices) 
 
 RLS is the authoritative access boundary. Client-side role checks in UI (e.g. disabling inputs for `identity.role === "client"`) are redundant safety, not security.
 
-Exceptions that do **not** go through the gateway: Supabase Auth (`providers/auth.tsx`), five SECURITY DEFINER RPCs (§3.6), Storage avatar objects (§3.7), and the read-only legacy-CRM client ([`lib/crm-integration.ts`](../../../src/app/lib/crm-integration.ts), ADR-0010).
+Exceptions that do **not** go through the gateway: Supabase Auth (`providers/auth.tsx`), five SECURITY DEFINER RPCs (§3.6), Storage avatar objects (§3.7), and the read-only legacy-CRM client ([`lib/crm-integration.ts`](../../../src/app/lib/crm-integration.ts), ADR-0010). One further exception has **no portal caller at all**: the anon-callable `public_lead_stats()` RPC read by the marketing website (§3.8).
 
 ---
 
@@ -350,6 +350,27 @@ Self-service avatar updates use the `orm-gateway` action **`updateProfileAvatar(
 The image bytes are written to the **public** `user-avatars` Storage bucket from the browser via the publishable client ([avatar-storage.ts](../../../src/app/lib/avatar-storage.ts)) — never the DB. The upload flow is transactional-enough: upload object → write DB → best-effort delete the previous object; if the DB write fails, the just-uploaded object is removed. `storage.objects` RLS restricts writes to the caller's own `avatars/{uid}/…` folder (or `private.is_admin_user()`).
 
 **Why public bucket (not private + signed URLs):** avatars are low-sensitivity face photos with unguessable UUID object names; public read removes per-render signing latency and list-batching complexity, and the DB stores only the object path. Decision logged in [BUSINESS_LOGIC.md](../../BUSINESS_LOGIC.md). Migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql).
+
+### 3.8 `public_lead_stats()` — the one anon-callable RPC (ADR-0014)
+
+The marketing website (Webflow) reads agency-wide lead counters with **no authenticated user**. It
+calls `POST /rest/v1/rpc/public_lead_stats` with the project's publishable key; the portal never
+calls it and `repository.ts` has no method for it.
+
+Same shape as the §3.6 RPCs — `SECURITY DEFINER`, `set search_path to 'public'`,
+`revoke all from public` then an explicit grant — with two differences: the grant includes **`anon`**,
+and the function is **read-only and argument-less**. Migration
+[`20260721_public_lead_stats_rpc.sql`](../../../supabase/migrations/20260721_public_lead_stats_rpc.sql).
+
+| Returns | Rule |
+|---|---|
+| `{yesterday, last_7_days, last_30_days, last_90_days, all_time, generated_at}` | `count(leads)` per window, excluding OOO / NRR / rejected. Windows anchored to UTC midnight. Formula: [04-metrics-catalog §16](04-metrics-catalog.md#16-public-marketing-counters). |
+
+Why this is not a hole: it takes no argument (nothing to inject through), emits only aggregates with
+no per-client or per-campaign dimension, and `anon` still has zero SELECT policies — verified
+2026-07-21 on the local stack, where `anon` reads `[]` from `leads`, `clients`, `campaigns`,
+`replies`, `users` and `daily_stats`. **Do not add a parameter to this function**; a sliced public
+metric needs a new ADR ([ADR-0014](../../adr/0014-public-marketing-stats-rpc.md)).
 
 ---
 

@@ -23,13 +23,23 @@ Smartlead / Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶
                                     │ webhooks           │
                                     ▼                    ▼
                               Email / SMS         Portal SPA (read + scoped write)
+                                                         │
+                                                         └──▶ Marketing site (Webflow)
+                                                              anon RPC, aggregate counters only
 ```
 
-Three actors that touch Supabase:
+Four actors that touch Supabase:
 
 - **n8n** — service-role writes. Owns ingestion + dispatch.
 - **Portal** — anon-key writes through RLS. Owns configuration + qualification.
 - **Edge functions** (`send-invite`, `manage-invites`) — service-role inside Supabase, invoked by the portal with a JWT, used only for invitation flows.
+- **Marketing site (Webflow)** — **read-only, unauthenticated, aggregates only.** Calls
+  `POST /rest/v1/rpc/public_lead_stats` with the project's publishable key and renders the five lead
+  counters it returns. It reads no table, no row and no per-client dimension; `anon` has no SELECT
+  policy anywhere. This is the single documented exception to "every read goes through the ORM
+  gateway" ([ADR-0014](../../adr/0014-public-marketing-stats-rpc.md); function spec in
+  [03-data-model §4a](03-data-model.md#4a-public-functions-anon-callable), formula in
+  [04-metrics-catalog §16](04-metrics-catalog.md#16-public-marketing-counters)).
 
 The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
 
