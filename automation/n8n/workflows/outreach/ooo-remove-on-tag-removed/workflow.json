@@ -1,0 +1,198 @@
+{
+  "name": "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads",
+  "description": "Removes a lead from the OOO Leads sheet when OOO tag is removed in Bison. Looks up workspace config to obtain Bison token, fetches lead, finds matching row, deletes it.",
+  "nodes": [
+    {
+      "id": "870c897d-bbcd-49e1-8e80-eab45dedf788",
+      "name": "[328] Find lead in OOO Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1120,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "LeadID",
+              "lookupValue": "={{ $json.data.id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "OOO Leads"
+        }
+      }
+    },
+    {
+      "id": "b9088074-7dfa-4155-87f9-25786f780484",
+      "name": "[329] Delete row from OOO Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "operation": "delete",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "OOO Leads"
+        },
+        "startIndex": "={{ $json.row_number }}"
+      }
+    },
+    {
+      "id": "48e58cd8-021e-40e6-aa2c-f798130a82f6",
+      "name": "[86] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        528,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "3477a218-d271-4c68-90e4-4ee5cb61db17",
+      "name": "[88] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        832,
+        304
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.col_6}}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "be429272-7145-4efc-9212-e24188ca561a",
+      "name": "Sticky Note 954a8524",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        288,
+        64
+      ],
+      "parameters": {
+        "color": 4,
+        "content": "## ⚠️ Verify column header names\n\n**`CS PDCA` sheet** (per-workspace config):\n- `Workspace ID` (col E in monolith)\n- `Leads Spreadsheet ID` (col D)\n- `Bison Token` (col F)\n\n**`OOO Leads` sheet** (`1BGjr3EW...`):\n- `Lead ID` (col A) — matches Bison lead.id\n\nThe original make.com used column letters; n8n uses header names from row 1. Open each Google Sheets node and pick the actual header from the dropdown if names differ.\n\n**Bison token is per-workspace** — Authorization header is built dynamically from CS PDCA, not from a shared credential.",
+        "height": 200,
+        "width": 1200
+      }
+    },
+    {
+      "id": "c9dac804-305a-400f-98ae-ce15258e041b",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        304
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[86] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[328] Find lead in OOO Leads": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[329] Delete row from OOO Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[86] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[88] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[88] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[328] Find lead in OOO Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}

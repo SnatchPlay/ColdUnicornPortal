@@ -1,0 +1,51 @@
+schemaVersion: 1
+
+id: ooo-remove-on-tag-removed
+name: "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
+domain: outreach
+owner: automation
+lifecycle: imported
+status: active
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+    event: TAG_REMOVED
+    tag: OOO
+
+reads:
+  external:
+    - "Google Sheets · CS PDCA (workspace → Bison API key)"
+    - "Bison API · GET /leads/{taggable_id}"
+
+writes:
+  external:
+    - "Google Sheets · OOO Leads — DELETE the row"
+  tables: []
+  rpcs: []
+
+transition:
+  phase: 0
+  authoritativeSource: sheets
+  targetStore: "Supabase · ooo_followups"
+  design: docs/reference/n8n/ooo-phase-a.md
+  notes: >-
+    SEMANTIC GAP, not a mapping detail: the sheet DELETES the row, cancel_active_ooo_followup
+    CANCELS and keeps the episode. ADR-0015 keeps history so a past absence stays explainable.
+    Reconciliation must compare ACTIVE rows only, or every cancellation reads as divergence.
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "sheet row lookup by lead — deleting an absent row is a no-op"
+
+retryPolicy:
+  notes: "None."

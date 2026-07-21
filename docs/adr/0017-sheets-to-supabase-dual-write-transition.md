@@ -45,6 +45,52 @@ A process moves A → B only when a reconciliation shows the two agree; B → C 
 no remaining readers. The phase is recorded per workflow in `manifest.yaml` (`transition.phase`), not
 inferred.
 
+### 1a. Dual-write is implemented as two fully parallel branches, not a shared prefix
+
+Within a workflow the two paths are **independent end to end** — each resolves its own client, its
+own routing, its own field mapping, and each issues its own calls to the sequencer API:
+
+```
+trigger ─┬─▶ [L] legacy branch    sheet lookup  → map from sheet columns   → Bison API
+         └─▶ [S] supabase branch  RPC / SQL     → map from Postgres columns → Bison API
+```
+
+Two properties follow, and both are the point:
+
+- **Cutover is a wire cut.** Phase C is "disconnect branch L", not a rewrite. Nothing that branch S
+  needs is computed inside branch L, so removing L cannot break S.
+- **The comparison is real.** Branch S exercises the whole path — resolution, mapping, API call —
+  rather than a shared prefix with two endings. A shared prefix would prove only that two writers
+  agree about data one of them already resolved.
+
+The cost is duplicated work per event: two sheet/DB reads and two API calls where one would do. That
+is accepted for the duration.
+
+### 1b. The external side effect is the dangerous part of running two branches
+
+Duplicating a *write to our own stores* is cheap. Duplicating a *call to the sequencer* is not: it
+acts on a real contact. Two rules bound it.
+
+**Same target ⇒ safe.** Bison's `attach-leads` silently ignores a contact already in the campaign
+(the same property [ADR-0015](0015-sequencer-contacts-and-ooo-followups.md) §4 relies on for
+`submitted`). So both branches attaching the *same* lead to the *same* campaign is a no-op.
+
+**Different target ⇒ harm.** If the two branches resolve different campaigns, the contact is enrolled
+in **two follow-up sequences** and gets emailed twice. This is the failure mode of a parallel run and
+it is not hypothetical: the routing sources are different objects (the `ARM` sheet vs
+`client_ooo_routing`) that merely *ought* to agree.
+
+Therefore phase A is split:
+
+| | Branch S resolution + mapping | Branch S API call | Purpose |
+|---|---|---|---|
+| **A1 · shadow** | runs | **suppressed** — the request it *would* send is logged | prove the two branches resolve the same target |
+| **A2 · live** | runs | fires | prove branch S can drive the process end to end |
+
+A1 → A2 requires measured agreement on the resolved target, not a review of the code. The suppression
+in A1 must be at the last node — build the exact request, then log instead of send — or the shadow
+proves less than it appears to.
+
 ### 2. Supabase is written through the RPC contract, Sheets through its existing nodes
 
 Dual-write does not weaken [ADR-0015](0015-sequencer-contacts-and-ooo-followups.md) §5. The Supabase

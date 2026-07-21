@@ -209,7 +209,8 @@ function main() {
     }
 
     if (!existsSync(join(dir, "README.md"))) {
-      push("error", "artifact/readme", label, "README.md is required (purpose, inputs, outputs, failure modes).");
+      const severity = manifest?.lifecycle === "imported" ? "warning" : "error";
+      push(severity, "artifact/readme", label, "README.md is required (purpose, inputs, outputs, failure modes).");
     }
 
     const workflowPath = join(dir, "workflow.json");

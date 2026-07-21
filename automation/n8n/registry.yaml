@@ -41,3 +41,56 @@ workflows:
         remoteWorkflowId: O4DqMEu1Z9LcxikE
     lastRepositorySync: 2026-07-21
     lastValidation: 2026-07-21 pnpm n8n:validate — 0 errors, accepted violations recorded in manifest
+
+  # The rest of the OOO family. Imported as `imported`: the graph is committed and diffable, the
+  # documentation is not written yet. See docs/reference/n8n/ooo-phase-a.md.
+  - id: ooo-enrol-followups
+    name: "Add OOO Leads"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-enrol-followups
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: imported
+    status: active
+    criticality: high        # the only OOO workflow that calls a Bison WRITE endpoint
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: zaPkpSAuvjibUUDU
+    lastRepositorySync: 2026-07-21
+
+  - id: ooo-remove-on-tag-removed
+    name: "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-remove-on-tag-removed
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: imported
+    status: active
+    criticality: medium
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: ZZ0ughB302WdDJOf
+    lastRepositorySync: 2026-07-21
+
+  - id: nrr-daily-stats
+    name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/nrr-daily-stats
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: imported
+    status: active
+    criticality: low
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: 1hHbU2hYYcsktLUP
+    lastRepositorySync: 2026-07-21

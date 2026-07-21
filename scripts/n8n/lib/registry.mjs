@@ -16,7 +16,11 @@ export const REGISTRY_PATH = join(AUTOMATION_ROOT, "registry.yaml");
 const LOGICAL_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const STATUSES = new Set(["active", "paused", "deprecated", "planned", "unmanaged"]);
 const CRITICALITY = new Set(["low", "medium", "high"]);
-const LIFECYCLES = new Set(["managed", "observed", "orphan"]);
+// `imported` is the mid-migration state that makes bulk capture honest: the GRAPH is committed and
+// diffable, but the documentation (README, process links, contracts) is not written yet. Without it
+// the only way to capture 33 workflows quickly would be to fabricate documentation for each, or to
+// switch the gate off. Both are worse than saying "not documented yet" out loud.
+const LIFECYCLES = new Set(["managed", "imported", "observed", "orphan"]);
 
 export function loadRegistry() {
   if (!existsSync(REGISTRY_PATH)) throw new Error(`Missing ${REGISTRY_PATH}`);
@@ -75,7 +79,10 @@ export function validateManifest(manifest, label) {
 
   const processes = manifest?.businessProcess ?? [];
   if (!Array.isArray(processes) || processes.length === 0) {
-    err("manifest/business-process", "businessProcess must list at least one process document.");
+    // An `imported` workflow is captured before it is understood; demanding a process document at
+    // that point would mean inventing one. It is a warning so the debt stays visible.
+    const severity = manifest?.lifecycle === "imported" ? warn : err;
+    severity("manifest/business-process", "businessProcess must list at least one process document.");
   } else {
     for (const relative of processes) {
       if (!existsSync(join(REPO_ROOT, relative))) {

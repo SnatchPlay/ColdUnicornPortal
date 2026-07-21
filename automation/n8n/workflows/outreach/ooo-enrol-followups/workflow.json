@@ -1,0 +1,272 @@
+{
+  "name": "Add OOO Leads",
+  "nodes": [
+    {
+      "id": "401dd5d8-11ef-4811-81dc-f921e1fb5236",
+      "name": "Attach leads to campaign1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2048,
+        256
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.apiKey }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ lead_ids: $json.leadIds }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://go.gheads.com/api/campaigns/{{ $json.campaignId }}/leads/attach-leads"
+      }
+    },
+    {
+      "id": "29b83f28-052b-48f1-8448-93fc56594357",
+      "name": "Build attach requests1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Фінальна збірка: 1 item = 1 HTTP-запит (клієнт + тип кампанії).\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\n// apiKeys: clientKey -> перший непорожній ключ\n// CS PDCA: колонка E = 'col_5' (workspace id), колонка F = 'col_6' (API key)\nconst apiKeys = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const clientKey = norm(row['col_5']);\n  const key = norm(row['col_6']);\n  if (clientKey && key && !(clientKey in apiKeys)) apiKeys[clientKey] = key;\n}\n\nconst out = [];\nfor (const item of $('Combine client data').all()) {\n  const c = item.json;\n  const apiKey = apiKeys[norm(c.clientKey)];\n  if (!apiKey) {\n    console.log(`Клієнт ${c.clientKey}: API key не знайдено. Є ключі для: ${Object.keys(apiKeys).join(', ') || '(нічого)'}`);\n    continue;\n  }\n  for (const type of TYPES) {\n    const leadIds = c[type] || [];\n    const campaignId = c.campaigns[type];\n    if (!leadIds.length || !campaignId) continue;\n    out.push({\n      json: {\n        clientKey: c.clientKey,\n        type,\n        campaignId,\n        apiKey,\n        leadIds: leadIds.map((v) => (v !== '' && !isNaN(Number(v)) ? Number(v) : v)),\n      },\n    });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "99079cc5-372e-46a1-b5e2-55651f2fc846",
+      "name": "Combine client data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Об'єднуємо кампанії з ARM із згрупованими лідами → знову 1 item на клієнта.\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\n// campaigns: clientKey -> { male: campaignId, female: ..., general: ... }\nconst campaigns = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const clientKey = norm(row['bison workspace id']);\n  const campaignId = norm(row['bison ooo campaign id']);\n  const type = norm(row['gender']).toLowerCase();\n  if (!clientKey || !campaignId || !TYPES.includes(type)) continue;\n  if (!campaigns[clientKey]) campaigns[clientKey] = {};\n  if (!(type in campaigns[clientKey])) campaigns[clientKey][type] = campaignId;\n}\n\nconst out = [];\nfor (const item of $('Group leads by client').all()) {\n  const c = item.json;\n  const clientCampaigns = campaigns[norm(c.clientKey)];\n  if (!clientCampaigns) {\n    console.log(`Клієнт ${c.clientKey}: кампаній в ARM не знайдено. Є ключі: ${Object.keys(campaigns).join(', ')}`);\n    continue;\n  }\n  out.push({ json: { ...c, campaigns: clientCampaigns } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "3e1492b0-d010-4693-8b87-5b3d81b00d7a",
+      "name": "Get API key (CS PDCA)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1632,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.clientKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "3c375b0b-c437-443b-98ae-1e58d41ebe5f",
+      "name": "Get ARM campaigns1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1216,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "Automated Replies Management",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "bison workspace id",
+              "lookupValue": "={{ $json.clientKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "ARM"
+        }
+      }
+    },
+    {
+      "id": "3192f5e2-4547-4f90-a5dd-3bd0d7645c2d",
+      "name": "Get OOO leads1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "Automated Replies Management",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Formatted Expected Date",
+              "lookupValue": "={{ Math.floor($now.minus(2, 'days').startOf('day').toSeconds()) }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "OOO Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit#gid=2036914555",
+          "mode": "list",
+          "value": 2036914555
+        }
+      }
+    },
+    {
+      "id": "b4f496f1-c643-4528-84a9-26f13d3a7be8",
+      "name": "Group leads by client",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Агрегація: з N лідів робимо 1 item на клієнта (workspace).\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\nconst clients = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const leadId = norm(row.LeadID);\n  const clientKey = norm(row.WorkspaceID);\n  let gender = norm(row.Gender).toLowerCase();\n  if (!gender) gender = 'general'; // порожній gender → general\n\n  if (!clientKey || !leadId) continue;\n  if (!clients[clientKey]) clients[clientKey] = { male: [], female: [], general: [] };\n  if (TYPES.includes(gender)) clients[clientKey][gender].push(leadId);\n}\n\nreturn Object.entries(clients)\n  .filter(([, b]) => b.male.length || b.female.length || b.general.length)\n  .map(([clientKey, b]) => ({ json: { clientKey, ...b } }));"
+      }
+    },
+    {
+      "id": "105e9571-1ba4-4528-a850-26df0651dbde",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        592,
+        256
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Build attach requests1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Attach leads to campaign1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Combine client data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get API key (CS PDCA)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get API key (CS PDCA)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build attach requests1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get ARM campaigns1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Combine client data",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get OOO leads1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Group leads by client",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Group leads by client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get ARM campaigns1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get OOO leads1",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}
