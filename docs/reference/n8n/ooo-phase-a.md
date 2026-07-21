@@ -165,18 +165,33 @@ those grants. The credential is not visible through the MCP (it strips credentia
 Postgres nodes in `ooo-detect-and-log` only ever did a plain `select` on `client_sequencers` and an
 `update` on `leads` — neither of which proves anything about `service_role`.
 
-So this is **unverified**, and it is the most likely first failure of branch S. Check it before
-wiring anything else, with a call that has no side effect:
+Measured grants (2026-07-21):
+
+| Function | Granted to |
+|---|---|
+| `upsert_sequencer_contact`, `upsert_reply`, `record_ooo_followup` | `postgres`, `service_role` |
+| `resolve_ooo_routing` | `postgres`, `service_role`, **`authenticated`** |
+
+Note the last row: `resolve_ooo_routing` is *also* granted to `authenticated`, because the portal's
+routing editor calls it. So **do not probe with `resolve_ooo_routing`** — it succeeds even from an
+`authenticated` connection and would report a false pass.
+
+Probe with the real thing instead. This is side-effect free — it asks the catalogue, it does not call
+the function:
 
 ```sql
-select public.resolve_ooo_routing(
-  (select id from public.clients limit 1), 'general'
-);
+select current_user::text as connected_as,
+       has_function_privilege(
+         'public.record_ooo_followup(uuid,uuid,date,date,text)', 'execute') as can_record,
+       has_function_privilege(
+         'public.upsert_reply(text,timestamptz,uuid,uuid,text,text,text,boolean,text,smallint)',
+         'execute') as can_upsert_reply;
 ```
 
-If it raises `permission denied for function`, branch S needs a Postgres credential connecting as
-`service_role` (or as a role granted `execute` on those functions) — a credential change, which is
-outside what an agent may do.
+Run it **from the n8n Postgres node** — running it anywhere else answers a different question. All
+three columns must be true. If not, branch S needs a credential connecting as `service_role` (or a
+role granted `execute` on those functions), which is a credential change and outside what an agent
+may do.
 
 ## Exit criteria
 
