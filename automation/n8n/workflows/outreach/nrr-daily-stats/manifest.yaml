@@ -4,7 +4,7 @@ id: nrr-daily-stats
 name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
 domain: outreach
 owner: automation
-lifecycle: imported
+lifecycle: managed
 status: active
 criticality: low
 
@@ -29,10 +29,13 @@ writes:
   external:
     - "Google Sheets · Daily Stats — increment the NRR counter, or insert today's row"
   tables: []
-  rpcs: []
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
 
 transition:
-  phase: 0
+  phase: A
+  phaseState: live              # published 2026-07-21; branch S runs on every NRR TAG_ATTACHED
   authoritativeSource: sheets
   targetStore: "Supabase · replies (upsert_reply with classification NRR)"
   design: docs/reference/n8n/ooo-phase-a.md

@@ -3,7 +3,7 @@
   "description": "Removes a lead from the OOO Leads sheet when OOO tag is removed in Bison. Looks up workspace config to obtain Bison token, fetches lead, finds matching row, deletes it.",
   "nodes": [
     {
-      "id": "870c897d-bbcd-49e1-8e80-eab45dedf788",
+      "id": "5865bc01-e5ab-449f-ad51-75e4425e0696",
       "name": "[328] Find lead in OOO Leads",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -36,7 +36,7 @@
       }
     },
     {
-      "id": "b9088074-7dfa-4155-87f9-25786f780484",
+      "id": "14a7bb40-70d3-4687-9223-cdba30fd5278",
       "name": "[329] Delete row from OOO Leads",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -60,7 +60,7 @@
       }
     },
     {
-      "id": "48e58cd8-021e-40e6-aa2c-f798130a82f6",
+      "id": "08d0bc47-43fd-4190-a51f-425cc25a5e28",
       "name": "[86] Find workspace in CS PDCA",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -93,7 +93,7 @@
       }
     },
     {
-      "id": "3477a218-d271-4c68-90e4-4ee5cb61db17",
+      "id": "785f02ae-e857-4fa5-9d04-d170b3dde0f0",
       "name": "[88] Bison: GET /leads/{taggable_id}",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
@@ -116,23 +116,57 @@
       }
     },
     {
-      "id": "be429272-7145-4efc-9212-e24188ca561a",
-      "name": "Sticky Note 954a8524",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
+      "id": "5624567b-a94a-4bd6-a592-bc689361615e",
+      "name": "[S] cancel_active_ooo_followup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
       "position": [
-        288,
-        64
+        528,
+        560
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
-        "color": 4,
-        "content": "## ⚠️ Verify column header names\n\n**`CS PDCA` sheet** (per-workspace config):\n- `Workspace ID` (col E in monolith)\n- `Leads Spreadsheet ID` (col D)\n- `Bison Token` (col F)\n\n**`OOO Leads` sheet** (`1BGjr3EW...`):\n- `Lead ID` (col A) — matches Bison lead.id\n\nThe original make.com used column letters; n8n uses header names from row 1. Open each Google Sheets node and pick the actual header from the dropdown if names differ.\n\n**Bison token is per-workspace** — Authorization header is built dynamically from CS PDCA, not from a shared credential.",
-        "height": 200,
-        "width": 1200
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.event.workspace_id), String($json.data.taggable_id), 'ooo_tag_removed'] }}"
+        },
+        "query": "select sc.id::text as sequencer_contact_id, f.id::text as cancelled_followup_id, f.status::text as cancelled_status from public.client_sequencers cs join public.sequencer_contacts sc on sc.client_sequencer_id = cs.id and sc.external_contact_id = $2 left join lateral public.cancel_active_ooo_followup(sc.id, $3) f on true where cs.external_workspace_id = $1 and cs.enabled"
       }
     },
     {
-      "id": "c9dac804-305a-400f-98ae-ce15258e041b",
+      "id": "83dd8e49-ca3a-4c0f-a2ce-a9390f30b918",
+      "name": "Sticky Note 35b051f3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        478,
+        254
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nDeletes the OOO Leads row. Unchanged.",
+        "height": 200,
+        "width": 1196
+      }
+    },
+    {
+      "id": "6b73445e-1df9-4722-99df-5e567d84ddf4",
+      "name": "Sticky Note 7c1aa332",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        478,
+        510
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (phase A)\n\nSEMANTIC GAP, deliberate: branch L DELETES the sheet row, this CANCELS the episode and keeps the history, so a past absence stays explainable (ADR-0015).\n\nIdempotent: cancel_active_ooo_followup returns NULL when nothing is active.\n\nNo Bison call here — branch L needs one to find the lead, this resolves the contact straight from Postgres. A pointless API call would be worse, not more faithful.\n\nonError: continueRegularOutput — must never break branch L.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 300
+      }
+    },
+    {
+      "id": "46c6b6c3-715f-4881-bc94-261b35ff8b98",
       "name": "When Called by HUB",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -152,6 +186,11 @@
           {
             "index": 0,
             "node": "[86] Find workspace in CS PDCA",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] cancel_active_ooo_followup",
             "type": "main"
           }
         ]

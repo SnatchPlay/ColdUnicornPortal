@@ -4,7 +4,7 @@ id: ooo-remove-on-tag-removed
 name: "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
 domain: outreach
 owner: automation
-lifecycle: imported
+lifecycle: managed
 status: active
 criticality: medium
 
@@ -30,10 +30,12 @@ writes:
   external:
     - "Google Sheets · OOO Leads — DELETE the row"
   tables: []
-  rpcs: []
+  rpcs:
+    - cancel_active_ooo_followup
 
 transition:
-  phase: 0
+  phase: A
+  phaseState: live              # published 2026-07-21; branch S runs on every OOO TAG_REMOVED
   authoritativeSource: sheets
   targetStore: "Supabase · ooo_followups"
   design: docs/reference/n8n/ooo-phase-a.md

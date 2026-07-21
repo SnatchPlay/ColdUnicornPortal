@@ -3,7 +3,7 @@
   "description": "Increments daily NRR counter in '🤖Daily stats' sheet on TAG_ATTACHED+NRR. Reads today's row by Workspace+Date+Source, either updates the counter or inserts a new row.",
   "nodes": [
     {
-      "id": "d30cd387-3107-477e-aa41-8297fb95c63a",
+      "id": "da07efe2-2bc5-481e-a668-e39d51ec5bc2",
       "name": "[60] Find today Daily Stats row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -42,7 +42,7 @@
       }
     },
     {
-      "id": "bea9d382-311b-4fa0-a4aa-801ab28cf1d7",
+      "id": "49deb8be-6d78-44bf-9bbb-5cac83ec6afb",
       "name": "[63] Insert new Daily Stats row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -346,7 +346,7 @@
       }
     },
     {
-      "id": "3138dc9b-8d63-44e4-ac3e-46ecfc7b19a0",
+      "id": "e45d848f-3e9e-41f5-88b3-0edf1dd7c309",
       "name": "[65] Increment NRR counter",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -664,7 +664,133 @@
       }
     },
     {
-      "id": "2314a902-22bc-4423-b53a-2e41cf3fcc50",
+      "id": "8099b86a-66c6-47ee-a816-3f64d71708a6",
+      "name": "[S] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "a29738a3-53e5-414f-87eb-1db0ea8fb5c3",
+      "name": "[S] Bison: GET /leads/{taggable_id}/replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('[S] Resolve client sequencer').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}/replies"
+      }
+    },
+    {
+      "id": "b7b53651-ee9a-4c7e-bb02-06f00ba893af",
+      "name": "[S] Pick newest reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1136,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "nrr_reply",
+              "name": "nrr_reply",
+              "type": "object",
+              "value": "={{ ($json.data || []).slice().sort((a, b) => new Date(b.date_received) - new Date(a.date_received))[0] || {} }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b8078a2e-ccc9-4722-ba42-ef8e88ba13e0",
+      "name": "[S] Resolve client sequencer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.event.workspace_id)] }}"
+        },
+        "query": "select cs.id::text as client_sequencer_id, cs.client_id::text as client_id, cs.api_key from public.client_sequencers cs where cs.external_workspace_id = $1 and cs.enabled limit 1"
+      }
+    },
+    {
+      "id": "17224179-8669-451d-8e55-b808e90a3854",
+      "name": "[S] upsert_reply (NRR)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1584,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('[S] Pick newest reply').first().json.nrr_reply.id), $('[S] Pick newest reply').first().json.nrr_reply.date_received, $json.sequencer_contact_id, $('[S] Pick newest reply').first().json.nrr_reply.subject || null, $('[S] Pick newest reply').first().json.nrr_reply.text_body || null, $('[S] Pick newest reply').first().json.nrr_reply.from_email_address || null] }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'NRR', $4, $5, false, $6, null)::text as reply_id"
+      }
+    },
+    {
+      "id": "a1d1be51-6eb9-4d7a-98ce-fe9fb946b349",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        640
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$('[S] Resolve client sequencer').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.first_name || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.last_name || null, ((($('[S] Bison: GET /leads/{taggable_id}').first().json.data.custom_variables || []).find(v => v.name === 'gender') || {}).value) || 'general'] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, $6, null)::text as sequencer_contact_id"
+      }
+    },
+    {
+      "id": "4d4aada9-79ae-4d17-aa39-cfba98b6e72b",
       "name": "Daily stats row exists?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
@@ -697,7 +823,39 @@
       }
     },
     {
-      "id": "2847ad95-2455-4760-9efd-e93f16c7a4ec",
+      "id": "99f84b9b-dbf3-4c33-83c8-ee531b1e20d0",
+      "name": "Sticky Note 062c03a5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        158
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nIncrements the Daily Stats NRR counter. Unchanged.\n\nNot idempotent: the counter is bumped unconditionally, so a redelivered TAG_ATTACHED double-counts. Branch S is idempotent by construction, so the two disagree exactly when an event is redelivered — which makes that a useful divergence signal, not noise.",
+        "height": 488,
+        "width": 524
+      }
+    },
+    {
+      "id": "b3619a92-cb12-4e7d-944c-af65ed517a06",
+      "name": "Sticky Note 8554af32",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        590
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (phase A)\n\nNRR records a REPLY and nothing else: no CRM lead, no OOO episode, and final_outcome is not touched — a lost outcome is an explicit human decision (ADR-0015).\n\ndaily_stats.ooo_count and the NRR counter stay sequencer-reported EVENT counts. They are not derived from this table and must never be mixed with CRM figures.\n\nNeeds its own Bison calls: branch L never fetches the reply, it only counts.\n\nonError: continueRegularOutput — must never break branch L.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 1420
+      }
+    },
+    {
+      "id": "80feb2fe-21bf-480d-a829-4d39793e570b",
       "name": "When Called by HUB",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -740,6 +898,66 @@
           {
             "index": 0,
             "node": "Daily stats row exists?",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Resolve client sequencer",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}/replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Pick newest reply",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Pick newest reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve client sequencer": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply (NRR)",
             "type": "main"
           }
         ]

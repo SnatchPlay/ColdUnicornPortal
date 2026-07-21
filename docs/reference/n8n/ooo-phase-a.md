@@ -5,7 +5,16 @@ Implementation plan for the first process through the
 Target contract: [ADR-0015](../../adr/0015-sequencer-contacts-and-ooo-followups.md).
 Process rule: [OOO follow-ups](../processes/outreach/ooo-followups.md).
 
-**Current state: phase 0** — Sheets only. `ooo_followups` has 0 rows in production.
+**Current state: phase A, live since 2026-07-21** for three of the four workflows. Migration
+`20260722g` is applied (52 `ooo_followup` campaigns, 0 still client-visible, 42 routing rules,
+14 clients enabled).
+
+| Workflow | Branch S | State |
+|---|---|---|
+| `ooo-detect-and-log` | contact → reply → episode | **live** |
+| `ooo-remove-on-tag-removed` | `cancel_active_ooo_followup` | **live** |
+| `nrr-daily-stats` | `upsert_reply` (NRR) | **live** |
+| `ooo-enrol-followups` | worker + Bison attach | **not started** — needs A1 shadow |
 
 ## Shape
 

@@ -67,7 +67,7 @@ workflows:
     path: automation/n8n/workflows/outreach/ooo-remove-on-tag-removed
     businessProcess: docs/reference/processes/outreach/ooo-followups.md
     owner: automation
-    lifecycle: imported
+    lifecycle: managed
     status: active
     criticality: medium
     trigger: sub-workflow
@@ -77,6 +77,7 @@ workflows:
       production:
         remoteWorkflowId: ZZ0ughB302WdDJOf
     lastRepositorySync: 2026-07-21
+    lastValidation: 2026-07-21 phase A branch S published
 
   - id: nrr-daily-stats
     name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
@@ -84,7 +85,7 @@ workflows:
     path: automation/n8n/workflows/outreach/nrr-daily-stats
     businessProcess: docs/reference/processes/outreach/ooo-followups.md
     owner: automation
-    lifecycle: imported
+    lifecycle: managed
     status: active
     criticality: low
     trigger: sub-workflow
