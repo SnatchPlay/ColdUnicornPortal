@@ -48,6 +48,9 @@ When Called by HUB ─┬─▶ [325] Find workspace in CS PDCA (Sheets, retry 5
    `WorkspaceID`, `Expected Return Date`, `Formatted Expected Date`, `Gender`. **This sheet is the
    de-facto source of truth for OOO today**, and it is what the scheduled `Add OOO Leads` workflow
    reads to re-enrol contacts.
+   Under [ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md) this
+   write is **kept** through the transition — it is the system the business currently reads, not debt
+   to delete.
 2. **`public.leads`** — `UPDATE … SET qualification='OOO', expected_return_date=… WHERE external_id=…`.
    Verified against production on 2026-07-21: **0 rows carry `qualification='OOO'` and 0 carry a
    non-null `expected_return_date`.** This write has never landed. Treat the Postgres branch as
@@ -82,13 +85,21 @@ faithfully reproduce a broken behaviour. Tracked in
 
 Target contract — [11-integrations §6a](../../../../../docs/reference/functional/11-integrations.md#6a-ooo--nrr-write-path-adr-0015--the-current-contract):
 
-| Step | Replace with |
-|---|---|
-| resolve workspace → client | `client_sequencers` join on `external_workspace_id` (already fetched, currently discarded) |
-| identify the contact | `upsert_sequencer_contact(client_sequencer_id, external_contact_id, …)` |
-| store the reply | `upsert_reply(external_id, sequencer_contact_id, …, classification)` |
-| record the absence | `record_ooo_followup(sequencer_contact_id, source_reply_id, expected_return_date, scheduled_for, date_source)` |
-| sheet append | **deleted** — `ooo_followups` replaces the `OOO Leads` sheet |
+Migration is by **dual-write** ([ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md)),
+not by replacement. The `OOO Leads` sheet is what the business runs on today; it keeps being written
+until Supabase has been proven against it. This workflow is at **phase 0** — Sheets only.
+
+| Step | Add (Supabase side) | Sheet side |
+|---|---|---|
+| resolve workspace → client | `client_sequencers` join on `external_workspace_id` (already fetched, currently discarded — defect 3) | unchanged |
+| identify the contact | `upsert_sequencer_contact(client_sequencer_id, external_contact_id, …)` | — |
+| store the reply | `upsert_reply(external_id, sequencer_contact_id, …, classification)` | — |
+| record the absence | `record_ooo_followup(sequencer_contact_id, source_reply_id, expected_return_date, scheduled_for, date_source)` | — |
+| append `OOO Leads` row | — | **kept**, but must become append-or-update on a stable key (defect 5) before dual-write, or the two stores diverge by construction |
+| write `leads` directly | **removed** — this is not a second source, it is a violation of ADR-0015 §5 | — |
+
+Ordering in phase A: **Sheets first, Supabase second, Supabase failure non-fatal** — the business
+still runs on the sheet, so the new path must not be able to break the old one.
 
 `expected_return_date` must be passed as `NULL` when the LLM returns none; the *today + 2* fallback
 goes to `scheduled_for` with `date_source='fallback'`.

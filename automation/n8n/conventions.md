@@ -52,6 +52,25 @@ Recommended: `architectureDecisions`, `triggers`, `reads`, `writes`, `targetCont
 `lifecycle`: `managed` (artifact committed) · `observed` (documented, not yet imported) · `orphan`.
 `status`: `active` · `paused` · `deprecated` · `planned` · `unmanaged`.
 
+### `transition` (ADR-0017)
+
+Required as soon as a workflow writes **both** Google Sheets and Supabase. `pnpm n8n:validate` errors
+on an undeclared dual-write — one that nobody declared has no phase, no authoritative source and no
+way to know which store to believe.
+
+```yaml
+transition:
+  phase: A                      # 0 sheets only | A dual-write | B parity | C supabase only
+  authoritativeSource: sheets   # exactly one, and it is written down
+  legacyStore: "Google Sheets · OOO Leads (…)"
+  targetStore: "Supabase · sequencer_contacts + ooo_followups"
+  reconciliation: >-            # required to leave phase A
+    the query that compares the two stores on their natural key
+  parityEvidence: null          # the measured result that justified advancing
+```
+
+Note `phase: 0` is a real value — it means "sheets only, migration not started".
+
 ### `knownViolations`
 
 An imported workflow usually *does* contradict the current contract — that is why it is being brought

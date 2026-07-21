@@ -135,6 +135,44 @@ export function validateBusinessRules(workflow, manifest, label) {
     }
   }
 
+  // ADR-0017: a workflow may legitimately write two stores during the Sheets → Supabase transition,
+  // but it must SAY SO. A dual-write nobody declared is the dangerous kind: no phase, no
+  // authoritative source, no reconciliation, and no way to know which store to believe.
+  const writesSheets = (workflow.nodes ?? []).some(
+    (node) => node.type === "n8n-nodes-base.googleSheets" && isWriteNode(node),
+  );
+  const writesSupabase =
+    postgresNodes(workflow).some((node) => isWriteNode(node)) ||
+    (manifest?.writes?.rpcs?.length ?? 0) > 0;
+
+  if (writesSheets && writesSupabase) {
+    const transition = manifest?.transition;
+    // `phase: 0` (sheets only) is a legitimate declared value — test for presence, not truthiness.
+    const phase = transition?.phase;
+    if (phase === undefined || phase === null || phase === "") {
+      push(
+        "error",
+        "business/undeclared-dual-write",
+        "Writes both Google Sheets and Supabase, but manifest.transition.phase is not declared " +
+          "(ADR-0017). State the phase, the authoritative source and the reconciliation.",
+      );
+    } else if (!transition.authoritativeSource) {
+      push(
+        "error",
+        "business/dual-write-no-authority",
+        `transition.phase=${phase} but no authoritativeSource. During dual-write exactly ` +
+          "one store is authoritative, and it must be written down.",
+      );
+    } else if (["A", "B"].includes(String(phase)) && !transition.reconciliation) {
+      push(
+        "warning",
+        "business/dual-write-no-reconciliation",
+        "Dual-write is active with no reconciliation declared. Divergence must be measured, not " +
+          "assumed (ADR-0017 §5) — it is the entry condition for the next phase.",
+      );
+    }
+  }
+
   if (manifest?.idempotency?.key === undefined) {
     push("warning", "business/idempotency-undocumented", "manifest.idempotency.key is not declared.");
   }

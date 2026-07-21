@@ -40,16 +40,32 @@ writes:
     - leads
   rpcs: []
 
-# ── The contract this workflow MUST move to (ADR-0015 §5, 11-integrations §6a) ────────────────
+# ── Sheets → Supabase transition (ADR-0017) ───────────────────────────────────────────────────
+# The OOO Leads sheet is the system the business runs on today. Migration is by dual-write, not
+# replacement: the sheet keeps being written until Supabase has been proven against it.
+transition:
+  phase: 0                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…)"
+  targetStore: "Supabase · sequencer_contacts + ooo_followups"
+  blockedBy:
+    - "defect 9 — the two branches read the LLM node with incompatible shapes; resolve before porting extraction logic"
+    - "defect 5 — the sheet append is unconditional; must become append-or-update on a stable key or the stores diverge by construction"
+  reconciliation: null          # required to leave phase A; see ADR-0017 §5
+  parityEvidence: null
+
+# ── The Supabase side the dual-write must add (ADR-0015 §5, 11-integrations §6a) ───────────────
 targetContract:
   rpcs:
     - upsert_sequencer_contact
     - upsert_reply
     - record_ooo_followup
   tables: []
+  ordering: "sheets first, supabase second; supabase failure non-fatal in phase A"
   notes: >-
     OOO stops being a lead field entirely. The episode becomes an ooo_followups row against a
-    sequencer_contacts identity. See the process document for the step-by-step call order.
+    sequencer_contacts identity. See the process document for the step-by-step call order. The
+    direct `leads` write is NOT a second source — it is removed, not kept (ADR-0015 §5).
 
 portalSurfaces:
   # ADR-0015 / OoS-16: there is deliberately NO portal list or editor for episodes.

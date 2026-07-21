@@ -17,12 +17,19 @@ comes before one that is merely undocumented.
 tables, RPCs, RLS, ~70 invariant assertions — on 2026-07-21. **Automation has not cut over.** OOO
 state still lives in the `OOO Leads` Google Sheet; `ooo_followups` has 0 rows in production.
 
-| Remote | Name | Role after cutover |
-|---|---|---|
-| `O4DqMEu1Z9LcxikE` | `[child-3] TAG_ATTACHED · OOO · Detect return date and log` | **managed** → call `upsert_sequencer_contact` → `upsert_reply` → `record_ooo_followup`; delete the sheet append |
-| `ZZ0ughB302WdDJOf` | `[child-7] TAG_REMOVED · OOO · Remove from OOO Leads` | → `cancel_active_ooo_followup` (cancels, never deletes) |
-| `zaPkpSAuvjibUUDU` | `Add OOO Leads` (scheduled re-enrolment) | → the worker: `claim_ooo_followup` → attach → `mark_ooo_submitted` / `mark_ooo_failed` |
-| `1hHbU2hYYcsktLUP` | `[child-2] TAG_ATTACHED · NRR · Daily stats` | → `upsert_reply` with `NRR`; no lead, no episode |
+Migration is by **dual-write**, not replacement
+([ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)). Every row below **keeps its
+sheet write** and **adds** the Supabase one; the sheet stops only at phase C, once nothing reads it.
+
+| Remote | Name | Supabase side to add | Sheet side |
+|---|---|---|---|
+| `O4DqMEu1Z9LcxikE` | `[child-3] TAG_ATTACHED · OOO · Detect return date and log` | `upsert_sequencer_contact` → `upsert_reply` → `record_ooo_followup` | kept; must first become append-or-**update** on a stable key |
+| `ZZ0ughB302WdDJOf` | `[child-7] TAG_REMOVED · OOO · Remove from OOO Leads` | `cancel_active_ooo_followup` (cancels, never deletes) | kept — note the semantic gap: the sheet **deletes**, Supabase **cancels and keeps history** |
+| `zaPkpSAuvjibUUDU` | `Add OOO Leads` (scheduled re-enrolment) | the worker: `claim_ooo_followup` → attach → `mark_ooo_submitted` / `mark_ooo_failed` | kept; **reads** the sheet in phase A, reads `ooo_followups` from phase B |
+| `1hHbU2hYYcsktLUP` | `[child-2] TAG_ATTACHED · NRR · Daily stats` | `upsert_reply` with `NRR`; no lead, no episode | kept |
+
+The `leads` write in child-3 is **not** part of dual-write — it is removed. A second store does not
+license bypassing the RPC contract (ADR-0015 §5), and it has never landed a row.
 
 **Blocking, in order:**
 
@@ -36,12 +43,20 @@ state still lives in the `OOO Leads` Google Sheet; `ooo_followups` has 0 rows in
    reply. For a repeat OOO that is almost certainly wrong.
 3. Move per-client Bison API keys from the CS PDCA sheet to `client_sequencers.api_key`
    ([security.md §1](security.md#1-per-client-bison-api-keys-live-in-a-google-sheet--high)).
-4. Cut over the four workflows above.
-5. **Only then** apply
+4. Make the sheet append **idempotent** (append-or-update on `LeadID` + `ReplyID`). Precondition for
+   phase A: two stores with different duplicate behaviour diverge by construction.
+5. Add the Supabase side to the four workflows — Sheets first, Supabase second, Supabase failure
+   non-fatal and logged to `integration_sync_runs`. This is **phase A**.
+6. Remove the direct `leads` write, then apply
    [`20260722z_drop_legacy_ooo_columns.sql`](../../../supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql).
-   Its precondition is exactly "n8n has stopped writing the legacy columns".
-6. Backfill the sheet's open absences into `ooo_followups`, or accept starting empty — a product
-   decision, not a technical one.
+   Unblocked by phase A — no phase writes the legacy lead columns.
+7. Build the reconciliation (sheet rows vs `ooo_followups`, compared on the natural key) and run it
+   until the two agree. Parity is the entry condition for **phase B**; record the number in the manifest.
+8. Backfill the sheet's open absences into `ooo_followups`, or accept starting empty — a product
+   decision, not a technical one. Note it proves the data copies, not that the write path works, so
+   it belongs after phase A rather than instead of it.
+9. **Phase C** only once the sheet has no readers left — including the dashboards and reports built
+   on it, which are outside this repository.
 
 **Accepted violations expire 2026-10-31.** After that, `pnpm n8n:validate` fails.
 
@@ -157,8 +172,12 @@ every future inventory noisier.
 1. **No development instance.** The single highest-value fix: without it, no cutover in this backlog
    can be built or tested without touching production.
 2. **Google Sheets is a load-bearing data store** — CS PDCA (credentials + client config), OOO Leads
-   (OOO state), Daily Stats (counters). This contradicts
-   [ADR-0001](../../adr/0001-live-supabase-source-of-truth.md), which says Supabase is the only data
-   system. Either migrate it or amend the ADR; the present state is that the ADR is simply untrue.
+   (OOO state), Daily Stats (counters), plus the dashboards and reports the agency actually uses.
+   This is the system the portal is replacing, and it is migrated **by dual-write**, process by
+   process ([ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)) — not deleted.
+   [ADR-0001](../../adr/0001-live-supabase-source-of-truth.md) is unaffected: it governs what the
+   *portal* reads, and the portal never reads a spreadsheet in any phase.
+   The one exception is **credentials** — per-client API keys in CS PDCA are not business data and
+   move to `client_sequencers.api_key` independently, and sooner.
 3. **No error handling outside the Winnr flows.** Only `oF6fP3ea2zglhAop` exists as an error handler.
 4. **Idempotency is mostly undocumented**, and in the OOO path absent.

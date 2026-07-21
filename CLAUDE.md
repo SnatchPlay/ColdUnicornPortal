@@ -88,7 +88,7 @@ moved, fix the doc as part of your change.
 
 | ADR | Rule |
 |---|---|
-| [0001](docs/adr/0001-live-supabase-source-of-truth.md) | Live Supabase is the only data system. No alternative backend, no local-first mode, no mock-mode runtime branch. |
+| [0001](docs/adr/0001-live-supabase-source-of-truth.md) | Live Supabase is the only data system **the portal reads**. No alternative backend, no local-first mode, no mock-mode runtime branch. (n8n may write a second, non-authoritative store during the Sheets migration — [ADR-0017](docs/adr/0017-sheets-to-supabase-dual-write-transition.md).) |
 | [0002](docs/adr/0002-route-based-role-shells.md) | Each role owns a URL prefix. No runtime role switcher — use impersonation. |
 | [0003](docs/adr/0003-client-campaign-visibility.md) | Clients see only `campaigns.type='outreach'`. Enforce in **both** RLS and `scopeCampaigns`. |
 | [0004](docs/adr/0004-lead-state-boundaries.md) | Editable lead fields are exactly: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`. Replies are read-only. |
@@ -98,6 +98,7 @@ moved, fix the doc as part of your change.
 | [0010](docs/adr/0010-legacy-crm-integration.md) | `lib/crm-integration.ts` is the **single** sanctioned second Supabase client — read-only, config metadata only. A third data source needs a new ADR. |
 | [0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md) | OOO/NRR are **outreach** states of a `sequencer_contacts` row, never fields on a lead. A CRM lead is created only by a positive reply, at most one per contact. The whole episode lifecycle is `service_role` RPCs driven by n8n — the portal has **no** follow-up list or editor ([OoS-16](docs/reference/functional/13-out-of-scope.md)); its only OOO surface is the per-client routing editor. |
 | [0016](docs/adr/0016-repository-as-automation-source-of-truth.md) | This repository is the source of truth for **automation**, not just for the portal. n8n is a deployment target. A workflow that contradicts a business rule, an ADR or a data contract is a defect **in the workflow**. |
+| [0017](docs/adr/0017-sheets-to-supabase-dual-write-transition.md) | The agency still runs on Google Sheets. Migration is **dual-write per process**, never a hard cutover: phase A (Sheets authoritative) → B (parity, Supabase authoritative) → C (Supabase only). Sheets first, Supabase second, Supabase failure non-fatal in phase A. A dual-write must **declare** its phase, authoritative source and reconciliation. A second store never licenses bypassing an RPC contract. |
 
 Full index, including `master_admin` (0005), lead custom fields (0007) and the conditions engine
 (0011): [docs/ADR.md](docs/ADR.md).

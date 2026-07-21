@@ -150,20 +150,31 @@ outreach and CRM ([04-metrics-catalog](../../functional/04-metrics-catalog.md), 
 | — | `1hHbU2hYYcsktLUP` | NRR → increment a Sheets counter | orphan |
 | — | `xPzdtWQiY3lGtqI1` | HUB dispatcher | orphan |
 
-### Known divergence (as of 2026-07-21)
+### Where the implementation actually is (as of 2026-07-21)
 
-The live implementation does **not** follow this document. OOO state lives in a Google Sheet
-(`OOO Leads`); `record_ooo_followup` is never called; `ooo_followups` has **0 rows** in production.
-The Postgres branch that would write `leads.qualification='OOO'` has never landed a row — verified:
-0 leads carry that qualification or a non-null `expected_return_date`.
+This document describes the **target**. The live implementation is at **phase 0** of the
+[Sheets → Supabase dual-write transition](../../../adr/0017-sheets-to-supabase-dual-write-transition.md):
+OOO state lives in the `OOO Leads` Google Sheet, `record_ooo_followup` is never called, and
+`ooo_followups` has **0 rows** in production.
+
+That is a migration in progress, not neglect — the sheet is the system the agency runs on, and it
+keeps being written until Supabase has been proven against it. What *is* a defect is the Postgres
+branch writing `leads.qualification='OOO'` directly: a second store does not license bypassing the RPC
+contract. It has never landed a row anyway (verified: 0 leads carry that qualification or a non-null
+`expected_return_date`), so removing it costs nothing.
 
 Consequences, in order of importance:
 
-1. **`20260722z` (drop legacy OOO columns) cannot be applied** until `ooo-detect-and-log` stops
-   referencing `leads.expected_return_date`.
-2. Invariants 4, 5, 6 and 8 are **not enforced anywhere** today — the sheet has no unique index, no
-   status and no skip reason.
-3. `daily_stats.ooo_count` and the sheet can disagree, with no reconciliation.
+1. Invariants 4, 5, 6 and 8 are **not enforced anywhere** today — the sheet has no unique index, no
+   status and no skip reason. Until dual-write reaches phase B, the invariants above are a contract
+   the database can honour and nothing exercises.
+2. **`20260722z` (drop legacy OOO columns) cannot be applied** until `ooo-detect-and-log` stops
+   referencing `leads.expected_return_date`. This is unblocked by **phase A**, not phase C — the
+   legacy *lead* columns are written by no phase.
+3. The sheet append is unconditional, so it is **not idempotent**. Dual-write makes that worse, not
+   better: two stores with different duplicate behaviour diverge by construction. Fixing the sheet
+   write to append-or-update on a stable key is a precondition for phase A, not a later cleanup.
+4. `daily_stats.ooo_count` and the sheet can disagree, with no reconciliation.
 
 Sequenced plan: [migration-backlog §1](../../n8n/migration-backlog.md#1-ooo-cutover).
 

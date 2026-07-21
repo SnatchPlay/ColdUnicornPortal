@@ -41,9 +41,16 @@ Legend: **✅** implemented and verified · **⚠️** implemented, diverges fro
 | 15 | `daily_stats.ooo_count` is an outreach event count, not a CRM figure | `daily_stats` | — | `loadDashboard*` | manager/client dashboards | `ooo_count` | `amJdB2eGXxUNyCPY` (orphan) | — | ✅ |
 
 **Reading the ⚠️ column.** Rows 1–13 are ⚠️ for one reason: the database contract is in place and
-tested, and the automation has not cut over to it. The invariants exist but nothing exercises them,
-because n8n still writes a Google Sheet. Closing every ⚠️ in this table *is*
-[migration-backlog §1](n8n/migration-backlog.md#1-ooo-cutover).
+tested, and the automation has not started writing to it. The invariants exist but nothing exercises
+them, because n8n still writes only the Google Sheet — **phase 0** of the
+[dual-write transition](../adr/0017-sheets-to-supabase-dual-write-transition.md). These rows go ✅ at
+**phase B**, when Supabase becomes authoritative and the invariants are the ones actually enforcing.
+Closing them *is* [migration-backlog §1](n8n/migration-backlog.md#1-ooo-cutover).
+
+⚠️ here means "the rule holds in the database and nothing routes through it yet" — not "the rule is
+violated". The genuine violations are narrower: row 3 (a direct `leads` write bypassing the RPC
+contract) and row 11 (the sheet **deletes** where the contract **cancels and keeps history** — a
+semantic gap dual-write must reconcile, not paper over).
 
 Rows 3 and 6 additionally block
 [`20260722z_drop_legacy_ooo_columns.sql`](../../supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql).
