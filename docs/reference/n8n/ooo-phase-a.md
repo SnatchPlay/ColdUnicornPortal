@@ -87,7 +87,7 @@ Postgres; the routing chain does not exist at all.
 | Bison API key per workspace | `client_sequencers`: **35 enabled**, all with a plausible key (50–51 chars) and a numeric `external_workspace_id` | ✅ **ready** |
 | `clients.auto_ooo_enabled` | `false` on **all 53** clients | ⛔ blocker |
 | `client_ooo_routing` rows | **0 rows** | ⛔ blocker |
-| Campaigns to route to | `campaigns`: 704 `outreach`, 27 `nurture`, **0 `ooo_followup`** | ⛔ **blocker, and the deepest one** |
+| Campaigns to route to | all 48 ARM campaigns **exist** — but typed `outreach` (21) / `nurture` (27), **0 `ooo_followup`** | ⚠️ misclassified, not missing |
 
 Two consequences worth stating plainly.
 
@@ -96,11 +96,21 @@ API key and workspace id, so branch S can authenticate from Postgres today. The 
 not read it. [Security finding 1](security.md#1-per-client-bison-api-keys-live-in-a-google-sheet--high)
 is therefore about deleting the sheet lookup, not about a migration — much smaller than it looked.
 
-**The routing chain has no bottom.** `client_ooo_routing.campaign_id` is
-`REFERENCES campaigns(id)`, and there are **zero** campaigns of type `ooo_followup`. The OOO
-follow-up campaigns the ARM sheet points at exist in Bison and have never been ingested here, so
-routing rows cannot be inserted at all — there is nothing to point them at. Seeding routing is not a
-data-entry task; it needs the campaigns ingested first, with their Bison `external_id`.
+**The campaigns are misclassified, not missing.** All 48 ARM campaign ids resolve to real
+`campaigns` rows — they were ingested all along, just never typed `ooo_followup`. So this is a
+one-line reclassification, not an ingestion project.
+
+**And that misclassification is a live defect.** Clients see exactly `campaigns.type='outreach'`
+(RLS `campaigns_select_scoped` + `scopeCampaigns`, ADR-0003). **25** campaigns named
+`OOO automation | male|female|general` are typed `outreach`, so **9 clients can currently see their
+own OOO follow-up campaigns in the portal**, and those campaigns' `campaign_daily_stats` — 3645 rows,
+2026-01-22 → 2026-07-19, 121 sent / 20 replies — are counted in client-facing campaign metrics.
+ADR-0015 and [11-integrations §5](../functional/11-integrations.md#5-ooo-routing) both say these must
+be `ooo_followup` and invisible to clients.
+
+Fixed by [`20260722g_ooo_campaigns_and_routing_seed.sql`](../../../supabase/migrations/20260722g_ooo_campaigns_and_routing_seed.sql),
+which also seeds the routing. Dry-run against production inside a rolled-back transaction:
+**52 `ooo_followup` campaigns · 0 still client-visible · 42 active routing rules · 14 clients.**
 
 ## Preconditions for phase A
 
@@ -115,15 +125,23 @@ data-entry task; it needs the campaigns ingested first, with their Bison `extern
    bypassing the RPC contract. It has never landed a row, so removal is free.
 4. **Read the Bison API key from `client_sequencers`, not from CS PDCA.** The data is already there
    (35/35). This is deleting a sheet lookup in branch S, not a credential migration.
-5. **Build the routing chain**, in this order — it is three steps, not one:
-   1. **Ingest the OOO follow-up campaigns** into `campaigns` with `type='ooo_followup'` and their
-      Bison `external_id`. There are currently **0**, and `client_ooo_routing.campaign_id` is a
-      foreign key to `campaigns(id)`, so nothing can be seeded until these exist.
-   2. **Seed `client_ooo_routing`** from the ARM sheet: `(bison workspace id, gender)` →
+5. **Build the routing chain.** Migration `20260722g` does the first two parts; the third is a
+   deliberate separate decision:
+   1. ✅ **Reclassify** the 52 OOO campaigns to `type='ooo_followup'` — also closes the
+      client-visibility defect above.
+   2. ✅ **Seed `client_ooo_routing`** from ARM: `(bison workspace id, gender)` →
       `(client_id, routing_key, campaign_id)`. The `routing_key` CHECK is exactly
-      `male | female | general`, matching the sheet's values.
-   3. **Set `clients.auto_ooo_enabled`** per client. It is `false` on all 53 today, so every episode
-      would be recorded `skipped/automation_disabled` regardless of routing.
+      `male | female | general`, matching the sheet's values verbatim.
+   3. ⛔ **Set `clients.auto_ooo_enabled`** — `false` on all 53 today, so every episode would be
+      recorded `skipped/automation_disabled` regardless of routing. Deliberately **not** in the
+      migration: this flag gates what `record_ooo_followup` records, so flipping it is part of the
+      phase A cutover with its own decision, not a side effect of seeding. No workflow graph reads
+      it today, so enabling it has no effect on branch L.
+
+   **Six of the 48 ARM rows cannot be seeded**: workspaces `75` and `130` have no enabled
+   `client_sequencers` row, so their client is unknown. The migration reports them rather than
+   inventing a placeholder parent. Those two workspaces will silently have no OOO routing in branch S
+   until someone maps them — worth resolving before reading any parity number.
 
 Precondition 5 governs whether phase A can produce a **meaningful** comparison at all. Skip any part
 of it and branch S enrols nobody: every episode lands as `skipped/routing_missing` or

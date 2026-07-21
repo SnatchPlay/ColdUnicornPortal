@@ -83,13 +83,25 @@ export async function callTool(name, args = {}) {
  */
 export async function callWriteTool(name, args = {}) {
   const env = currentEnvironment();
-  if (env !== "development") {
-    throw new Error(
-      `Refusing to call ${name}: N8N_ENV=${env}. Write operations are allowed only against a ` +
-        `development instance. Set N8N_ENV=development in .env.local when N8N_MCP_URL points at one.`,
-    );
+  if (env === "development") return unwrap(await rpc("tools/call", { name, arguments: args }));
+
+  // Escape hatch for an operation the user has explicitly approved on a non-development instance.
+  //
+  // Deliberately a SEPARATE variable rather than "just set N8N_ENV=development": mislabelling the
+  // environment would silently re-open every other write path and corrupt the registry's
+  // per-environment remote IDs. This says what is true — production, with approval — and has to be
+  // passed per invocation, so it cannot linger in .env.local as an ambient permission.
+  const approval = process.env.N8N_APPROVED_PRODUCTION_WRITE?.trim();
+  if (approval) {
+    console.warn(`[n8n] PRODUCTION WRITE: ${name} — approved as "${approval}"`);
+    return unwrap(await rpc("tools/call", { name, arguments: args }));
   }
-  return unwrap(await rpc("tools/call", { name, arguments: args }));
+
+  throw new Error(
+    `Refusing to call ${name}: N8N_ENV=${env}. Write operations are allowed only against a ` +
+      `development instance. If the user has approved this specific operation, pass ` +
+      `N8N_APPROVED_PRODUCTION_WRITE="<what was approved>" for that invocation only.`,
+  );
 }
 
 /**
