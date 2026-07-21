@@ -32,9 +32,13 @@
 -- * external_ids 365, 629, 630, 631 are OOO campaigns by name but appear in no ARM row. They are
 --   reclassified (part 1) so they stop being client-visible, but get no routing: nothing routes to
 --   them today, and inventing a mapping would be worse than leaving them unrouted.
--- * clients.auto_ooo_enabled is NOT touched here. It gates record_ooo_followup, so flipping it
---   changes what the new write path records — that belongs to the phase A cutover, with its own
---   decision, not to a seed migration.
+-- * Workspaces '75' and '130' are knowingly left unrouted (decision 2026-07-21). Their 6 ARM rows
+--   are skipped. In branch S their OOO replies will record as skipped/routing_missing — visible by
+--   design (ADR-0015 §7), never a silent drop — and they must be excluded from any parity number
+--   until someone maps them to a client.
+--
+-- clients.auto_ooo_enabled IS set here (part 3), scoped to the clients that just received routing.
+-- Rationale in that section.
 
 begin;
 
@@ -114,15 +118,32 @@ join public.campaigns c
   on c.external_id = arm.campaign_external_id
 on conflict do nothing;
 
--- ── 3. Report what could not be seeded ────────────────────────────────────────────────────────
+-- ── 3. Enable OOO automation for the clients that just received routing ───────────────────────
+-- Scoped to clients with an active routing rule, NOT set globally. Those clients already receive
+-- OOO follow-ups today via the Google Sheet path, so this makes Supabase reflect what is already
+-- happening rather than turning something new on. A client with no routing keeps auto_ooo_enabled
+-- = false, so it cannot start recording episodes it has nowhere to send.
+--
+-- Safe with respect to the live system: no n8n workflow graph reads clients.auto_ooo_enabled today
+-- (verified 2026-07-21 across the imported OOO family) — branch L gates on the ARM sheet instead.
+-- The only consumer is record_ooo_followup, which nothing calls yet. So this changes what the NEW
+-- write path will record, and nothing about current behaviour.
+update public.clients
+set auto_ooo_enabled = true
+where id in (select client_id from public.client_ooo_routing where is_active)
+  and auto_ooo_enabled is distinct from true;
+
+-- ── 4. Report what could not be seeded ────────────────────────────────────────────────────────
 do $$
 declare
   v_campaigns  integer;
   v_routes     integer;
+  v_enabled    integer;
   v_unmatched  text;
 begin
   select count(*) into v_campaigns from public.campaigns where type = 'ooo_followup';
   select count(*) into v_routes    from public.client_ooo_routing where is_active;
+  select count(*) into v_enabled   from public.clients where auto_ooo_enabled;
 
   select string_agg(distinct ws, ', ' order by ws)
     into v_unmatched
@@ -134,6 +155,7 @@ begin
 
   raise notice 'ooo_followup campaigns: %', v_campaigns;
   raise notice 'active routing rules: % (expected 42 of 48 ARM rows)', v_routes;
+  raise notice 'clients with auto_ooo_enabled: % (expected 14)', v_enabled;
   if v_unmatched is not null then
     raise notice 'ARM workspaces with no enabled client_sequencers row, NOT seeded: %', v_unmatched;
   end if;

@@ -132,16 +132,20 @@ which also seeds the routing. Dry-run against production inside a rolled-back tr
    2. ✅ **Seed `client_ooo_routing`** from ARM: `(bison workspace id, gender)` →
       `(client_id, routing_key, campaign_id)`. The `routing_key` CHECK is exactly
       `male | female | general`, matching the sheet's values verbatim.
-   3. ⛔ **Set `clients.auto_ooo_enabled`** — `false` on all 53 today, so every episode would be
-      recorded `skipped/automation_disabled` regardless of routing. Deliberately **not** in the
-      migration: this flag gates what `record_ooo_followup` records, so flipping it is part of the
-      phase A cutover with its own decision, not a side effect of seeding. No workflow graph reads
-      it today, so enabling it has no effect on branch L.
+   3. ✅ **Set `clients.auto_ooo_enabled`** for the **14** clients that just received routing
+      (decision 2026-07-21). Scoped, not global: those clients already receive OOO follow-ups via
+      the sheet, so this makes Supabase reflect what already happens rather than turning something
+      new on. A client with no routing stays `false` and cannot record episodes it has nowhere to
+      send. No workflow graph reads this flag today — the only consumer is `record_ooo_followup`,
+      which nothing calls yet — so it changes what the *new* path records and nothing about branch L.
 
-   **Six of the 48 ARM rows cannot be seeded**: workspaces `75` and `130` have no enabled
-   `client_sequencers` row, so their client is unknown. The migration reports them rather than
-   inventing a placeholder parent. Those two workspaces will silently have no OOO routing in branch S
-   until someone maps them — worth resolving before reading any parity number.
+   **Six of the 48 ARM rows are knowingly left unseeded** (decision 2026-07-21): workspaces `75` and
+   `130` have no enabled `client_sequencers` row, so their client is unknown, and a placeholder
+   parent would be a guess. In branch S their OOO replies record as `skipped/routing_missing` —
+   visible by design (ADR-0015 §7), never a silent drop.
+
+   **Exclude both workspaces from every parity number** until they are mapped, or branch S will look
+   wrong for a reason that has nothing to do with the mapping under test.
 
 Precondition 5 governs whether phase A can produce a **meaningful** comparison at all. Skip any part
 of it and branch S enrols nobody: every episode lands as `skipped/routing_missing` or
@@ -152,6 +156,27 @@ and tell you nothing about the mapping.
 Step 5.1 is the real unit of work here and is currently owned by nobody: no workflow ingests
 `ooo_followup` campaigns, and `11-integrations` §2 documents campaign ingestion as creating
 `outreach` campaigns only.
+
+## Open risk for branch S: does the Postgres credential have the right role?
+
+Every ADR-0015 RPC is `SECURITY DEFINER` and granted to **`service_role` only**. Branch S calls them
+from an `n8n-nodes-base.postgres` node, so that node's credential must connect as a role that holds
+those grants. The credential is not visible through the MCP (it strips credentials), and the existing
+Postgres nodes in `ooo-detect-and-log` only ever did a plain `select` on `client_sequencers` and an
+`update` on `leads` — neither of which proves anything about `service_role`.
+
+So this is **unverified**, and it is the most likely first failure of branch S. Check it before
+wiring anything else, with a call that has no side effect:
+
+```sql
+select public.resolve_ooo_routing(
+  (select id from public.clients limit 1), 'general'
+);
+```
+
+If it raises `permission denied for function`, branch S needs a Postgres credential connecting as
+`service_role` (or as a role granted `execute` on those functions) — a credential change, which is
+outside what an agent may do.
 
 ## Exit criteria
 
