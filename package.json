@@ -16,7 +16,12 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-apply-migrations.mjs",
     "db:migrate:local": "SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres node scripts/db-apply-migrations.mjs",
-    "db:diagnose": "node scripts/db-diagnose.mjs"
+    "db:diagnose": "node scripts/db-diagnose.mjs",
+    "n8n:smoke": "node scripts/n8n/smoke.mjs",
+    "n8n:inventory": "node scripts/n8n/inventory.mjs",
+    "n8n:export": "node scripts/n8n/export.mjs",
+    "n8n:validate": "node scripts/n8n/validate.mjs",
+    "n8n:check-drift": "node scripts/n8n/check-drift.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -69,6 +74,7 @@
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "26.1.0",
+    "js-yaml": "^4.1.0",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
     "vitest": "2.1.9"
