@@ -74,6 +74,68 @@ separate, reviewable change. An import diff that also alters logic cannot be rev
 
 ---
 
+## The SDK authoring contract
+
+`update_workflow` and `create_workflow_from_code` take **SDK code**, not workflow JSON, and there is
+no decompiler. Every change therefore means re-authoring the whole graph, so the exact shape matters:
+a wrong one is accepted, reports the right `nodeCount`, and produces a **different workflow**.
+
+Measured against the production instance on 2026-07-22 by creating throwaway workflows and reading
+them back. Each rule below is a shape that validated cleanly and was still wrong.
+
+**Node shape.** `version` at the top level, parameters nested under `config.parameters`:
+
+```js
+const node = {
+  name: "[S] record_ooo_followup",
+  type: "n8n-nodes-base.postgres",
+  version: 2.6,
+  config: {
+    parameters: { operation: "executeQuery", query: "…", options: {} },
+    onError: "continueRegularOutput",
+  },
+};
+workflow({ name: "…" }).add(trigger).to(node)
+```
+
+| Shape | Result |
+|---|---|
+| `{name, type, version, config: {parameters}}` | **correct** |
+| `{name, type, typeVersion, parameters}` (raw n8n JSON) | `nodeCount` is right, `typeVersion` resets to 1 and **every parameter is silently dropped** |
+| `{name, type, version, config: {…params directly…}}` | `typeVersion` survives, parameters are still dropped |
+| `{type, version, config}` with no top-level `name` | node is skipped entirely; `nodeCount` 0 |
+
+**The oracle for "did the parameters land" is `publish_workflow`.** A parameterless graph fails to
+activate with `Cannot read properties of undefined (reading 'map'/'length')`. `get_workflow_details`
+returns node parameters only for a workflow that has an **active version**, so a draft always reads
+back as a bare summary — do not mistake that for data loss, and do not use it as proof of success.
+
+**Connections.** `.add(x).to(y)` chains. Two different meanings that are easy to confuse:
+
+```js
+.add(t).to(a).add(t).to(b)   // main:[[a, b]]  — one output port, parallel fan-out ← branch L / branch S
+.add(t).to([a, b])           // main:[[a],[b]] — output 0 → a, output 1 → b     ← if/filter branches
+```
+
+Using `.to([a, b])` on a single-output node wires the second target to an output port that does not
+exist. It validates. Reserve the array form for `if` / `filter` / `switch`.
+
+**What is preserved and what is not.**
+
+- **Credentials are re-attached automatically.** New nodes come back with an
+  `autoAssignedCredentials` list in the tool result — n8n matches by credential type. Verify it names
+  the node you added; an empty list on a node that needs auth means it will fail at runtime.
+- **`webhookId` is regenerated.** The production URL survives only because it is derived from
+  `parameters.path`. Re-authoring a webhook workflow **without** an explicit `path` changes its URL
+  and silently stops delivery.
+- **Positions are normalized.** Cosmetic drift in the artifact; re-export after every change.
+
+**Prove fidelity before touching the live workflow.** `create_workflow_from_code` a throwaway copy
+first, read it back, and diff every untouched node (type, typeVersion, parameters) plus every edge
+against the committed artifact. Then archive the copy. The instance count must return to what it was.
+
+---
+
 ## Direction of synchronisation
 
 After import, **the repository is canonical**. The failure mode this prevents:
