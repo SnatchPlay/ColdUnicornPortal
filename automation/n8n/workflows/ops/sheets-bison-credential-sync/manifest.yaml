@@ -1,0 +1,77 @@
+schemaVersion: 1
+
+id: sheets-bison-credential-sync
+name: "[CRED] CS PDCA → client_sequencers · Bison keys"
+domain: ops
+owner: automation
+lifecycle: managed
+status: paused            # published, NOT yet executed once — see README "Not yet proven"
+criticality: high         # every Bison call in bison-lead-enrichment now depends on this data
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "every 6 hours"
+
+reads:
+  tables:
+    - clients
+    - sequencers
+    - client_sequencers
+  external:
+    - "Google Sheets · CS PDCA — col_5 (Bison workspace id), col_6 (Bison API key), customer name"
+
+writes:
+  tables:
+    - client_sequencers
+  tablesWritten:
+    - client_sequencers
+  rpcs: []
+  external: []
+
+credentials:
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "Read CS PDCA"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Sync client_sequencers"
+
+transition:
+  phase: A
+  phaseState: designed      # published but never executed; nothing has been synced yet
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · CS PDCA col_6"
+  targetStore: "Supabase · client_sequencers.api_key"
+  design: automation/n8n/workflows/ops/sheets-bison-credential-sync/README.md
+  notes: >-
+    This is a CREDENTIAL move, not a data migration. ADR-0012 has always placed per-client vendor
+    keys in client_sequencers; the workflows simply never followed it, which is security finding 1.
+    It is the precondition for bison-lead-enrichment surviving the Sheets cutover: every Bison call
+    there now reads its bearer token from client_sequencers, with a guarded sheet fallback that
+    exists only until the last 7 workspaces are seeded.
+  reconciliation: >-
+    select count(*) filter (where coalesce(cs.api_key,'') <> '') as keyed, count(*) as rows
+    from public.client_sequencers cs
+    join public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison';
+    Expect 42 keyed rows once the three missing clients exist. 35 before this workflow runs.
+  parityEvidence: null
+
+idempotency:
+  key: "client_sequencers.external_workspace_id for updates; UNIQUE (client_id, sequencer_id) for inserts"
+  notes: >-
+    An update only fires when the key actually differs (api_key IS DISTINCT FROM), so a no-op run
+    reports keys_refreshed = 0 rather than touching every row's updated_at.
+
+retryPolicy:
+  notes: >-
+    Single statement. errorWorkflow points at automation-failure-recorder, so a failed run becomes an
+    integration_sync_runs row rather than silence.
+
+knownViolations: []

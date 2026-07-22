@@ -376,7 +376,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -406,7 +406,7 @@
           "values": [
             {
               "lookupColumn": "col_5",
-              "lookupValue": "={{ $json.event.workspace_id }}"
+              "lookupValue": "={{ $('When Called by HUB').first().json.event.workspace_id }}"
             }
           ]
         },
@@ -531,7 +531,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -781,7 +781,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -872,7 +872,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $json.col_6}}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -918,7 +918,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -1010,7 +1010,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -1056,7 +1056,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -1102,7 +1102,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+              "value": "={{ (() => { const s = $('[S0] Resolve Bison credentials').first().json.bison_api_key; if (s) return 'Bearer ' + s; try { return 'Bearer ' + $('[2] Find workspace in CS PDCA').first().json.col_6; } catch (e) { return 'Bearer '; } })() }}"
             }
           ]
         },
@@ -1661,6 +1661,25 @@
           "queryReplacement": "={{ [ $json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('Edit Fields1').item.json.email || null, $('Edit Fields1').item.json.firstname || null, $('Edit Fields1').item.json.lastname || null ] }}"
         },
         "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
+      "id": "s0-resolve-bison-credentials",
+      "name": "[S0] Resolve Bison credentials",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        336,
+        124
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('When Called by HUB').first().json.event.workspace_id)] }}"
+        },
+        "query": "-- ADR-0012: per-client Bison credentials live in client_sequencers, never in a spreadsheet.\n-- This is what lets every Bison call below survive the Google Sheets cutover.\nselect cs.id::text          as client_sequencer_id,\n       cs.client_id::text   as client_id,\n       cs.api_key           as bison_api_key,\n       cs.external_workspace_id as workspace_id,\n       c.name               as client_name\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison'\njoin public.clients    c on c.id = cs.client_id\nwhere cs.external_workspace_id = $1 and cs.enabled and coalesce(cs.api_key, '') <> ''\nlimit 1;"
       }
     },
     {
@@ -3479,7 +3498,7 @@
         [
           {
             "index": 0,
-            "node": "[2] Find workspace in CS PDCA",
+            "node": "[S0] Resolve Bison credentials",
             "type": "main"
           }
         ]
@@ -4015,6 +4034,17 @@
         ]
       ]
     },
+    "[S0] Resolve Bison credentials": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[2] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "[S] Resolve campaign": {
       "main": [
         [
@@ -4063,6 +4093,7 @@
   "settings": {
     "binaryMode": "separate",
     "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }

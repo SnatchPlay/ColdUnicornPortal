@@ -23,6 +23,7 @@ triggers:
 
 reads:
   tables:
+    - clients
     - client_sequencers
     - sequencers
     - campaigns
@@ -53,7 +54,7 @@ writes:
 credentials:
   - alias: "Postgres account"
     type: postgres
-    usedBy: "the five [S] branch nodes"
+    usedBy: "[S0] Resolve Bison credentials and the five [S] branch nodes"
   - alias: "Google Sheets account"
     type: googleSheetsOAuth2Api
     usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes"
@@ -75,6 +76,10 @@ transition:
   targetStore: "Supabase · sequencer_contacts + replies + leads"
   design: docs/reference/processes/outreach/bison-ingestion.md
   notes: >-
+    Every Bison call now takes its bearer token from client_sequencers via [S0] Resolve Bison
+    credentials (ADR-0012), not from CS PDCA col_6 — without that, disconnecting Sheets killed the
+    run at [40] and branch S was parallel in the graph but serial in its dependencies. A guarded
+    sheet fallback remains for the 7 onboarding workspaces that have no client_sequencers row yet.
     Branch S hangs off "Edit Fields1" — the point where branch L has already appended the sheet row
     and gathered every enriched field. It reuses that enrichment rather than duplicating it: Snov.io,
     Lusha and OpenAI cost money per lead, so a second independent chain would double the bill for no

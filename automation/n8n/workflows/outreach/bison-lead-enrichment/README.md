@@ -47,6 +47,54 @@ gathered every enriched field. **Sheets first, Supabase second.**
 Verified before publishing: the whole chain was executed against production inside a transaction that
 was rolled back, and returned `created: true` with a real `lead_id`.
 
+## The Sheets dependency, and how it was cut (2026-07-22)
+
+Branch S hanging off `Edit Fields1` was **not enough to survive the Sheets cutover**, and the first
+version of this README was wrong to imply otherwise.
+
+`workspace_id` does come from the webhook, so `[S] Resolve client sequencer` was already independent.
+But every Bison call in the workflow — `[40]`, `[43]`, `[49]`, `[52]`, `[69]`, `[284]`, `[306]` and
+the reply forward — took its bearer token from **`[2] Find workspace in CS PDCA`, column `col_6`**.
+Disconnect Google Sheets and the run dies at `[40]`, long before branch S is reached. Branch S was
+parallel in the graph and serial in its dependencies.
+
+Fixed by **`[S0] Resolve Bison credentials`**, inserted between `Merge` and the CS PDCA lookup:
+
+```sql
+select cs.api_key, cs.client_id, cs.id
+from public.client_sequencers cs
+join public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison'
+where cs.external_workspace_id = $1 and cs.enabled and coalesce(cs.api_key,'') <> '';
+```
+
+This is not a new contract — it is [ADR-0012](../../../../../docs/adr/0012-multi-sequencer-model.md),
+which has said since the sequencer model landed that per-client vendor credentials live in
+`client_sequencers` and never on a spreadsheet. It also closes
+[security finding 1](../../../../../docs/reference/n8n/security.md) for this workflow, and removes the
+literal token that gave `[69]` its name.
+
+**All 8 Bison Authorization headers now read from Supabase.** The expression keeps a guarded sheet
+fallback:
+
+```js
+const s = $('[S0] …').first().json.bison_api_key;
+if (s) return 'Bearer ' + s;
+try { return 'Bearer ' + $('[2] …').first().json.col_6; } catch (e) { return 'Bearer '; }
+```
+
+The `try` matters: once the CS PDCA node is deleted, a bare `$('[2] …')` reference **throws**, so an
+unguarded fallback would itself become the thing that breaks at cutover.
+
+**The fallback exists for exactly 7 clients** — CS PDCA lists 42 Bison workspaces, 35 have a keyed
+`client_sequencers` row, and workspaces 131/136/137/138/139/149/150 (all `Onboarding`) have none.
+Four of them match a client by name; **SalesBook, Tryumf and Kamiński have no `clients` row at all**.
+Delete the fallback once those are seeded — [`sheets-bison-credential-sync`](../../ops/sheets-bison-credential-sync/README.md)
+does the seeding on a schedule.
+
+What still requires Sheets is now only what *should*: the client's Leads spreadsheet id (`col_4`), the
+notification recipients (`col_101`) and the ABM list — all branch L's business, all of it disconnected
+at phase C by design.
+
 ### Why branch S reuses branch L's enrichment
 
 [ADR-0017 §1a](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md) asks for two

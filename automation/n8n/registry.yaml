@@ -334,3 +334,20 @@ workflows:
       production:
         remoteWorkflowId: YLfQZBprSRIT6hLm
     lastRepositorySync: 2026-07-22
+
+  - id: sheets-bison-credential-sync
+    name: "[CRED] CS PDCA → client_sequencers · Bison keys"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-bison-credential-sync
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: paused
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: Hzar4pwdAXrDHAwn
+    lastRepositorySync: 2026-07-22

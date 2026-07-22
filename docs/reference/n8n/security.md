@@ -40,7 +40,14 @@ runs the secret scanner over fixtures too.
 Found during the 2026-07-21 inventory unless dated otherwise. Everything is recorded so it is not
 rediscovered — including the two that are now closed, which keep their history rather than vanishing.
 
-### 1. Per-client vendor API keys live in a Google Sheet — **high**
+### 1. Per-client vendor API keys live in a Google Sheet — **high, partially closed 2026-07-22**
+
+**Closed for `bison-lead-enrichment`.** All eight of its Bison calls now take the bearer token from
+`client_sequencers` via `[S0] Resolve Bison credentials`, and the literal token in `[69]` is gone.
+A guarded fallback to `col_6` remains for the 7 onboarding workspaces with no row yet; delete it once
+[`sheets-bison-credential-sync`](../../../automation/n8n/workflows/ops/sheets-bison-credential-sync/README.md)
+has run and the three missing clients exist. **Every other workflow below is unchanged.**
+
 
 `ooo-detect-and-log` (and its siblings) read the CS PDCA sheet, take the Bison API key from `col_6`,
 and interpolate it into an `Authorization: Bearer` header expression. The Aimfox workflows do the
