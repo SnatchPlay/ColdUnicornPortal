@@ -1,0 +1,4068 @@
+{
+  "name": "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment",
+  "description": "Heavy MQL enrichment with FIXED Snov.io chain (Local→Global merge via Code picker before OpenAI). OpenAI is now langchain v2.1 Responses API with strict JSON schema for structured lead info extraction.",
+  "nodes": [
+    {
+      "id": "ebf6d887-94e0-43df-861c-85be55898682",
+      "name": "[10] Snov.io Local empty?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3248,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "e78bc313-df82-4591-97f2-5a21fece0422",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "operation": "false",
+                "singleValue": true,
+                "type": "boolean"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "36646af2-3713-4f45-b0da-6fa4089a3b93",
+      "name": "[10] Snov.io Local empty?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3248,
+        -288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "e78bc313-df82-4591-97f2-5a21fece0422",
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "operation": "false",
+                "singleValue": true,
+                "type": "boolean"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "626147f5-32f1-4aab-bcd6-9f06dbd0cc09",
+      "name": "[11] Snov.io: POST /v1/get-profile-by-email (Global)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3696,
+        -32
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.access_token }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ email: $(\"[40] Bison: GET /leads/{taggable_id}\").first().json.data.email }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.snov.io/v1/get-profile-by-email"
+      }
+    },
+    {
+      "id": "a9432514-b515-4684-948e-30fdf5a818ab",
+      "name": "[11] Snov.io: POST /v1/get-profile-by-email (Global)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3696,
+        -368
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.access_token }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ email: $(\"[40] Bison: GET /leads/{taggable_id}1\").first().json.data.email }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.snov.io/v1/get-profile-by-email"
+      }
+    },
+    {
+      "id": "92afb025-9b5a-4c33-943f-9d2651bfdbe8",
+      "name": "[18] OpenAI: gpt-4o analyze email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        4144,
+        96
+      ],
+      "parameters": {
+        "builtInTools": {},
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "GPT-5.4-MINI",
+          "mode": "list",
+          "value": "gpt-5.4-mini"
+        },
+        "options": {
+          "instructions": "Analyze email text, Smartlead info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
+          "store": true,
+          "textFormat": {
+            "textOptions": {
+              "schema": "{\n\"type\": \"object\",\n\"additionalProperties\": false,\n\"properties\": {\n\"first_name\": {\n\"type\": \"string\",\n\"description\": \"Lead first name. Return an empty string if unknown.\"\n},\n\"last_name\": {\n\"type\": \"string\",\n\"description\": \"Lead last name. Return an empty string if unknown.\"\n},\n\"lead_position\": {\n\"type\": \"string\",\n\"description\": \"Lead job title or role. Return an empty string if unknown.\"\n},\n\"phone_number\": {\n\"type\": \"string\",\n\"description\": \"Lead phone number in the most complete available format. Return an empty string if unknown.\"\n},\n\"company_industry\": {\n\"type\": \"string\",\n\"description\": \"Company industry or business category. Return an empty string if unknown.\"\n},\n\"company_website\": {\n\"type\": \"string\",\n\"description\": \"Company website URL or domain. Return an empty string if unknown.\"\n},\n\"company_name\": {\n\"type\": \"string\",\n\"description\": \"Company name. Return an empty string if unknown.\"\n},\n\"company_size\": {\n\"type\": \"string\",\n\"description\": \"Company size, employee count, or size range. Return an empty string if unknown.\"\n},\n\"person_linkedin\": {\n\"type\": \"string\",\n\"description\": \"Lead LinkedIn profile URL. Return an empty string if unknown.\"\n}\n},\n\"required\": [\n\"first_name\",\n\"last_name\",\n\"lead_position\",\n\"phone_number\",\n\"company_industry\",\n\"company_website\",\n\"company_name\",\n\"company_size\",\n\"person_linkedin\"\n]\n}\n",
+              "strict": true,
+              "type": "json_schema"
+            }
+          }
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ \"Bison Info:\\nFirst Name: \" + $('[40] Bison: GET /leads/{taggable_id}').item.json.data.first_name + \"\\nLast Name: \" + $('[40] Bison: GET /leads/{taggable_id}').item.json.data.last_name + \"\\nEmail: \" + $('[40] Bison: GET /leads/{taggable_id}').item.json.data.email + \"\\nCompany Name: \" + ($('[40] Bison: GET /leads/{taggable_id}').item.json.data.company || \"\") + \"\\nWebsite: \" + $('[40] Bison: GET /leads/{taggable_id}').item.json.data.email.extractDomain() + \"\\nTitle: \" + ($('[40] Bison: GET /leads/{taggable_id}').item.json.data.title || \"\") + \"\\n\\nSnov.io Info:\\nPerson Position: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].position) || \"\") + \"\\nCompany Name: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].companyName) || \"\") + \"\\nCompany Size: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].size) || \"\") + \"\\nCompany Industry: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].industry) || \"\") + \"\\n\\nEmail text:\\n\" + ($json.last_reply.text_body || \"\") }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "016b1fc7-fe2f-4bcc-b575-8314c7f957f0",
+      "name": "[18] OpenAI: gpt-4o analyze email2",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        4144,
+        -288
+      ],
+      "parameters": {
+        "builtInTools": {},
+        "modelId": {
+          "__rl": true,
+          "cachedResultName": "GPT-5.4-MINI",
+          "mode": "list",
+          "value": "gpt-5.4-mini"
+        },
+        "options": {
+          "instructions": "Analyze email text, Smartlead info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
+          "store": true,
+          "textFormat": {
+            "textOptions": {
+              "schema": "{\n\"type\": \"object\",\n\"additionalProperties\": false,\n\"properties\": {\n\"first_name\": {\n\"type\": \"string\",\n\"description\": \"Lead first name. Return an empty string if unknown.\"\n},\n\"last_name\": {\n\"type\": \"string\",\n\"description\": \"Lead last name. Return an empty string if unknown.\"\n},\n\"lead_position\": {\n\"type\": \"string\",\n\"description\": \"Lead job title or role. Return an empty string if unknown.\"\n},\n\"phone_number\": {\n\"type\": \"string\",\n\"description\": \"Lead phone number in the most complete available format. Return an empty string if unknown.\"\n},\n\"company_industry\": {\n\"type\": \"string\",\n\"description\": \"Company industry or business category. Return an empty string if unknown.\"\n},\n\"company_website\": {\n\"type\": \"string\",\n\"description\": \"Company website URL or domain. Return an empty string if unknown.\"\n},\n\"company_name\": {\n\"type\": \"string\",\n\"description\": \"Company name. Return an empty string if unknown.\"\n},\n\"company_size\": {\n\"type\": \"string\",\n\"description\": \"Company size, employee count, or size range. Return an empty string if unknown.\"\n},\n\"person_linkedin\": {\n\"type\": \"string\",\n\"description\": \"Lead LinkedIn profile URL. Return an empty string if unknown.\"\n}\n},\n\"required\": [\n\"first_name\",\n\"last_name\",\n\"lead_position\",\n\"phone_number\",\n\"company_industry\",\n\"company_website\",\n\"company_name\",\n\"company_size\",\n\"person_linkedin\"\n]\n}\n",
+              "strict": true,
+              "type": "json_schema"
+            }
+          }
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ \"Bison Info:\\nFirst Name: \" + $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.first_name + \"\\nLast Name: \" + $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.last_name + \"\\nEmail: \" + $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.email + \"\\nCompany Name: \" + ($('[40] Bison: GET /leads/{taggable_id}1').item.json.data.company || \"\") + \"\\nWebsite: \" + $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.email.extractDomain() + \"\\nTitle: \" + ($('[40] Bison: GET /leads/{taggable_id}1').item.json.data.title || \"\") + \"\\n\\nSnov.io Info:\\nPerson Position: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].position) || \"\") + \"\\nCompany Name: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].companyName) || \"\") + \"\\nCompany Size: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].currentJob && $json.snovio_body.data[0].currentJob[0] && $json.snovio_body.data[0].currentJob[0].size) || \"\") + \"\\nCompany Industry: \" + (($json.snovio_body.data && $json.snovio_body.data[0] && $json.snovio_body.data[0].industry) || \"\") + \"\\n\\nEmail text:\\n\" + ($json.last_reply.text_body || \"\") }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "24d41d4e-742c-4b90-8228-b33ec8a980e8",
+      "name": "[180] Phone number missing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4720,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b750b0a7-878e-4de4-a59d-2d930d220abb",
+              "leftValue": "={{ $json.phoneNumber }}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "string"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "55fcd1eb-02fd-4e57-a7ab-7747d258fe7f",
+      "name": "[180] Phone number missing?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4944,
+        -288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b750b0a7-878e-4de4-a59d-2d930d220abb",
+              "leftValue": "={{ $('[286] Parse AI output + set phone2').item.json.phoneNumber }}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "string"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a059cecd-3bc8-47dc-b1ba-c076a0889aad",
+      "name": "[181] Lusha: POST /v2/person (fallback phone)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4944,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{$(\"[40] Bison: GET /leads/{taggable_id}\").first().json.data.email}}"
+            },
+            {
+              "name": "filterBy",
+              "value": "phoneNumbers"
+            },
+            {
+              "name": "revealPhones",
+              "value": "true"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "url": "https://api.lusha.com/v2/person"
+      }
+    },
+    {
+      "id": "b87afee2-05d5-4683-9cab-5ec95b993889",
+      "name": "[181] Lusha: POST /v2/person (fallback phone)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5168,
+        -368
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{$(\"[40] Bison: GET /leads/{taggable_id}1\").first().json.data.email}}"
+            },
+            {
+              "name": "filterBy",
+              "value": "phoneNumbers"
+            },
+            {
+              "name": "revealPhones",
+              "value": "true"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "url": "https://api.lusha.com/v2/person"
+      }
+    },
+    {
+      "id": "7486fec1-c5fd-4bd2-96ea-7fb1c3ec3e59",
+      "name": "[189-192] Forward email to recipients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6064,
+        96
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "<!DOCTYPE html> <html lang=\"pl\"> <head>     <meta charset=\"UTF-8\">     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">     <title>Nowy Lead</title>     <style>         /* Proste style dla lepszej czytelności, osadzone w head dla niektórych klientów */         body {             font-family: Arial, sans-serif;             line-height: 1.6;             color: #333;             margin: 0;             padding: 0;         }         .container {             width: 90%;             max-width: 600px;             margin: 20px auto;             padding: 25px;             border: 1px solid #ddd;             border-radius: 8px;             background-color: #ffffff;         }         .footer {             margin-top: 25px;             font-weight: bold;         }     </style> </head> <body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;\">      <div class=\"container\" style=\"width: 90%; max-width: 600px; margin: 20px auto; padding: 25px; border: 1px solid #ddd; border-radius: 8px; background-color: #ffffff;\">                  <p style=\"margin-top: 0;\">Nowy, zimny lead wpłynął właśnie na Twojego maila 📨<br>Podejmij go do 5 minut, a znacznie łatwiej odczarujesz jego lodowe serce ⏳<br>Ps. W stopce brakuje numeru telefonu? Zerknij do Google Sheets, gdzie mogła zadziać się magia 📲</p>          <p class=\"footer\" style=\"margin-top: 25px; font-weight: bold;\">             Twój zespół ColdUnicorn  🦄         </p>              </div>  </body> </html>"
+            },
+            {
+              "name": "sender_email_id",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].sender_email_id }}"
+            },
+            {
+              "name": "content_type",
+              "value": "html"
+            },
+            {
+              "name": "to_emails",
+              "value": "={{ \n  ($('[2] Find workspace in CS PDCA').item.json.col_101 || '')\n    .split(',')\n    .map(item => item.trim())\n    .filter(Boolean)\n    .map(email => ({ email_address: email }))\n}}"
+            },
+            {
+              "name": "inject_previous_email_body",
+              "value": "={{true}}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/replies/\" + $(\"[226+227+228] Pick Snovio output body\").first().json.last_reply.id + \"/forward\" }}"
+      }
+    },
+    {
+      "id": "e514603e-75aa-424a-8d77-21a0bbe13d59",
+      "name": "[2] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        560,
+        96
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "d31a678f-41be-452f-9000-eda7d4e94d3d",
+      "name": "[226+227+228] Pick Snovio output body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3920,
+        96
+      ],
+      "parameters": {
+        "jsCode": "const local = $(\"[9] Snov.io: POST /v1/get-prospects-by-email (Local List)\").first().json;\nlet snovio_body = local;\ntry {\n  const globalAll = $(\"[11] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[79+72+51+8+57] Compute derived values\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
+      }
+    },
+    {
+      "id": "15555e49-e474-44e5-9de6-0524ab11682d",
+      "name": "[226+227+228] Pick Snovio output body2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3920,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "const local = $(\"[9] Snov.io: POST /v1/get-prospects-by-email (Local List)2\").first().json;\nlet snovio_body = local;\ntry {\n  const globalAll = $(\"[11] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[79+72+51+8+57] Compute derived values2\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
+      }
+    },
+    {
+      "id": "86ef8212-0a21-4d2e-a493-d694aaa9fd0e",
+      "name": "[283] Lead email == Reply email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1904,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "3192b646-85be-4d92-8d0d-f2b9a880a1c1",
+              "leftValue": "={{ $json.last_reply.data[0].from_email_address.toLowerCase().trim() }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data.email.toLowerCase().trim() }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      }
+    },
+    {
+      "id": "b1ea1bd8-8c11-4b63-b197-901ac55de28e",
+      "name": "[283] Lead email == Reply email?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1904,
+        -96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "3192b646-85be-4d92-8d0d-f2b9a880a1c1",
+              "leftValue": "={{ $json.last_reply.data[0].from_email_address.toLowerCase().trim() }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.email.toLowerCase().trim() }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      }
+    },
+    {
+      "id": "f4dabfb3-78fd-4dd4-92a5-0956cc73f846",
+      "name": "[284] Bison: blacklist 3rd-party email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2128,
+        288
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ email: $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://go.gheads.com/api/blacklisted-emails"
+      }
+    },
+    {
+      "id": "5a5a4ab2-2532-4d09-948e-708879107c6c",
+      "name": "[284] Bison: blacklist 3rd-party email2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2128,
+        -96
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ email: $('[45] Set last_reply (LATEST by date_received DESC)2').item.json.last_reply.data[0].from_email_address }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://go.gheads.com/api/blacklisted-emails"
+      }
+    },
+    {
+      "id": "5cc2414d-b07f-4159-8cd4-ccd8ff55b39d",
+      "name": "[286] Parse AI output + set phone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4496,
+        96
+      ],
+      "parameters": {
+        "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\nconst phoneFromAi = (ai.phone_number || \"\").trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
+      }
+    },
+    {
+      "id": "a19993e9-b8d8-4c89-b121-e45c5b7c6eae",
+      "name": "[286] Parse AI output + set phone2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4496,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\nconst phoneFromAi = (ai.phone_number || \"\").trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
+      }
+    },
+    {
+      "id": "616f9397-c8a1-4e51-8921-c756d487620c",
+      "name": "[287] Set phone from Lusha",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5168,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "phoneNumber",
+              "name": "phoneNumber",
+              "type": "string",
+              "value": "={{ $json.contact.data?$json.contact.data.phoneNumbers[0].number:'' }}"
+            },
+            {
+              "id": "phoneSource",
+              "name": "phoneSource",
+              "type": "string",
+              "value": "=Lusha"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "05714271-51e5-48e1-ac73-7ecc25acee45",
+      "name": "[287] Set phone from Lusha1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5392,
+        -368
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "phoneNumber",
+              "name": "phoneNumber",
+              "type": "string",
+              "value": "={{ $json.contact.data?$json.contact.data.phoneNumbers[0].number:'' }}"
+            },
+            {
+              "id": "phoneSource",
+              "name": "phoneSource",
+              "type": "string",
+              "value": "=Lusha"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "32c95c0e-3d57-48ae-915b-315c1d5bf31e",
+      "name": "[304] Check if 3rd-party domain is public",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2352,
+        288
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Emails",
+              "lookupValue": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "🤖Emails Exclude List"
+        }
+      }
+    },
+    {
+      "id": "9dc8af59-8fe0-4ff4-ad03-e5fb3106b844",
+      "name": "[306-filter] 3rd-party domain NOT in exclude list?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2576,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "2c4c7967-b286-4f69-80e4-6aaba3211983",
+              "leftValue": "={{ $(\"[304] Check if 3rd-party domain is public\")}}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4447dff7-b890-4bba-b8ec-dee5043ecf75",
+      "name": "[306-filter] 3rd-party domain NOT in exclude list?2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2576,
+        -96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "2c4c7967-b286-4f69-80e4-6aaba3211983",
+              "leftValue": "={{ $(\"Get Blacklist Domain from base\")}}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "611c2a3c-4af9-47dd-b882-7dcdf315f3f7",
+      "name": "[306] Bison: blacklist 3rd-party domain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        288
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/blacklisted-domains"
+      }
+    },
+    {
+      "id": "299c1dfa-a691-44de-9184-bff1c501a27b",
+      "name": "[306] Bison: blacklist 3rd-party domain2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        -96
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)2').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/blacklisted-domains"
+      }
+    },
+    {
+      "id": "6b36951d-4657-4d32-83d9-820cea876e19",
+      "name": "[4] Check if lead already in Leads sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1008,
+        96
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "E-MAIL",
+              "lookupValue": "={{ $json.data.email }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "0653287a-30b2-4058-9839-60d4e123c147",
+      "name": "[40] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        96
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.col_6}}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "93896592-8765-408a-8881-9dd9893d4ddd",
+      "name": "[40] Bison: GET /leads/{taggable_id}1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        -288
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.external_api_key}}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "110eee18-b868-46b9-bfd9-179018273ced",
+      "name": "[43] Bison: GET /leads/{taggable_id}/replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1456,
+        192
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id + \"/replies\" }}"
+      }
+    },
+    {
+      "id": "ec563b98-73ee-4211-85f8-e0121fc95a32",
+      "name": "[43] Bison: GET /leads/{taggable_id}/replies1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1456,
+        -192
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id + \"/replies\" }}"
+      }
+    },
+    {
+      "id": "dacb5d15-39e9-4117-a08c-4ebe4560ff48",
+      "name": "[45] Set last_reply (LATEST by date_received DESC)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        192
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "last_reply",
+              "name": "last_reply",
+              "type": "object",
+              "value": "={{ \n  $input.all()\n    .map(item => item.json)\n    .sort((a, b) => new Date(a.date_received) - new Date(b.date_received))[0]\n}}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "14be3a69-f768-47e7-9d4e-dfc1a9ac408c",
+      "name": "[45] Set last_reply (LATEST by date_received DESC)2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        -192
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "last_reply",
+              "name": "last_reply",
+              "type": "object",
+              "value": "={{ \n  $input.all()\n    .map(item => item.json)\n    .sort((a, b) => new Date(a.date_received) - new Date(b.date_received))[0]\n}}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e4a18774-cf9d-49e7-8f97-f1e487bb6bd5",
+      "name": "[49] Bison: GET /leads/{lead_id}/scheduled-emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2128,
+        96
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"[40] Bison: GET /leads/{taggable_id}\").first().json.data.id + \"/scheduled-emails\" }}"
+      }
+    },
+    {
+      "id": "b420bd82-f979-4839-b577-ee5adf7db577",
+      "name": "[49] Bison: GET /leads/{lead_id}/scheduled-emails2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2128,
+        -288
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"[40] Bison: GET /leads/{taggable_id}1\").first().json.data.id + \"/scheduled-emails\" }}"
+      }
+    },
+    {
+      "id": "05078131-3ca2-44de-b24b-629aba207c34",
+      "name": "[52] Bison: GET /campaigns/{id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1904,
+        96
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/campaigns/\" + $json.last_reply.data[0].campaign_id }}"
+      }
+    },
+    {
+      "id": "5605a3ad-65ef-4fc3-b506-5cc56d4936b4",
+      "name": "[52] Bison: GET /campaigns/{id}2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1904,
+        -288
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/campaigns/\" + $json.last_reply.data[0].campaign_id }}"
+      }
+    },
+    {
+      "id": "0728c305-8699-4e65-8253-919dcf32ec1c",
+      "name": "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2352,
+        96
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/campaigns/v1.1/\" + $(\"[45] Set last_reply (LATEST by date_received DESC)\").first().json.last_reply.data[0].campaign_id + \"/sequence-steps\" }}"
+      }
+    },
+    {
+      "id": "ae9cabc1-950a-4b2d-bca6-9cad5320c0cd",
+      "name": "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2352,
+        -288
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Client Data').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/campaigns/v1.1/\" + $(\"[45] Set last_reply (LATEST by date_received DESC)2\").first().json.last_reply.data[0].campaign_id + \"/sequence-steps\" }}"
+      }
+    },
+    {
+      "id": "cbbc5930-6568-47b2-b8f5-a06af787fd8e",
+      "name": "[79+72+51+8+57] Compute derived values",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        96
+      ],
+      "parameters": {
+        "jsCode": "const last_reply = $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0]\nconst scheduled = $(\"[49] Bison: GET /leads/{lead_id}/scheduled-emails\").first().json.data || [];\nconst stepsResp = $input.first().json.data;\nconst sequenceSteps = stepsResp.sequence_steps|| [];\n\nconst scheduledRow = scheduled.find(s => s.id === last_reply.scheduled_email_id) || {};\nconst sequenceStepId = scheduledRow.sequence_step_id ?? null;\nconst sequenceStepRow = sequenceSteps.find(s => s.id === sequenceStepId) || {};\nconst firstEmailDateIso = scheduledRow.sent_at ?? null;\nconst subject = scheduledRow.email_subject ?? \"\";\n\nlet responseTimeHours = null;\nif (firstEmailDateIso && last_reply.date_received) {\n  responseTimeHours = (new Date(last_reply.date_received).getTime() - new Date(firstEmailDateIso).getTime()) / 1000 / 3600;\n}\n\nlet responseTimeBucket = \"another day\";\nif (responseTimeHours !== null) {\n  if (responseTimeHours < 0.25) responseTimeBucket = \"less than 15 minutes\";\n  else if (responseTimeHours < 1) responseTimeBucket = \"less than 1 hour\";\n  else if (responseTimeHours < 12) responseTimeBucket = \"less than 12 hours\";\n  else responseTimeBucket = \"another day\";\n}\n\nreturn [{ json: {\n  last_reply,\n  sequence_step_id: sequenceStepId,\n  sequence_step_order: sequenceStepRow.order ?? null,\n  first_email_date: last_reply.date_received,\n  response_time_hours: responseTimeHours,\n  response_time_bucket: responseTimeBucket,\n  subject,\n}}];"
+      }
+    },
+    {
+      "id": "851e9fc1-855e-4caf-9f7d-b85f21ccd734",
+      "name": "[79+72+51+8+57] Compute derived values2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "const last_reply = $('[45] Set last_reply (LATEST by date_received DESC)2').first().json.last_reply.data[0]\nconst scheduled = $(\"[49] Bison: GET /leads/{lead_id}/scheduled-emails2\").first().json.data || [];\nconst stepsResp = $input.first().json.data;\nconst sequenceSteps = stepsResp.sequence_steps|| [];\n\nconst scheduledRow = scheduled.find(s => s.id === last_reply.scheduled_email_id) || {};\nconst sequenceStepId = scheduledRow.sequence_step_id ?? null;\nconst sequenceStepRow = sequenceSteps.find(s => s.id === sequenceStepId) || {};\nconst firstEmailDateIso = scheduledRow.sent_at ?? null;\nconst subject = scheduledRow.email_subject ?? \"\";\n\nlet responseTimeHours = null;\nif (firstEmailDateIso && last_reply.date_received) {\n  responseTimeHours = (new Date(last_reply.date_received).getTime() - new Date(firstEmailDateIso).getTime()) / 1000 / 3600;\n}\n\nlet responseTimeBucket = \"another day\";\nif (responseTimeHours !== null) {\n  if (responseTimeHours < 0.25) responseTimeBucket = \"less than 15 minutes\";\n  else if (responseTimeHours < 1) responseTimeBucket = \"less than 1 hour\";\n  else if (responseTimeHours < 12) responseTimeBucket = \"less than 12 hours\";\n  else responseTimeBucket = \"another day\";\n}\n\nreturn [{ json: {\n  last_reply,\n  sequence_step_id: sequenceStepId,\n  sequence_step_order: sequenceStepRow.order ?? null,\n  first_email_date: last_reply.date_received,\n  response_time_hours: responseTimeHours,\n  response_time_bucket: responseTimeBucket,\n  subject,\n}}];"
+      }
+    },
+    {
+      "id": "6896a53b-4ba7-4323-80f5-35264236ad78",
+      "name": "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3024,
+        96
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{$('[40] Bison: GET /leads/{taggable_id}').item.json.data.email}}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.access_token }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://api.snov.io/v1/get-prospects-by-email"
+      }
+    },
+    {
+      "id": "edb62724-5c0d-4519-ad93-d6c447ec1c6e",
+      "name": "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3024,
+        -288
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{$('[40] Bison: GET /leads/{taggable_id}1').item.json.data.email}}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.access_token }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://api.snov.io/v1/get-prospects-by-email"
+      }
+    },
+    {
+      "id": "52a0586b-95cc-4aa9-a45d-c34113b1cc14",
+      "name": "[96] Update Qualification col",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1456,
+        0
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "FULL NAME",
+              "id": "FULL NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "JOB TITLE",
+              "id": "JOB TITLE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-MAIL",
+              "id": "E-MAIL",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Number",
+              "id": "Phone Number",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Source",
+              "id": "Phone Source",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMPANY NAME",
+              "id": "COMPANY NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "INDUSTRY",
+              "id": "INDUSTRY",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "HEADCOUNT",
+              "id": "HEADCOUNT",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RECEIVED",
+              "id": "LEAD RECEIVED",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "CAMPAIGN NAME",
+              "id": "CAMPAIGN NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE TITLE",
+              "id": "MESSAGE TITLE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE #",
+              "id": "MESSAGE #",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WEBSITE",
+              "id": "WEBSITE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "QUALIFICATION",
+              "id": "QUALIFICATION",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RESPONSE TIME",
+              "id": "LEAD RESPONSE TIME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS",
+              "id": "MEETINGS",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS HELD",
+              "id": "MEETINGS HELD",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "OFFER SENT",
+              "id": "OFFER SENT",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMMENTS",
+              "id": "COMMENTS",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Mail from lead",
+              "id": "Mail from lead",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "TIP",
+              "id": "TIP",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Campaign ID",
+              "id": "Campaign ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Blacklist ID",
+              "id": "Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Domain Blacklist ID",
+              "id": "Domain Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LinkedIn URL",
+              "id": "LinkedIn URL",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Column 29",
+              "id": "Column 29",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "QUALIFICATION": "={{ (() => {\n  try {\n    const tagName = $('When Called by HUB').first().json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "6140ccf8-75fa-4fa9-a3a3-27a574a7b40f",
+      "name": "[S] promote_contact_to_lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4400,
+        1200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const e = $('Edit Fields1').item.json; let ps = ''; try { ps = $('[287] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[286] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps) ]; })() }}"
+        },
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, '')\n         ))) as result;"
+      }
+    },
+    {
+      "id": "ab0376f1-c631-4c15-bf47-9c37be48930c",
+      "name": "[S] Resolve campaign",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4200,
+        1200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ String($('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].campaign_id), $('[S] Resolve client sequencer').first().json.client_sequencer_id ] }}"
+        },
+        "query": "select c.id::text as campaign_id\nfrom public.campaigns c\njoin public.client_sequencers cs on cs.client_id = c.client_id and cs.id = $2::uuid\nwhere c.external_id = $1\nlimit 1;"
+      }
+    },
+    {
+      "id": "d853df98-14b2-46ae-8634-715d745d12e8",
+      "name": "[S] Resolve client sequencer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3600,
+        1200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('Edit Fields1').item.json.workspace_id)] }}"
+        },
+        "query": "select cs.id::text as client_sequencer_id, cs.client_id::text as client_id\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison'\nwhere cs.external_workspace_id = $1 and cs.enabled\nlimit 1;"
+      }
+    },
+    {
+      "id": "069b013f-5311-4ab8-9286-268a69e007fa",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4000,
+        1200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const r = $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0]; return [ String(r.id), r.date_received, $json.sequencer_contact_id, r.subject || null, r.text_body || null, r.from_email_address || null ]; })() }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'Interested', $4, $5, false, $6, null)::text as reply_id;"
+      }
+    },
+    {
+      "id": "711190b1-b675-4d49-af97-eb5803658370",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3800,
+        1200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('Edit Fields1').item.json.email || null, $('Edit Fields1').item.json.firstname || null, $('Edit Fields1').item.json.lastname || null ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
+      "id": "55190644-a83a-410f-bf31-16f9cb238ff1",
+      "name": "Call '[HUB] CRMs Add/Update Lead Dispatcher'",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        6064,
+        288
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "cachedResultName": "[HUB] CRMs Add/Update Lead Dispatcher",
+          "cachedResultUrl": "/workflow/mfmMYQqK73Nsx6uO",
+          "mode": "list",
+          "value": "mfmMYQqK73Nsx6uO"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        }
+      }
+    },
+    {
+      "id": "f5a5b16d-ca1a-4c5c-91e6-154fcd65e0ff",
+      "name": "Check if lead exist in base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1008,
+        -288
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "limit": 1,
+        "operation": "select",
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "leads",
+          "mode": "list",
+          "value": "leads"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "email",
+              "value": "={{ $json.data.email }}"
+            },
+            {
+              "column": "client_id",
+              "value": "={{ $('Get Client Data').item.json.id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "00dd6d30-ce39-43b5-8b74-4a613330baa5",
+      "name": "Create Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5616,
+        96
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ (() => {\n  const safe = (fn, fallback = '') => {\n    try {\n      const value = fn();\n      return value === undefined || value === null ? fallback : value;\n    } catch (e) {\n      return fallback;\n    }\n  };\n\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const str = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value);\n  };\n\n  // Converts JS Date / ISO date string to Google Sheets serial date number.\n  // Google Sheets stores dates as numbers: 1970-01-01 = 25569.\n  const toGoogleSheetsDateSerial = (value) => {\n    if (value === undefined || value === null || value === '') return null;\n\n    const d = new Date(value);\n    if (Number.isNaN(d.getTime())) return null;\n\n    // Date only, no time component.\n    return Math.floor(d.getTime() / 86400000) + 25569;\n  };\n\n  const makeCell = (value, index) => {\n    // Column index 8 = LEAD RECEIVED\n    // Send it as a real Google Sheets date, not as text.\n    if (index === 8) {\n      const serial = toGoogleSheetsDateSerial(value);\n\n      if (serial === null) {\n        return {\n          userEnteredValue: { stringValue: '' }\n        };\n      }\n\n      return {\n        userEnteredValue: {\n          numberValue: serial\n        },\n        userEnteredFormat: {\n          numberFormat: {\n            type: 'DATE',\n            pattern: 'mm/dd/yyyy'\n          }\n        }\n      };\n    }\n\n    return {\n      userEnteredValue: {\n        stringValue: str(value)\n      }\n    };\n  };\n\n  const sheet = safe(\n    () => $json.sheets.find(sheet => sheet.properties?.title === 'Leads'),\n    null\n  );\n  if (!sheet) throw new Error('Sheet \"Leads\" not found');\n\nconst table = safe(\n  () =>\n    (sheet.tables || []).find(table => table.name === 'Leads') ||\n    (sheet.tables || []).find(table => table.name === 'Table3') ||\n    (sheet.tables || [])[0],\n  null\n);\n\nif (!table) {\n  throw new Error('No table found inside sheet \"Leads\"');\n}\n\n  // --- Sources ---\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0];\n  const ai           = () => $('[286] Parse AI output + set phone').item.json.ai || {};\n  const bisonLead    = () => $('[40] Bison: GET /leads/{taggable_id}').item.json.data || {};\n  const pickedReply  = () => $('[226+227+228] Pick Snovio output body').item.json.last_reply || {};\n\n  // --- Phone (Lusha → AI extraction; tracked via phoneSource) ---\n  const phoneNumber = safe(() => {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha').item.json.phoneNumber;\n    }\n    return $('[286] Parse AI output + set phone').item.json.phoneNumber;\n  });\n\n  const phoneSource = safe(() => {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha').item.json.phoneSource;\n    }\n    return $('[286] Parse AI output + set phone').item.json.phoneSource;\n  });\n\n  // --- Cascaded fields: Snov.io → AI → Bison ---\n  const fullName = pick(\n    () => `${snovProspect()?.firstName || ''} ${snovProspect()?.lastName || ''}`.trim(),\n    () => `${ai().first_name || ''} ${ai().last_name || ''}`.trim(),\n    () => `${bisonLead().first_name || ''} ${bisonLead().last_name || ''}`.trim(),\n  );\n\n  const jobTitle = pick(\n    () => snovProspect()?.currentJob?.[0]?.position,\n    () => ai().lead_position,\n    () => bisonLead().title,\n  );\n\n  const companyName = pick(\n    () => snovProspect()?.currentJob?.[0]?.companyName,\n    () => ai().company_name,\n    () => bisonLead().company,\n  );\n\n  const industry = pick(\n    () => snovProspect()?.industry,\n    () => ai().company_industry,\n  );\n\n  const headcount = pick(\n    () => snovProspect()?.currentJob?.[0]?.size,\n    () => ai().company_size,\n  );\n\n  const linkedinUrl = pick(\n    () => (snovProspect()?.social || []).find(s => s.type === 'linkedinProfile')?.link,\n    () => ai().person_linkedin,\n  );\n\n  const country = pick(\n    () => snovProspect()?.country,\n  );\n\n  // E-MAIL — Bison is canonical (lead identifier); reply email as fallback\n  const email = pick(\n    () => bisonLead().email,\n    () => pickedReply().from_email_address,\n  );\n\n  const website = pick(\n    () => {\n      const e = bisonLead().email;\n      return e ? e.extractDomain() : '';\n    },\n    () => ai().company_website,\n  );\n\n  // --- Other fields (single source) ---\n  // Keep raw ISO/date value here. Do NOT format to 'MM/dd/yyyy' string.\n  // Formatting is handled in makeCell() via Google Sheets numberFormat.\n  const leadReceived = safe(() => {\n    return $('[226+227+228] Pick Snovio output body').item.json.first_email_date;\n  });\n\n  const campaignName  = safe(() => $('[52] Bison: GET /campaigns/{id}').item.json.data?.name);\n  const messageTitle  = safe(() => $('[226+227+228] Pick Snovio output body').item.json.subject);\n  const messageNumber = safe(() => $('[226+227+228] Pick Snovio output body').item.json.sequence_step_order);\n  const responseTime  = safe(() => $('[226+227+228] Pick Snovio output body').item.json.response_time_bucket);\n\n  const qualification = safe(() => {\n    const tagName = $('When Called by HUB').item.json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  });\n\n  const emailText = safe(() => pickedReply().text_body);\n  const campaignId = safe(() => pickedReply().campaign_id);\n\n  const values = [\n    fullName,        // 0  FULL NAME\n    jobTitle,        // 1  JOB TITLE\n    email,           // 2  E-MAIL\n    phoneNumber,     // 3  Phone Number\n    phoneSource,     // 4  Phone Source\n    companyName,     // 5  COMPANY NAME\n    industry,        // 6  INDUSTRY\n    headcount,       // 7  HEADCOUNT\n    leadReceived,    // 8  LEAD RECEIVED — real Sheet date\n    campaignName,    // 9  CAMPAIGN NAME\n    messageTitle,    // 10 MESSAGE TITLE\n    messageNumber,   // 11 MESSAGE #\n    website,         // 12 WEBSITE\n    qualification,   // 13 QUALIFICATION\n    responseTime,    // 14 LEAD RESPONSE TIME\n    '',              // 15\n    '',              // 16\n    '',              // 17\n    '',              // 18\n    '',              // 19\n    '',              // 20\n    emailText,       // 21 Mail from lead\n    '',              // 22\n    '',              // 23\n    campaignId,      // 24 Campaign ID\n    '',              // 25\n    '',              // 26\n    linkedinUrl,     // 27 LinkedIn URL\n    country,         // 28 Country\n  ];\n\n  return JSON.stringify({\n    requests: [\n      {\n        appendCells: {\n          sheetId: Number(sheet.properties.sheetId),\n          tableId: String(table.tableId),\n          rows: [\n            {\n              values: values.map((value, index) => makeCell(value, index))\n            }\n          ],\n          fields: 'userEnteredValue,userEnteredFormat.numberFormat'\n        }\n      }\n    ]\n  });\n})() }}\n",
+        "method": "POST",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}:batchUpdate"
+      }
+    },
+    {
+      "id": "ea734f54-d58f-4dfc-80c6-42c50331e73b",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5840,
+        -96
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "abb1587f-6a76-4ce6-b7b3-7a1e8eae5f66",
+              "name": "phones",
+              "type": "array",
+              "value": "={{ $('[2] Find workspace in CS PDCA').item.json['Ecosystem integration - ABM stage 1'].split(',') }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4ea1c23c-0e28-4324-9816-12929494f9be",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5840,
+        288
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8b45934e-47d0-4b03-a067-edd1463a46a2",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '' }}"
+            },
+            {
+              "id": "7ab46e26-8282-4c7c-83a3-2bda8edd2696",
+              "name": "firstname",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.firstName) || ($('[286] Parse AI output + set phone').item.json.ai?.first_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.first_name) || '' }}"
+            },
+            {
+              "id": "fbd92e21-15a8-4056-bcbc-0834e7caf2ce",
+              "name": "lastname",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.lastName) || ($('[286] Parse AI output + set phone').item.json.ai?.last_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.last_name) || '' }}"
+            },
+            {
+              "id": "16a15220-8cb5-41b4-95fe-b81fbde978a9",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $('[287] Set phone from Lusha').isExecuted ? $('[287] Set phone from Lusha').item.json.phoneNumber : ($('[286] Parse AI output + set phone').item.json.phoneNumber || '') }}"
+            },
+            {
+              "id": "318a953f-5e20-46b4-80c4-d345ec0b4ce6",
+              "name": "company",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.companyName) || ($('[286] Parse AI output + set phone').item.json.ai?.company_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.company) || '' }}"
+            },
+            {
+              "id": "7b3260c2-0ef1-4819-9d18-fdcabbeb0d1c",
+              "name": "position",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.position) || ($('[286] Parse AI output + set phone').item.json.ai?.lead_position) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.title) || '' }}"
+            },
+            {
+              "id": "b852fa2d-325c-4f66-9219-d64ae2f59c0d",
+              "name": "website",
+              "type": "string",
+              "value": "={{ ($('[286] Parse AI output + set phone').item.json.ai?.company_website) || (($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '').split('@').pop()) || '' }}"
+            },
+            {
+              "id": "dccbbe96-8928-453c-b89d-955b36201b8b",
+              "name": "notes",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.notes || '' }}"
+            },
+            {
+              "id": "e6e62d8c-f8a9-4803-b16d-ee5abafa1e45",
+              "name": "created_at",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.created_at || '' }}"
+            },
+            {
+              "id": "e68c54aa-fa74-428a-949d-d0d2e2e2e57f",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $('When Called by HUB').item.json.event.workspace_id }}"
+            },
+            {
+              "id": "ee994814-85f3-48f5-8ef9-f0652c5708ac",
+              "name": "last_reply_subject",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].subject }}"
+            },
+            {
+              "id": "eb59ae6b-067c-449e-9dd5-eff6d2fcbd19",
+              "name": "last_reply_body",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].text_body }}"
+            },
+            {
+              "id": "0519d60a-4522-418a-9a2b-3aa2a282077d",
+              "name": "last_reply_created_at",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].created_at }}"
+            },
+            {
+              "id": "90a0e8d5-1ffe-4cb6-b01e-9296f36de40a",
+              "name": "last_reply_body_html",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].html_body }}"
+            },
+            {
+              "id": "093c72de-b54f-44ad-a286-6efe7038958f",
+              "name": "last_reply_to_name",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].name }}"
+            },
+            {
+              "id": "f89cae72-d569-481c-b57b-5634f67e3136",
+              "name": "last_reply_to_email",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].address }}"
+            },
+            {
+              "id": "4d1d4571-b178-4972-bee3-ee7c69b312ae",
+              "name": "last_reply_message_id",
+              "type": "string",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].raw_message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1766967d-49f5-40db-801b-cc4659d41ae6",
+      "name": "Edit Fields2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        16
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "da6b3afa-8043-43d7-940e-46b07af2da6e",
+              "name": "time",
+              "type": "number",
+              "value": "={{ Math.floor(Math.random() * 81) + 20 }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0f673c4f-2aa1-4f16-b19b-24d62f581d8d",
+      "name": "Email Recipients configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5840,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "dd2b9cf0-a3f8-4d59-8828-627a2f429ae8",
+              "leftValue": "={{ ($(\"[2] Find workspace in CS PDCA\").first().json[\"col_101\"] || \"\").trim() }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0831d567-6593-47db-b096-305227280aa1",
+      "name": "Execution Data",
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        -368,
+        16
+      ],
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "workspace",
+              "value": "={{ $json.event.workspace_name }}"
+            },
+            {
+              "key": "tag",
+              "value": "={{ $json.data.tag_name }}"
+            },
+            {
+              "key": "workspace_id",
+              "value": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6b298140-0ac1-47ef-91a7-343b6653db60",
+      "name": "Get Blacklist Domain from base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2352,
+        -96
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "limit": 1,
+        "operation": "select",
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "email_exclude_list",
+          "mode": "list",
+          "value": "email_exclude_list"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "domain",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)2').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ec438014-0fdf-4398-be9a-e98632f7adbd",
+      "name": "Get Campaign Id",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4720,
+        -288
+      ],
+      "parameters": {
+        "limit": 1,
+        "operation": "select",
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "campaigns",
+          "mode": "list",
+          "value": "campaigns"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "external_id",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)2').item.json.last_reply.data[0].campaign_id.toString() }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9561837b-7b0d-4823-bcb9-7d5130284a7a",
+      "name": "Get Client Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        560,
+        -288
+      ],
+      "parameters": {
+        "limit": 1,
+        "operation": "select",
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "clients",
+          "mode": "list",
+          "value": "clients"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "external_workspace_id",
+              "value": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b6d166e2-95ee-429a-acbb-3e81551e019b",
+      "name": "Get Snov.io Access Token (Global)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3472,
+        -32
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "432f02b3c57f37952e10909ebe7bf3ab"
+            },
+            {
+              "name": "client_secret",
+              "value": "83aee70e3fd1984669ee0acb16b98990"
+            }
+          ]
+        },
+        "contentType": "form-urlencoded",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.snov.io/v1/oauth/access_token"
+      }
+    },
+    {
+      "id": "f7012747-944c-4160-a30e-b008e5a5a674",
+      "name": "Get Snov.io Access Token (Global)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3472,
+        -368
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "432f02b3c57f37952e10909ebe7bf3ab"
+            },
+            {
+              "name": "client_secret",
+              "value": "83aee70e3fd1984669ee0acb16b98990"
+            }
+          ]
+        },
+        "contentType": "form-urlencoded",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.snov.io/v1/oauth/access_token"
+      }
+    },
+    {
+      "id": "41b1c618-59ca-4789-a5a2-186ecf1dde0f",
+      "name": "Get Snov.io Access Token (Local)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        96
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "432f02b3c57f37952e10909ebe7bf3ab"
+            },
+            {
+              "name": "client_secret",
+              "value": "83aee70e3fd1984669ee0acb16b98990"
+            }
+          ]
+        },
+        "contentType": "form-urlencoded",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.snov.io/v1/oauth/access_token"
+      }
+    },
+    {
+      "id": "4c28b115-d4e7-414c-861b-3320b157b8e1",
+      "name": "Get Snov.io Access Token (Local)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        -288
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "432f02b3c57f37952e10909ebe7bf3ab"
+            },
+            {
+              "name": "client_secret",
+              "value": "83aee70e3fd1984669ee0acb16b98990"
+            }
+          ]
+        },
+        "contentType": "form-urlencoded",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.snov.io/v1/oauth/access_token"
+      }
+    },
+    {
+      "id": "4990f772-0301-4027-b6d0-e3e305f0cd1d",
+      "name": "Get Table ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5392,
+        96
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}?fields=sheets(properties(sheetId,title),tables(tableId,name,range,columnProperties(columnName,columnIndex)))"
+      }
+    },
+    {
+      "id": "b1e177fe-fca9-430d-8cc0-d1b73aae4cb0",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6288,
+        -96
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.phones.trim() }}"
+            },
+            {
+              "name": "messageType",
+              "value": "SMS"
+            },
+            {
+              "name": "text",
+              "value": "Nowy, zimny lead wplynal wlasnie na Twojego maila - podejmij go do 5 minut, a znacznie latwiej odczarujesz jego lodowe serce"
+            }
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.unitalk.cloud/api/message/send"
+      }
+    },
+    {
+      "id": "5be664a9-2339-49f7-9ebc-a61ba373c2c7",
+      "name": "Insert rows in a table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5616,
+        -288
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": true,
+              "display": true,
+              "displayName": "id",
+              "id": "id",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "created_at",
+              "id": "created_at",
+              "removed": false,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "client_id",
+              "id": "client_id",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "campaign_id",
+              "id": "campaign_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email",
+              "id": "email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "first_name",
+              "id": "first_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "last_name",
+              "id": "last_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "job_title",
+              "id": "job_title",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "company_name",
+              "id": "company_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "linkedin_url",
+              "id": "linkedin_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "gender",
+              "id": "gender",
+              "options": [
+                {
+                  "name": "male",
+                  "value": "male"
+                },
+                {
+                  "name": "female",
+                  "value": "female"
+                }
+              ],
+              "required": false,
+              "type": "options"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "qualification",
+              "id": "qualification",
+              "options": [
+                {
+                  "name": "preMQL",
+                  "value": "preMQL"
+                },
+                {
+                  "name": "MQL",
+                  "value": "MQL"
+                },
+                {
+                  "name": "meeting_scheduled",
+                  "value": "meeting_scheduled"
+                },
+                {
+                  "name": "meeting_held",
+                  "value": "meeting_held"
+                },
+                {
+                  "name": "offer_sent",
+                  "value": "offer_sent"
+                },
+                {
+                  "name": "won",
+                  "value": "won"
+                },
+                {
+                  "name": "rejected",
+                  "value": "rejected"
+                },
+                {
+                  "name": "OOO",
+                  "value": "OOO"
+                },
+                {
+                  "name": "NRR",
+                  "value": "NRR"
+                }
+              ],
+              "required": false,
+              "type": "options"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "expected_return_date",
+              "id": "expected_return_date",
+              "removed": true,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "updated_at",
+              "id": "updated_at",
+              "removed": true,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_id",
+              "id": "external_id",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "phone_number",
+              "id": "phone_number",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "phone_source",
+              "id": "phone_source",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "industry",
+              "id": "industry",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "headcount_range",
+              "id": "headcount_range",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "website",
+              "id": "website",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "country",
+              "id": "country",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "message_title",
+              "id": "message_title",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "message_number",
+              "id": "message_number",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "response_time_hours",
+              "id": "response_time_hours",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "response_time_label",
+              "id": "response_time_label",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "meeting_booked",
+              "id": "meeting_booked",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "meeting_held",
+              "id": "meeting_held",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "offer_sent",
+              "id": "offer_sent",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "won",
+              "id": "won",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "added_to_ooo_campaign",
+              "id": "added_to_ooo_campaign",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_blacklist_id",
+              "id": "external_blacklist_id",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_domain_blacklist_id",
+              "id": "external_domain_blacklist_id",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "source",
+              "id": "source",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reply_text",
+              "id": "reply_text",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comments",
+              "id": "comments",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "campaign_id": "={{ $('Get Campaign Id').item.json.id }}",
+            "client_id": "={{ $('Get Client Data').item.json.id }}",
+            "company_name": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n  const bisonLead = () => $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n\n  return pick(\n    () => snovProspect().currentJob?.[0]?.companyName,\n    () => ai().company_name,\n    () => bisonLead().company\n  );\n})() }}",
+            "country": "={{ (() => {\n  try {\n    return $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0]?.country || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "created_at": "={{ (() => {\n  try {\n    const value = $('[226+227+228] Pick Snovio output body2').first().json.first_email_date;\n    if (!value) return null;\n\n    const d = new Date(value);\n    if (Number.isNaN(d.getTime())) return null;\n\n    return d.toISOString();\n  } catch (e) {\n    return null;\n  }\n})() }}",
+            "email": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const bisonLead = () => $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n  const pickedReply = () => $('[226+227+228] Pick Snovio output body2').first().json.last_reply || {};\n\n  return pick(\n    () => bisonLead().email,\n    () => pickedReply().from_email_address\n  );\n})() }}",
+            "external_id": "={{ $('[40] Bison: GET /leads/{taggable_id}1').item.json.data.id }}",
+            "first_name": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const value = fn();\n        if (value !== undefined && value !== null && value !== '') return value;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const clean = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value).trim().replace(/\\s+/g, ' ');\n  };\n\n  const snovProspect = () =>\n    $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n\n  const ai = () =>\n    $('[286] Parse AI output + set phone2').first().json.ai || {};\n\n  const bisonLead = () =>\n    $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n\n  return pick(\n    () => clean(snovProspect().firstName),\n    () => clean(ai().firstName),\n    () => clean(bisonLead().firstName)\n  );\n})() }}",
+            "gender": "={{ $json.gender_target }}",
+            "headcount_range": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n\n  return pick(\n    () => snovProspect().currentJob?.[0]?.size,\n    () => ai().company_size\n  );\n})() }}",
+            "industry": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n\n  return pick(\n    () => snovProspect().industry,\n    () => ai().company_industry\n  );\n})() }}",
+            "job_title": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n  const bisonLead = () => $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n\n  return pick(\n    () => snovProspect().currentJob?.[0]?.position,\n    () => ai().lead_position,\n    () => bisonLead().title\n  );\n})() }}",
+            "last_name": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const value = fn();\n        if (value !== undefined && value !== null && value !== '') return value;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const clean = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value).trim().replace(/\\s+/g, ' ');\n  };\n\n  const snovProspect = () =>\n    $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n\n  const ai = () =>\n    $('[286] Parse AI output + set phone2').first().json.ai || {};\n\n  const bisonLead = () =>\n    $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n\n  return pick(\n    () => clean(snovProspect().lastName),\n    () => clean(ai().last_name),\n    () => clean(bisonLead().last_name)\n  );\n})() }}",
+            "linkedin_url": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body2').first().json.snovio_body?.data?.[0] || {};\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n\n  return pick(\n    () => (snovProspect().social || []).find(s => s.type === 'linkedinProfile')?.link,\n    () => ai().person_linkedin\n  );\n})() }}",
+            "message_number": "={{ (() => {\n  try {\n    return $('[226+227+228] Pick Snovio output body2').first().json.sequence_step_order || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "message_title": "={{ (() => {\n  try {\n    return $('[226+227+228] Pick Snovio output body2').first().json.subject || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "phone_number": "={{ (() => {\n  try {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha1').first().json.phoneNumber || '';\n    }\n\n    return $('[286] Parse AI output + set phone2').first().json.phoneNumber || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "phone_source": "={{ (() => {\n  try {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha1').first().json.phoneSource || '';\n    }\n\n    return $('[286] Parse AI output + set phone2').first().json.phoneSource || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "qualification": "={{ (() => {\n  try {\n    const tagName = $('When Called by HUB').first().json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "reply_text": "={{ (() => {\n  try {\n    return $('[226+227+228] Pick Snovio output body2').first().json.last_reply?.text_body || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "response_time_label": "={{ (() => {\n  try {\n    return $('[226+227+228] Pick Snovio output body2').first().json.response_time_bucket || '';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "website": "={{ (() => {\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const ai = () => $('[286] Parse AI output + set phone2').first().json.ai || {};\n  const bisonLead = () => $('[40] Bison: GET /leads/{taggable_id}1').first().json.data || {};\n\n  return pick(\n    () => {\n      const email = bisonLead().email;\n      if (!email || !String(email).includes('@')) return '';\n      return String(email).split('@')[1].trim().toLowerCase();\n    },\n    () => ai().company_website\n  );\n})() }}"
+          }
+        },
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "leads",
+          "mode": "list",
+          "value": "leads"
+        }
+      }
+    },
+    {
+      "id": "a83c6836-fe4b-4c2e-a3d2-d147d34ef85e",
+      "name": "Lead already exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1232,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "594d75c9-fe21-424e-82ab-caf2bea3cfb9",
+              "leftValue": "={{ $('[4] Check if lead already in Leads sheet').item.json }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e48bdd1a-07b1-4036-b012-d62d3ea2c0b4",
+      "name": "Lead already exists?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1232,
+        -288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "594d75c9-fe21-424e-82ab-caf2bea3cfb9",
+              "leftValue": "={{ $('Check if lead exist in base').item.json }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5f2de945-ac0e-407c-9569-1b68fe459244",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        336,
+        -96
+      ],
+      "parameters": {
+        "mode": "chooseBranch"
+      }
+    },
+    {
+      "id": "3c161710-a69f-4311-8b3b-99771078272c",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        6064,
+        -96
+      ],
+      "parameters": {
+        "fieldToSplitOut": "phones",
+        "options": {}
+      }
+    },
+    {
+      "id": "8ff8f5d4-f781-4509-8360-1759a497b89e",
+      "name": "Update rows in a table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1456,
+        -384
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": true,
+              "display": true,
+              "displayName": "id",
+              "id": "id",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "created_at",
+              "id": "created_at",
+              "removed": true,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "client_id",
+              "id": "client_id",
+              "removed": true,
+              "required": true,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "campaign_id",
+              "id": "campaign_id",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "email",
+              "id": "email",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "first_name",
+              "id": "first_name",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "last_name",
+              "id": "last_name",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "job_title",
+              "id": "job_title",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "company_name",
+              "id": "company_name",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "linkedin_url",
+              "id": "linkedin_url",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "gender",
+              "id": "gender",
+              "options": [
+                {
+                  "name": "male",
+                  "value": "male"
+                },
+                {
+                  "name": "female",
+                  "value": "female"
+                }
+              ],
+              "removed": true,
+              "required": false,
+              "type": "options"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "qualification",
+              "id": "qualification",
+              "options": [
+                {
+                  "name": "preMQL",
+                  "value": "preMQL"
+                },
+                {
+                  "name": "MQL",
+                  "value": "MQL"
+                },
+                {
+                  "name": "meeting_scheduled",
+                  "value": "meeting_scheduled"
+                },
+                {
+                  "name": "meeting_held",
+                  "value": "meeting_held"
+                },
+                {
+                  "name": "offer_sent",
+                  "value": "offer_sent"
+                },
+                {
+                  "name": "won",
+                  "value": "won"
+                },
+                {
+                  "name": "rejected",
+                  "value": "rejected"
+                },
+                {
+                  "name": "OOO",
+                  "value": "OOO"
+                },
+                {
+                  "name": "NRR",
+                  "value": "NRR"
+                }
+              ],
+              "required": false,
+              "type": "options"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "expected_return_date",
+              "id": "expected_return_date",
+              "removed": true,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "updated_at",
+              "id": "updated_at",
+              "removed": true,
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_id",
+              "id": "external_id",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "phone_number",
+              "id": "phone_number",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "phone_source",
+              "id": "phone_source",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "industry",
+              "id": "industry",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "headcount_range",
+              "id": "headcount_range",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "website",
+              "id": "website",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "country",
+              "id": "country",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "message_title",
+              "id": "message_title",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "message_number",
+              "id": "message_number",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "response_time_hours",
+              "id": "response_time_hours",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "response_time_label",
+              "id": "response_time_label",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "meeting_booked",
+              "id": "meeting_booked",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "meeting_held",
+              "id": "meeting_held",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "offer_sent",
+              "id": "offer_sent",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "won",
+              "id": "won",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "added_to_ooo_campaign",
+              "id": "added_to_ooo_campaign",
+              "removed": true,
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_blacklist_id",
+              "id": "external_blacklist_id",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_domain_blacklist_id",
+              "id": "external_domain_blacklist_id",
+              "removed": true,
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "source",
+              "id": "source",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reply_text",
+              "id": "reply_text",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comments",
+              "id": "comments",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "id": "={{$json.id}}",
+            "qualification": "={{ (() => {\n  try {\n    const tagName = $('When Called by HUB').first().json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  } catch (e) {\n    return '';\n  }\n})() }}"
+          }
+        },
+        "operation": "update",
+        "options": {},
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "leads",
+          "mode": "list",
+          "value": "leads"
+        }
+      }
+    },
+    {
+      "id": "37cb5a4a-e355-4e50-968b-50985cb0d58a",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        48,
+        16
+      ],
+      "parameters": {
+        "amount": "={{ $json.time }}"
+      }
+    },
+    {
+      "id": "e5a7dae4-c681-408c-983f-1234f5975c76",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -560,
+        -112
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Check if lead exist in base": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Lead already exists?1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Create Record": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Email Recipients configured?",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Edit Fields1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split Out",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Call '[HUB] CRMs Add/Update Lead Dispatcher'",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Resolve client sequencer",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Wait",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Email Recipients configured?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[189-192] Forward email to recipients",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Execution Data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Blacklist Domain from base": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[306-filter] 3rd-party domain NOT in exclude list?2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Campaign Id": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[180] Phone number missing?2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Client Data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[40] Bison: GET /leads/{taggable_id}1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Snov.io Access Token (Global)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[11] Snov.io: POST /v1/get-profile-by-email (Global)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Snov.io Access Token (Global)1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[11] Snov.io: POST /v1/get-profile-by-email (Global)1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Snov.io Access Token (Local)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Snov.io Access Token (Local)2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Table ID": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Create Record",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lead already exists?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[96] Update Qualification col",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[43] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lead already exists?1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Update rows in a table",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[43] Bison: GET /leads/{taggable_id}/replies1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[2] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Request",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "index": 1,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Execution Data",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[10] Snov.io Local empty?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Snov.io Access Token (Global)",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[226+227+228] Pick Snovio output body",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[10] Snov.io Local empty?2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Snov.io Access Token (Global)1",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[226+227+228] Pick Snovio output body2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[11] Snov.io: POST /v1/get-profile-by-email (Global)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[226+227+228] Pick Snovio output body",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[11] Snov.io: POST /v1/get-profile-by-email (Global)1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[226+227+228] Pick Snovio output body2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[180] Phone number missing?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[181] Lusha: POST /v2/person (fallback phone)",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[180] Phone number missing?2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[181] Lusha: POST /v2/person (fallback phone)1",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Insert rows in a table",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[181] Lusha: POST /v2/person (fallback phone)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[287] Set phone from Lusha",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[181] Lusha: POST /v2/person (fallback phone)1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[287] Set phone from Lusha1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[18] OpenAI: gpt-4o analyze email": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[286] Parse AI output + set phone",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[18] OpenAI: gpt-4o analyze email2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[286] Parse AI output + set phone2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[226+227+228] Pick Snovio output body": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[18] OpenAI: gpt-4o analyze email",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[226+227+228] Pick Snovio output body2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[18] OpenAI: gpt-4o analyze email2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[283] Lead email == Reply email?": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "[284] Bison: blacklist 3rd-party email",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[283] Lead email == Reply email?2": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "[284] Bison: blacklist 3rd-party email2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[284] Bison: blacklist 3rd-party email": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[304] Check if 3rd-party domain is public",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[284] Bison: blacklist 3rd-party email2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Blacklist Domain from base",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[286] Parse AI output + set phone": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[180] Phone number missing?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[286] Parse AI output + set phone2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Campaign Id",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[287] Set phone from Lusha": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[287] Set phone from Lusha1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Insert rows in a table",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[2] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[40] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[304] Check if 3rd-party domain is public": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[306-filter] 3rd-party domain NOT in exclude list?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[306-filter] 3rd-party domain NOT in exclude list?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[306] Bison: blacklist 3rd-party domain",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[306-filter] 3rd-party domain NOT in exclude list?2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[306] Bison: blacklist 3rd-party domain2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[40] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[4] Check if lead already in Leads sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[40] Bison: GET /leads/{taggable_id}1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Check if lead exist in base",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[43] Bison: GET /leads/{taggable_id}/replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[45] Set last_reply (LATEST by date_received DESC)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[43] Bison: GET /leads/{taggable_id}/replies1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[45] Set last_reply (LATEST by date_received DESC)2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[45] Set last_reply (LATEST by date_received DESC)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[283] Lead email == Reply email?",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[52] Bison: GET /campaigns/{id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[45] Set last_reply (LATEST by date_received DESC)2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[283] Lead email == Reply email?2",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[52] Bison: GET /campaigns/{id}2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[49] Bison: GET /leads/{lead_id}/scheduled-emails": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[49] Bison: GET /leads/{lead_id}/scheduled-emails2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[4] Check if lead already in Leads sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Lead already exists?",
+            "type": "main"
+          }
+        ],
+        []
+      ]
+    },
+    "[52] Bison: GET /campaigns/{id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[49] Bison: GET /leads/{lead_id}/scheduled-emails",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[52] Bison: GET /campaigns/{id}2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[49] Bison: GET /leads/{lead_id}/scheduled-emails2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[79+72+51+8+57] Compute derived values",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[79+72+51+8+57] Compute derived values2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[79+72+51+8+57] Compute derived values": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Snov.io Access Token (Local)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[79+72+51+8+57] Compute derived values2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Snov.io Access Token (Local)2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[10] Snov.io Local empty?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[10] Snov.io Local empty?2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] promote_contact_to_lead",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve client sequencer": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Resolve campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

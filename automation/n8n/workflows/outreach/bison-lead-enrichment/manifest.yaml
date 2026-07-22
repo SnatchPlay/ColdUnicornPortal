@@ -1,0 +1,121 @@
+schemaVersion: 1
+
+id: bison-lead-enrichment
+name: "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # the entry point into the funnel for the email channel
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0004-lead-state-boundaries.md
+  - docs/adr/0010-legacy-crm-integration.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    detail: "called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1) on Interested / preMQL"
+
+reads:
+  tables:
+    - client_sequencers
+    - sequencers
+    - campaigns
+  external:
+    - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps"
+    - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List"
+    - "Snov.io · local list + global profile lookup"
+    - "Lusha · POST /v2/person (fallback phone)"
+    - "OpenAI · gpt-4o reply analysis"
+
+writes:
+  external:
+    - "Google Sheets · <client>/Leads — appends a lead row, or updates the Qualification column"
+    - "Bison · POST /blacklisted-emails, /blacklisted-domains (3rd-party sender)"
+    - "Bison · POST /replies/{id}/forward"
+    - "UniTalk · notification"
+    - "sub-workflow '[HUB] CRMs Add/Update Lead Dispatcher'"
+  tables: []
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - promote_contact_to_lead
+  tablesWritten:
+    - sequencer_contacts     # via RPC
+    - replies                # via RPC
+    - leads                  # via RPC — never a direct insert (ADR-0015 §5)
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "the five [S] branch nodes"
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes"
+  - alias: "Lusha"
+    type: httpHeaderAuth
+    usedBy: "[181] Lusha: POST /v2/person"
+  - alias: "UniTalk"
+    type: httpHeaderAuth
+    usedBy: "HTTP Request (notification)"
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "[18] OpenAI: gpt-4o analyze email"
+
+transition:
+  phase: A                   # dual-write: sheet first, Supabase second, Supabase failure non-fatal
+  phaseState: live           # branch S published 2026-07-22
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · sequencer_contacts + replies + leads"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: >-
+    Branch S hangs off "Edit Fields1" — the point where branch L has already appended the sheet row
+    and gathered every enriched field. It reuses that enrichment rather than duplicating it: Snov.io,
+    Lusha and OpenAI cost money per lead, so a second independent chain would double the bill for no
+    added confidence. This is a deliberate, declared narrowing of ADR-0017 §1a: what branch L owns
+    exclusively is the sheet write, the CRM dispatch and the blacklisting, and those are what phase C
+    disconnects. The enrichment nodes move to branch S rather than being deleted.
+  reconciliation: >-
+    Per run, one leads row per appended sheet row:
+      select l.id, l.qualification, l.created_at, sc.external_contact_id
+      from public.leads l
+      join public.sequencer_contacts sc on sc.id = l.source_sequencer_contact_id
+      where l.created_at > now() - interval '1 day';
+    EXPECTED DIVERGENCE, not a defect: promote_contact_to_lead always creates at qualification
+    'preMQL' because promotion to MQL is a human decision (ADR-0004). Branch L writes MQL or preMQL
+    into the sheet based on the tag. Compare on existence and identity, never on qualification.
+  parityEvidence: null
+
+idempotency:
+  key: "uq_leads_source_sequencer_contact + leads.origin_reply_id + replies UNIQUE (external_id)"
+  notes: >-
+    Branch S is genuinely idempotent: promote_contact_to_lead returns the existing lead for a repeat
+    reply and never creates a second one. Branch L is not — its duplicate check is a sheet lookup,
+    so two deliveries can both append. They will therefore disagree on redelivery, and branch S is
+    the correct side.
+
+retryPolicy:
+  notes: >-
+    Every [S] node is onError=continueRegularOutput, so a Supabase or resolution failure cannot stop
+    the sheet or CRM path (ADR-0017: Supabase failure is non-fatal in phase A). Branch L has no error
+    branch — pre-existing.
+
+knownViolations:
+  - rule: business/direct-table-write
+    node: "Update rows in a table"
+    reason: >-
+      One of the 31 orphaned nodes of the unfinished Supabase branch someone built earlier. It writes
+      leads directly, which ADR-0015 §5 forbids — but it is UNREACHABLE: its branch root
+      ("Get Client Data") has no inbound edge, and across 15 consecutive executions not one of those
+      nodes ran. It is also broken at the root, selecting the dropped clients.external_workspace_id.
+      Accepted rather than silently deleted: removing 31 nodes someone authored is a human decision,
+      not an agent's. The correct resolution is deletion — branch S replaces it through the RPC
+      contract and is live.
+    trackedIn: automation/n8n/workflows/outreach/bison-lead-enrichment/README.md
+    expires: 2026-09-30

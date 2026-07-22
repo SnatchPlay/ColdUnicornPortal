@@ -1,8 +1,8 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-22: **34 workflows, 28 active, 14 managed, 20 orphan.**
-(Managed: the four OOO/NRR workflows of §1, all five Aimfox workflows of §5, the four Bison ingestion
-workflows of §3, and the failure recorder built the same day.)
+Inventory taken 2026-07-22: **34 workflows, 28 active, 15 managed, 19 orphan.**
+(Managed: the four OOO/NRR workflows of §1, `[child-1]` lead enrichment, all five Aimfox workflows of
+§5, the four Bison ingestion workflows of §3, and the failure recorder built the same day.)
 
 Reproduce with `pnpm n8n:inventory`.
 
@@ -85,12 +85,21 @@ payload and fans out to seven children. Import it next, because:
   ([security.md §3](security.md#3-the-hub-webhook-is-the-entry-point-for-all-reply-processing--medium)).
   `scan.mjs` will answer this the moment it is imported.
 
-Children not covered by §1: `lBOyL8ZPA3SZSvDW` (child-1, Interested/PreMQL enrichment),
-`bEB3aOHEq2lEpubp` (child-4, blacklist add), `FZSFz5bcgigUneQZ` (child-5, unblacklist),
-`wJZbg0cRsdF58ylE` (child-6, MQL delete + unblacklist).
+Children not covered by §1: `bEB3aOHEq2lEpubp` (child-4, blacklist add), `FZSFz5bcgigUneQZ`
+(child-5, unblacklist), `wJZbg0cRsdF58ylE` (child-6, MQL delete + unblacklist).
 
-Note child-1 and child-6 create and **delete** leads — they must be checked against invariants 1–3
-before any cutover, and child-6's "delete the row from Leads" is worth questioning against
+**child-1 is done.** `lBOyL8ZPA3SZSvDW` was imported as
+[`bison-lead-enrichment`](../../../automation/n8n/workflows/outreach/bison-lead-enrichment/README.md)
+and reached **phase A** on 2026-07-22: a five-node branch S writes the contact, the reply and the
+lead through `upsert_sequencer_contact` → `upsert_reply` → `promote_contact_to_lead`. That is the
+first caller `promote_contact_to_lead` has ever had.
+
+It also turned out to contain **31 orphaned Supabase nodes** — an unfinished branch that was never
+wired to its trigger, whose root selects a dropped column, and which writes `leads` directly in
+violation of ADR-0015 §5. Recorded as an accepted violation expiring 2026-09-30; the right fix is
+deletion, which is a human's call.
+
+child-6 still **deletes** leads and is worth questioning against
 [ADR-0004](../../adr/0004-lead-state-boundaries.md).
 
 ---

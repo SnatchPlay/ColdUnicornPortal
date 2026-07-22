@@ -170,6 +170,24 @@ workflows:
     lastRepositorySync: 2026-07-22
     lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
 
+  - id: bison-lead-enrichment
+    name: "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/bison-lead-enrichment
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads and dispatches them to the clients' CRMs
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: lBOyL8ZPA3SZSvDW
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 phase A branch S published — RPC chain verified in a rolled-back transaction
+
   # Ops. Bound as settings.errorWorkflow on every managed workflow above.
   - id: automation-failure-recorder
     name: "[ERR] Automation failure recorder"

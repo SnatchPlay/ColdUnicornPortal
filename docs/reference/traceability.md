@@ -24,7 +24,7 @@ Legend: **✅** implemented and verified · **⚠️** implemented, diverges fro
 
 | # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | A CRM lead is created only by a positive reply | `leads`, `replies`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | — | preMQL→MQL conversion | `ooo-detect-and-log` ⚠️ writes `leads` directly | `ooo-invariants.sql` | ⚠️ |
+| 1 | A CRM lead is created only by a positive reply | `leads`, `replies`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | — | preMQL→MQL conversion | ✅ `bison-lead-enrichment` branch S calls the RPC (2026-07-22); `ooo-detect-and-log` ⚠️ still writes `leads` directly | `ooo-invariants.sql` | ⚠️ |
 | 2 | One contact → at most one CRM lead | `leads` | `uq_leads_source_sequencer_contact` | — | — | lead counts | — | `ooo-invariants.sql` | ✅ |
 | 3 | OOO/NRR are never a lead qualification | `leads` | `promote_contact_to_lead` whitelist | — | CRM view (`crm_stage`) | — | `ooo-detect-and-log` ⚠️ sets `qualification='OOO'` | `ooo-invariants.sql` | ⚠️ |
 | 4 | At most one **active** episode per contact | `ooo_followups` | `uq_ooo_followups_active` | — | — | active follow-ups | ⛔ not enforced (Google Sheet) | `ooo-invariants.sql` | ⚠️ |
