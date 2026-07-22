@@ -4,8 +4,8 @@
 **Remote (production):** `Hzar4pwdAXrDHAwn` — `[CRED] CS PDCA → client_sequencers · Bison keys`
 **Trigger:** every 6 hours
 
-> ⚠️ **Not yet proven.** Published, never executed. The SQL was validated against production inside
-> `begin … rollback`, but no live run has happened — see [below](#not-yet-proven).
+> **Live since 2026-07-22.** First run created 3 rows and lifted Bison credential coverage from
+> 35 to 39 of the 42 workspaces CS PDCA lists.
 
 ## Why it exists
 
@@ -58,9 +58,9 @@ So one run should produce `rows_created = 3` and leave four unmatched. **SalesBo
 Kamiński need a `clients` row before automation can serve them at all** — that is a business act, not
 something this workflow may invent.
 
-## Not yet proven
+## Proven
 
-The SQL was exercised against production in a rolled-back transaction with a three-row payload
+The SQL was first exercised against production in a rolled-back transaction with a three-row payload
 covering all three branches — an existing workspace whose key differs, a new workspace whose name
 matches, and a new workspace whose name does not:
 
@@ -68,14 +68,24 @@ matches, and a new workspace whose name does not:
 sheet_clients=3  keys_refreshed=1  rows_created=1  unmatched="150:Kamiński"
 ```
 
-The live run was blocked, so `status: paused` and `phaseState: designed` are literal, not cautious.
-Before trusting it:
+The live run (execution 50229) then produced:
+
+```
+sheet_clients=42  keys_refreshed=0  rows_created=3
+unmatched="131:SalesBook, 137:Tryumf, 149:RedIntoGreen DAPR, 150:Kamiński"
+```
+
+**`keys_refreshed=0` is the useful number.** It says every one of the 35 pre-existing rows already
+carried exactly the key the sheet holds — so the repoint in `bison-lead-enrichment` did not silently
+change which credential any client authenticates with.
+
+Re-check with:
 
 ```sql
 select count(*) filter (where coalesce(cs.api_key,'') <> '') as keyed, count(*) as rows
 from public.client_sequencers cs
 join public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison';
--- 35 / 35 before the first run; expect 38 / 38 after it
+-- 35 / 35 before the first run; 39 / 39 after it
 ```
 
 ## Note on scope

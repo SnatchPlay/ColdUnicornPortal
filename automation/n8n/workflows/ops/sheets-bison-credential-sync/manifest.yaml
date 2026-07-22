@@ -5,7 +5,7 @@ name: "[CRED] CS PDCA → client_sequencers · Bison keys"
 domain: ops
 owner: automation
 lifecycle: managed
-status: paused            # published, NOT yet executed once — see README "Not yet proven"
+status: active            # runs every 6 hours; first run 2026-07-22 created 3 rows
 criticality: high         # every Bison call in bison-lead-enrichment now depends on this data
 
 businessProcess:
@@ -45,7 +45,7 @@ credentials:
 
 transition:
   phase: A
-  phaseState: designed      # published but never executed; nothing has been synced yet
+  phaseState: live          # first run 2026-07-22: 3 rows created, coverage 35 -> 39 of 42
   authoritativeSource: sheets
   legacyStore: "Google Sheets · CS PDCA col_6"
   targetStore: "Supabase · client_sequencers.api_key"
@@ -61,7 +61,10 @@ transition:
     from public.client_sequencers cs
     join public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison';
     Expect 42 keyed rows once the three missing clients exist. 35 before this workflow runs.
-  parityEvidence: null
+  parityEvidence: >-
+    execution 50229 (2026-07-22): sheet_clients=42, keys_refreshed=0, rows_created=3,
+    unmatched="131:SalesBook, 137:Tryumf, 149:RedIntoGreen DAPR, 150:Kaminski".
+    keys_refreshed=0 is itself evidence: every pre-existing key already matched the sheet.
 
 idempotency:
   key: "client_sequencers.external_workspace_id for updates; UNIQUE (client_id, sequencer_id) for inserts"

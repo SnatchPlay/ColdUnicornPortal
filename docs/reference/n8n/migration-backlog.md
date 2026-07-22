@@ -1,13 +1,46 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-22: **34 workflows, 28 active, 15 managed, 19 orphan.**
+Inventory re-taken 2026-07-22 (evening): **37 workflows, 29 active, 18 managed, 19 orphan.**
 (Managed: the four OOO/NRR workflows of §1, `[child-1]` lead enrichment, all five Aimfox workflows of
-§5, the four Bison ingestion workflows of §3, and the failure recorder built the same day.)
+§5, the four Bison ingestion workflows of §3, the failure recorder, the credential sync of §8, and
+the two completed backfills of §9.)
+
+> **Read [§0 · where this stands](#0--where-this-stands) first if you are picking this up fresh.**
 
 Reproduce with `pnpm n8n:inventory`.
 
 Priority is by *risk*, not by convenience: a workflow that blocks a migration or contradicts an ADR
 comes before one that is merely undocumented.
+
+---
+
+## 0 · Where this stands
+
+The state of the migration in one table. Everything here is measured against production, not planned.
+
+| Process | Phase | Evidence |
+|---|---|---|
+| OOO / NRR (§1) | **A, live** — all four workflows call the RPCs | `ooo_followups` still 0 rows; see the open gap below |
+| Bison ingestion (§3) | **C** — Supabase-only by construction | repaired 2026-07-22 after days of silent failure |
+| Bison lead enrichment (§2) | **A, live** — branch S writes leads via `promote_contact_to_lead` | credentials no longer come from Sheets |
+| Aimfox metrics (§5) | **A, live** — branch S writes `sequencer_daily_stats` per account | execution 50246 |
+| Aimfox lead flows (§5) | **0** — nothing reaches Supabase | blocked on `sequencer_contacts` for LinkedIn |
+| Bison credentials (§8) | **A, live** — synced every 6 hours | 39 of 42 workspaces keyed |
+| Historical import (§9) | **done** | 184 leads, 117 Aimfox client-days |
+
+**The three things most worth doing next**, in order:
+
+1. **Chase the OOO episode gap.** Contact and reply rows are written; `ooo_followups` is still empty
+   and the RPC is verified working. Something between them fails silently. This is the oldest
+   unexplained defect in the estate — §1.
+2. **Give LinkedIn contacts an identity.** `sequencer_contacts` has 0 aimfox rows, `campaigns` has 0
+   aimfox rows. Until both exist, neither Aimfox lead flow can move off phase 0, and the 30
+   back-filled Aimfox leads keep a NULL `campaign_id` — §5.
+3. **Delete the sheet fallback in `bison-lead-enrichment`.** It exists only because SalesBook, Tryumf
+   and Kamiński have no `clients` row. That is a business act, not an automation one — §8.
+
+**Do not** build a recurring Sheets → Supabase sync for leads or stats. Two one-off backfills covered
+the history; a standing sync would race branch S — [reconciliation](../processes/outreach/sheets-supabase-reconciliation.md).
 
 ---
 
@@ -43,8 +76,9 @@ license bypassing the RPC contract (ADR-0015 §5), and it has never landed a row
    extraction logic, or the cutover will faithfully reproduce a broken behaviour.
 2. Decide the oldest-vs-newest reply question (defect 8): `[326]` deliberately takes the **oldest**
    reply. For a repeat OOO that is almost certainly wrong.
-3. Move per-client Bison API keys from the CS PDCA sheet to `client_sequencers.api_key`
-   ([security.md §1](security.md#1-per-client-bison-api-keys-live-in-a-google-sheet--high)).
+3. ~~Move per-client Bison API keys from the CS PDCA sheet to `client_sequencers.api_key`~~ —
+   **done for the data (§8)**, and done for `bison-lead-enrichment`. The four OOO/NRR workflows still
+   read `col_6` and must be repointed at `[S0]`-style resolution before their sheet reads can go.
 4. Make the sheet append **idempotent** (append-or-update on `LeadID` + `ReplyID`). Precondition for
    phase A: two stores with different duplicate behaviour diverge by construction.
 5. Add the Supabase side to the four workflows — Sheets first, Supabase second, Supabase failure
@@ -146,8 +180,9 @@ A clean dispatcher + per-provider-child pattern; likely the best-structured grou
 
 ## 5 · Aimfox / LinkedIn
 
-**Priority: high. All five imported 2026-07-22; both critical secret findings closed. Still phase 0 —
-no Aimfox workflow writes Supabase.**
+**Priority: high. All five imported 2026-07-22; both critical secret findings closed.
+`aimfox-daily-metrics` reached phase A the same day — branch S writes `sequencer_daily_stats`, one
+row per LinkedIn account. The other four are still phase 0.**
 
 The whole channel is now described in one place:
 [process · LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md).
@@ -183,9 +218,13 @@ live write until this inventory corrected it.
    PDCA `col_105` and `external_workspace_id` read from each token's own `GET /accounts`. FitMech has
    no workspace id (no LinkedIn account connected); EvidencePrime had no `emailbison` row at all and
    was resolved by name.
-4. **Phase A on the capacity flow first** (`aimfox-daily-metrics`): a pure UPSERT of derived numbers,
-   no person touched, no external write endpoint — the only part of this channel that needs no A1
-   shadow. Fix defects 1–3 in branch S rather than porting them.
+4. ~~Phase A on the capacity flow first (`aimfox-daily-metrics`)~~ — **done 2026-07-22.** Branch S is
+   fully parallel (own client resolution, own Aimfox calls) and fixed **four** defects rather than
+   three: the fourth, a lying leading bucket in the interactions series, was found by probing the API
+   and is invisible in the code. One question is deliberately left open — the per-account
+   interactions filter is unverified, so branch S writes nothing for a client with more than one
+   LinkedIn account. Re-probe before a second account appears
+   ([README](../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md)).
 5. **Then the lead flows.** `4OjNRWLaG2IWK6kd` and `s0GqDtCzyLAvVnm1` create leads — check against
    invariants 1–3 of the process doc before any cutover, and note that neither can store a contact
    identity today, so `sequencer_contacts` comes first.
@@ -226,6 +265,61 @@ importing before anything depends further on it.
 Each is either dead or undocumented. Deleting requires an explicit decision
 ([environments.md](environments.md)) — but leaving unnamed workflows on a production instance makes
 every future inventory noisier.
+
+---
+
+## 8 · Bison credentials out of the spreadsheet
+
+**Priority: high — a precondition for every other cutover, and security finding 1.**
+
+| Remote | Name | State |
+|---|---|---|
+| `Hzar4pwdAXrDHAwn` | `[CRED] CS PDCA → client_sequencers · Bison keys` | **active**, every 6 hours |
+
+Per-client Bison keys lived only in CS PDCA `col_6`. Every Bison call in the estate read them from
+there, which meant the whole pipeline died the moment Sheets was disconnected — a dependency that
+survived even after `bison-lead-enrichment` grew a "parallel" branch S, because branch S sat
+downstream of API calls the sheet was authenticating.
+
+Done 2026-07-22: the sync, plus `[S0] Resolve Bison credentials` in `bison-lead-enrichment`, where
+all eight Bison `Authorization` headers now read `client_sequencers.api_key`.
+
+**Remaining:**
+
+1. **Three clients have no `clients` row at all** — SalesBook, Tryumf, Kamiński. Until they exist the
+   guarded sheet fallback cannot be deleted. A business act.
+2. **`RedIntoGreen DAPR` (workspace 149) does not match the client named `DAPR`.** The sync refuses to
+   guess; someone must confirm they are the same client.
+3. **Repoint the four OOO/NRR workflows** the same way — they still read `col_6`.
+4. **Aimfox keys have no sync.** They were seeded once by hand for five clients.
+
+---
+
+## 9 · Historical import from Sheets — done, do not repeat
+
+**Priority: closed.** Recorded because the *shape* matters more than the result.
+
+| Remote | Name | Result |
+|---|---|---|
+| `KoLN4bU7qe7RwnGT` | `[BACKFILL] Sheets → Supabase · leads` | 184 leads (30 Aimfox); `leads` 4787 → 4971 |
+| `YLfQZBprSRIT6hLm` | `[BACKFILL] Sheets → Supabase · Aimfox daily metrics` | 117 client-days; the first rows `sequencer_daily_stats` ever held |
+
+Both are `deprecated` and deactivated. **Do not turn either into a recurring sync** — branch S of
+`bison-lead-enrichment` owns new leads through `promote_contact_to_lead`, and a second writer would
+race it.
+
+Two findings worth keeping:
+
+- **The five "empty" outcome columns of `daily_stats` are not a broken sync.** `mql_count`, `me_count`,
+  `won_count`, `negative_count` and `prospects_in_base` are empty in the *sheet* too — `WON` is
+  non-zero in none of its 6734 rows. Nothing computes them on either side. Deriving them from `leads`
+  is the honest fix; syncing is not.
+- **`ooo_count` in `daily_stats` is a mislabelled copy of `automated_replies_count`.** The Bison
+  worker computes it from the automated-replies total and fetches no OOO at all.
+
+Still not imported, deliberately: **1583 `daily_stats` rows for 30 churned workspaces.** Nothing in
+the workbook maps a retired workspace id to a client, so attribution would be guesswork
+([reconciliation](../processes/outreach/sheets-supabase-reconciliation.md)).
 
 ---
 

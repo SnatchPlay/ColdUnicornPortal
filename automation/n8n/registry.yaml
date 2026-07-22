@@ -342,7 +342,7 @@ workflows:
     businessProcess: docs/reference/processes/outreach/bison-ingestion.md
     owner: automation
     lifecycle: managed
-    status: paused
+    status: active
     criticality: high
     trigger: schedule
     environments:
