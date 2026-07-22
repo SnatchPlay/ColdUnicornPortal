@@ -22,6 +22,9 @@ triggers:
     detail: "called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
 
 reads:
+  tables:
+    - client_sequencers      # the client's Aimfox token — replaces the broken minting endpoint
+    - sequencers
   external:
     - "Aimfox API · GET /leads/{id}"
     - "Google Sheets · CS PDCA — client row; <client>/Leads — existing lead?"
@@ -39,9 +42,9 @@ writes:
   tablesWritten: []
 
 credentials:
-  - alias: "Aimfox Master"
-    type: httpBearerAuth
-    usedBy: "Get Workspace Api Key"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Workspace Api Key — resolves client_sequencers.api_key (no longer mints a token)"
   - alias: "Google Sheets account"
     type: googleSheetsOAuth2Api
     usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, [96] Update Qualification col, Create Record, Get Table ID"

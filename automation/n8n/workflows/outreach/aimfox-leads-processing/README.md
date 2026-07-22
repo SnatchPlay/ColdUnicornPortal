@@ -76,3 +76,31 @@ pnpm n8n:check-drift --id aimfox-leads-processing
 
 **Never** `execute_workflow` against this on production: it writes to a client spreadsheet, to their
 CRM, and forwards email.
+
+## History · 2026-07-22 — the token now comes from Supabase
+
+Every Aimfox webhook workflow had been failing on `Get Workspace Api Key`, with *"The service was not
+able to process your request"*. The cause is not the credential: **`GET /workspaces/{id}/tokens`
+returns 500**, confirmed by calling it directly with a known-good workspace token.
+
+Minting a token is no longer necessary. The per-client tokens were seeded into
+`client_sequencers.api_key` on 2026-07-22, so the node became a Postgres lookup:
+
+```sql
+select jsonb_build_array(jsonb_build_object('token', cs.api_key)) as tokens, ...
+from public.client_sequencers cs
+join public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'
+where cs.external_workspace_id = $1 and cs.enabled and coalesce(cs.api_key,'') <> ''
+```
+
+**The node keeps its name and its output shape**, so not one downstream expression changed — all of
+them read `$('Get Workspace Api Key').item.json.tokens[0].token`. That the `jsonb` really arrives as
+a JS array was proved, not assumed: a throwaway workflow executed the same query and evaluated the
+same expression (`resolves: true`, `token_length: 36`, `tokens_type: object`).
+
+Consequences: the Aimfox master token is no longer used by this workflow at all, and the flow is
+Supabase-dependent for credentials — the first real link from this channel to the database.
+
+**Behaviour change to know about:** a webhook for a workspace with no `client_sequencers` row now
+resolves to **zero rows** and the run stops silently, where before it errored. Five clients are
+seeded; FitMech has no `external_workspace_id` yet, so its events will not resolve.

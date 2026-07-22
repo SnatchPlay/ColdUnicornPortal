@@ -809,17 +809,18 @@
     {
       "id": "0ecb6f71-513b-4c30-a371-c6f28704b1ed",
       "name": "Get Workspace Api Key",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
       "position": [
         144,
         -16
       ],
       "parameters": {
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpBearerAuth",
-        "options": {},
-        "url": "=https://api.aimfox.com/api/v2/workspaces/{{ $json.body.workspace.id }}/tokens"
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.body.workspace.id)] }}"
+        },
+        "query": "select jsonb_build_array(jsonb_build_object('token', cs.api_key)) as tokens,\n       cs.id::text                as client_sequencer_id,\n       cs.client_id::text         as client_id,\n       cs.external_workspace_id   as workspace_id\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'\nwhere cs.external_workspace_id = $1\n  and cs.enabled\n  and coalesce(cs.api_key, '') <> ''\nlimit 1;"
       }
     },
     {

@@ -21,6 +21,9 @@ triggers:
     detail: "POST /webhook/aimfox-classifier — no authentication (security.md §3)"
 
 reads:
+  tables:
+    - client_sequencers      # the client's Aimfox token — replaces the broken minting endpoint
+    - sequencers
   external:
     - "Aimfox API · GET /leads/{id} — the contact and their current LinkedIn experience"
     - "OpenAI · POST /v1/responses — classification, and a company-mention check"
@@ -35,9 +38,9 @@ writes:
   tablesWritten: []
 
 credentials:
-  - alias: "Aimfox Master"
-    type: httpBearerAuth
-    usedBy: "Get Workspace Api Key — mints the per-workspace token"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Workspace Api Key — resolves client_sequencers.api_key (no longer mints a token)"
   - alias: "OpenAi account"
     type: openAiApi
     usedBy: "OpenAI - Classify Email, OpenAI - Search for the company name"
