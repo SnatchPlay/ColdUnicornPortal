@@ -7,6 +7,11 @@ Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transi
 **Status 2026-07-22: all five imported and `managed`. Both blockers cleared. Phase 0 — no Aimfox
 workflow writes Supabase yet; the capacity branch is next and is no longer blocked on anything.**
 
+> **Supabase now holds Aimfox data, and none of it came from an Aimfox workflow.** Two one-off sheet
+> backfills put it there on 2026-07-22: 30 Aimfox-attributed leads and 117 `sequencer_daily_stats`
+> rows ([reconciliation](../processes/outreach/sheets-supabase-reconciliation.md)). Do not read that
+> as progress on this page — the workflows are unchanged and still write only to Sheets.
+
 ---
 
 ## Where the channel actually is
@@ -128,6 +133,19 @@ An imported defect is still a defect ([ADR-0016](../../adr/0016-repository-as-au
 `sequencer_daily_stats` rows agree. Expect one honest difference: branch S has per-account rows where
 the sheet has a single client rollup, so compare the **sum** across `profile_id`. Record the agreeing
 date range in `transition.parityEvidence`.
+
+> **Sum across `profile_id` only after excluding `'__workspace_total__'`.** The table is no longer
+> empty: the sheet backfill wrote 117 rollup rows under that sentinel for 5 clients over
+> 2026-06-18…07-22 — exactly the window branch S will first produce. Summing naively would double
+> every one of those days and make a broken branch look like it reconciles.
+>
+> ```sql
+> where profile_id <> '__workspace_total__'
+> ```
+>
+> Decide before branch S goes live whether the backfilled rows are deleted once real per-account rows
+> cover the same dates, or kept as the sheet-era record. Keeping both silently is the one option that
+> is wrong.
 
 ## Order for the rest
 
