@@ -26,7 +26,6 @@ import { useAuth } from "../providers/auth";
 import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { TimeframeValue } from "../lib/timeframe";
 
-type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
 
 const PAGE_SIZE = 50;
@@ -63,7 +62,6 @@ export function ClientLeadsPage() {
   }, [query]);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">("all");
   const [campaignFilter, setCampaignFilter] = useState("all");
-  const [replyScope, setReplyScope] = useState<ReplyScope>("all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => createDefaultTimeframe());
   // Load-more pagination: accumulates rows across pages.
@@ -78,7 +76,6 @@ export function ClientLeadsPage() {
 
   const listParams = useMemo<LeadsListParams>(() => ({
     campaignId: campaignFilter !== "all" ? campaignFilter : undefined,
-    replyScope,
     dateFrom: timeframeFrom?.toISOString(),
     dateTo: timeframeTo?.toISOString(),
     search: committedSearch || undefined,
@@ -86,13 +83,13 @@ export function ClientLeadsPage() {
     sortDir: leadSort.direction,
     page: loadPage,
     pageSize: PAGE_SIZE,
-  }), [campaignFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, loadPage]);
+  }), [campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, loadPage]);
 
   const { data, loading, error, refresh } = useLeadsList(listParams);
   const { data: filterOptions } = useLeadsFilterOptions();
 
   // Reset accumulation when any filter changes (loadPage goes back to 1).
-  const filterKey = JSON.stringify({ campaignFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort });
+  const filterKey = JSON.stringify({ campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort });
   useEffect(() => {
     setLoadPage(1);
     setAccumulatedRows([]);
@@ -231,16 +228,6 @@ export function ClientLeadsPage() {
             {campaignsLite.map((campaign) => (
               <SelectItem key={campaign.id} value={campaign.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{campaign.name}</SelectItem>
             ))}
-          </SelectContent>
-        </Select>
-        <Select value={replyScope} onValueChange={(value) => setReplyScope(value as ReplyScope)}>
-          <SelectTrigger aria-label="Filter leads by reply type" className="h-[52px] rounded-2xl border-[#242424] bg-[#050505] px-5 text-base text-neutral-300">
-            <SelectValue placeholder="All (OOO + Active)" />
-          </SelectTrigger>
-          <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-            <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">All (OOO + Active)</SelectItem>
-            <SelectItem value="active" className="text-white focus:bg-[#1a1a1a] focus:text-white">Active only</SelectItem>
-            <SelectItem value="ooo" className="text-white focus:bg-[#1a1a1a] focus:text-white">OOO only</SelectItem>
           </SelectContent>
         </Select>
       </div>

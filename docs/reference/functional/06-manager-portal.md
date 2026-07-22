@@ -256,9 +256,12 @@ Editable lead workspace. Change qualification, mark milestones (meeting booked/h
 
 - `PortalSearch`-style search on name / email / company / title / country.
 - Campaign filter (Select).
-- OOO qualification filter (`All leads` / `Non-OOO only` / `OOO only`). This filters leads by `qualification`, not replies.
 - Pipeline stage chips (same as client pipeline; click to filter).
-- URL state contract: `q`, `campaign`, `stage`, `replyScope`, `sort`, `dir`, `range`, `from`, `to`, `page`.
+- URL state contract: `q`, `campaign`, `stage`, `sort`, `dir`, `range`, `from`, `to`, `page`.
+
+> The OOO qualification filter (`All leads` / `Non-OOO only` / `OOO only`) and its `replyScope`
+> URL param were **removed** (2026-07-22) together with migration `20260722z`: OOO is no longer a
+> lead state (ADR-0015), so there is nothing on a lead to scope by.
 
 ### 3.3 Lead table (dense report — Batch 4)
 

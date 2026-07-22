@@ -184,11 +184,13 @@ Key contract points n8n must respect:
   `qualification`, `won`, timestamps etc. are derived inside the function; a repeat call returns the existing
   lead with `created: false` rather than raising.
 
-**Legacy fallback (display-only, pre-cutover).** Until n8n is on this contract, old rows where
-`leads.qualification` is `'OOO'`/`'NRR'` still render via `deriveContactDisposition` (a display fallback, no
-backfill). The disposition columns and the `OOO`/`NRR` qualification values are removed by the **deferred**
-`supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql`, whose precondition is exactly that n8n
-has stopped writing them — see that file's header before applying.
+**Legacy disposition display — REMOVED 2026-07-22.** The old display-only fallback (rows where
+`leads.qualification` was `'OOO'`/`'NRR'` rendered via `deriveContactDisposition`) is gone. The
+disposition column + resolver, the CRM "Disposition" column, and the `OOO`/`NRR` `lead_qualification`
+values were all removed from the portal and gateway, and
+[`supabase/migrations/20260722z_drop_legacy_ooo_columns.sql`](../../../supabase/migrations/20260722z_drop_legacy_ooo_columns.sql)
+(no longer deferred) drops the underlying columns + enum values. Its remaining precondition is the
+deploy order: **redeploy `orm-gateway` before applying it** — see the file header.
 
 ---
 

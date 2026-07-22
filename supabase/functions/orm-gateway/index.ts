@@ -203,7 +203,6 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     linkedin_url: row.linkedinUrl,
     gender: row.gender,
     qualification: row.qualification,
-    expected_return_date: row.expectedReturnDate,
     external_id: row.externalId,
     phone_number: row.phoneNumber,
     phone_source: row.phoneSource,
@@ -219,7 +218,6 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     meeting_held: row.meetingHeld,
     offer_sent: row.offerSent,
     won: row.won,
-    added_to_ooo_campaign: row.addedToOooCampaign,
     external_blacklist_id: row.externalBlacklistId,
     external_domain_blacklist_id: row.externalDomainBlacklistId,
     source: row.source,
@@ -235,7 +233,6 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     conclusion: row.conclusion,
     concluded_at: row.concludedAt,
     final_outcome: row.finalOutcome,
-    contact_disposition: row.contactDisposition,
   };
 }
 
@@ -423,17 +420,9 @@ function mapLeadPatch(patch: Record<string, unknown>) {
   if ("industry" in patch) mapped.industry = patch.industry;
   if ("headcount_range" in patch) mapped.headcountRange = patch.headcount_range;
   if ("website" in patch) mapped.website = patch.website;
-  // OOO state
-  // `expected_return_date` / `added_to_ooo_campaign` are NO LONGER writable (ADR-0015, spec §18).
-  // OOO is a state of an external contact, tracked in `ooo_followups`; letting the portal stamp it
-  // onto a lead is how the two models drifted apart in the first place. The columns still exist for
-  // the n8n cutover window and are removed by migrations/deferred/20260722z.
-  //
-  // REJECT rather than ignore: both fields are still declared on `LeadRecord`, so `Partial<LeadRecord>`
-  // accepts them and a caller would get a 200 with the write silently dropped.
-  if ("expected_return_date" in patch || "added_to_ooo_campaign" in patch) {
-    fail(400, "OOO state is no longer stored on a lead (ADR-0015) — it belongs to ooo_followups.");
-  }
+  // OOO state is not a lead field (ADR-0015): the columns were dropped by migration 20260722z and
+  // `expected_return_date` / `added_to_ooo_campaign` / `contact_disposition` no longer exist on
+  // `LeadRecord`, so `Partial<LeadRecord>` can no longer carry them — no reject guard is needed.
   // Lead CRM operational state (ADR-0013, Phase 5.2). Editable dates/method that drive the CRM health
   // columns. Terminal-status columns (final_outcome/conclusion/concluded_at) are NOT here — only the
   // atomic concludeLead action writes them. Dates are validated (null or a YYYY-MM-DD... string) so a
@@ -678,7 +667,6 @@ function mapLeadInsert(input: Record<string, unknown>) {
     meetingHeld: input.meeting_held ?? false,
     offerSent: input.offer_sent ?? false,
     won: input.won ?? false,
-    addedToOooCampaign: input.added_to_ooo_campaign ?? false,
     source: input.source ?? "manual",
     clientNote: input.client_note ?? null,
   };
@@ -1246,11 +1234,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             l.id, l.created_at, l.updated_at, l.client_id,
             l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
             l.company_name, l.linkedin_url, l.gender, l.qualification,
-            l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+            l.external_id, l.phone_number, l.phone_source,
             l.industry, l.headcount_range, l.website, l.country,
             l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
             l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
-            l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+            l.external_blacklist_id, l.external_domain_blacklist_id,
             l.source, l.reply_text, l.client_note, l.coldunicorn_note, l.highlight,
             c.name AS client_name,
             camp.name AS campaign_name,
@@ -1315,7 +1303,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         linkedin_url: r.linkedin_url ? String(r.linkedin_url) : null,
         gender: r.gender ? String(r.gender) : null,
         qualification: r.qualification ? String(r.qualification) : null,
-        expected_return_date: r.expected_return_date ? String(r.expected_return_date) : null,
         external_id: r.external_id ? String(r.external_id) : null,
         phone_number: r.phone_number ? String(r.phone_number) : null,
         phone_source: r.phone_source ? String(r.phone_source) : null,
@@ -1331,7 +1318,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         meeting_held: Boolean(r.meeting_held),
         offer_sent: Boolean(r.offer_sent),
         won: Boolean(r.won),
-        added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
         external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
         external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
         source: r.source ? String(r.source) : "smartlead",
@@ -1788,7 +1774,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     console.log(
       `[PERF][orm-gateway] loadLeadsList shape: ` +
         `hasSearch=${!!p.search} hasClientFilter=${!!p.clientId} hasCampaignFilter=${!!p.campaignId} ` +
-        `hasStageFilter=${!!p.stage} replyScope=${p.replyScope ?? "all"} ` +
+        `hasStageFilter=${!!p.stage} ` +
         `sortField=${p.sortField} page=${p.page} pageSize=${pageSize}`,
     );
 
@@ -1813,8 +1799,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
     if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
     if (p.dateTo) baseWhereParts.push(sql`l.created_at <= ${p.dateTo}`);
-    if (p.replyScope === "ooo") baseWhereParts.push(sql`l.qualification = 'OOO'`);
-    if (p.replyScope === "active") baseWhereParts.push(sql`l.qualification IS DISTINCT FROM 'OOO'`);
     if (p.search) {
       const needle = `%${p.search.toLowerCase()}%`;
       baseWhereParts.push(sql`(
@@ -1887,11 +1871,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.id, l.created_at, l.updated_at, l.client_id,
         l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
         l.company_name, l.linkedin_url, l.gender, l.qualification,
-        l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+        l.external_id, l.phone_number, l.phone_source,
         l.industry, l.headcount_range, l.website, l.country,
         l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
         l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
-        l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+        l.external_blacklist_id, l.external_domain_blacklist_id,
         l.source, l.reply_text, l.client_note, l.highlight,
         -- coldunicorn_note is internal-only: never expose it to the client role. We resolve the
         -- caller role via a public.users self-lookup (RLS returns only the caller own row).
@@ -1939,7 +1923,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       linkedin_url: r.linkedin_url ? String(r.linkedin_url) : null,
       gender: r.gender ? String(r.gender) : null,
       qualification: r.qualification ? String(r.qualification) : null,
-      expected_return_date: r.expected_return_date ? String(r.expected_return_date) : null,
       external_id: r.external_id ? String(r.external_id) : null,
       phone_number: r.phone_number ? String(r.phone_number) : null,
       phone_source: r.phone_source ? String(r.phone_source) : null,
@@ -1955,7 +1938,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       meeting_held: Boolean(r.meeting_held),
       offer_sent: Boolean(r.offer_sent),
       won: Boolean(r.won),
-      added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
       external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
       external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
       source: r.source ? String(r.source) : "smartlead",
@@ -2056,8 +2038,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
     if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
     if (p.dateTo) baseWhereParts.push(sql`l.created_at <= ${p.dateTo}`);
-    if (p.replyScope === "ooo") baseWhereParts.push(sql`l.qualification = 'OOO'`);
-    if (p.replyScope === "active") baseWhereParts.push(sql`l.qualification IS DISTINCT FROM 'OOO'`);
     if (p.search) {
       const needle = `%${p.search.toLowerCase()}%`;
       baseWhereParts.push(sql`(
@@ -2110,14 +2090,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.id, l.created_at, l.updated_at, l.client_id,
         l.campaign_id, l.email, l.first_name, l.last_name, l.job_title,
         l.company_name, l.linkedin_url, l.gender, l.qualification,
-        l.expected_return_date, l.external_id, l.phone_number, l.phone_source,
+        l.external_id, l.phone_number, l.phone_source,
         l.industry, l.headcount_range, l.website, l.country,
         l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
         l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
-        l.added_to_ooo_campaign, l.external_blacklist_id, l.external_domain_blacklist_id,
+        l.external_blacklist_id, l.external_domain_blacklist_id,
         l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id,
         l.linkedin_invitation_sent_at, l.contact_made_at, l.contact_method,
-        l.negotiation_started_at, l.concluded_at, l.final_outcome, l.contact_disposition,
+        l.negotiation_started_at, l.concluded_at, l.final_outcome,
         -- coldunicorn_note + conclusion are internal-only; nulled for the client role in TS via isClient.
         l.coldunicorn_note, l.conclusion,
         c.name AS client_name,
@@ -2259,7 +2239,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       linkedin_url: str(r.linkedin_url),
       gender: str(r.gender),
       qualification: str(r.qualification),
-      expected_return_date: str(r.expected_return_date),
       external_id: str(r.external_id),
       phone_number: str(r.phone_number),
       phone_source: str(r.phone_source),
@@ -2275,7 +2254,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       meeting_held: Boolean(r.meeting_held),
       offer_sent: Boolean(r.offer_sent),
       won: Boolean(r.won),
-      added_to_ooo_campaign: Boolean(r.added_to_ooo_campaign),
       external_blacklist_id: num(r.external_blacklist_id),
       external_domain_blacklist_id: num(r.external_domain_blacklist_id),
       source: r.source ? String(r.source) : "smartlead",
@@ -2291,9 +2269,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       conclusion: isClient ? null : str(r.conclusion),
       concluded_at: r.concluded_at ? toIsoString(r.concluded_at) : null,
       final_outcome: str(r.final_outcome),
-      // Persisted disposition (n8n-owned). The client resolves persisted-or-legacy-fallback via
-      // deriveContactDisposition, keeping qualification untouched (spec item 10).
-      contact_disposition: str(r.contact_disposition),
       clientName: String(r.client_name ?? ""),
       campaignName: str(r.campaign_name),
       replyCount: Number(r.reply_count ?? 0),

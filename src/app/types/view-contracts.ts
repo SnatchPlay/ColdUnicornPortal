@@ -452,7 +452,6 @@ export interface LeadsListParams {
   campaignId?: string;
   /** PIPELINE_STAGES key, or undefined for "all" stages. */
   stage?: string;
-  replyScope?: "all" | "active" | "ooo";
   /** ISO date string (inclusive). Resolved from TimeframeValue on the frontend. */
   dateFrom?: string;
   dateTo?: string;

@@ -89,8 +89,11 @@ Client's lead workspace. Read-only (ADR-0004 + UI also disables edits). Full rep
 - `PortalPageHeader` with title and subtitle.
 - `PortalSearch` — full-text search across `first_name + last_name`, `email`, `company_name`, `job_title`.
 - Campaign filter: `Select` listing scoped campaigns.
-- Reply scope filter: `Select` with options "All (OOO + Active)" | "Active only" | "OOO only". Filters leads by `lead.qualification === 'OOO'` (not by reply classification — the label is misleading; rename to "Lead OOO scope" tracked as **BL-7**).
 - Pipeline stage chips (`FilterChip`): "All" + one chip per `PIPELINE_STAGES` entry (see [04-metrics §4](./04-metrics-catalog.md#4-lead-stage-lifecycle)) with counts.
+
+> The reply-scope `Select` ("All (OOO + Active)" | "Active only" | "OOO only") was **removed**
+> (2026-07-22) with migration `20260722z`. It filtered on `lead.qualification === 'OOO'`, and OOO is
+> no longer a lead state (ADR-0015); BL-7 (the rename) is closed as obsolete.
 - CSV export button (top-right): serialises current filtered rows via `toCsvCell()` inline helper.
 
 ### 2.3 Lead table (dense report — Batch 4)

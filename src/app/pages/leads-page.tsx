@@ -74,7 +74,6 @@ const ALL_FILTER_VALUE = "__all__";
 const PAGE_SIZE = 50;
 const MAX_PAGE_LINKS = 5;
 
-type ReplyScope = "all" | "active" | "ooo";
 type SortDirection = "asc" | "desc";
 // Server sort fields supported by loadLeadsList (see orm-gateway orderClause).
 const LEAD_SORT_KEYS = ["lead", "client", "company", "campaign", "step", "status", "replies", "lastReply", "created"] as const;
@@ -300,11 +299,6 @@ function InternalLeadsPage() {
   });
   const [clientFilter, setClientFilter] = useState(searchParams.get("client") ?? ALL_FILTER_VALUE);
   const [campaignFilter, setCampaignFilter] = useState(searchParams.get("campaign") ?? ALL_FILTER_VALUE);
-  const [replyScope, setReplyScope] = useState<ReplyScope>(() => {
-    const value = searchParams.get("replyScope");
-    if (value === "active" || value === "ooo") return value;
-    return "all";
-  });
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => parseTimeframeFromParams(searchParams));
   const [currentPage, setCurrentPage] = useState(() => parsePage(searchParams.get("page")));
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -332,7 +326,6 @@ function InternalLeadsPage() {
     clientId: clientFilter !== ALL_FILTER_VALUE ? clientFilter : undefined,
     campaignId: campaignFilter !== ALL_FILTER_VALUE ? campaignFilter : undefined,
     stage: stageFilter !== "all" ? stageFilter : undefined,
-    replyScope,
     dateFrom: timeframeFrom?.toISOString(),
     dateTo: timeframeTo?.toISOString(),
     search: committedSearch || undefined,
@@ -340,7 +333,7 @@ function InternalLeadsPage() {
     sortDir: leadSort.direction,
     page: currentPage,
     pageSize: PAGE_SIZE,
-  }), [clientFilter, campaignFilter, stageFilter, replyScope, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
+  }), [clientFilter, campaignFilter, stageFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
 
   // View switcher (ADR-0013): PDCA = existing report; CRM = banded CRM table; combined = union, calm.
   const isCrmView = viewMode !== "pdca";
@@ -547,13 +540,12 @@ function InternalLeadsPage() {
     if (stageFilter !== "all") nextParams.set("stage", stageFilter); else nextParams.delete("stage");
     if (clientFilter !== ALL_FILTER_VALUE) nextParams.set("client", clientFilter); else nextParams.delete("client");
     if (campaignFilter !== ALL_FILTER_VALUE) nextParams.set("campaign", campaignFilter); else nextParams.delete("campaign");
-    if (replyScope !== "all") nextParams.set("replyScope", replyScope); else nextParams.delete("replyScope");
     nextParams.set("sort", leadSort.key);
     nextParams.set("dir", leadSort.direction);
     nextParams.set("page", String(safeCurrentPage));
     writeTimeframeToParams(nextParams, timeframe);
     if (nextParams.toString() !== searchParams.toString()) setSearchParams(nextParams, { replace: true });
-  }, [campaignFilter, clientFilter, leadSort.direction, leadSort.key, query, replyScope, safeCurrentPage, searchParams, setSearchParams, stageFilter, timeframe]);
+  }, [campaignFilter, clientFilter, leadSort.direction, leadSort.key, query, safeCurrentPage, searchParams, setSearchParams, stageFilter, timeframe]);
 
   const draftPatch = useMemo(() => {
     if (!selectedLead || !draft) return {};
@@ -681,7 +673,6 @@ function InternalLeadsPage() {
   }
   function handleClientFilterChange(value: string) { setClientFilter(value); setCampaignFilter(ALL_FILTER_VALUE); setCurrentPage(1); }
   function handleCampaignFilterChange(value: string) { setCampaignFilter(value); setCurrentPage(1); }
-  function handleReplyScopeChange(value: ReplyScope) { setReplyScope(value); setCurrentPage(1); }
   function handleTimeframeChange(value: TimeframeValue) { setTimeframe(value); setCurrentPage(1); }
   function handleQueryChange(value: string) { setQuery(value); setCurrentPage(1); }
 
@@ -789,16 +780,6 @@ function InternalLeadsPage() {
                 {clientFilteredCampaigns.map((campaign) => (
                   <SelectItem key={campaign.id} value={campaign.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">{campaign.name}</SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-            <Select value={replyScope} onValueChange={(value) => handleReplyScopeChange(value as ReplyScope)}>
-              <SelectTrigger aria-label="Filter leads by OOO qualification" className="h-auto rounded-md border-[#242424] bg-[#080808] px-4 py-3 text-sm text-white">
-                <SelectValue placeholder="All leads" />
-              </SelectTrigger>
-              <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
-                <SelectItem value="all" className="text-white focus:bg-[#1a1a1a] focus:text-white">All leads</SelectItem>
-                <SelectItem value="active" className="text-white focus:bg-[#1a1a1a] focus:text-white">Non-OOO only</SelectItem>
-                <SelectItem value="ooo" className="text-white focus:bg-[#1a1a1a] focus:text-white">OOO only</SelectItem>
               </SelectContent>
             </Select>
           </div>

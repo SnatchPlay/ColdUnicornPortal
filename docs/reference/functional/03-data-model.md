@@ -377,12 +377,12 @@ Columns of note:
 | `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url` | text | Enrichment. |
 | `gender` | `lead_gender` | Used for OOO routing. |
 | `qualification` | `lead_qualification` (indexed) | Editable by internal roles. |
-| `expected_return_date` | date | **LEGACY** (ADR-0015) — OOO now lives in `ooo_followups`. No longer writable through the gateway; dropped by the deferred `20260722z`. |
+| ~~`expected_return_date`~~ | — | **DROPPED** by `20260722z` (2026-07-22). OOO lives in `ooo_followups` (ADR-0015); the gateway no longer reads or writes it. |
 | `message_title` | varchar(500) | Subject of the step the lead replied to. |
 | `message_number` | smallint | Sequence step at which the last reply landed (denormalised from `replies`). |
 | `response_time_hours` / `response_time_label` | numeric / varchar | Time-to-reply metric from ingestion. |
 | `meeting_booked`, `meeting_held`, `offer_sent`, `won` | booleans default false | **Editable by internal roles; drive `getLeadStage`**. |
-| `added_to_ooo_campaign` | boolean | **LEGACY** (ADR-0015) — superseded by `ooo_followups.status`. Not writable; dropped by the deferred `20260722z`. |
+| ~~`added_to_ooo_campaign`~~ | — | **DROPPED** by `20260722z` (2026-07-22). Superseded by `ooo_followups.status` (ADR-0015). |
 | `source_sequencer_contact_id` | uuid FK > `sequencer_contacts.id` | ADR-0015 provenance. Partial UNIQUE — **one contact yields at most one CRM lead**; a later positive reply attaches to the existing lead. |
 | `origin_reply_id` | uuid FK > `replies.id` | ADR-0015 provenance. Partial UNIQUE — one reply never creates two leads (reprocessing guard). |
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
@@ -452,7 +452,7 @@ Four lead-owned child tables added by [`20260719_lead_crm_tables.sql`](../../../
 **New `leads` columns** (spec §8.1): `linkedin_invitation_sent_at`, `contact_made_at`, `contact_method` (text CHECK `phone`|`email`), `negotiation_started_at`, `conclusion`, `concluded_at`. Also re-synced the previously-missing `sequencer_id` into `schema.ts`.
 
 **Status model (Phase 1b, ADR-0013 split model — [`20260719d`](../../../supabase/migrations/20260719d_lead_final_outcome.sql)):** the taxonomy is SPLIT, not a single stored column.
-- `crm_stage` (`preMQL`/`MQL`/`SQL`) and `contact_disposition` (`ooo`/`nrr`) are **DERIVED on read** (`src/app/lib/crm/lead-status.ts` — `deriveCrmStage`, `deriveContactDisposition`); no columns, no backfill.
+- `crm_stage` (`preMQL`/`MQL`/`SQL`) is **DERIVED on read** (`src/app/lib/crm/lead-status.ts` — `deriveCrmStage`); no column, no backfill. The former `contact_disposition` dimension (`ooo`/`nrr`) and its `deriveContactDisposition` resolver were **removed** 2026-07-22: OOO/NRR are outreach states of a `sequencer_contacts` row (ADR-0015), not a lead dimension, and `20260722z` dropped the underlying column and the `OOO`/`NRR` enum values.
 - `leads.final_outcome` (enum `final_outcome` = `won`/`lost`/`lost_premql`, nullable) is the **only stored** part — the explicit terminal decision, guarded by `leads_final_outcome_concluded_check` (`final_outcome ⇒ concluded_at`), set atomically with `conclusion`/`concluded_at` by the Phase-5 conclusion action.
 - `resolveCrmStatus` = `final_outcome ?? won-boolean ?? rejected→lost ?? deriveCrmStage`. **KPI dashboards are unchanged** (booleans/`qualification`).
 

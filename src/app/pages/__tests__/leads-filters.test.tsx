@@ -50,11 +50,11 @@ function makeRow(overrides: Partial<{
     last_name: "User",
     job_title: null, company_name: null, linkedin_url: null, gender: null,
     qualification: overrides.qualification ?? null,
-    expected_return_date: null, external_id: null, phone_number: null, phone_source: null,
+    external_id: null, phone_number: null, phone_source: null,
     industry: null, headcount_range: null, website: null, country: null,
     message_title: null, message_number: null, response_time_hours: null, response_time_label: null,
     meeting_booked: false, meeting_held: false, offer_sent: false, won: false,
-    added_to_ooo_campaign: false, external_blacklist_id: null, external_domain_blacklist_id: null,
+    external_blacklist_id: null, external_domain_blacklist_id: null,
     source: "test", reply_text: null, client_note: null, coldunicorn_note: null, highlight: null,
     sequencer_id: "00000000-0000-4000-a000-000000000002", linkedin_invitation_sent_at: null,
     contact_made_at: null, contact_method: null, negotiation_started_at: null,
@@ -94,23 +94,15 @@ describe("internal leads filters", () => {
     });
   });
 
-  it("supports combined reply/campaign/stage filters", async () => {
+  it("supports combined campaign/stage filters", async () => {
     // First call: 3 rows (no filters)
     mockedRepo.loadLeadsList.mockResolvedValueOnce(makeResponse([
       makeRow({ id: "lead-mql", campaignId: "camp-a", qualification: "MQL", firstName: "lead-mql", campaignName: "Campaign Alpha" }),
-      makeRow({ id: "lead-ooo", campaignId: "camp-b", qualification: "OOO", firstName: "lead-ooo", campaignName: "Campaign Beta" }),
+      makeRow({ id: "lead-beta", campaignId: "camp-b", qualification: "preMQL", firstName: "lead-beta", campaignName: "Campaign Beta" }),
       makeRow({ id: "lead-pre", campaignId: "camp-a", qualification: "preMQL", firstName: "lead-pre", campaignName: "Campaign Alpha" }),
-    ], { stageCounts: { MQL: 1, preMQL: 1 } }));
+    ], { stageCounts: { MQL: 1, preMQL: 2 } }));
 
-    // OOO replyScope call: only ooo row
-    mockedRepo.loadLeadsList.mockResolvedValueOnce(makeResponse([
-      makeRow({ id: "lead-ooo", campaignId: "camp-b", qualification: "OOO", firstName: "lead-ooo", campaignName: "Campaign Beta" }),
-    ], { stageCounts: {} }));
-
-    // OOO + MQL stage call: 0 rows
-    mockedRepo.loadLeadsList.mockResolvedValueOnce(makeResponse([], { stageCounts: {} }));
-
-    // All + campaign Alpha call: 2 rows
+    // Campaign Alpha call: 2 rows
     mockedRepo.loadLeadsList.mockResolvedValue(makeResponse([
       makeRow({ id: "lead-mql", campaignId: "camp-a", qualification: "MQL", firstName: "lead-mql", campaignName: "Campaign Alpha" }),
       makeRow({ id: "lead-pre", campaignId: "camp-a", qualification: "preMQL", firstName: "lead-pre", campaignName: "Campaign Alpha" }),
@@ -120,50 +112,13 @@ describe("internal leads filters", () => {
 
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(3);
 
-    // Filter to OOO only.
-    const oooTrigger = screen.getByLabelText("Filter leads by OOO qualification");
-    fireEvent.click(oooTrigger);
-    fireEvent.click(await screen.findByRole("option", { name: "OOO only" }));
-    await act(async () => {});
-
-    expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /lead-ooo/i })).toBeInTheDocument();
-
-    // Stage filter MQL while ooo scope is on → no results.
-    fireEvent.click(screen.getByRole("button", { name: /^MQL \(/i }));
-    await act(async () => {});
-
-    expect(screen.getByText("No leads match the current filters")).toBeInTheDocument();
-
-    // Reset replyScope + filter campaign Alpha.
-    const allTrigger = screen.getByLabelText("Filter leads by OOO qualification");
-    fireEvent.click(allTrigger);
-    fireEvent.click(await screen.findByRole("option", { name: "All leads" }));
-    await act(async () => {});
-
+    // Filter to Campaign Alpha.
     const campTrigger = screen.getByLabelText("Filter leads by campaign");
     fireEvent.click(campTrigger);
     fireEvent.click(await screen.findByRole("option", { name: "Campaign Alpha" }));
     await act(async () => {});
 
-    fireEvent.click(screen.getByRole("button", { name: /All \(\d+\)/i }));
-    await act(async () => {});
-
     expect(screen.getAllByRole("button", { name: /Open details for/i })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: /lead-ooo/i })).not.toBeInTheDocument();
-  });
-
-  it("calls loadLeadsList with correct replyScope param when OOO filter is selected", async () => {
-    mockedRepo.loadLeadsList.mockResolvedValue(makeResponse([]));
-
-    await renderPage();
-
-    const trigger = screen.getByLabelText("Filter leads by OOO qualification");
-    fireEvent.click(trigger);
-    fireEvent.click(await screen.findByRole("option", { name: "OOO only" }));
-    await act(async () => {});
-
-    const lastCall = mockedRepo.loadLeadsList.mock.calls.at(-1)?.[0];
-    expect(lastCall?.replyScope).toBe("ooo");
+    expect(screen.queryByRole("button", { name: /lead-beta/i })).not.toBeInTheDocument();
   });
 });

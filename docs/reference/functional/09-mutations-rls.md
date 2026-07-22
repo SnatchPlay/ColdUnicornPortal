@@ -69,8 +69,8 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
   - Report (Batch 4): `client_note` (renamed from `comments`), `coldunicorn_note` (internal — gateway nulls it for the client role in `loadLeadsList`), `highlight` (`green|yellow|red|null`)
   - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
   - Firmographics: `country`, `industry`, `headcount_range`, `website`
-  - OOO: `expected_return_date`, `added_to_ooo_campaign`
   - CRM operational (ADR-0013, Phase 5.2): `linkedin_invitation_sent_at`, `contact_made_at`, `negotiation_started_at` (dates edited as `YYYY-MM-DD`, stored midnight), `contact_method` (`phone|email` — any other value is coerced to `NULL` server-side to respect the DB CHECK)
+  - ~~OOO: `expected_return_date`, `added_to_ooo_campaign`~~ — **columns dropped** by `20260722z` (2026-07-22); OOO is not a lead field (ADR-0015). The old `mapLeadPatch` reject-guard is gone with them.
 - **Never accepted by gateway (read-only):** `id`, `client_id`, `campaign_id`, `external_id`, `external_blacklist_id`, `external_domain_blacklist_id`, `source`, `reply_text`, `response_time_hours`, `response_time_label`, `message_title`, `message_number`, `created_at`. Keys outside the whitelist are silently dropped — they will not error, just no-op.
 - **Not editable via `mapLeadPatch`:** the terminal-status columns `final_outcome`, `conclusion`, `concluded_at`. They are written only by `concludeLead` (§2.3a), which sets all three atomically and syncs `won`.
 
@@ -128,8 +128,10 @@ they are created and advanced by n8n through the `service_role` RPCs in `2026072
 `recover_skipped_ooo_followups` runs under the CALLER's role, which is why `20260722d` keeps both a
 SELECT and an UPDATE policy on `ooo_followups` even though no portal screen lists episodes.
 
-**Removed from `mapLeadPatch`:** `expected_return_date` and `added_to_ooo_campaign` are no longer
-writable on a lead (spec §18). OOO state belongs to `ooo_followups`.
+**`expected_return_date` / `added_to_ooo_campaign` / `contact_disposition`:** not just unwritable —
+**the columns were dropped** by `20260722z` (2026-07-22) and no longer exist on `LeadRecord`, so a
+patch cannot carry them and the old reject-guard was deleted. OOO state belongs to `ooo_followups`
+(ADR-0015).
 
 ### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
 

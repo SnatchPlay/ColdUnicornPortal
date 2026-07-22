@@ -7,7 +7,7 @@ export const clientStatus = pgEnum("client_status", ['Active', 'Subscription', '
 export const crmPipelineStage = pgEnum("crm_pipeline_stage", ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost'])
 export const domainStatus = pgEnum("domain_status", ['active', 'warmup', 'blocked', 'retired'])
 export const leadGender = pgEnum("lead_gender", ['male', 'female'])
-export const leadQualification = pgEnum("lead_qualification", ['preMQL', 'MQL', 'meeting_scheduled', 'meeting_held', 'offer_sent', 'won', 'rejected', 'OOO', 'NRR'])
+export const leadQualification = pgEnum("lead_qualification", ['preMQL', 'MQL', 'meeting_scheduled', 'meeting_held', 'offer_sent', 'won', 'rejected'])
 // `negative` + `neutral` added by 20260722b so outreach analytics can count them separately. The
 // legacy labels stay — they are the live n8n contract and the value on every historical row; the
 // mapping to the spec's domain names is documented in 11-integrations.md §6, not duplicated here.
@@ -37,7 +37,6 @@ export const leads = pgTable("leads", {
 	linkedinUrl: text("linkedin_url"),
 	gender: leadGender(),
 	qualification: leadQualification(),
-	expectedReturnDate: date("expected_return_date"),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	externalId: text("external_id"),
 	phoneNumber: varchar("phone_number", { length: 50 }),
@@ -54,7 +53,6 @@ export const leads = pgTable("leads", {
 	meetingHeld: boolean("meeting_held").default(false).notNull(),
 	offerSent: boolean("offer_sent").default(false).notNull(),
 	won: boolean().default(false).notNull(),
-	addedToOooCampaign: boolean("added_to_ooo_campaign").default(false).notNull(),
 	externalBlacklistId: integer("external_blacklist_id"),
 	externalDomainBlacklistId: integer("external_domain_blacklist_id"),
 	source: varchar({ length: 30 }).default('cold_email').notNull(),
@@ -70,7 +68,6 @@ export const leads = pgTable("leads", {
 	conclusion: text(),
 	concludedAt: timestamp("concluded_at", { withTimezone: true, mode: 'string' }),
 	finalOutcome: finalOutcome("final_outcome"),
-	contactDisposition: text("contact_disposition"),
 	// ADR-0015 provenance: which external contact this lead was promoted from, and the positive
 	// reply that caused it. Both carry partial unique indexes (uq_leads_source_sequencer_contact,
 	// uq_leads_origin_reply) — one contact never yields two leads, one reply never yields two leads.

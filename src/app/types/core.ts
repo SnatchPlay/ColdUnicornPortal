@@ -26,9 +26,7 @@ export type LeadQualification =
   | "meeting_held"
   | "offer_sent"
   | "won"
-  | "rejected"
-  | "OOO"
-  | "NRR";
+  | "rejected";
 /** Mirrors the `reply_classification` Postgres enum. `negative`/`neutral` were added by 20260722b
  *  so outreach analytics can count them separately — keep this union in step with the DB enum and
  *  with `replyClassification` in supabase/drizzle/schema.ts. */
@@ -52,10 +50,6 @@ export type CrmStage = "preMQL" | "MQL" | "SQL";
 /** Single source for terminal-outcome values — shared by the gateway validator and the editor select. */
 export const FINAL_OUTCOME_VALUES = ["won", "lost", "lost_premql"] as const;
 export type FinalOutcome = (typeof FINAL_OUTCOME_VALUES)[number];
-/** Contact disposition — a separate dimension DERIVED from the n8n-owned `qualification`. Domain names
- *  are canonical (spec item 10); the legacy `OOO`/`NRR` abbreviations survive only as the qualification
- *  input values mapped in `mapLegacyQualificationToDisposition`. */
-export type ContactDisposition = "out_of_office" | "not_right_role";
 /** The resolved single display/health status (a `CrmStage` or a `FinalOutcome`). */
 export type LeadCrmStatus = CrmStage | FinalOutcome;
 export type ContactMethod = "phone" | "email";
@@ -207,7 +201,6 @@ export interface LeadRecord {
   linkedin_url: string | null;
   gender: LeadGender | null;
   qualification: LeadQualification | null;
-  expected_return_date: string | null;
   external_id: string | null;
   phone_number: string | null;
   phone_source: string | null;
@@ -223,7 +216,6 @@ export interface LeadRecord {
   meeting_held: boolean;
   offer_sent: boolean;
   won: boolean;
-  added_to_ooo_campaign: boolean;
   external_blacklist_id: number | null;
   external_domain_blacklist_id: number | null;
   source: string;
@@ -246,8 +238,6 @@ export interface LeadRecord {
   concluded_at: string | null;
   /** Explicit terminal outcome; `null` = non-terminal (funnel stage is derived). */
   final_outcome: FinalOutcome | null;
-  /** Persisted contact disposition (n8n-owned), independent of `qualification`; `null` = active. */
-  contact_disposition: ContactDisposition | null;
   // NOTE: the ADR-0015 provenance columns (`source_sequencer_contact_id`, `origin_reply_id`) exist
   // in the database and in the drizzle schema but are deliberately NOT projected here — no portal
   // surface reads them, and the OOO view resolves the linked lead from the contact side instead.

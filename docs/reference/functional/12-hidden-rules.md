@@ -108,15 +108,13 @@ Two SECURITY DEFINER helpers exist with the same name in different schemas. RLS 
 
 [client-metrics.ts:195-202](../../../src/app/lib/client-metrics.ts#L195-L202) вЂ” `threeDodTotal` increments for `qualification в€€ {preMQL, MQL}`; `sql` (= MQL leads) increments only for `MQL`. A lead at preMQL counts toward the "total" bucket but not toward the "SQL" bucket вЂ” by design.
 
-### Reply scope filter on lead pages
+### ~~Reply scope filter on lead pages~~ — REMOVED 2026-07-22
 
-[leads-page.tsx:152-153](../../../src/app/pages/leads-page.tsx#L152-L153), [client-leads-page.tsx](../../../src/app/pages/client-leads-page.tsx) вЂ” Filters **leads by `qualification`**:
-
-- `replyScope === "ooo"` в†’ `qualification === "OOO"`.
-- `replyScope === "active"` в†’ `qualification !== "OOO"`.
-- `replyScope === "all"` в†’ no filter.
-
-It does **not** filter replies by `replies.classification`. The label is misleading; rename tracked as BL-7.
+The `replyScope` filter (`ooo` → `qualification === "OOO"`, `active` → `!== "OOO"`, `all` → no
+filter) on `leads-page.tsx` and `client-leads-page.tsx` was **removed** with migration `20260722z`.
+OOO is no longer a lead state (ADR-0015) — `OOO`/`NRR` were dropped from the `lead_qualification`
+enum — so there is nothing to scope by. BL-7 (the "rename the misleading label" task) is closed as
+obsolete.
 
 ### CSV export filename
 

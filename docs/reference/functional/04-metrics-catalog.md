@@ -677,19 +677,20 @@ a PostgREST RPC.
 ### 16.1 Leads received (yesterday / 7d / 30d / 90d / all time)
 
 - **Where:** the public marketing website. Not rendered anywhere in the portal.
-- **Formula:** `count(leads)` per window, excluding OOO / NRR / rejected:
+- **Formula:** `count(leads)` per window, excluding only `rejected`:
 
   ```sql
   qualification IS DISTINCT FROM 'rejected'
-  AND coalesce(contact_disposition,
-        CASE qualification WHEN 'OOO' THEN 'out_of_office'
-                           WHEN 'NRR' THEN 'not_right_role' END) IS NULL
   ```
 
-- **Source:** `leads.created_at`, `leads.qualification`, `leads.contact_disposition`.
-- **File:line:** the SQL is the single implementation. It deliberately duplicates
-  `deriveContactDisposition()` ([lead-status.ts:73](../../../src/app/lib/crm/lead-status.ts#L73))
-  because Postgres cannot import the TS module - a change to one is incomplete without the other.
+  > Simplified by `20260722z` (2026-07-22). The old predicate also excluded OOO/NRR via
+  > `contact_disposition` and a legacy `qualification` fallback; those are gone — OOO/NRR contacts are
+  > no longer `leads` at all (ADR-0015), and the column + enum values were dropped.
+
+- **Source:** `leads.created_at`, `leads.qualification`.
+- **File:line:** the SQL is the single implementation — see the `public_lead_stats()` body in
+  [`20260722z`](../../../supabase/migrations/20260722z_drop_legacy_ooo_columns.sql). No TS duplication
+  remains (`deriveContactDisposition` was deleted with the disposition model).
 - **Time window:** anchored to UTC midnight (same convention as `isoDaysAgo()`,
   [orm-gateway/index.ts:117](../../../supabase/functions/orm-gateway/index.ts#L117)).
   `yesterday` = the previous whole UTC day, half-open `[midnight-1d, midnight)`. `last_7_days` /
