@@ -121,6 +121,12 @@ Verified by execution: 16 clients, 390 campaigns, `daily_stats` written for 2026
   workflow has **no date override and no backfill trigger** — it always writes today — so a day
   missed while it was broken cannot be recovered by re-running it. Recovering those two days needs a
   date parameter added first. 2026-07-22 is filled (428 campaigns).
+- **`ooo_count` does not contain OOO data.** `Transform Metrics1` computes it as
+  `automatedRepliesTotal − prevOooTotal`, and the workflow has no OOO fetch at all — so the column is
+  a copy of `automated_replies_count` (identical on every row inspected). Measured 2026-07-22; see
+  [Sheets ↔ Supabase reconciliation](sheets-supabase-reconciliation.md#problem-2--ooo_count-is-a-mislabelled-copy).
+- **Five `daily_stats` columns have no writer at all** — `mql_count`, `me_count`, `won_count`,
+  `negative_count`, `prospects_in_base`. Not a broken sync: the sheet is empty too. Same document.
 - **The silent-zero defect still stands.** Both Bison fetches continue on error and store `0`, which
   invariant 3 calls a lie. The failure recorder does **not** catch this: it fires on workflow
   failure, and a node with `onError: continueRegularOutput` never fails the workflow.
