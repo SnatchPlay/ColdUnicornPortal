@@ -8,10 +8,13 @@ Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transi
 `aimfox-daily-metrics` is now PHASE A — branch S is live and writing `sequencer_daily_stats`.
 The other four are still phase 0.**
 
-> **Supabase now holds Aimfox data, and none of it came from an Aimfox workflow.** Two one-off sheet
-> backfills put it there on 2026-07-22: 30 Aimfox-attributed leads and 117 `sequencer_daily_stats`
-> rows ([reconciliation](../processes/outreach/sheets-supabase-reconciliation.md)). Do not read that
-> as progress on this page — the workflows are unchanged and still write only to Sheets.
+> **Two different things put Aimfox data into Supabase on 2026-07-22, and only one of them is
+> progress on this page.** One-off sheet backfills wrote 30 Aimfox-attributed leads and 117
+> `sequencer_daily_stats` rollup rows
+> ([reconciliation](../processes/outreach/sheets-supabase-reconciliation.md)) — that is imported
+> history, not automation. Branch S of `aimfox-daily-metrics` is the real move: a workflow writing
+> `sequencer_daily_stats` per LinkedIn account, every two hours. The other four workflows still write
+> only to Sheets.
 
 ---
 
@@ -107,7 +110,7 @@ column is nullable precisely so seeding is not blocked on it.
 **Do not commit real values.** Run the statement from a local file, and keep the mapping out of the
 repository ([security.md](security.md)).
 
-## Then: branch S on `aimfox-daily-metrics`
+## Done: branch S on `aimfox-daily-metrics` — live 2026-07-22
 
 The only part of this channel that needs no A1 shadow — derived numbers, no person touched, no
 external write endpoint.
@@ -120,13 +123,22 @@ Schedule (2h) ─┬─ [L] CS PDCA → Aimfox → PDCA + Daily stats cells     
                            on (client_id, sequencer_id, profile_id, report_date)
 ```
 
-Branch S must **fix, not port**, three defects of branch L
+Branch S **fixed, rather than ported, four defects** of branch L
 ([README](../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md)):
 
 1. `remaining_limit` double-subtracts `buckets[0]`;
-2. `profile_id` must be the Aimfox account id, not a spreadsheet row number (process invariant 4);
-3. no averaging of identifiers — one row **per account**, which is what the unique key was designed
-   for.
+2. `profile_id` was a spreadsheet row number, not the Aimfox account id (process invariant 4);
+3. `Summarize` averaged `account_id` and `workspace_id` — one row **per account** instead;
+4. **found by probing, not by reading:** a single-day interactions query returns two buckets and the
+   leading one is a boundary artefact — it reported `sent=0` for 2026-07-20 where a multi-day query
+   gave `33`. Branch L reads `buckets[1] − buckets[0]` and is saved only by that artefact currently
+   being zero for `sent_connections`.
+
+**Open question, deliberately left open:** the per-account interactions filter is unverified —
+`account_ids` returns HTTP 500 and the other spellings return the workspace numbers unchanged, which
+with exactly one account per client is indistinguishable from the parameter being ignored. Branch S
+therefore writes nothing for a client with more than one account. Re-probe before a second account
+appears anywhere.
 
 An imported defect is still a defect ([ADR-0016](../../adr/0016-repository-as-automation-source-of-truth.md) §1).
 
