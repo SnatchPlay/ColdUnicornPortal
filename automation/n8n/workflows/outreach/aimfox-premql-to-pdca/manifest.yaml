@@ -1,0 +1,81 @@
+schemaVersion: 1
+
+id: aimfox-premql-to-pdca
+name: "preMGL tag added (Aimfox) -> Add lead to PDCA"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # creates leads — the LinkedIn entry point into the funnel
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0004-lead-state-boundaries.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: webhook
+    detail: "POST /webhook/preMQL-Aimfox — no authentication (security.md §3)"
+
+reads:
+  external:
+    - "Aimfox API · GET /leads/{id}, /accounts/{id}/leads/{id}/conversation, /accounts/{id}/conversations/{urn}"
+    - "Google Sheets · CS PDCA — client row: sheet id (col_4)"
+    - "Google Sheets · <client>/Leads — does this lead already exist?"
+    - "Lusha · POST /v3/contacts/search-and-enrich"
+
+writes:
+  external:
+    - "Google Sheets · <client>/Leads — appends a lead row (sheets batchUpdate), or updates the existing one"
+    - "UniTalk · POST /api/message/send — notification"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+credentials:
+  - alias: "Aimfox Master"
+    type: httpBearerAuth
+    usedBy: "Get Workspace Api Key"
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, Update row in sheet, Create Record, Get Table ID"
+  - alias: "Lusha"
+    type: httpHeaderAuth
+    usedBy: "Lusha Enrichment"
+  - alias: "UniTalk"
+    type: httpHeaderAuth
+    usedBy: "HTTP Request (notification)"
+
+transition:
+  phase: 0
+  phaseState: none
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · sequencer_contacts + leads (sequencer_id = aimfox)"
+  design: docs/reference/n8n/aimfox-phase-a.md
+  notes: >-
+    Creates leads, so it comes AFTER aimfox-classification in phase A: a lead must hang off a stored
+    contact identity and a stored reply (ADR-0015). Today no LinkedIn contact is stored anywhere, so
+    there is nothing for a lead to reference.
+  reconciliation: >-
+    At phase A: one `leads` row per appended sheet row, matched on (client, Aimfox lead id), with
+    leads.sequencer_id = the aimfox sequencer. Compare row counts per client per day.
+  parityEvidence: null
+
+idempotency:
+  key: "'[4] Check if lead already in Leads sheet' — existing row is updated instead of appended"
+  notes: >-
+    Guarded by a sheet lookup rather than a constraint, so it is a read-then-write race: two webhooks
+    for the same lead can both see 'not found'. The Supabase side has the real guarantee —
+    uq_leads_source_sequencer_contact (ADR-0015 §4).
+
+retryPolicy:
+  notes: >-
+    None. No retry and no error branch on the Aimfox, Lusha, Sheets or UniTalk calls; a failure part
+    way through leaves the lead half-written and the notification unsent.
+
+knownViolations: []

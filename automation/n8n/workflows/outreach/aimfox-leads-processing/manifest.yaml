@@ -1,0 +1,82 @@
+schemaVersion: 1
+
+id: aimfox-leads-processing
+name: "AimFox Leads Processing"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # creates leads AND dispatches them to the clients' CRMs
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0010-legacy-crm-integration.md
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    detail: "called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+
+reads:
+  external:
+    - "Aimfox API · GET /leads/{id}"
+    - "Google Sheets · CS PDCA — client row; <client>/Leads — existing lead?"
+    - "Lusha · POST /v3/contacts/search-and-enrich"
+    - "Snov.io · OAuth + /v2/li-profiles-by-urls (start, then poll result)"
+
+writes:
+  external:
+    - "Google Sheets · <client>/Leads — appends a lead row, or updates the Qualification column"
+    - "UniTalk · POST /api/message/send — notification"
+    - "Bison · POST /replies/{id}/forward — forwards the reply to the client's recipients"
+    - "sub-workflow '[HUB] CRMs Add/Update Lead Dispatcher' → HubSpot / LiveSpace / Pipedrive / Salesforce / Zoho"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+credentials:
+  - alias: "Aimfox Master"
+    type: httpBearerAuth
+    usedBy: "Get Workspace Api Key"
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, [96] Update Qualification col, Create Record, Get Table ID"
+  - alias: "Lusha"
+    type: httpHeaderAuth
+    usedBy: "Lusha Enrichment"
+  - alias: "UniTalk"
+    type: httpHeaderAuth
+    usedBy: "HTTP Request (notification)"
+
+transition:
+  phase: 0
+  phaseState: none
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · sequencer_contacts + leads (sequencer_id = aimfox)"
+  design: docs/reference/n8n/aimfox-phase-a.md
+  notes: >-
+    The heaviest workflow of the family and the last of the lead flows to migrate: it also drives the
+    CRM dispatcher, so a second branch would risk a duplicate lead in a client's own CRM — a visible,
+    external side effect (ADR-0017 §1b). Needs the A1 shadow treatment.
+  reconciliation: >-
+    At A1: compare branch S's intended (client, Aimfox lead id, qualification) set against the rows
+    branch L actually appended for the same run.
+  parityEvidence: null
+
+idempotency:
+  key: "'[4] Check if lead already in Leads sheet' — existing row takes the update path"
+  notes: >-
+    Same read-then-write race as aimfox-premql-to-pdca. The CRM dispatch has no guard of its own; it
+    inherits whatever the sheet lookup decided.
+
+retryPolicy:
+  notes: >-
+    None on any call. The Snov.io chain uses a fixed Wait between start and result rather than
+    polling until ready, so a slow enrichment silently yields nothing.
+
+knownViolations: []

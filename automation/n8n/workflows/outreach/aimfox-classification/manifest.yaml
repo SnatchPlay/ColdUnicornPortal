@@ -1,0 +1,73 @@
+schemaVersion: 1
+
+id: aimfox-classification
+name: "AimFox Classification"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # blacklisting permanently removes a company or contact from reach
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: webhook
+    detail: "POST /webhook/aimfox-classifier — no authentication (security.md §3)"
+
+reads:
+  external:
+    - "Aimfox API · GET /leads/{id} — the contact and their current LinkedIn experience"
+    - "OpenAI · POST /v1/responses — classification, and a company-mention check"
+
+writes:
+  external:
+    - "Aimfox API · POST /blacklist/{urn}          ← IRREVERSIBLE for that contact"
+    - "Aimfox API · POST /blacklist-companies      ← IRREVERSIBLE for that company"
+    - "sub-workflow 'Test aimfox' for the Interested branch"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+credentials:
+  - alias: "Aimfox Master"
+    type: httpBearerAuth
+    usedBy: "Get Workspace Api Key — mints the per-workspace token"
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "OpenAI - Classify Email, OpenAI - Search for the company name"
+
+transition:
+  phase: 0                   # Sheets/vendor only — no Supabase branch exists yet
+  phaseState: none
+  authoritativeSource: sheets
+  legacyStore: "Aimfox workspace state (blacklists); no local store at all"
+  targetStore: "Supabase · replies (classification), sequencer_contacts"
+  design: docs/reference/n8n/aimfox-phase-a.md
+  notes: >-
+    The LinkedIn analogue of Bison reply classification. Its `category` values are the same vocabulary
+    as replies.classification (OOO / Interested / NRR / …), which is why it belongs in phase A before
+    the lead flows: a stored reply is what a contact identity and an OOO episode hang off.
+  reconciliation: >-
+    Not applicable in phase 0. At phase A: every classified reply becomes one `replies` row via
+    upsert_reply, keyed on the Aimfox reply id; compare counts per category per day.
+  parityEvidence: null
+
+idempotency:
+  key: "none — a redelivered webhook re-classifies and re-blacklists"
+  notes: >-
+    Blacklisting the same contact twice is harmless at the vendor, but the OpenAI calls are billed
+    again and nothing records that the reply was already seen. Phase A fixes this properly:
+    upsert_reply is UNIQUE on external_id (20260722c), so the second delivery becomes a no-op.
+
+retryPolicy:
+  notes: >-
+    None. No retry, no error branch. A failed OpenAI call silently ends the run and the reply is
+    never classified — with no trace beyond the n8n execution list.
+
+knownViolations: []

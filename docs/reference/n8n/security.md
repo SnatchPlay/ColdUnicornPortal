@@ -37,7 +37,8 @@ runs the secret scanner over fixtures too.
 
 ## Open findings
 
-Found during the 2026-07-21 inventory. None are fixed; all are recorded so they are not rediscovered.
+Found during the 2026-07-21 inventory unless dated otherwise. Everything is recorded so it is not
+rediscovered — including the two that are now closed, which keep their history rather than vanishing.
 
 ### 1. Per-client vendor API keys live in a Google Sheet — **high**
 
@@ -117,7 +118,7 @@ database level rather than only by review.
 
 Not fixed here — changing a credential is outside what an agent should do unattended.
 
-### 7. An Aimfox organisation token is written literally into three workflow graphs — **critical**
+### 7. ~~An Aimfox organisation token written literally into three workflow graphs~~ — **resolved 2026-07-22**
 
 Found 2026-07-21 while importing the Aimfox family. The node `Get Workspace Api Key` — present in
 `aimfox-classification` (`JnvRBXtRNar7ejeM`), `aimfox-leads-processing` (`4OjNRWLaG2IWK6kd`) and
@@ -132,18 +133,36 @@ Unlike finding 1, this **is** caught by `scan.mjs` (`hardcoded-auth-header`), wh
 workflows are not in this repository: `pnpm n8n:export` refuses to write them (layer 4). They stay
 uncommitted and undiffable until the value moves into an n8n credential.
 
-Fix, in order: rotate the token in Aimfox → store it as an n8n credential → replace the literal in
-all three nodes → re-export and commit.
+**Resolved 2026-07-22.** The token now lives in the `Aimfox Master` credential (`httpBearerAuth`);
+all three `Get Workspace Api Key` nodes authenticate through it, and all three workflows are
+committed. Rotation in Aimfox itself is the owner's call — the old value was exposed for as long as
+it sat in workflow JSON.
 
-### 8. An OpenAI API key is written literally into `aimfox-classification` — **critical**
+### 8. ~~An OpenAI API key written literally into `aimfox-classification`~~ — **resolved 2026-07-22**
 
 Same import, same workflow file. Both `OpenAI - Classify Email` and
 `OpenAI - Search for the company name` carry a literal `sk-…` in an `Authorization` header, calling
 `https://api.openai.com/v1/responses`. Caught by `scan.mjs` (`secret/openai-key`); the workflow is
 blocked from import for this reason as well as finding 7.
 
-A leaked OpenAI key is billable to the agency's account for as long as it is valid. Rotate first,
-then move it to a credential.
+**Resolved 2026-07-22.** Both nodes now use the `OpenAi account` credential via
+`predefinedCredentialType`; the request bodies are unchanged, so the strict `json_schema` structured
+output is intact. A leaked OpenAI key stays billable until it is rotated in OpenAI — that step is the
+owner's.
+
+### 9. `update_workflow` silently unbinds credentials on HTTP Request nodes — **medium**
+
+Found by causing it, on 2026-07-22. Re-authoring a workflow through the MCP SDK path returns an
+`autoAssignedCredentials` list that covers typed nodes (Google Sheets, Postgres, OpenAI) but **skips
+`httpRequest` nodes** — its own result note says so. Four nodes in `aimfox-premql-to-pdca` (`Create
+Record`, `Get Table ID`, `Lusha Enrichment`, the UniTalk call) lost their credentials and would have
+401'd on the next preMQL event.
+
+Repaired within the session by a targeted REST `PUT`, and every credential-declaring node on the
+instance was then audited — only the throwaway copies were affected. The rule and the audit are in
+[workflow-lifecycle · the SDK authoring contract](workflow-lifecycle.md): **prefer a REST `PUT` for a
+targeted node change**; re-author through the SDK only when the graph itself changes, and always pass
+credentials explicitly.
 
 ## Reviewing a workflow
 

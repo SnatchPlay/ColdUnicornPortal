@@ -1,0 +1,1300 @@
+{
+  "name": "AimFox Leads Processing",
+  "description": "Heavy MQL enrichment with FIXED Snov.io chain (Local→Global merge via Code picker before OpenAI). OpenAI is now langchain v2.1 Responses API with strict JSON schema for structured lead info extraction.",
+  "nodes": [
+    {
+      "id": "4b805a37-812b-4b20-8d48-3a6c8ff582c8",
+      "name": "[189-192] Forward email to recipients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3024,
+        80
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "<!DOCTYPE html> <html lang=\"pl\"> <head>     <meta charset=\"UTF-8\">     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">     <title>Nowy Lead</title>     <style>         /* Proste style dla lepszej czytelności, osadzone w head dla niektórych klientów */         body {             font-family: Arial, sans-serif;             line-height: 1.6;             color: #333;             margin: 0;             padding: 0;         }         .container {             width: 90%;             max-width: 600px;             margin: 20px auto;             padding: 25px;             border: 1px solid #ddd;             border-radius: 8px;             background-color: #ffffff;         }         .footer {             margin-top: 25px;             font-weight: bold;         }     </style> </head> <body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;\">      <div class=\"container\" style=\"width: 90%; max-width: 600px; margin: 20px auto; padding: 25px; border: 1px solid #ddd; border-radius: 8px; background-color: #ffffff;\">                  <p style=\"margin-top: 0;\">Nowy, zimny lead wpłynął właśnie na Twojego maila 📨<br>Podejmij go do 5 minut, a znacznie łatwiej odczarujesz jego lodowe serce ⏳<br>Ps. W stopce brakuje numeru telefonu? Zerknij do Google Sheets, gdzie mogła zadziać się magia 📲</p>          <p class=\"footer\" style=\"margin-top: 25px; font-weight: bold;\">             Twój zespół ColdUnicorn  🦄         </p>              </div>  </body> </html>"
+            },
+            {
+              "name": "sender_email_id",
+              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].sender_email_id }}"
+            },
+            {
+              "name": "content_type",
+              "value": "html"
+            },
+            {
+              "name": "to_emails",
+              "value": "={{ \n  ($('[2] Find workspace in CS PDCA').item.json.col_101 || '')\n    .split(',')\n    .map(item => item.trim())\n    .filter(Boolean)\n    .map(email => ({ email_address: email }))\n}}"
+            },
+            {
+              "name": "inject_previous_email_body",
+              "value": "={{true}}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[2] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/replies/\" + $(\"[226+227+228] Pick Snovio output body\").first().json.last_reply.id + \"/forward\" }}"
+      }
+    },
+    {
+      "id": "b280d6af-ec4c-41bf-be82-f55e19e8e0d1",
+      "name": "[2] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        352,
+        -16
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_105",
+              "lookupValue": "={{ $json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "7b2352f5-3928-4680-8dfc-d4dae9a9f439",
+      "name": "[287] Set phone from Lusha",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2128,
+        -128
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "phoneNumber",
+              "name": "phoneNumber",
+              "type": "string",
+              "value": "={{ $json.body.results[0].phones[0].number }}"
+            },
+            {
+              "id": "phoneSource",
+              "name": "phoneSource",
+              "type": "string",
+              "value": "=Lusha"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c21f139d-0ebd-45b5-aac7-668aedda548c",
+      "name": "[4] Check if lead already in Leads sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        -16
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "LinkedIn URL",
+              "lookupValue": "=https://www.linkedin.com/in/{{ $json.lead.public_identifier }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "bfd5ffc4-551b-4b53-a407-6bf7ca48930b",
+      "name": "[40] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        592,
+        272
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.col_6}}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "4bdae586-8baa-47fa-a2c3-083bf137c8ad",
+      "name": "[79+72+51+8+57] Compute derived values",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        80
+      ],
+      "parameters": {
+        "jsCode": "const input = $('Execution Data').first().json;\n\n// Supports both:\n// 1) Webhook body as raw array: [ {...} ]\n// 2) Webhook body wrapped by n8n: { body: [ {...} ] }\n// 3) Direct object: { event: {...} }\nconst root =\n  Array.isArray(input) ? input[0] :\n  Array.isArray(input.body) ? input.body[0] :\n  input.body?.event ? input.body :\n  input;\n\nconst event = root.event || {};\nconst campaign = event.campaign || {};\nconst target = event.target || {};\nconst account = event.account || {};\nconst workspace = root.workspace || {};\n\nconst flowId = event.flow_id ?? null;\nconst templateId = event.template_id ?? null;\n\nconst flows = campaign.flows || [];\nconst flowRow = flows.find(f => f.id === flowId) || {};\n\nconst templates = flowRow.flow_message_templates || [];\n\n// Aimfox sample contains original_id, but in your example both templates have the same original_id.\n// So order detection can be ambiguous.\nconst exactTemplate = templates.find(t =>\n  t.id === templateId ||\n  t.template_id === templateId\n);\n\nconst originalIdMatches = templates\n  .map((t, index) => ({ ...t, _order: index + 1 }))\n  .filter(t => t.original_id === templateId);\n\nconst sequenceStepRow =\n  exactTemplate\n    ? { ...exactTemplate, _order: templates.indexOf(exactTemplate) + 1 }\n    : originalIdMatches.length === 1\n      ? originalIdMatches[0]\n      : {};\n\nconst isTemplateMatchAmbiguous =\n  !exactTemplate && originalIdMatches.length > 1;\n\n// Not available from this Aimfox reply payload.\n// You need a stored \"sent message\" event / DB row / separate API response for this.\nconst firstEmailDateIso = null;\n\nlet responseTimeHours = null;\nif (firstEmailDateIso && event.timestamp) {\n  responseTimeHours =\n    (new Date(event.timestamp).getTime() - new Date(firstEmailDateIso).getTime()) /\n    1000 /\n    3600;\n}\n\nlet responseTimeBucket = null;\nif (responseTimeHours !== null) {\n  if (responseTimeHours < 0.25) responseTimeBucket = \"less than 15 minutes\";\n  else if (responseTimeHours < 1) responseTimeBucket = \"less than 1 hour\";\n  else if (responseTimeHours < 12) responseTimeBucket = \"less than 12 hours\";\n  else responseTimeBucket = \"another day\";\n}\n\nreturn [\n  {\n    json: {\n      source: \"aimfox\",\n\n      reply_event_id: root.id ?? null,\n      event_type: root.event_type ?? null,\n\n      reply_message: event.message ?? \"\",\n      reply_date: event.timestamp ?? root.timestamp ?? null,\n\n      target_urn: event.target_urn ?? target.urn ?? null,\n      target_id: target.id ?? null,\n      target_public_identifier: target.public_identifier ?? null,\n      target_first_name: target.first_name ?? null,\n      target_last_name: target.last_name ?? null,\n      target_full_name: [target.first_name, target.last_name].filter(Boolean).join(\" \"),\n      target_email: target.email ?? null,\n      target_picture_url: target.picture_url ?? null,\n\n      account_id: account.id ?? null,\n      account_public_identifier: account.public_identifier ?? null,\n      account_first_name: account.first_name ?? null,\n      account_last_name: account.last_name ?? null,\n      account_full_name: [account.first_name, account.last_name].filter(Boolean).join(\" \"),\n      account_email: account.email ?? null,\n\n      campaign_id: campaign.id ?? null,\n      campaign_name: campaign.name ?? null,\n      campaign_state: campaign.state ?? null,\n      campaign_type: campaign.type ?? null,\n      outreach_type: campaign.outreach_type ?? null,\n\n      workspace_id: workspace.id ?? null,\n      workspace_name: workspace.name ?? null,\n\n      flow_id: flowId,\n      flow_type: event.flow_type ?? flowRow.type ?? null,\n      flow_name: flowRow.name ?? null,\n\n      template_id: templateId,\n\n      sequence_step_id: templateId,\n      sequence_step_order: sequenceStepRow._order ?? null,\n      sequence_step_delay_hours: sequenceStepRow.delay ?? null,\n      sequence_step_message: sequenceStepRow.message ?? null,\n      sequence_step_match_ambiguous: isTemplateMatchAmbiguous,\n\n      first_email_date: firstEmailDateIso,\n      response_time_hours: responseTimeHours,\n      response_time_bucket: responseTimeBucket,\n\n      subject: \"\",\n\n      declined: event.metadata?.declined ?? null,\n\n      linkedin_profile_url: target.public_identifier\n        ? `https://www.linkedin.com/in/target.public_identifier`\n        : null,\n    },\n  },\n];"
+      }
+    },
+    {
+      "id": "152d087e-cb81-4271-b24e-34b2a650245a",
+      "name": "[96] Update Qualification col",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1248,
+        -112
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "FULL NAME",
+              "id": "FULL NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "JOB TITLE",
+              "id": "JOB TITLE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-MAIL",
+              "id": "E-MAIL",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Number",
+              "id": "Phone Number",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Source",
+              "id": "Phone Source",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMPANY NAME",
+              "id": "COMPANY NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "INDUSTRY",
+              "id": "INDUSTRY",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "HEADCOUNT",
+              "id": "HEADCOUNT",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RECEIVED",
+              "id": "LEAD RECEIVED",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "CAMPAIGN NAME",
+              "id": "CAMPAIGN NAME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE TITLE",
+              "id": "MESSAGE TITLE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE #",
+              "id": "MESSAGE #",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WEBSITE",
+              "id": "WEBSITE",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "QUALIFICATION",
+              "id": "QUALIFICATION",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RESPONSE TIME",
+              "id": "LEAD RESPONSE TIME",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS",
+              "id": "MEETINGS",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS HELD",
+              "id": "MEETINGS HELD",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "OFFER SENT",
+              "id": "OFFER SENT",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMMENTS",
+              "id": "COMMENTS",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Mail from lead",
+              "id": "Mail from lead",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "TIP",
+              "id": "TIP",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Campaign ID",
+              "id": "Campaign ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Blacklist ID",
+              "id": "Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Domain Blacklist ID",
+              "id": "Domain Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LinkedIn URL",
+              "id": "LinkedIn URL",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Column 29",
+              "id": "Column 29",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "QUALIFICATION": "={{ (() => {\n  try {\n    const tagName = $('When Called by HUB').first().json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "df282cad-8691-439a-aaed-e6238484b568",
+      "name": "Call '[HUB] CRMs Add/Update Lead Dispatcher'",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3024,
+        272
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "cachedResultName": "[HUB] CRMs Add/Update Lead Dispatcher",
+          "cachedResultUrl": "/workflow/mfmMYQqK73Nsx6uO",
+          "mode": "list",
+          "value": "mfmMYQqK73Nsx6uO"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        }
+      }
+    },
+    {
+      "id": "f5ae687e-2a71-41d2-b3c6-9b48399c2955",
+      "name": "Create Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2576,
+        80
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ (() => {\n    const AIMFOX_REPLY_NODE = '[79+72+51+8+57] Compute derived values';\n  const AIMFOX_LEAD_NODE = 'GET lead info Aimfox';\n\n  const LUSHA_ENRICH_NODE = 'Lusha Enrichment';\n\n  const safe = (fn, fallback = '') => {\n    try {\n      const value = fn();\n      return value === undefined || value === null ? fallback : value;\n    } catch (e) {\n      return fallback;\n    }\n  };\n\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const str = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value);\n  };\n\n  const nodeJson = (nodeName, fallback = {}) => {\n    return safe(() => {\n      const node = $(nodeName);\n      if (node.isExecuted === false) return fallback;\n      return node.first().json ?? fallback;\n    }, fallback);\n  };\n\n  const unwrapN8nPayload = (raw) => {\n    if (!raw) return {};\n    if (Array.isArray(raw)) return raw[0] || {};\n    if (Array.isArray(raw.body)) return raw.body[0] || {};\n    if (raw.body?.event) return raw.body;\n    if (Array.isArray(raw.data)) return raw.data[0] || {};\n    return raw;\n  };\n\n  const toGoogleSheetsDateSerial = (value) => {\n    if (value === undefined || value === null || value === '') return null;\n\n    const d = new Date(value);\n    if (Number.isNaN(d.getTime())) return null;\n\n    // Google Sheets serial date:\n    // 1970-01-01 = 25569.\n    return Math.floor(d.getTime() / 86400000) + 25569;\n  };\n\n  const makeCell = (value, index) => {\n    // Column index 8 = LEAD RECEIVED.\n    // Send it as a real Google Sheets date, not as text.\n    if (index === 8) {\n      const serial = toGoogleSheetsDateSerial(value);\n\n      if (serial === null) {\n        return {\n          userEnteredValue: {\n            stringValue: ''\n          }\n        };\n      }\n\n      return {\n        userEnteredValue: {\n          numberValue: serial\n        },\n        userEnteredFormat: {\n          numberFormat: {\n            type: 'DATE',\n            pattern: 'mm/dd/yyyy'\n          }\n        }\n      };\n    }\n\n    return {\n      userEnteredValue: {\n        stringValue: str(value)\n      }\n    };\n  };\n\n  const getDomainFromEmail = (email) => {\n    if (!email || typeof email !== 'string' || !email.includes('@')) return '';\n    return email.split('@').pop().trim().toLowerCase();\n  };\n\n  const normalizeDomain = (domain) => {\n    if (!domain || typeof domain !== 'string') return '';\n    return domain\n      .replace(/^https?:\\/\\//i, '')\n      .replace(/^www\\./i, '')\n      .replace(/\\/.*$/, '')\n      .trim()\n      .toLowerCase();\n  };\n\n  const linkedinFromPublicId = (publicId) => {\n    if (!publicId) return '';\n    return `https://www.linkedin.com/in/${publicId}`;\n  };\n\n  const companyLinkedinFromUniversalName = (universalName) => {\n    if (!universalName) return '';\n    return `https://www.linkedin.com/company/${universalName}`;\n  };\n\n  const countryFromLocation = (locationName) => {\n    if (!locationName || typeof locationName !== 'string') return '';\n    const parts = locationName.split(',').map(p => p.trim()).filter(Boolean);\n    return parts.length ? parts[parts.length - 1] : '';\n  };\n\n  const getPhoneValue = (phones) => {\n    if (!Array.isArray(phones) || phones.length === 0) return '';\n\n    const first = phones[0];\n\n    if (typeof first === 'string') return first;\n\n    return (\n      first.number ||\n      first.phone ||\n      first.value ||\n      first.raw ||\n      ''\n    );\n  };\n\n  const getLabelNames = (labels) => {\n    if (!Array.isArray(labels)) return [];\n\n    return labels\n      .map(label => typeof label === 'string' ? label : label?.name)\n      .filter(Boolean);\n  };\n\n  const qualificationFromLabels = (labels) => {\n    const normalized = getLabelNames(labels)\n      .map(v => String(v).trim().toLowerCase());\n\n    if (normalized.includes('mql')) return 'MQL';\n    if (normalized.includes('interested')) return 'MQL';\n    if (normalized.includes('premql')) return 'preMQL';\n    if (normalized.includes('pre-mql')) return 'preMQL';\n\n    return '';\n  };\n\n  const normalizeRawAimfoxWebhook = (root) => {\n    const event = root.event || {};\n    const campaign = event.campaign || {};\n    const target = event.target || {};\n    const account = event.account || {};\n    const workspace = root.workspace || {};\n\n    const flowId = event.flow_id ?? null;\n    const templateId = event.template_id ?? null;\n\n    const flows = campaign.flows || [];\n    const flowRow = flows.find(f => f.id === flowId) || {};\n    const templates = flowRow.flow_message_templates || [];\n\n    const exactTemplate = templates.find(t =>\n      t.id === templateId ||\n      t.template_id === templateId\n    );\n\n    const originalIdMatches = templates\n      .map((t, index) => ({ ...t, _order: index + 1 }))\n      .filter(t => t.original_id === templateId);\n\n    const sequenceStepRow =\n      exactTemplate\n        ? { ...exactTemplate, _order: templates.indexOf(exactTemplate) + 1 }\n        : originalIdMatches.length === 1\n          ? originalIdMatches[0]\n          : {};\n\n    return {\n      source: 'aimfox',\n\n      reply_event_id: root.id ?? null,\n      event_type: root.event_type ?? null,\n\n      reply_message: event.message ?? '',\n      reply_date: event.timestamp ?? root.timestamp ?? null,\n\n      target_urn: event.target_urn ?? target.urn ?? null,\n      target_id: target.id ?? null,\n      target_public_identifier: target.public_identifier ?? null,\n      target_first_name: target.first_name ?? null,\n      target_last_name: target.last_name ?? null,\n      target_full_name: [target.first_name, target.last_name].filter(Boolean).join(' '),\n      target_email: target.email ?? null,\n\n      account_id: account.id ?? null,\n      account_public_identifier: account.public_identifier ?? null,\n      account_first_name: account.first_name ?? null,\n      account_last_name: account.last_name ?? null,\n\n      campaign_id: campaign.id ?? null,\n      campaign_name: campaign.name ?? null,\n      campaign_state: campaign.state ?? null,\n      campaign_type: campaign.type ?? null,\n      outreach_type: campaign.outreach_type ?? null,\n\n      workspace_id: workspace.id ?? null,\n      workspace_name: workspace.name ?? null,\n\n      flow_id: flowId,\n      flow_type: event.flow_type ?? flowRow.type ?? null,\n      flow_name: flowRow.name ?? null,\n\n      template_id: templateId,\n\n      sequence_step_id: templateId,\n      sequence_step_order: sequenceStepRow._order ?? null,\n      sequence_step_delay_hours: sequenceStepRow.delay ?? null,\n      sequence_step_message: sequenceStepRow.message ?? null,\n      sequence_step_match_ambiguous: !exactTemplate && originalIdMatches.length > 1,\n\n      // Not available from a plain Aimfox reply webhook unless calculated earlier.\n      first_email_date: null,\n      response_time_hours: null,\n      response_time_bucket: null,\n\n      subject: '',\n\n      declined: event.metadata?.declined ?? null,\n\n      linkedin_profile_url: target.public_identifier\n        ? linkedinFromPublicId(target.public_identifier)\n        : '',\n    };\n  };\n\n  const normalizeAimfoxReply = () => {\n    let raw = unwrapN8nPayload(nodeJson(AIMFOX_REPLY_NODE, {}));\n\n    if (\n      raw.source === 'aimfox' ||\n      raw.reply_event_id ||\n      raw.reply_message ||\n      raw.target_full_name ||\n      raw.campaign_name\n    ) {\n      return raw;\n    }\n\n    if (raw.aimfox) return raw.aimfox;\n    if (raw.data && !Array.isArray(raw.data)) return raw.data;\n\n    if (raw.event || raw.event_type) {\n      return normalizeRawAimfoxWebhook(raw);\n    }\n\n    return raw;\n  };\n\n  const normalizeAimfoxLead = () => {\n    const rawRoot = unwrapN8nPayload(nodeJson(AIMFOX_LEAD_NODE, {}));\n\n    const lead =\n      rawRoot.lead ||\n      rawRoot.data?.lead ||\n      rawRoot.data ||\n      rawRoot;\n\n    const currentExperience =\n      Array.isArray(lead.current_experience) && lead.current_experience.length\n        ? lead.current_experience[0]\n        : {};\n\n    const currentCompany = currentExperience.company || {};\n\n    const locationName = pick(\n      () => currentExperience.location?.name,\n      () => lead.location?.name,\n    );\n\n    const labelNames = getLabelNames(lead.labels);\n\n    return {\n      lead_id: lead.id ?? null,\n      lead_urn: lead.urn ?? null,\n\n      first_name: lead.first_name ?? null,\n      last_name: lead.last_name ?? null,\n      full_name: lead.full_name ?? null,\n\n      occupation: lead.occupation ?? null,\n\n      job_title: currentExperience.job_title ?? null,\n      employment_type: currentExperience.employment_type?.name ?? null,\n\n      company_name: currentCompany.name ?? null,\n      company_urn: currentCompany.urn ?? null,\n      company_universal_name: currentCompany.universal_name ?? null,\n      company_linkedin_url: currentCompany.universal_name\n        ? companyLinkedinFromUniversalName(currentCompany.universal_name)\n        : '',\n\n      location: locationName,\n      country: countryFromLocation(locationName),\n\n      linkedin_public_identifier: lead.public_identifier ?? null,\n      linkedin_profile_url: lead.public_identifier\n        ? linkedinFromPublicId(lead.public_identifier)\n        : '',\n\n      picture_url: lead.picture_url ?? null,\n\n      phones: lead.phones || [],\n      phone_number: getPhoneValue(lead.phones),\n\n      labels: labelNames,\n      qualification: qualificationFromLabels(lead.labels),\n\n      connections: lead.connections ?? null,\n      followers: lead.followers ?? null,\n      verified: lead.verified ?? null,\n      premium: lead.premium ?? null,\n\n      origin_campaign_id: lead.origins?.[0]?.id ?? null,\n      origin_campaign_name: lead.origins?.[0]?.name ?? null,\n\n      skills: Array.isArray(lead.skills)\n        ? lead.skills.map(s => s.name).filter(Boolean)\n        : [],\n    };\n  };\n\n  const normalizeLushaEnrichment = () => {\n    const rawRoot = unwrapN8nPayload(nodeJson(LUSHA_ENRICH_NODE, {}));\n\n    const body = rawRoot.body || rawRoot;\n\n    const result =\n      body.results?.[0] ||\n      rawRoot.results?.[0] ||\n      rawRoot.data?.results?.[0] ||\n      rawRoot.data?.[0] ||\n      {};\n\n    const emailRow =\n      Array.isArray(result.emails) && result.emails.length\n        ? result.emails.find(e => e.type === 'work') || result.emails[0]\n        : {};\n\n    const phoneRow =\n      Array.isArray(result.phones) && result.phones.length\n        ? result.phones.find(p => p.doNotCall === false) || result.phones[0]\n        : {};\n\n    return {\n      id: result.id ?? null,\n\n      first_name: result.firstName ?? null,\n      last_name: result.lastName ?? null,\n      full_name: result.fullName ?? null,\n\n      job_title: result.jobTitle?.title ?? null,\n      job_departments: Array.isArray(result.jobTitle?.departments)\n        ? result.jobTitle.departments.join(', ')\n        : '',\n      seniority: result.jobTitle?.seniority ?? null,\n\n      company_id: result.company?.id ?? null,\n      company_name: result.company?.name ?? null,\n      company_domain: normalizeDomain(result.company?.domain),\n      company_industry: result.company?.industry ?? null,\n\n      country: result.location?.country ?? null,\n      country_iso2: result.location?.countryIso2 ?? null,\n      continent: result.location?.continent ?? null,\n      is_eu_contact: result.location?.isEuContact ?? null,\n\n      linkedin_url: result.socialLinks?.linkedin ?? null,\n\n      email: emailRow.email ?? null,\n      email_type: emailRow.type ?? null,\n      email_confidence: emailRow.confidence ?? null,\n      email_update_date: emailRow.updateDate ?? null,\n\n      phone_number: phoneRow.number ?? null,\n      phone_type: phoneRow.type ?? null,\n      phone_do_not_call: phoneRow.doNotCall ?? null,\n      phone_update_date: phoneRow.updateDate ?? null,\n\n      update_date: result.updateDate ?? null,\n\n      has_data: Boolean(\n        result.id ||\n        result.fullName ||\n        emailRow.email ||\n        phoneRow.number ||\n        result.company?.name\n      ),\n    };\n  };\n\n  const aimfoxReply = normalizeAimfoxReply();\n  const aimfoxLead = normalizeAimfoxLead();\n  const lusha = normalizeLushaEnrichment();\n\n  // Optional fallback enrichment nodes from the old flow.\n  // These are fallback only. If they do not exist or were not executed, fields stay empty.\n  const aiRaw = nodeJson('[286] Parse AI output + set phone', {});\n  const ai = aiRaw.ai || aiRaw || {};\n\n  const lushaRaw = nodeJson('[287] Set phone from Lusha', {});\n  const lushaExecuted = safe(() => $('[287] Set phone from Lusha').isExecuted, false);\n\n  const snovRaw = nodeJson('[226+227+228] Pick Snovio output body', {});\n  const snovProspect = safe(() => snovRaw.snovio_body?.data?.[0], {});\n\n  const sheet = safe(\n    () => $json.sheets.find(sheet => sheet.properties?.title === 'Leads'),\n    null\n  );\n\n  if (!sheet) {\n    throw new Error('Sheet \"Leads\" not found');\n  }\n\n  const table = safe(\n    () =>\n      (sheet.tables || []).find(table => table.name === 'Leads') ||\n      (sheet.tables || []).find(table => table.name === 'Table3') ||\n      (sheet.tables || [])[0],\n    null\n  );\n\n  if (!table) {\n    throw new Error('No table found inside sheet \"Leads\"');\n  }\n\n  const fullName = pick(\n    () => aimfoxLead.full_name,\n    () => lusha.full_name,\n    () => aimfoxReply.target_full_name,\n    () => `${aimfoxLead.first_name || ''} ${aimfoxLead.last_name || ''}`.trim(),\n    () => `${lusha.first_name || ''} ${lusha.last_name || ''}`.trim(),\n    () => `${aimfoxReply.target_first_name || ''} ${aimfoxReply.target_last_name || ''}`.trim(),\n    () => `${snovProspect.firstName || ''} ${snovProspect.lastName || ''}`.trim(),\n    () => `${ai.first_name || ''} ${ai.last_name || ''}`.trim(),\n  );\n\n  const jobTitle = pick(\n    () => aimfoxLead.job_title,\n    () => lusha.job_title,\n    () => aimfoxLead.occupation,\n    () => ai.lead_position,\n    () => ai.job_title,\n    () => snovProspect.currentJob?.[0]?.position,\n  );\n\n  const email = pick(\n    () => lusha.email,\n    () => aimfoxReply.target_email,\n    () => ai.email,\n    () => ai.lead_email,\n    () => snovProspect.emails?.[0]?.email,\n  );\n\n  const phoneNumber = pick(\n    // Prefer Lusha only if not marked DNC.\n    () => lusha.phone_do_not_call === false ? lusha.phone_number : '',\n    () => aimfoxLead.phone_number,\n    // Fallback: keep Lusha phone if DNC flag was absent/null, but not if explicitly true.\n    () => lusha.phone_do_not_call !== true ? lusha.phone_number : '',\n    () => lushaExecuted ? lushaRaw.phoneNumber : '',\n    () => aiRaw.phoneNumber,\n    () => ai.phoneNumber,\n    () => ai.phone,\n  );\n\n  const phoneSource = pick(\n    () => lusha.phone_number && lusha.phone_do_not_call === false ? 'Lusha' : '',\n    () => aimfoxLead.phone_number ? 'Aimfox Lead' : '',\n    () => lusha.phone_number && lusha.phone_do_not_call !== true ? 'Lusha' : '',\n    () => lushaExecuted ? lushaRaw.phoneSource : '',\n    () => aiRaw.phoneSource,\n    () => ai.phoneSource,\n  );\n\n  const companyName = pick(\n    () => aimfoxLead.company_name,\n    () => lusha.company_name,\n    () => ai.company_name,\n    () => snovProspect.currentJob?.[0]?.companyName,\n  );\n\n  const industry = pick(\n    () => lusha.company_industry,\n    () => ai.company_industry,\n    () => snovProspect.industry,\n  );\n\n  const headcount = pick(\n    // Current Aimfox Lead sample does not provide clean company headcount.\n    // Current Lusha sample also does not include headcount, but keep future-compatible fallbacks.\n    () => lusha.company_size,\n    () => ai.company_size,\n    () => snovProspect.currentJob?.[0]?.size,\n  );\n\n  const leadReceived = pick(\n    // Actual received reply date from Aimfox.\n    () => aimfoxReply.reply_date,\n    // Only if your previous normalize node calculated/stored the first sent message date.\n    () => aimfoxReply.first_email_date,\n  );\n\n  const campaignName = pick(\n    () => aimfoxReply.campaign_name,\n    () => aimfoxLead.origin_campaign_name,\n  );\n\n  const messageTitle = pick(\n    // LinkedIn/Aimfox message usually has no email subject.\n    () => aimfoxReply.subject,\n    () => aimfoxReply.flow_name,\n    () => aimfoxReply.sequence_step_id\n      ? `Step ${aimfoxReply.sequence_step_order || ''}`.trim()\n      : '',\n  );\n\n  const messageNumber = pick(\n    () => aimfoxReply.sequence_step_order,\n  );\n\n  const website = pick(\n    () => lusha.company_domain,\n    () => normalizeDomain(ai.company_website),\n    () => getDomainFromEmail(email),\n  );\n\n  const qualification = 'MQL';\n\n  const responseTime = pick(\n    () => aimfoxReply.response_time_bucket,\n  );\n\n  const emailText = pick(\n    () => aimfoxReply.reply_message,\n  );\n\n  const campaignId = pick(\n    () => aimfoxReply.campaign_id,\n    () => aimfoxLead.origin_campaign_id,\n  );\n\n  const linkedinUrl = pick(\n    () => lusha.linkedin_url,\n    () => aimfoxLead.linkedin_profile_url,\n    () => aimfoxReply.linkedin_profile_url,\n    () => linkedinFromPublicId(aimfoxLead.linkedin_public_identifier),\n    () => linkedinFromPublicId(aimfoxReply.target_public_identifier),\n    () => (snovProspect.social || []).find(s => s.type === 'linkedinProfile')?.link,\n    () => ai.person_linkedin,\n  );\n\n  const country = pick(\n    () => lusha.country,\n    () => aimfoxLead.country,\n    () => ai.lead_country,\n    () => ai.company_country,\n    () => snovProspect.country,\n  );\n\n  const values = [\n    fullName,        // 0  FULL NAME\n    jobTitle,        // 1  JOB TITLE\n    email,           // 2  E-MAIL\n    phoneNumber,     // 3  Phone Number\n    phoneSource,     // 4  Phone Source\n    companyName,     // 5  COMPANY NAME\n    industry,        // 6  INDUSTRY\n    headcount,       // 7  HEADCOUNT\n    leadReceived,    // 8  LEAD RECEIVED — real Sheet date\n    campaignName,    // 9  CAMPAIGN NAME\n    messageTitle,    // 10 MESSAGE TITLE\n    messageNumber,   // 11 MESSAGE #\n    website,         // 12 WEBSITE\n    qualification,   // 13 QUALIFICATION\n    responseTime,    // 14 LEAD RESPONSE TIME\n    '',              // 15\n    '',              // 16\n    '',              // 17\n    '',              // 18\n    '',              // 19\n    '',              // 20\n    emailText,       // 21 Mail from lead\n    '',              // 22\n    '',              // 23\n    campaignId,      // 24 Campaign ID\n    '',              // 25\n    '',              // 26\n    linkedinUrl,     // 27 LinkedIn URL\n    country,         // 28 Country\n  ];\n\n  return JSON.stringify({\n    requests: [\n      {\n        appendCells: {\n          sheetId: Number(sheet.properties.sheetId),\n          tableId: String(table.tableId),\n          rows: [\n            {\n              values: values.map((value, index) => makeCell(value, index))\n            }\n          ],\n          fields: 'userEnteredValue,userEnteredFormat.numberFormat'\n        }\n      }\n    ]\n  });\n})() }}",
+        "method": "POST",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}:batchUpdate"
+      }
+    },
+    {
+      "id": "bccd6012-5148-4a6d-ab19-292b80d961dd",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2800,
+        -112
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "abb1587f-6a76-4ce6-b7b3-7a1e8eae5f66",
+              "name": "phones",
+              "type": "string",
+              "value": "={{ $('[2] Find workspace in CS PDCA').item.json['Ecosystem integration - ABM stage 1'].split(',') }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "473222bc-5741-40a9-9cca-7f4986073c0e",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2800,
+        272
+      ],
+      "disabled": true,
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8b45934e-47d0-4b03-a067-edd1463a46a2",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '' }}"
+            },
+            {
+              "id": "7ab46e26-8282-4c7c-83a3-2bda8edd2696",
+              "name": "firstname",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.firstName) || ($('[286] Parse AI output + set phone').item.json.ai?.first_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.first_name) || '' }}"
+            },
+            {
+              "id": "fbd92e21-15a8-4056-bcbc-0834e7caf2ce",
+              "name": "lastname",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.lastName) || ($('[286] Parse AI output + set phone').item.json.ai?.last_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.last_name) || '' }}"
+            },
+            {
+              "id": "16a15220-8cb5-41b4-95fe-b81fbde978a9",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $('[287] Set phone from Lusha').isExecuted ? $('[287] Set phone from Lusha').item.json.phoneNumber : ($('[286] Parse AI output + set phone').item.json.phoneNumber || '') }}"
+            },
+            {
+              "id": "318a953f-5e20-46b4-80c4-d345ec0b4ce6",
+              "name": "company",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.companyName) || ($('[286] Parse AI output + set phone').item.json.ai?.company_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.company) || '' }}"
+            },
+            {
+              "id": "7b3260c2-0ef1-4819-9d18-fdcabbeb0d1c",
+              "name": "position",
+              "type": "string",
+              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.position) || ($('[286] Parse AI output + set phone').item.json.ai?.lead_position) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.title) || '' }}"
+            },
+            {
+              "id": "b852fa2d-325c-4f66-9219-d64ae2f59c0d",
+              "name": "website",
+              "type": "string",
+              "value": "={{ ($('[286] Parse AI output + set phone').item.json.ai?.company_website) || (($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '').split('@').pop()) || '' }}"
+            },
+            {
+              "id": "dccbbe96-8928-453c-b89d-955b36201b8b",
+              "name": "notes",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.notes || '' }}"
+            },
+            {
+              "id": "e6e62d8c-f8a9-4803-b16d-ee5abafa1e45",
+              "name": "created_at",
+              "type": "string",
+              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.created_at || '' }}"
+            },
+            {
+              "id": "e68c54aa-fa74-428a-949d-d0d2e2e2e57f",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $('When Called by HUB').item.json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e3b3bdae-c2b1-403e-aed6-714d9d535212",
+      "name": "Email Recipients configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2800,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "dd2b9cf0-a3f8-4d59-8828-627a2f429ae8",
+              "leftValue": "={{ ($(\"[2] Find workspace in CS PDCA\").first().json[\"col_101\"] || \"\").trim() }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c853cfab-c450-4e6e-a621-ecc415b62a28",
+      "name": "Execution Data",
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        -288,
+        64
+      ],
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "workspace",
+              "value": "={{ $json.event.workspace_name }}"
+            },
+            {
+              "key": "tag",
+              "value": "={{ $json.data.tag_name }}"
+            },
+            {
+              "key": "workspace_id",
+              "value": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "837d61db-27f6-4714-a6aa-76cf2c2b171c",
+      "name": "GET lead info Aimfox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        576,
+        -16
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/leads/{{ $('Merge').item.json.body.event.target.id }}"
+      }
+    },
+    {
+      "id": "c28ee2fc-6f26-4d62-9397-f7d077eeb707",
+      "name": "Get Snov.io Access Token (Local)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        672
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "432f02b3c57f37952e10909ebe7bf3ab"
+            },
+            {
+              "name": "client_secret",
+              "value": "83aee70e3fd1984669ee0acb16b98990"
+            }
+          ]
+        },
+        "contentType": "form-urlencoded",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.snov.io/v1/oauth/access_token"
+      }
+    },
+    {
+      "id": "8d975a21-4928-4d67-89ec-b961424cdb36",
+      "name": "Get Table ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2352,
+        80
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}?fields=sheets(properties(sheetId,title),tables(tableId,name,range,columnProperties(columnName,columnIndex)))"
+      }
+    },
+    {
+      "id": "0ecb6f71-513b-4c30-a371-c6f28704b1ed",
+      "name": "Get Workspace Api Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        144,
+        -16
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "=https://api.aimfox.com/api/v2/workspaces/{{ $json.body.workspace.id }}/tokens"
+      }
+    },
+    {
+      "id": "0b16777f-86df-4ce6-919e-c284ff74eb4d",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3248,
+        -112
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.phones.parseJson()[0] }}"
+            },
+            {
+              "name": "messageType",
+              "value": "SMS"
+            },
+            {
+              "name": "text",
+              "value": "Nowy, zimny lead wplynal wlasnie na Twojego maila - podejmij go do 5 minut, a znacznie latwiej odczarujesz jego lodowe serce"
+            }
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.unitalk.cloud/api/message/send"
+      }
+    },
+    {
+      "id": "f49090be-8714-4016-a054-1dfecceac4cf",
+      "name": "Lead already exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        -16
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "594d75c9-fe21-424e-82ab-caf2bea3cfb9",
+              "leftValue": "={{ $('[4] Check if lead already in Leads sheet').item.json }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c568f32c-b645-4e76-a27a-3775224421cd",
+      "name": "Lusha Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1920,
+        -128
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\n  \"contacts\": [\n    {\n      \"linkedinUrl\": \"https://www.linkedin.com/in/{{ $json.target_public_identifier }}\"\n    }\n  ],\n  \"reveal\": [\n    \"phones\",\n    \"emails\"\n  ],\n  \"options\": {\n    \"includePartialProfiles\": false\n  }\n} ",
+        "method": "POST",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.lusha.com/v3/contacts/search-and-enrich"
+      }
+    },
+    {
+      "id": "e6db7c9a-dc7f-4b57-9e70-ca76b02c17d6",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -64,
+        -16
+      ],
+      "parameters": {
+        "mode": "chooseBranch"
+      }
+    },
+    {
+      "id": "a1a77dd6-c2a4-4116-b873-e9bc4eb474d8",
+      "name": "Snov.io get info by LI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        704,
+        672
+      ],
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "urls[]",
+              "value": "={{ ['https://www.linkedin.com/in/'+$('GET lead info Aimfox').item.json.lead.public_identifier] }}"
+            },
+            {
+              "name": "webhook_url",
+              "value": "https://n8n.coldunicorn.com/webhook/c6c4ff6f-e88c-44a0-a7d4-69a95f754feb"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.access_token }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://api.snov.io/v2/li-profiles-by-urls/start"
+      }
+    },
+    {
+      "id": "91bd8962-b291-4dc0-917c-3eb707718b37",
+      "name": "Snov.io get info by LI GET Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1280,
+        816
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $('Get Snov.io Access Token (Local)').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "task_hash",
+              "value": "={{ $json.data.task_hash }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "sendQuery": true,
+        "url": "https://api.snov.io/v2/li-profiles-by-urls/result"
+      }
+    },
+    {
+      "id": "059c0232-360e-4e95-8471-3bd176047951",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        3024,
+        -112
+      ],
+      "parameters": {
+        "fieldToSplitOut": "phones",
+        "options": {}
+      }
+    },
+    {
+      "id": "c2ce9c2e-911f-4830-a021-bbd3abb23717",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1056,
+        816
+      ],
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "7a8aae00-0fdd-445c-b1e5-9a73d5ac1ef3",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -512,
+        -16
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Create Record": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split Out",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Call '[HUB] CRMs Add/Update Lead Dispatcher'",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Email Recipients configured?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[189-192] Forward email to recipients",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Execution Data": {
+      "main": [
+        [
+          {
+            "index": 1,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "GET lead info Aimfox": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[4] Check if lead already in Leads sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Snov.io Access Token (Local)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Snov.io get info by LI",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Table ID": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Create Record",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Workspace Api Key": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[2] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lead already exists?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[96] Update Qualification col",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[79+72+51+8+57] Compute derived values",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lusha Enrichment": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[287] Set phone from Lusha",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Workspace Api Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Snov.io get info by LI": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Wait",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Request",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Snov.io get info by LI GET Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Execution Data",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[287] Set phone from Lusha": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[2] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "GET lead info Aimfox",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[40] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        []
+      ]
+    },
+    "[4] Check if lead already in Leads sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Lead already exists?",
+            "type": "main"
+          }
+        ],
+        []
+      ]
+    },
+    "[79+72+51+8+57] Compute derived values": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Lusha Enrichment",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

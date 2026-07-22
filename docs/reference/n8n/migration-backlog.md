@@ -1,7 +1,7 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-21: **33 workflows, 27 active, 6 managed, 27 orphan.**
-(Managed: the four OOO/NRR workflows of §1, plus the two importable Aimfox workflows of §5.)
+Inventory taken 2026-07-22: **33 workflows, 27 active, 9 managed, 24 orphan.**
+(Managed: the four OOO/NRR workflows of §1, plus all five Aimfox workflows of §5.)
 
 Reproduce with `pnpm n8n:inventory`.
 
@@ -132,8 +132,8 @@ A clean dispatcher + per-provider-child pattern; likely the best-structured grou
 
 ## 5 · Aimfox / LinkedIn
 
-**Priority: raised to high on 2026-07-21 — two critical secret findings, and a documented table that
-has never been written.**
+**Priority: high. All five imported 2026-07-22; both critical secret findings closed. Still phase 0 —
+no Aimfox workflow writes Supabase.**
 
 The whole channel is now described in one place:
 [process · LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md).
@@ -142,13 +142,14 @@ The whole channel is now described in one place:
 |---|---|---|
 | `sVev5d0N6rtrbcgI` | `Get Metrics from Aimfox` | **imported** — [`ingestion/aimfox-daily-metrics`](../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md) |
 | `nG6Q4KEGeXk7tBHm` | `Import leads to Aimfox connection` | **imported** — [`outreach/aimfox-import-to-connection`](../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md) |
-| `JnvRBXtRNar7ejeM` | `AimFox Classification` | **blocked** — literal OpenAI key + literal Aimfox master token ([security §7](security.md), [§8](security.md)) |
-| `4OjNRWLaG2IWK6kd` | `AimFox Leads Processing` | **blocked** — literal Aimfox master token |
-| `s0GqDtCzyLAvVnm1` | `preMGL tag added (Aimfox) -> Add lead to PDCA` | **blocked** — literal Aimfox master token |
+| `JnvRBXtRNar7ejeM` | `AimFox Classification` | **imported** — [`outreach/aimfox-classification`](../../../automation/n8n/workflows/outreach/aimfox-classification/README.md) |
+| `4OjNRWLaG2IWK6kd` | `AimFox Leads Processing` | **imported** — [`outreach/aimfox-leads-processing`](../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md) |
+| `s0GqDtCzyLAvVnm1` | `preMGL tag added (Aimfox) -> Add lead to PDCA` | **imported** — [`outreach/aimfox-premql-to-pdca`](../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) |
 
-`pnpm n8n:export` refuses the three blocked workflows by design (security.md layer 4). They cannot be
-committed, diffed or drift-checked until the secrets move into n8n credentials — so the most
-security-sensitive workflows in the family are the ones the repository currently cannot see.
+Those three were unreachable until 2026-07-22: `pnpm n8n:export` refuses a file the scanner rejects
+(security.md layer 4), so the most security-sensitive workflows in the family were the ones the
+repository could not see. Moving their literals into the `Aimfox Master` and `OpenAi account`
+credentials closed that.
 
 **The channel is phase 0.** Not one of the five contains a Postgres node or a Supabase URL. Meanwhile
 `sequencers` has an `aimfox` row, `client_sequencers` carries the token field, and
@@ -159,12 +160,15 @@ live write until this inventory corrected it.
 
 **Blocking, in order:**
 
-1. **Rotate the two leaked secrets and move them to n8n credentials** (findings 7 and 8), then import
-   the three blocked workflows. Nothing else in this group can proceed while they are invisible.
+1. ~~Move the two leaked secrets into n8n credentials and import the three blocked workflows~~ —
+   **done 2026-07-22** (findings 7 and 8). Rotating the old values in Aimfox and OpenAI is still
+   outstanding and is the owner's step.
 2. **Authenticate the two Aimfox webhooks** (`aimfox-classifier`, `preMQL-Aimfox`) — finding 3.
-3. **Seed `client_sequencers` for aimfox** — `api_key` from CS PDCA `col_105`, `external_workspace_id`
-   from the Aimfox workspace id. A precondition for every Supabase branch in this group: without it
-   branch S cannot resolve a `client_id`.
+   **Open.**
+3. ~~Seed `client_sequencers` for aimfox~~ — **done 2026-07-22**: five clients, `api_key` from CS
+   PDCA `col_105` and `external_workspace_id` read from each token's own `GET /accounts`. FitMech has
+   no workspace id (no LinkedIn account connected); EvidencePrime had no `emailbison` row at all and
+   was resolved by name.
 4. **Phase A on the capacity flow first** (`aimfox-daily-metrics`): a pure UPSERT of derived numbers,
    no person touched, no external write endpoint — the only part of this channel that needs no A1
    shadow. Fix defects 1–3 in branch S rather than porting them.

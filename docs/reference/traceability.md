@@ -67,18 +67,22 @@ specified, the automation is entirely Sheets-based ([migration-backlog §5](n8n/
 
 | # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | A LinkedIn contact is not a lead; `preMQL` creates it | `leads`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | CRM view | lead counts | `s0GqDtCzyLAvVnm1` ⛔ appends a spreadsheet row | — | ⛔ |
+| 1 | A LinkedIn contact is not a lead; `preMQL` creates it | `leads`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | CRM view | lead counts | `aimfox-premql-to-pdca` ⛔ appends a spreadsheet row | — | ⛔ |
 | 2 | Contact identity is scoped `(client_sequencer_id, external_contact_id)` | `sequencer_contacts` | `upsert_sequencer_contact` | — | — | — | ⛔ no LinkedIn contact is stored anywhere | `ooo-invariants.sql` (contract only) | ⛔ |
 | 3 | A lead carries its channel (`sequencer_id` = aimfox) | `leads` | — | — | CRM view | per-channel splits | ⛔ | — | ⛔ |
 | 4 | `profile_id` is the Aimfox **account** id | `sequencer_daily_stats` | — | — | — | capacity per profile | `aimfox-daily-metrics` ⚠️ uses the sheet **row number** | — | ⚠️ |
 | 5 | Invite counters never mix channels | `sequencer_daily_stats`, `daily_stats` | — | — | — | invites vs sends | ⛔ table never written | — | ⛔ |
 | 6 | Snapshots are overwritten, per-day facts are keyed | `sequencer_daily_stats` | unique `(client, sequencer, profile, date)` | — | — | — | ⛔ | — | ⛔ |
-| 7 | Blacklisting follows an explicit classification only | — (no table) | — | — | — | — | `JnvRBXtRNar7ejeM` — **not importable**, literal secrets | — | ⛔ |
-| 8 | Audience loading is a live send; no blind second branch | — | — | — | — | — | `nG6Q4KEGeXk7tBHm` — A1 shadow required at cutover | — | ⛔ |
+| 7 | Blacklisting follows an explicit classification only | — (no table) | — | — | — | — | `aimfox-classification` ⚠️ classifies correctly, records nothing | — | ⚠️ |
+| 8 | Audience loading is a live send; no blind second branch | — | — | — | — | — | `aimfox-import-to-connection` — A1 shadow required at cutover | — | ⛔ |
 
 **What closes these.** Row 4 is a defect in a workflow this repository now owns and can fix. Rows 5
-and 6 close together, with the capacity branch S. Rows 1–3 need `client_sequencers` seeded first;
-rows 7–8 need the secrets rotated before the workflows can even be committed.
+and 6 close together, with the capacity branch S. Rows 1–3 needed `client_sequencers` seeded — done
+2026-07-22, five clients — and now need branch S on the classification and lead flows, in that order.
+Row 7 closes when a classification produces a `replies` row, which is the same step as rows 1–2.
+
+All five workflows are `managed` as of 2026-07-22, so every row above is now a defect this repository
+can see and fix rather than one it merely suspects.
 
 ---
 

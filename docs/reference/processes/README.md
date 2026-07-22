@@ -53,7 +53,7 @@ to prevent.
 | Process | Domain | Status |
 |---|---|---|
 | [OOO follow-ups (and NRR)](outreach/ooo-followups.md) | outreach | contract accepted; phase A live on all four workflows |
-| [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase 0** — Sheets only; the database model exists and is unwritten |
+| [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase 0** — all five workflows imported; credentials seeded; no Supabase write yet |
 
 ## Traceability
 

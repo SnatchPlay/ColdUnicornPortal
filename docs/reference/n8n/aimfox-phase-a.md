@@ -4,7 +4,8 @@ Counterpart of [ooo-phase-a.md](ooo-phase-a.md), for the LinkedIn channel.
 Process: [LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md) ·
 Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)
 
-**Status 2026-07-22: phase 0 on all five workflows. Two blockers, both requiring a human.**
+**Status 2026-07-22: all five imported and `managed`. Both blockers cleared. Phase 0 — no Aimfox
+workflow writes Supabase yet; the capacity branch is next and is no longer blocked on anything.**
 
 ---
 
@@ -14,48 +15,61 @@ Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transi
 |---|---|---|
 | `aimfox-daily-metrics` | imported, `managed` | none — **first candidate** |
 | `aimfox-import-to-connection` | imported, `managed` | none — last, needs an A1 shadow |
-| `aimfox-classification` | **cannot be imported** | none |
-| `aimfox-leads-processing` | **cannot be imported** | none |
-| `aimfox-premql-to-pdca` | **cannot be imported** | none |
+| `aimfox-classification` | imported, `managed` | none — **second**: gives a reply a home |
+| `aimfox-premql-to-pdca` | imported, `managed` | none — third, needs a stored contact first |
+| `aimfox-leads-processing` | imported, `managed` | none — fourth, also writes the clients' CRMs |
 
-Verified against production: `sequencer_daily_stats` 0 rows, `client_sequencers` with
-`sequencers.key='aimfox'` 0 rows (35 `emailbison` rows, all enabled and keyed).
+Verified against production: `sequencer_daily_stats` **0 rows**; `client_sequencers` with
+`sequencers.key='aimfox'` **5 rows** as of 2026-07-22 (35 `emailbison` rows, all enabled and keyed).
 
-## Blocker 1 · the Aimfox organisation token
+## ~~Blocker 1~~ · the Aimfox organisation token — cleared 2026-07-22
 
 The node `Get Workspace Api Key` carries `Authorization: Bearer <token>` as a **literal**, in three
 workflows. That token mints per-workspace tokens, so it is the master key to every client's LinkedIn
 workspace ([security §7](security.md)). `pnpm n8n:export` refuses any artifact containing it, so
 those three workflows cannot enter the repository at all.
 
-**Needs a human**: the n8n MCP exposes no credential tools — 13 tools, none of them credential
-management. Create it in the n8n UI:
+Resolved: the credential **`Aimfox Master`** (`httpBearerAuth`, id `Sow8iVXceVMZM5b3`) was created in
+the n8n UI — the MCP exposes no credential tools, so this needed a human. All three
+`Get Workspace Api Key` nodes now use `authentication: "genericCredentialType"`,
+`genericAuthType: "httpBearerAuth"`, and all three workflows are committed.
 
-- Type: **Header Auth**
-- Name: `Aimfox Org Token`
-- Header name: `Authorization`
-- Header value: `Bearer <token>` — **rotate the token in Aimfox first**; the current value has been
-  sitting in plaintext workflow JSON and in every export of it.
+The same pass moved the OpenAI key in `aimfox-classification` to the existing `OpenAi account`
+credential via `predefinedCredentialType`, leaving both request bodies byte-identical so the strict
+`json_schema` structured output survives.
 
-Then the three `Get Workspace Api Key` nodes switch to
-`authentication: "genericCredentialType"`, `genericAuthType: "httpHeaderAuth"`, and the literal
-disappears. Credentials are re-attached automatically on re-authoring
-([workflow-lifecycle · the SDK authoring contract](workflow-lifecycle.md)), so no manual repair is
-needed afterwards.
+**Still outstanding, and the owner's step:** rotate both values at the vendor. They sat in plaintext
+workflow JSON, so they must be treated as exposed.
 
-## Blocker 2 · per-client Aimfox tokens
+## ~~Blocker 2~~ · per-client Aimfox tokens — cleared 2026-07-22
 
 Branch S has to make its **own** Aimfox calls — that is what makes branch L disconnectable in one
 move (ADR-0017 §1a). Its token must therefore come from `client_sequencers.api_key`, not from the CS
-PDCA sheet. Today that table has no `aimfox` rows.
+PDCA sheet.
 
 Seeding is a **credential** move, not a data migration: per-client API keys are not business data, and
 [migration-backlog cross-cutting §2](migration-backlog.md) already carves them out as something that
 moves sooner and independently of the Sheets transition.
 
-The statement below resolves each client through the `emailbison` row it already has, so the only
-thing to supply is `(bison workspace id from CS PDCA col_5, Aimfox token from col_105, Aimfox
-workspace id)`. Verified against production in a rolled-back transaction:
+**Done 2026-07-22 — five rows.** Of 21 active CS PDCA clients, five carry an Aimfox token in
+`col_105`; all five tokens authenticated. Each client's `external_workspace_id` was read from its own
+`GET /accounts` rather than guessed, so the value is the Aimfox workspace the token actually belongs
+to.
+
+| Client | Aimfox workspace | Note |
+|---|---|---|
+| Bent Iron PL | seeded | — |
+| ColdUnicorn PL | seeded | — |
+| Runmageddon | seeded | — |
+| EvidencePrime | seeded | had **no** `client_sequencers` row at all (bison workspace 130 was never mapped); resolved by client name instead |
+| FitMech | **null** | token valid, but the workspace has no LinkedIn account connected, so no workspace id exists yet |
+
+FitMech can therefore authenticate API calls but cannot resolve an inbound webhook until an account
+is connected.
+
+The statement used, kept here as the shape for future clients — it resolves each client through the
+`emailbison` row it already has, so the only input is `(bison workspace id from CS PDCA col_5, Aimfox
+token from col_105, Aimfox workspace id)`. Verified in a rolled-back transaction before running:
 
 ```sql
 with seed(bison_workspace_id, aimfox_api_key, aimfox_workspace_id) as (

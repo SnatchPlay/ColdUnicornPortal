@@ -9,12 +9,13 @@
 > **Level 1 document.** This describes what the business rule *is*. Where it disagrees with a
 > running n8n workflow, the workflow is wrong ([ADR-0016](../../../adr/0016-repository-as-automation-source-of-truth.md)).
 
-> **Read this first.** The database already models this channel — `sequencers` has an `aimfox` row,
-> `client_sequencers` carries the per-client Aimfox token, `sequencer_daily_stats` was designed
-> against the live metrics workflow ([`20260705`](../../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)).
-> **None of it is written.** All five Aimfox workflows read and write Google Sheets exclusively;
-> not one contains a Postgres node or a Supabase URL (verified 2026-07-21 by scanning the exported
-> graphs). The model is specified and unused — that gap *is* the migration.
+> **Read this first.** The database models this channel — `sequencers` has an `aimfox` row,
+> `client_sequencers` now carries the per-client Aimfox token (seeded 2026-07-22),
+> `sequencer_daily_stats` was designed against the live metrics workflow
+> ([`20260705`](../../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)).
+> **No workflow writes any of it.** All five read and write Google Sheets exclusively; not one
+> contains a Postgres node or a Supabase URL. The model is specified and unused — that gap *is* the
+> migration, and the credentials are now in place to close it.
 
 ---
 
@@ -62,9 +63,11 @@ Collapsing them makes capacity planning read a cap as a balance.
 
 - The client is `Active` in CS PDCA (`col_7`).
 - The client has an Aimfox token in CS PDCA `col_105`, and a client Leads spreadsheet in `col_4`.
-- **Target state:** the client has an enabled `client_sequencers` row for `sequencers.key = 'aimfox'`
-  carrying `api_key` and `external_workspace_id`. Neither the tokens nor the workspace ids have been
-  seeded — see [Divergence](#divergence-from-the-live-implementation).
+- The client has an enabled `client_sequencers` row for `sequencers.key = 'aimfox'` carrying
+  `api_key` and `external_workspace_id`. **Seeded 2026-07-22** for the five clients that have an
+  Aimfox token: Bent Iron PL, ColdUnicorn PL, EvidencePrime, FitMech, Runmageddon. FitMech has no
+  `external_workspace_id` because its workspace has no LinkedIn account connected, so it can
+  authenticate API calls but cannot yet resolve an inbound webhook.
 
 ## Main flow — capacity
 
@@ -174,13 +177,13 @@ we do not control ([migration-backlog cross-cutting §2](../../n8n/migration-bac
 |---|---|---|---|
 | [`aimfox-daily-metrics`](../../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md) | `sVev5d0N6rtrbcgI` | capacity, every 2h | **imported** |
 | [`aimfox-import-to-connection`](../../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md) | `nG6Q4KEGeXk7tBHm` | audience loading, daily 19:00 | **imported** |
-| `aimfox-classification` | `JnvRBXtRNar7ejeM` | LLM reply classification + blacklisting | **blocked — literal OpenAI key in the graph** |
-| `aimfox-leads-processing` | `4OjNRWLaG2IWK6kd` | enrich + create lead + CRM dispatch | **blocked — literal Aimfox master token** |
-| `aimfox-premql-to-pdca` | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification | **blocked — literal Aimfox master token** |
+| [`aimfox-classification`](../../../../automation/n8n/workflows/outreach/aimfox-classification/README.md) | `JnvRBXtRNar7ejeM` | LLM reply classification + blacklisting | **imported** |
+| [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md) | `4OjNRWLaG2IWK6kd` | enrich + create lead + CRM dispatch | **imported** |
+| [`aimfox-premql-to-pdca`](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification | **imported** |
 
-The three blocked workflows cannot be committed until their secrets move into n8n credentials:
-`pnpm n8n:export` refuses to write a file the scanner rejects, by design
-([security.md](../../n8n/security.md) layer 4).
+All five entered the repository on 2026-07-22. The last three had been unreachable: `pnpm n8n:export`
+refuses a file the scanner rejects ([security.md](../../n8n/security.md) layer 4), and each carried a
+literal credential. Those moved into the `Aimfox Master` and `OpenAi account` n8n credentials first.
 
 ## Divergence from the live implementation
 
@@ -193,7 +196,7 @@ state as though it were live is worse than none".
 | 2 | `profile_id` is the Aimfox account id (invariant 4) | the metrics workflow sets `account_id` to the **CS PDCA sheet row number** |
 | 3 | contact identity is stored (invariant 2) | no LinkedIn contact is stored anywhere; the Aimfox lead id lives only inside an execution |
 | 4 | a lead carries its channel (invariant 3) | leads are appended to a spreadsheet, so `sequencer_id` does not exist to be set |
-| 5 | tokens come from `client_sequencers` | they come from CS PDCA `col_105` — [security finding 1](../../n8n/security.md) |
+| 5 | tokens come from `client_sequencers` | branch L still reads CS PDCA `col_105` — [security finding 1](../../n8n/security.md). The table itself is now seeded (2026-07-22, five clients), so branch S no longer depends on the sheet |
 | 6 | invite capacity is per account | `Summarize` **averages** `account_id` across a batch; the numbers are a client rollup wearing an account id |
 
 ## Failure handling
@@ -206,12 +209,14 @@ execution list ([migration-backlog cross-cutting §3](../../n8n/migration-backlo
 
 - Two **unauthenticated webhooks** (`aimfox-classifier`, `preMQL-Aimfox`). Their paths are effectively
   bearer secrets; anyone holding one can drive lead creation and blacklisting.
-- An **Aimfox organisation token is written literally** into three workflow graphs. It mints
-  per-workspace tokens, so it is the master key to every client's LinkedIn presence.
-- An **OpenAI API key is written literally** into the classification workflow.
-- Per-client tokens sit in a shared spreadsheet.
+- ~~An **Aimfox organisation token written literally** into three workflow graphs~~ — moved to the
+  `Aimfox Master` credential 2026-07-22 ([security §7](../../n8n/security.md)).
+- ~~An **OpenAI API key written literally** into the classification workflow~~ — moved to the
+  `OpenAi account` credential the same day ([security §8](../../n8n/security.md)).
+- Per-client tokens still sit in the shared spreadsheet for branch L. They now also live in
+  `client_sequencers.api_key`, which is what branch S will read.
 
-All four are recorded in [security.md](../../n8n/security.md) §1, §3, §7, §8.
+The two webhooks remain the open finding: [security.md](../../n8n/security.md) §1, §3.
 
 ## Acceptance criteria for phase A
 
@@ -219,8 +224,8 @@ Phase A for this channel means the **capacity** flow first — it is a pure UPSE
 it touches no person, and it is therefore the only part of this channel where a second branch is
 risk-free ([ADR-0017 §1b](../../../adr/0017-sheets-to-supabase-dual-write-transition.md)).
 
-1. `client_sequencers` carries an enabled `aimfox` row per active client, with `api_key` and
-   `external_workspace_id`. **Precondition, not a step** — branch S cannot resolve a client without it.
+1. ~~`client_sequencers` carries an enabled `aimfox` row per active client~~ — **done 2026-07-22**,
+   five rows. This was the precondition: branch S cannot resolve a client without it.
 2. The metrics workflow gains a parallel branch S that resolves the client from
    `client_sequencers` and UPSERTs `sequencer_daily_stats` on its unique key. Sheets first, Supabase
    second, Supabase failure non-fatal.

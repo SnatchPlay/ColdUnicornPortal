@@ -79,9 +79,9 @@ workflows:
     lastRepositorySync: 2026-07-21
     lastValidation: 2026-07-21 phase A branch S published
 
-  # LinkedIn channel (Aimfox). Imported unchanged, phase 0 — no Supabase branch exists yet.
-  # The other three Aimfox workflows cannot be committed until their literal secrets move into n8n
-  # credentials: `pnpm n8n:export` refuses them (security.md §7, §8).
+  # LinkedIn channel (Aimfox). All five imported; phase 0 — no Supabase branch exists yet.
+  # The three lead/classification workflows became importable on 2026-07-22, once their literal
+  # secrets moved into the `Aimfox Master` and `OpenAi account` credentials (security.md §7, §8).
   - id: aimfox-daily-metrics
     name: "Get Metrics from Aimfox"
     domain: ingestion
@@ -115,6 +115,60 @@ workflows:
       production:
         remoteWorkflowId: nG6Q4KEGeXk7tBHm
     lastRepositorySync: 2026-07-21
+
+  - id: aimfox-classification
+    name: "AimFox Classification"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-classification
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # blacklisting is irreversible for that client
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: JnvRBXtRNar7ejeM
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal OpenAI key replaced by the OpenAi account credential
+
+  - id: aimfox-premql-to-pdca
+    name: "preMGL tag added (Aimfox) -> Add lead to PDCA"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-premql-to-pdca
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: s0GqDtCzyLAvVnm1
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
+
+  - id: aimfox-leads-processing
+    name: "AimFox Leads Processing"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-leads-processing
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads AND dispatches them to the clients' CRMs
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: 4OjNRWLaG2IWK6kd
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
 
   - id: nrr-daily-stats
     name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
