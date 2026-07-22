@@ -1,7 +1,8 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-22: **33 workflows, 27 active, 9 managed, 24 orphan.**
-(Managed: the four OOO/NRR workflows of §1, plus all five Aimfox workflows of §5.)
+Inventory taken 2026-07-22: **33 workflows, 27 active, 13 managed, 20 orphan.**
+(Managed: the four OOO/NRR workflows of §1, all five Aimfox workflows of §5, and the four Bison
+ingestion workflows of §3.)
 
 Reproduce with `pnpm n8n:inventory`.
 
@@ -103,17 +104,21 @@ already documented — importing them mostly means proving doc and reality agree
 |---|---|---|
 | `yjztuv4q07uysvkA` | `Winnr Daily Sync - Supabase v2` | §2 `email_accounts`, `email_account_warming_daily`, `domains` |
 | `oF6fP3ea2zglhAop` | `Winnr Sync - Error Handler` | §2 `integration_sync_runs` |
-| `sVev5d0N6rtrbcgI` | `Get Metrics from Aimfox` | §2 `sequencer_daily_stats` (+ the documented double-subtraction quirk) |
+| `sVev5d0N6rtrbcgI` | `Get Metrics from Aimfox` | §2 `sequencer_daily_stats` — **imported**, see §5 |
 | `8uRWXHe9FIfglq1u` | `Get Winnr Domains` (inactive) | §2 |
-| `AEgpCGoSpiZ7PA90` | `Bison campaign daily stats` | §2 `campaign_daily_stats` |
-| `amJdB2eGXxUNyCPY` | `Bison daily stats population` | §2 `daily_stats` (incl. `ooo_count`) |
-| `BQbFKHUaIcEKPc01` | `Daily Stats Process` | §2 |
-| `UXpSOrgsN2TxjXUu` | `Bison campaign sync` | §2 `campaigns` |
+| `AEgpCGoSpiZ7PA90` | `Bison campaign daily stats` | **imported** — [`ingestion/bison-campaign-daily-stats`](../../../automation/n8n/workflows/ingestion/bison-campaign-daily-stats/README.md) |
+| `amJdB2eGXxUNyCPY` | `Bison daily stats population` | **imported** — [`ingestion/bison-daily-stats-population`](../../../automation/n8n/workflows/ingestion/bison-daily-stats-population/README.md) |
+| `BQbFKHUaIcEKPc01` | `Daily Stats Process` | **imported** — [`ingestion/bison-daily-stats-process`](../../../automation/n8n/workflows/ingestion/bison-daily-stats-process/README.md) |
+| `UXpSOrgsN2TxjXUu` | `Bison campaign sync` | **imported** — [`ingestion/bison-campaign-sync`](../../../automation/n8n/workflows/ingestion/bison-campaign-sync/README.md) |
 
-Check specifically: has the **ADR-0012 sequencer cutover** actually happened? §3 documents a
-migration from `clients.external_api_key` to `client_sequencers`, with
-`20260704b_drop_client_sequencer_credentials.sql` deferred until every workflow has switched. Nobody
-has verified that they did.
+**The ADR-0012 sequencer cutover had NOT happened, and it was a live outage.** This entry asked
+"nobody has verified that they did" — the answer, found 2026-07-22, is that all three top-level Bison
+workflows had been failing every run on the dropped `clients.external_*` columns. `daily_stats` was
+stale since 2026-07-20 and `campaign_daily_stats` since 2026-07-19, with nothing surfacing it.
+
+Repaired and imported the same day; the incident, the remaining 2026-07-21 hole and the EvidencePrime
+gap are written up in [process · Bison ingestion](../processes/outreach/bison-ingestion.md). The
+remaining Winnr workflows in this group are still unverified against the same question.
 
 ---
 

@@ -53,6 +53,7 @@ to prevent.
 | Process | Domain | Status |
 |---|---|---|
 | [OOO follow-ups (and NRR)](outreach/ooo-followups.md) | outreach | contract accepted; phase A live on all four workflows |
+| [Bison ingestion (campaigns and counters)](outreach/bison-ingestion.md) | outreach | live, Supabase-only — repaired 2026-07-22 after days of silent failure |
 | [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase 0** — all five workflows imported; credentials seeded; no Supabase write yet |
 
 ## Traceability

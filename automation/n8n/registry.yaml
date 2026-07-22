@@ -170,6 +170,80 @@ workflows:
     lastRepositorySync: 2026-07-22
     lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
 
+  # Bison ingestion — the counters every portal dashboard reads. Imported 2026-07-22 in the same
+  # change that repaired them: all three top-level workflows had been failing on the dropped
+  # clients.external_* columns (ADR-0012). See processes/outreach/bison-ingestion.md.
+  - id: bison-campaign-sync
+    name: "Bison campaign sync"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-campaign-sync
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: UXpSOrgsN2TxjXUu
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired and executed — 16 clients, 390 campaigns
+
+  - id: bison-campaign-daily-stats
+    name: "Bison campaign daily stats"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-campaign-daily-stats
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: AEgpCGoSpiZ7PA90
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired — 416 campaigns resolve
+
+  - id: bison-daily-stats-population
+    name: "Bison daily stats population"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-daily-stats-population
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: amJdB2eGXxUNyCPY
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired and executed — daily_stats written for 2026-07-22
+
+  - id: bison-daily-stats-process
+    name: "Daily Stats Process"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-daily-stats-process
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: BQbFKHUaIcEKPc01
+    lastRepositorySync: 2026-07-22
+
   - id: nrr-daily-stats
     name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
     domain: outreach

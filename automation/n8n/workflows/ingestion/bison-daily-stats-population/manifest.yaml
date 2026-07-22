@@ -1,0 +1,61 @@
+schemaVersion: 1
+
+id: bison-daily-stats-population
+name: "Bison daily stats population"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # `daily_stats` drives the manager and client dashboards
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "hourly"
+  - type: webhook
+    detail: "POST /webhook/backfill-daily-stats {targetDate} — no authentication"
+
+reads:
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+
+writes:
+  external: []
+  tables: []
+  rpcs: []
+  tablesWritten: []          # writes happen in the child, bison-daily-stats-process
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Active Clients1"
+
+transition:
+  phase: C
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · daily_stats (via the child)"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: "Fan-out only: resolves active clients and calls the child once per client."
+  reconciliation: null
+  parityEvidence: >-
+    2026-07-22: 16 clients resolved and written after the client_sequencers fix. One active client
+    (EvidencePrime) resolves to nothing because it has no client_sequencers row at all.
+
+idempotency:
+  key: "delegated to the child — daily_stats UNIQUE (client_id, report_date)"
+  notes: "Safe to re-run for the same date; the backfill webhook exists for exactly that."
+
+retryPolicy:
+  notes: "None. A client whose sub-workflow call fails is skipped with no record."
+
+knownViolations: []

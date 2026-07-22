@@ -1,0 +1,466 @@
+{
+  "name": "Daily Stats Process",
+  "nodes": [
+    {
+      "id": "e625405e-91ab-4d96-8652-92cac79b1ebe",
+      "name": "Get Yesterday Totals1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        640,
+        -480
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "SELECT\n  COALESCE(human_replies_total, 0)                             AS prev_human_total,\n  COALESCE(automated_replies_total, 0)                         AS prev_auto_total,\n  COALESCE(ooo_count_total, automated_replies_total, 0)        AS prev_ooo_total,\n  COALESCE(prospects_total, 0)                                 AS prev_prospects_total,\n  TO_CHAR(report_date, 'YYYY-MM-DD')                          AS prev_report_date\nFROM daily_stats\nWHERE client_id = '{{ $('Start').item.json.client_id }}'\n  AND report_date = '{{ $('Start').item.json.reportDate_firstItem }}'::date - 1"
+      }
+    },
+    {
+      "id": "078f3a1d-e01e-48e6-8dfe-6fed68742f25",
+      "name": "HTTP Automated Replies1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/replies?status=automated_reply&folder=inbox"
+      }
+    },
+    {
+      "id": "0bffa928-c1a2-4424-81fc-a154e87a779b",
+      "name": "HTTP Human Replies1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/replies?status=not_automated_reply&folder=inbox"
+      }
+    },
+    {
+      "id": "ca8f5665-01f0-434d-8ea0-e0494c3b67a6",
+      "name": "HTTP Leads1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "={{ 'https://go.gheads.com/api/leads?filters%5Bcreated_at%5D%5Bcriteria%5D=%3E%3D&filters%5Bcreated_at%5D%5Bvalue%5D=' + $('Start').first().json.firstDayOfMonth_firstItem }}"
+      }
+    },
+    {
+      "id": "b4135f22-31bd-4b2e-9f07-c06e6278607f",
+      "name": "HTTP Line Stats1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "={{ 'https://go.gheads.com/api/workspaces/v1.1/line-area-chart-stats?start_date=' + $('Start').first().json.reportDate_firstItem + '&end_date=' + $('Start').first().json.reportDate_firstItem }}"
+      }
+    },
+    {
+      "id": "312fe85f-03fa-40f5-bb59-668290590414",
+      "name": "HTTP Schedule DayAfter1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/campaigns/sending-schedules?day=day_after_tomorrow"
+      }
+    },
+    {
+      "id": "3d05a636-23ff-471e-8dbe-4b3f8769ec95",
+      "name": "HTTP Schedule Today1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -32,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/campaigns/sending-schedules?day=today"
+      }
+    },
+    {
+      "id": "9c48daee-9235-4d74-a1c0-93d220978d45",
+      "name": "HTTP Schedule Tomorrow1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/campaigns/sending-schedules?day=tomorrow"
+      }
+    },
+    {
+      "id": "87514cfb-148a-45b9-835d-957dece1aa3d",
+      "name": "HTTP Sender Emails1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -928,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/sender-emails"
+      }
+    },
+    {
+      "id": "e8891bf5-ffa3-4ced-87d4-789f60c63ba5",
+      "name": "HTTP Stats Bounce1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1152,
+        -480
+      ],
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Start').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        },
+        "sendHeaders": true,
+        "url": "={{ 'https://go.gheads.com/api/workspaces/v1.1/stats?start_date=' + $('Start').first().json.reportDate_firstItem + '&end_date=' + $('Start').first().json.reportDate_firstItem }}"
+      }
+    },
+    {
+      "id": "6ad65ba9-1c1b-43c6-80fc-5455ea8f27e8",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1584,
+        -480
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "reportDate_firstItem",
+              "type": "any"
+            },
+            {
+              "name": "external_api_key",
+              "type": "any"
+            },
+            {
+              "name": "firstDayOfMonth_firstItem",
+              "type": "any"
+            },
+            {
+              "name": "isBackfill_firstItem",
+              "type": "any"
+            },
+            {
+              "name": "client_id"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b787f5a6-030b-43db-9e85-5d202243d50a",
+      "name": "Transform Metrics1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        -480
+      ],
+      "parameters": {
+        "jsCode": "const client =$('Start').first().json.client_id ;\n\nconst rawReportDate = $('Start').first().json.reportDate_firstItem;\nconst reportDate = String(rawReportDate).substring(0, 10);\n\nconst isBackfill = !!$('Start').first().json.isBackfill_firstItem;\n\nconst lineJson = $('HTTP Line Stats1').item.json;\nconst lineOk = !!(lineJson && Array.isArray(lineJson.data));\n\nlet emailsSent = lineOk ? 0 : null;\nlet responseCount = lineOk ? 0 : null;\n\nif (lineOk) {\n  for (const item of lineJson.data) {\n    const de = (item.dates || []).find(d => d[0] === reportDate);\n    const val = de ? (de[1] || 0) : 0;\n\n    if (item.label === 'Sent') {\n      emailsSent = val;\n    } else if (item.label === 'Replied') {\n      responseCount = val;\n    }\n  }\n}\n\nconst bounceJson = $('HTTP Stats Bounce1').item.json;\nconst bounceOk = !!(bounceJson && bounceJson.data);\nconst bounceCount = bounceOk ? (bounceJson.data.bounced || 0) : null;\n\nconst senderJson = $('HTTP Sender Emails1').item.json;\nconst inboxesCount =\n  senderJson &&\n  senderJson.meta &&\n  typeof senderJson.meta.total === 'number'\n    ? senderJson.meta.total\n    : null;\n\nconst leadsJson = $('HTTP Leads1').item.json;\nconst prospectsTotal =\n  leadsJson &&\n  leadsJson.meta &&\n  typeof leadsJson.meta.total === 'number'\n    ? leadsJson.meta.total\n    : null;\n\nconst humanJson = $('HTTP Human Replies1').item.json;\nconst humanRepliesTotal =\n  humanJson &&\n  humanJson.meta &&\n  typeof humanJson.meta.total === 'number'\n    ? humanJson.meta.total\n    : null;\n\nconst autoJson = $('HTTP Automated Replies1').item.json;\nconst automatedRepliesTotal =\n  autoJson &&\n  autoJson.meta &&\n  typeof autoJson.meta.total === 'number'\n    ? autoJson.meta.total\n    : null;\n\nconst prevRow = $('Get Yesterday Totals1').item.json;\n\nconst prevHumanTotal = prevRow ? (Number(prevRow.prev_human_total) || 0) : 0;\nconst prevAutoTotal = prevRow ? (Number(prevRow.prev_auto_total) || 0) : 0;\nconst prevProspectsTotal = prevRow ? (Number(prevRow.prev_prospects_total) || 0) : 0;\nconst prevOooTotal = prevRow ? (Number(prevRow.prev_ooo_total) || 0) : 0;\nconst prevReportDate = prevRow ? String(prevRow.prev_report_date || '').substring(0, 10) : '';\n\nconst humanRepliesCount =\n  humanRepliesTotal === null\n    ? null\n    : Math.max(humanRepliesTotal - prevHumanTotal, 0);\n\nconst automatedRepliesCount =\n  automatedRepliesTotal === null\n    ? null\n    : Math.max(automatedRepliesTotal - prevAutoTotal, 0);\nconst oooCount =\n  automatedRepliesTotal === null\n    ? null\n    : Math.max(automatedRepliesTotal - prevOooTotal, 0);\n\nconst todayMonth = reportDate.substring(0, 7);\nconst prevMonth = prevReportDate ? prevReportDate.substring(0, 7) : '';\n\nlet prospectsCount;\n\nif (prospectsTotal === null) {\n  prospectsCount = null;\n} else if (!prevMonth || prevMonth !== todayMonth) {\n  prospectsCount = prospectsTotal;\n} else {\n  prospectsCount = Math.max(prospectsTotal - prevProspectsTotal, 0);\n}\n\nconst sumSched = (j) => {\n  if (!j || !Array.isArray(j.data)) return null;\n\n  return j.data.reduce((s, it) => {\n    return s + (Number(it.emails_being_sent) || 0);\n  }, 0);\n};\n\nconst scheduleToday = sumSched($('HTTP Schedule Today1').item.json);\nconst scheduleTomorrow = sumSched($('HTTP Schedule Tomorrow1').item.json);\nconst scheduleDayAfter = sumSched($('HTTP Schedule DayAfter1').item.json);\n\n// Use UTC noon to avoid timezone/date boundary issues.\nconst dateObj = new Date(reportDate + 'T12:00:00Z');\n\nconst year = dateObj.getUTCFullYear();\nconst monthNumber = dateObj.getUTCMonth() + 1;\n\nconst getISOWeek = (d) => {\n  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));\n\n  dt.setUTCDate(dt.getUTCDate() + 4 - (dt.getUTCDay() || 7));\n\n  const y0 = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));\n\n  return Math.ceil((((dt - y0) / 86400000) + 1) / 7);\n};\n\nconst weekNumber = getISOWeek(dateObj);\n\nconst fmt = (v) => {\n  return v === null || v === undefined ? 'NULL' : String(v);\n};\n\nconst fmtStr = (v) => {\n  return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n};\n\nconst cols = [\n  'client_id',\n  'report_date',\n  'emails_sent',\n  'response_count',\n  'bounce_count',\n  'inboxes_count',\n  'prospects_count',\n  'prospects_total',\n  'human_replies_count',\n  'human_replies_total',\n  'automated_replies_count',\n  'automated_replies_total',\n  'schedule_today',\n  'schedule_tomorrow',\n  'schedule_day_after',\n  'negative_count',\n  'ooo_count',\n  'ooo_count_total',\n  'mql_count',\n  'me_count',\n  'won_count',\n  'prospects_in_base',\n  'week_number',\n  'month_number',\n  'year',\n].join(', ');\n\nconst valsArr = [\n  fmtStr(client),\n  fmtStr(reportDate) + '::date',\n  fmt(emailsSent),\n  fmt(responseCount),\n  fmt(bounceCount),\n  fmt(inboxesCount),\n  fmt(prospectsCount),\n  fmt(prospectsTotal),\n  fmt(humanRepliesCount),\n  fmt(humanRepliesTotal),\n  fmt(automatedRepliesCount),   \n  fmt(automatedRepliesTotal),   \n  fmt(scheduleToday),\n  fmt(scheduleTomorrow),\n  fmt(scheduleDayAfter),\n  '0',                          \n  fmt(oooCount),               \n  fmt(automatedRepliesTotal),   \n  '0',                          \n  '0',\n  '0',\n  '0',\n  fmt(weekNumber),\n  fmt(monthNumber),\n  fmt(year),\n];\n\n\nconst vals = '(' + valsArr.join(', ') + ')';\n\nconst updateColsBackfill = [\n  'emails_sent',\n  'response_count',\n  'bounce_count',\n  'inboxes_count',\n  'prospects_count',\n  'prospects_total',\n  'human_replies_count',\n  'human_replies_total',\n  'automated_replies_count',\n  'automated_replies_total',\n  'schedule_today',\n  'schedule_tomorrow',\n  'schedule_day_after',\n  'ooo_count',\n  'ooo_count_total',\n];\n\nconst updateColsNormal = [\n  'emails_sent',\n  'response_count',\n  'bounce_count',\n  'inboxes_count',\n  'prospects_count',\n  'prospects_total',\n  'human_replies_count',\n  'human_replies_total',\n  'automated_replies_count',\n  'automated_replies_total',\n  'schedule_today',\n  'schedule_tomorrow',\n  'schedule_day_after',\n  'ooo_count',\n  'ooo_count_total',\n  'week_number',\n  'month_number',\n  'year',\n];\n\nlet updateClause = '';\n\nif (isBackfill) {\n  updateClause = updateColsBackfill\n    .map(c => `${c} = COALESCE(EXCLUDED.${c}, daily_stats.${c})`)\n    .join(', ');\n\n  updateClause += ', week_number = EXCLUDED.week_number';\n  updateClause += ', month_number = EXCLUDED.month_number';\n  updateClause += ', year = EXCLUDED.year';\n} else {\n  updateClause = updateColsNormal\n    .map(c => `${c} = EXCLUDED.${c}`)\n    .join(', ');\n}\n\nconst sql =\n  'INSERT INTO daily_stats (' +\n  cols +\n  ') VALUES ' +\n  vals +\n  ' ON CONFLICT (client_id, report_date) DO UPDATE SET ' +\n  updateClause +\n  ' RETURNING id, client_id, report_date::text AS report_date';\n\nreturn [\n  {\n    json: {\n      sql,\n      client_name: client,\n      report_date: reportDate,\n      is_backfill: isBackfill,\n      emails_sent: emailsSent,\n      response_count: responseCount,\n      bounce_count: bounceCount,\n    },\n  },\n];"
+      }
+    },
+    {
+      "id": "f7d7ca3a-6841-4e68-b1a7-64cc37fbffb6",
+      "name": "Upsert Daily Stats1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1072,
+        -480
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "{{ $json.sql }}"
+      }
+    }
+  ],
+  "connections": {
+    "Get Yesterday Totals1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Transform Metrics1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Automated Replies1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Schedule Today1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Human Replies1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Automated Replies1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Leads1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Human Replies1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Line Stats1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Stats Bounce1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Schedule DayAfter1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Yesterday Totals1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Schedule Today1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Schedule Tomorrow1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Schedule Tomorrow1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Schedule DayAfter1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Sender Emails1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Leads1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Stats Bounce1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Sender Emails1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Line Stats1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Transform Metrics1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Upsert Daily Stats1",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}
