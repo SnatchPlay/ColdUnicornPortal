@@ -17,7 +17,7 @@ architectureDecisions:
 
 triggers:
   - type: schedule
-    detail: "hourly"
+    detail: "hourly at :15"
 
 reads:
   external:

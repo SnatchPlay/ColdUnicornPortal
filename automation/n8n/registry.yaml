@@ -170,6 +170,25 @@ workflows:
     lastRepositorySync: 2026-07-22
     lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
 
+  # Ops. Bound as settings.errorWorkflow on every managed workflow above.
+  - id: automation-failure-recorder
+    name: "[ERR] Automation failure recorder"
+    domain: ops
+    path: automation/n8n/workflows/ops/automation-failure-recorder
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: error
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: Pmz0JjRRuJNdNpSE
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 proved end to end — a deliberate failure produced one integration_sync_runs row
+
   # Bison ingestion — the counters every portal dashboard reads. Imported 2026-07-22 in the same
   # change that repaired them: all three top-level workflows had been failing on the dropped
   # clients.external_* columns (ADR-0012). See processes/outreach/bison-ingestion.md.

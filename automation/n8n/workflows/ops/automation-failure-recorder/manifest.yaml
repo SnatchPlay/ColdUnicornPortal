@@ -1,0 +1,66 @@
+schemaVersion: 1
+
+id: automation-failure-recorder
+name: "[ERR] Automation failure recorder"
+domain: ops
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # it is the only thing that makes a silent failure loud
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+triggers:
+  - type: error
+    detail: "n8n Error Trigger — fires for any workflow whose settings.errorWorkflow points here"
+
+reads:
+  external: []
+  tables: []
+
+writes:
+  external: []
+  tables:
+    - integration_sync_runs  # provider, sync_type='workflow_failure', status='failed'
+  rpcs: []
+  tablesWritten:
+    - integration_sync_runs
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Record Failed Run"
+
+transition:
+  phase: C                   # Supabase only; never had a Sheets equivalent
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · integration_sync_runs"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: >-
+    Built 2026-07-22 after two classes of silent failure surfaced on the same day: three Bison
+    ingestion workflows failing every run for days, and a Supabase branch in child-1 that was never
+    wired to its trigger. Neither produced any signal outside the n8n execution list.
+  reconciliation: null
+  parityEvidence: >-
+    2026-07-22: proved end to end. A throwaway workflow was made to throw; the handler recorded
+    provider=n8n, sync_type=workflow_failure, status=failed, with the workflow name, the failing node
+    and the message. The synthetic row was then deleted.
+
+idempotency:
+  key: "integration_sync_runs UNIQUE (n8n_execution_id) with ON CONFLICT DO UPDATE"
+  notes: >-
+    One row per failed execution. A retried execution keeps the same id and updates in place rather
+    than accumulating duplicates.
+
+retryPolicy:
+  notes: >-
+    None, deliberately. If the recorder itself cannot reach Postgres there is nowhere left to record
+    that, and retrying an error handler risks a loop.
+
+knownViolations: []

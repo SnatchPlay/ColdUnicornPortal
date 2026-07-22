@@ -24,10 +24,11 @@ The dual-write question is answered explicitly rather than skipped.
 ## The four workflows
 
 ```
-hourly    ─ bison-campaign-sync            → campaigns              (UPSERT on external_id)
-every 30m ─ bison-campaign-daily-stats     → campaign_daily_stats   (UPSERT on campaign_id + date)
-hourly    ─ bison-daily-stats-population   ─ per client ─▶ bison-daily-stats-process
-                                                            → daily_stats (UPSERT on client_id + date)
+hourly :15 ─ bison-campaign-sync           → campaigns              (UPSERT on external_id)
+daily 21:30 ─ bison-campaign-daily-stats   → campaign_daily_stats   (UPSERT on campaign_id + date)
+every 2h :26 ─ bison-daily-stats-population ─ per client ─▶ bison-daily-stats-process
+                                                             → daily_stats (UPSERT on client_id + date)
+             + GET /webhook/backfill-daily-stats?targetDate=YYYY-MM-DD
 ```
 
 ## Credentials — the rule that broke this
@@ -101,22 +102,39 @@ Fix: one SQL node per workflow, repointed at `client_sequencers`, **preserving t
 names** (`external_api_key`, `external_workspace_id`) so no downstream node or sub-workflow changed.
 Verified by execution: 16 clients, 390 campaigns, `daily_stats` written for 2026-07-22.
 
-**Still open after the fix:**
+**Closed the same day:**
 
-- **2026-07-21 is a hole** in `daily_stats` and `campaign_daily_stats`. The backfill webhook
-  (`/webhook/backfill-daily-stats`) returns 404 from outside, so backfilling needs another route.
-  Invariant 2 makes this worth doing rather than ignoring.
-- **EvidencePrime dropped out.** It is `Active` but has **no** `client_sequencers` row, so it
-  resolves to nothing where the legacy column used to carry it (17 clients → 16). Its Bison workspace
-  is the one deferred earlier as "ignore 75 and 130". Seeding it is the fix.
-- **Nothing detects this class of failure.** Three active workflows failed every run for days. An
-  error workflow writing `integration_sync_runs` would have caught it on the first run.
+- **`daily_stats` is continuous again.** 2026-07-21 was backfilled and every day since 2026-07-18 now
+  has 17 clients. The backfill webhook was not broken — it is a **GET**, and a POST returns 404,
+  which is what made it look dead.
+- **EvidencePrime is back.** It was `Active` with no `client_sequencers` row at all, so it resolved
+  to nothing where the legacy column used to carry it (17 clients → 16). Seeded from CS PDCA
+  `col_5`/`col_6`; Bison workspace **130** — one of the two deferred as "ignore 75 and 130" — is now
+  mapped, and 17 clients resolve again.
+- **Failures are no longer silent.** [`automation-failure-recorder`](../../../../automation/n8n/workflows/ops/automation-failure-recorder/README.md)
+  is bound as `settings.errorWorkflow` on all 13 managed workflows and writes one
+  `integration_sync_runs` row per failed execution. Proved end to end with a deliberate failure.
+
+**Still open:**
+
+- **`campaign_daily_stats` has a two-day hole: 2026-07-20 and 2026-07-21.** Unlike its sibling this
+  workflow has **no date override and no backfill trigger** — it always writes today — so a day
+  missed while it was broken cannot be recovered by re-running it. Recovering those two days needs a
+  date parameter added first. 2026-07-22 is filled (428 campaigns).
+- **The silent-zero defect still stands.** Both Bison fetches continue on error and store `0`, which
+  invariant 3 calls a lie. The failure recorder does **not** catch this: it fires on workflow
+  failure, and a node with `onError: continueRegularOutput` never fails the workflow.
 
 ## Failure handling
 
-Only the Winnr flows have an error handler (`oF6fP3ea2zglhAop`). Nothing in this process writes
-`integration_sync_runs`, which is why the incident above was invisible. Closing that is the highest
--value change to this process and is independent of any migration.
+Every managed workflow now points `settings.errorWorkflow` at
+[`automation-failure-recorder`](../../../../automation/n8n/workflows/ops/automation-failure-recorder/README.md),
+so a failed run becomes an `integration_sync_runs` row instead of silence. The pre-existing
+`Winnr Sync - Error Handler` (`oF6fP3ea2zglhAop`) stays where it is — it hardcodes
+`provider='winnr'`, so it could not be reused as a general handler.
+
+That is a floor, not a ceiling: it fires on **workflow** failure, and every HTTP node in this process
+uses `onError: continueRegularOutput`, so the silent-zero defect is still invisible to it.
 
 ## Related n8n workflows
 

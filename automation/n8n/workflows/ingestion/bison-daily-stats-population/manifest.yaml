@@ -17,9 +17,9 @@ architectureDecisions:
 
 triggers:
   - type: schedule
-    detail: "hourly"
+    detail: "every 2 hours at :26 (cron 0 26 */2 * * *)"
   - type: webhook
-    detail: "POST /webhook/backfill-daily-stats {targetDate} — no authentication"
+    detail: "GET /webhook/backfill-daily-stats?targetDate=YYYY-MM-DD — no authentication"
 
 reads:
   tables:
@@ -53,7 +53,9 @@ transition:
 
 idempotency:
   key: "delegated to the child — daily_stats UNIQUE (client_id, report_date)"
-  notes: "Safe to re-run for the same date; the backfill webhook exists for exactly that."
+  notes: >-
+    Safe to re-run for the same date; the backfill webhook exists for exactly that. It is a **GET** —
+    a POST returns 404, which is what made it look broken.
 
 retryPolicy:
   notes: "None. A client whose sub-workflow call fails is skipped with no record."

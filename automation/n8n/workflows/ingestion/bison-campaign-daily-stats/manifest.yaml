@@ -17,7 +17,7 @@ architectureDecisions:
 
 triggers:
   - type: schedule
-    detail: "every 30 minutes"
+    detail: "daily at 21:30 (rule: triggerAtMinute 30, default daily field)"
 
 reads:
   external:
@@ -54,7 +54,10 @@ transition:
 
 idempotency:
   key: "campaign_daily_stats UNIQUE (campaign_id, report_date)"
-  notes: "Re-running the same day overwrites the same row with fresher counters."
+  notes: >-
+    Re-running the same day overwrites the same row. But the report date is always TODAY — there is no
+    date override and no backfill trigger, so a day missed while the workflow was broken cannot be
+    recovered by re-running it. 2026-07-20 and 2026-07-21 are lost for this reason.
 
 retryPolicy:
   notes: >-

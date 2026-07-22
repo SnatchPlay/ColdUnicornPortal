@@ -1,8 +1,8 @@
 # n8n migration backlog
 
-Inventory taken 2026-07-22: **33 workflows, 27 active, 13 managed, 20 orphan.**
-(Managed: the four OOO/NRR workflows of §1, all five Aimfox workflows of §5, and the four Bison
-ingestion workflows of §3.)
+Inventory taken 2026-07-22: **34 workflows, 28 active, 14 managed, 20 orphan.**
+(Managed: the four OOO/NRR workflows of §1, all five Aimfox workflows of §5, the four Bison ingestion
+workflows of §3, and the failure recorder built the same day.)
 
 Reproduce with `pnpm n8n:inventory`.
 
@@ -232,5 +232,10 @@ every future inventory noisier.
    *portal* reads, and the portal never reads a spreadsheet in any phase.
    The one exception is **credentials** — per-client API keys in CS PDCA are not business data and
    move to `client_sequencers.api_key` independently, and sooner.
-3. **No error handling outside the Winnr flows.** Only `oF6fP3ea2zglhAop` exists as an error handler.
+3. ~~**No error handling outside the Winnr flows.**~~ **Closed 2026-07-22.**
+   [`automation-failure-recorder`](../../../automation/n8n/workflows/ops/automation-failure-recorder/README.md)
+   is bound as `settings.errorWorkflow` on every managed workflow and writes one
+   `integration_sync_runs` row per failed execution. It is a floor, not a ceiling: it fires on
+   **workflow** failure, so a node with `onError: continueRegularOutput` still fails silently — which
+   is most of the ingestion HTTP nodes. The 20 orphan workflows are still unbound.
 4. **Idempotency is mostly undocumented**, and in the OOO path absent.

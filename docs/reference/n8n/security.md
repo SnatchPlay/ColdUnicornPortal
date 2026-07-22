@@ -84,11 +84,15 @@ deliberately makes this data internal-only and client-scoped via `private.can_ma
 sheet has no equivalent. Closed by the OOO cutover
 ([migration-backlog §1](migration-backlog.md#1-ooo-cutover)).
 
-### 5. No workflow writes through `service_role` RPCs yet — **medium**
+### 5. No workflow writes through `service_role` RPCs yet — **partially closed 2026-07-21/22**
 
 Every ADR-0015 invariant is `SECURITY DEFINER`, `search_path = ''`, `service_role`-only, and correct.
-None of it is reached, because automation still writes a spreadsheet. The security model is sound and
-unused; that gap is the migration.
+The OOO family now reaches it: all four workflows call `upsert_sequencer_contact`, `upsert_reply`,
+`record_ooo_followup` and `cancel_active_ooo_followup` in phase A.
+
+Still unreached for **leads**: `promote_contact_to_lead` has no caller. The Supabase branch inside
+`[child-1]` writes `leads` directly and is not wired to its trigger, so the RPC contract is bypassed
+in design even though nothing runs — see [migration-backlog §2](migration-backlog.md#2-hub-dispatcher).
 
 ### 6. n8n connects to Postgres as a superuser — **high**
 
