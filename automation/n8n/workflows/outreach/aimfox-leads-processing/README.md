@@ -3,8 +3,16 @@
 **Logical ID:** `aimfox-leads-processing` · **Domain:** `outreach` · **Criticality:** high
 **Remote (production):** `4OjNRWLaG2IWK6kd` — `AimFox Leads Processing`
 **Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
-**Phase:** **0 — no Supabase branch.** Imported 2026-07-22, once the literal Aimfox master token moved
-into the `Aimfox Master` credential ([security §7](../../../../../docs/reference/n8n/security.md)).
+**Phase:** **A — branch S live 2026-07-22.**
+
+**Trigger correction (2026-07-22):** this workflow is called by
+[`aimfox-classification`](../aimfox-classification/README.md)'s `Call 'Test aimfox'` node — gated on
+`category=='interested'` — **not** the Bison HUB, as this doc previously (wrongly) said. Verified by
+grepping all 57 live n8n workflows for this workflow's own node id; the only match was
+aimfox-classification. Confirmed against a real execution: the item it receives at `When Called by HUB`
+is aimfox-classification's own raw webhook body, unchanged (its `Edit Fields` node does `jsonOutput:
+{{$('Webhook').item.json}}`) — same `body.event.target.*` shape aimfox-classification's own branch S
+already consumes.
 
 ## Business purpose
 
@@ -46,26 +54,43 @@ Pipedrive, Salesforce or Zoho ([ADR-0010](../../../../../docs/adr/0010-legacy-cr
 | 5 | no retry, no error branch anywhere | a failure part way through leaves a partially written lead, and the CRM may already hold it |
 | 6 | the derived-values code itself flags an ambiguity | when two message templates share an `original_id`, the sequence step cannot be determined; the code detects this (`isTemplateMatchAmbiguous`) and carries on |
 
-## Why this one migrates last
+## Why this one was flagged to migrate last — and why branch S shipped anyway
 
 It writes into the **clients' own CRMs**. Under
 [ADR-0017 §1b](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md) a branch that
 calls an external write endpoint may not simply be duplicated: two branches disagreeing about whether
-a lead is new would put a duplicate into a customer's Salesforce, where we cannot clean it up.
+a lead is new would put a duplicate into a customer's Salesforce, where we cannot clean it up. This
+doc originally called for an A1 shadow (log the intended lead, measure agreement, wire real writes
+later) for exactly that reason.
 
-So it gets the A1 shadow treatment — branch S builds the intended lead, logs it to
-`integration_sync_runs`, and agreement is measured before anything is sent.
+**That risk doesn't apply to what branch S actually does.** Branch S never calls `Call '[HUB] CRMs
+Add/Update Lead Dispatcher'` — that stays branch-L-exclusive, the same way
+[`bison-lead-enrichment`](../bison-lead-enrichment/README.md)'s and
+[`aimfox-classification`](../aimfox-classification/README.md)'s already-shipped branch S never touch
+their workflows' CRM/blacklist calls either. Branch S here only writes Postgres via the RPC contract.
+Confirmed with the user before building (2026-07-22) rather than silently overriding the prior caution.
 
-## What phase A adds, when its turn comes
+## What phase A adds — branch S, live 2026-07-22
 
 ```
-upsert_sequencer_contact(client_sequencer_id, aimfox lead id, …)
-  └─ upsert_reply(…)
-     └─ promote_contact_to_lead(…)   → leads.sequencer_id = …0003 (aimfox)
+Get Workspace Api Key ─┬─ [2] Find workspace in CS PDCA → … (branch L, unchanged)
+                        └─ [S] GET lead info Aimfox (own call, never branch L's)
+                             └─ [S] upsert_sequencer_contact(client_sequencer_id, target.id, target.email, target.first_name, target.last_name)
+                                  └─ [S] upsert_reply(webhook delivery id, event.timestamp, …, 'Interested', event.message)
+                                       └─ [S] Resolve campaign(event.campaign.id)
+                                            └─ [S] promote_contact_to_lead(…)   → leads.sequencer_id = …0003 (aimfox)
 ```
 
 `uq_leads_source_sequencer_contact` then makes defect 3 a database guarantee instead of a spreadsheet
-lookup, and defect 4 disappears with it.
+lookup, and defect 4 disappears with it. Unlike `aimfox-premql-to-pdca`, the message text
+(`event.message`) and campaign id (`event.campaign.id`) are both already inline in the webhook body —
+no extra conversation-fetch calls needed for those two fields.
+
+**Deliberately NOT duplicated:** Lusha and Snov.io. Branch L's elaborate enrichment chain (Lusha →
+Snov.io Local → Snov.io Global fallback) exists to fill phone/company/job-title when Aimfox's own
+profile is thin. Branch S calls only its own `GET lead info Aimfox` (free) for job_title/company_name
+and leaves `phone_number` NULL — not measured, rather than doubling per-lookup vendor spend to prove a
+lead exists.
 
 ## Verification
 
@@ -75,7 +100,9 @@ pnpm n8n:check-drift --id aimfox-leads-processing
 ```
 
 **Never** `execute_workflow` against this on production: it writes to a client spreadsheet, to their
-CRM, and forwards email.
+CRM, and forwards email. Real verification is the first live production execution after this change —
+watch `GET /api/v1/executions?workflowId=4OjNRWLaG2IWK6kd` and confirm a new `sequencer_contacts` /
+`replies` / `leads` row.
 
 ## History · 2026-07-22 — the token now comes from Supabase
 
@@ -104,3 +131,27 @@ Supabase-dependent for credentials — the first real link from this channel to 
 **Behaviour change to know about:** a webhook for a workspace with no `client_sequencers` row now
 resolves to **zero rows** and the run stops silently, where before it errored. Five clients are
 seeded; FitMech has no `external_workspace_id` yet, so its events will not resolve.
+
+## History · 2026-07-22 — branch S added; the trigger claim was wrong
+
+Before wiring branch S, its inputs had to be grounded rather than assumed — this workflow's internal
+code already showed signs of confusion (a dead `[40] Bison: GET /leads/{taggable_id}` node reading
+`data.taggable_id`, a disabled `Edit Fields1` reading `event.workspace_id`/`data.tag_name`, and the live
+`Get Workspace Api Key`/`GET lead info Aimfox` nodes reading a completely different `body.event.target.*`
+shape). Rather than guess which shape is real, the actual caller was found by grepping all 57 live n8n
+workflows for this workflow's own node id (`4OjNRWLaG2IWK6kd`): the only match is
+`aimfox-classification`'s `Call 'Test aimfox'` node, **not** `[HUB] Bison Replies Dispatcher` as this
+doc and the manifest previously said. A real execution (50083) confirmed the payload: aimfox-classification
+forwards its own raw webhook body unchanged, so `body.event.target.*` is the trustworthy shape and the
+`data.tag_name`/`data.taggable_id` code paths are dead weight from an earlier design.
+
+This also resolved the standing "A1 shadow" question: the caution existed to prevent branch S from
+duplicating a CRM write, but branch S was designed to never touch the CRM dispatcher at all (same
+pattern as `bison-lead-enrichment`'s and `aimfox-classification`'s branch S) — so real RPC writes went
+in immediately, confirmed with the user first rather than silently reversing a documented decision.
+
+Same credential-preservation care as `aimfox-premql-to-pdca`'s branch S build applied here too: the raw
+REST `PUT` payload was built from a **live `GET`** (which, for this particular workflow, already
+returned every node's `credentials` object faithfully — unlike `aimfox-premql-to-pdca`, where a plain
+`GET` returned none at all). Verified post-write that all 8 pre-existing credentialed nodes plus the 4
+new Postgres RPC nodes carried the correct credential before calling this done.

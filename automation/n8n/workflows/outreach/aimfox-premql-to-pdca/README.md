@@ -3,8 +3,7 @@
 **Logical ID:** `aimfox-premql-to-pdca` · **Domain:** `outreach` · **Criticality:** high
 **Remote (production):** `s0GqDtCzyLAvVnm1` — `preMGL tag added (Aimfox) -> Add lead to PDCA`
 **Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
-**Phase:** **0 — no Supabase branch.** Imported 2026-07-22, once the literal Aimfox master token
-moved into the `Aimfox Master` credential ([security §7](../../../../../docs/reference/n8n/security.md)).
+**Phase:** **A — branch S live 2026-07-22.**
 
 ## Business purpose
 
@@ -38,23 +37,44 @@ Webhook /preMQL-Aimfox
 | 5 | no retry, no error branch | a failure between enrichment and the sheet write leaves the lead half-created and the notification unsent |
 | 6 | client resolution goes through CS PDCA `col_4` | the client's *spreadsheet id* is the join key, so a client with no sheet cannot receive a lead at all |
 
-## What phase A adds
+## What phase A adds — branch S, live 2026-07-22
 
-Branch S resolves the client from `client_sequencers` on the Aimfox `external_workspace_id` — seeded
-2026-07-22, so this precondition is now met — then:
+Branch S is its **own** call chain, independent of branch L in both directions (ADR-0017 §1a): it makes
+its own `GET lead info Aimfox` / `Search Conversations` / `Get Conversation` calls (never reuses branch
+L's), sharing only the already-Supabase-only `Get Workspace Api Key` node — the same shared-infra
+pattern `aimfox-classification` uses.
 
 ```
-upsert_sequencer_contact(client_sequencer_id, aimfox lead id, …)
-  └─ upsert_reply(the preMQL conversation message, classification 'Interested')
-     └─ promote_contact_to_lead(…)        → leads.sequencer_id = …0003 (aimfox)
+Get Workspace Api Key ─┬─ [2] Find workspace in CS PDCA → … (branch L, unchanged)
+                        └─ [S] GET lead info Aimfox
+                             └─ [S] Search Conversations
+                                  └─ [S] Get Conversation
+                                       └─ [S] upsert_sequencer_contact(client_sequencer_id, lead.id, lead.email, lead.first_name, lead.last_name)
+                                            └─ [S] upsert_reply(webhook delivery id, event.timestamp, …, 'Interested', latest lead message body)
+                                                 └─ [S] Resolve campaign(lead.origins[0].id)
+                                                      └─ [S] promote_contact_to_lead(…) → leads.sequencer_id = …0003 (aimfox)
 ```
 
 That closes defects 2, 3 and 4 at once: `uq_leads_source_sequencer_contact` makes "at most one lead
 per contact" a database fact rather than a spreadsheet lookup, and the lead carries its channel.
 
-**Order matters.** This workflow comes *after*
-[`aimfox-classification`](../aimfox-classification/README.md) in phase A: a lead must hang off a
-stored contact and a stored reply, and today neither exists for LinkedIn.
+**Campaign attribution (task B) turned out to be resolvable for this workflow.** The open question in
+[aimfox-phase-a.md](../../../../../docs/reference/n8n/aimfox-phase-a.md) was whether a preMQL lead could
+carry a real `campaign_id` — the raw webhook body has no campaign reference. But `GET lead info Aimfox`'s
+response does: `lead.origins[0].id` is the same Aimfox campaign UUID
+[`aimfox-campaign-sync`](../../../ingestion/aimfox-campaign-sync/README.md) catalogs — verified by
+cross-referencing a real lead profile response against a real campaign-sync execution (same id, same
+name, "Lipiec | K"). So `[S] Resolve campaign` joins on it and `promote_contact_to_lead` gets a non-NULL
+`campaign_id` whenever the campaign is already in the catalog.
+
+**Deliberately NOT duplicated:** Lusha. Branch L calls Lusha for phone/work-email enrichment; branch S
+does not — phone_number stays NULL (not measured) rather than doubling a per-lookup vendor cost for a
+field this migration doesn't need in order to prove a lead exists. Email/name/company/job-title come
+from Aimfox's own lead profile, which is free.
+
+**Order no longer matters procedurally** — branch S here shares no data with `aimfox-classification`'s
+branch S, it only shares the general design principle (own calls, own credentials resolution). Both
+were built the same day.
 
 ## Verification
 
@@ -64,7 +84,9 @@ pnpm n8n:check-drift --id aimfox-premql-to-pdca
 ```
 
 Do **not** `execute_workflow` against this on production: it appends to a live client spreadsheet and
-sends a notification.
+sends a notification. Real verification is the first live production execution after this change —
+watch `GET /api/v1/executions?workflowId=s0GqDtCzyLAvVnm1` and confirm a new `sequencer_contacts` /
+`replies` / `leads` row.
 
 ## History
 
@@ -99,6 +121,24 @@ same expression (`resolves: true`, `token_length: 36`, `tokens_type: object`).
 
 Consequences: the Aimfox master token is no longer used by this workflow at all, and the flow is
 Supabase-dependent for credentials — the first real link from this channel to the database.
+
+## History · 2026-07-22 — branch S added; the credential-drop trap hit again
+
+A raw REST `PUT` (no n8n MCP this session) that resends the full `nodes` array **strips every native
+node's `credentials` object** unless it is explicitly re-attached — `GET` never returns it, so a
+naive GET→edit→PUT round trip silently produces a live, uncredentialed workflow. It happened here: the
+first `PUT` adding branch S returned `HTTP 400` ("8 nodes have configuration issues") but had **already
+written the graph** — `[2] Find workspace in CS PDCA`, `[4] Check if lead already in Leads sheet`,
+`Update row in sheet` and `Get Workspace Api Key` were live with no credential bound. Fixed by a second
+`PUT`, immediately after, re-attaching `googleSheetsOAuth2Api` (`k9XUOJXc1vb4PgSx`) and `postgres`
+(`ZTq9rOxLMPN5YT2d`) to every node that needed one — including `Get Table ID`, `Create Record`, `Lusha
+Enrichment` and the UniTalk `HTTP Request` node, which the 400 didn't flag but would have broken
+silently at runtime on the same trap this workflow already hit once (see the entry above). No
+production execution fell in the gap between the two `PUT`s (checked via `GET /executions`).
+
+Also: `pnpm n8n:export` failed with *"Workflow is not available in MCP"* — this workflow's
+`settings.availableInMCP` was still `false` (an "imported" default), unlike its already-migrated
+siblings. Flipped to `true` in a settings-only `PUT` before export succeeded.
 
 **Behaviour change to know about:** a webhook for a workspace with no `client_sequencers` row now
 resolves to **zero rows** and the run stops silently, where before it errored. Five clients are

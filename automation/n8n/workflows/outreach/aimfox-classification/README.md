@@ -3,8 +3,10 @@
 **Logical ID:** `aimfox-classification` · **Domain:** `outreach` · **Criticality:** high
 **Remote (production):** `JnvRBXtRNar7ejeM` — `AimFox Classification`
 **Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
-**Phase:** **0 — no Supabase branch.** Imported 2026-07-22, after its two literal secrets moved into
-n8n credentials ([security §7](../../../../../docs/reference/n8n/security.md), §8).
+**Phase:** **A · dual-write**, branch S live since 2026-07-22
+([ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md)). First of the
+four blocked Aimfox lead-adjacent workflows to get one — see
+[aimfox-phase-a.md](../../../../../docs/reference/n8n/aimfox-phase-a.md).
 
 ## Business purpose
 
@@ -21,10 +23,12 @@ vocabulary** the portal already treats as a contract
 Webhook /aimfox-classifier
   └─ Normalize Payload (reply body + the classification prompt)
      └─ OpenAI · classify → {category, confidence, short_reason, language_detected}
-        └─ Parse Classification ─┬─ Get Workspace Api Key → Aimfox blacklist contact
-                                 │     └─ Get contact → If ─┬─ blacklist company
-                                 │                          └─ OpenAI · which company did they name?
-                                 │                             └─ blacklist that company
+        └─ Parse Classification ─┬─ Get Workspace Api Key ─┬─ Aimfox blacklist contact           [L]
+                                 │                          │     └─ Get contact → If ─┬─ blacklist company
+                                 │                          │                          └─ OpenAI · which company?
+                                 │                          │                             └─ blacklist that company
+                                 │                          └─ [S] upsert_sequencer_contact       [S]
+                                 │                               → [S] upsert_reply
                                  └─ Filter1: category = interested → sub-workflow 'Test aimfox'
 ```
 
@@ -54,27 +58,62 @@ profile — or `null`. That is a structural guarantee, not a prompt instruction.
 | 4 | no retry, no error branch | a failed OpenAI call ends the run silently and the reply is never classified |
 | 5 | `Add company to blacklist` (the `If` true branch) is a **terminal** node with an empty output | intentional today, but it means the "company was named in the reply" path and the "current company" path never converge for logging |
 
-Defect 3 is the one phase A closes, and it is the reason this workflow comes before the lead flows:
-`upsert_reply` gives the classification a home, and its UNIQUE on `external_id`
-([`20260722c`](../../../../../supabase/migrations/20260722c_replies_external_id_unique.sql)) makes
-defect 2 disappear as a side effect.
+Defect 3 was the one phase A closes for the Supabase side, and it is why this workflow got branch S
+before the lead flows: `upsert_reply` gives the classification a home, and its UNIQUE on
+`external_id` ([`20260722c`](../../../../../supabase/migrations/20260722c_replies_external_id_unique.sql))
+makes defect 2 disappear as a side effect **for branch S**. Branch L (the blacklist calls) still has
+neither idempotency nor a stored record — defects 2 and 3 remain real for branch L until phase C.
 
-## What phase A adds
+## Branch S — a home for the classification (2026-07-22)
 
-A parallel branch S: resolve the client from `client_sequencers` on the Aimfox
-`external_workspace_id` (seeded 2026-07-22), `upsert_sequencer_contact` for the Aimfox lead id, then
-`upsert_reply` with the classification. **No blacklist call in branch S** — that is a vendor-side
-side effect and belongs to branch L alone until phase C.
+Two Postgres nodes, both `onError: continueRegularOutput` so a Supabase failure cannot stop
+blacklisting (ADR-0017: Supabase failure is non-fatal in phase A):
+
+```
+[S] upsert_sequencer_contact   client_sequencer_id (from Get Workspace Api Key) + the Aimfox
+                                target id (body.event.target.id) as external_contact_id
+[S] upsert_reply                the webhook delivery id (body.id) as external_id, classification
+                                 from Parse Classification, message text from body.event.message
+```
+
+Hangs off `Get Workspace Api Key` — **already** the sole, Supabase-only credential resolution for
+both branches (it replaced a broken Aimfox token-minting call, never a sheet read, so there is no
+Task-0-style coupling risk here: Sheets was never an alternate source for this token). No new
+resolution node was needed; `Get Workspace Api Key` already returns `client_sequencer_id` and
+`client_id` alongside the token.
+
+**No blacklist call in branch S** — that is a vendor-side side effect and belongs to branch L alone
+until phase C. `p_lead_id` is `null` (no lead exists at classification time) and there is no
+`sequencer_daily_stats`-style capacity data here — resolving the contact and giving the reply a home
+is the entire scope of this branch S.
 
 An `OOO` classification here should eventually reach `record_ooo_followup` exactly as the Bison path
 does ([ADR-0015](../../../../../docs/adr/0015-sequencer-contacts-and-ooo-followups.md)) — the model is
-channel-agnostic by design. That is a later step, not part of the first branch S.
+channel-agnostic by design. That is a later step, not part of this branch S.
+
+Shipped 2026-07-22; not yet exercised by a real LinkedIn reply. Verify against the next real webhook
+delivery with the query below — do not `execute_workflow` to force one (see below).
+
+This branch also **unblocks the lead flows**: `aimfox-premql-to-pdca` and `aimfox-leads-processing`
+both need a `sequencer_contacts` row to exist before they can call `promote_contact_to_lead` (process
+invariants 1–3), and this is the first workflow that creates one.
 
 ## Verification
 
 ```bash
 pnpm n8n:validate
 pnpm n8n:check-drift --id aimfox-classification
+```
+
+```sql
+-- branch S output for the last day
+select sc.id, sc.external_contact_id, sc.client_sequencer_id, r.classification, r.created_at
+from public.sequencer_contacts sc
+join public.replies r on r.sequencer_contact_id = sc.id
+join public.client_sequencers cs on cs.id = sc.client_sequencer_id
+join public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'
+where r.created_at > now() - interval '1 day'
+order by r.created_at desc;
 ```
 
 Do **not** `execute_workflow` against this on production: it blacklists real contacts.

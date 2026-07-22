@@ -19,14 +19,22 @@ architectureDecisions:
 
 triggers:
   - type: sub-workflow
-    detail: "called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+    detail: >-
+      called by aimfox-classification's 'Call Test aimfox' node, gated on category=='interested'.
+      NOT the Bison HUB — that claim was wrong, corrected 2026-07-22 by grepping all 57 live n8n
+      workflows for this workflow's own node id (4OjNRWLaG2IWK6kd); the only match was
+      aimfox-classification. Confirmed against a real execution (50083): the item aimfox-classification
+      forwards is its own raw webhook body unchanged (Edit Fields there does `jsonOutput:
+      {{$('Webhook').item.json}}`), so `When Called by HUB` here receives the identical
+      body.event.target.* shape aimfox-classification's own branch S already consumes.
 
 reads:
   tables:
     - client_sequencers      # the client's Aimfox token — replaces the broken minting endpoint
     - sequencers
+    - campaigns              # [S] Resolve campaign — external_id = body.event.campaign.id
   external:
-    - "Aimfox API · GET /leads/{id}"
+    - "Aimfox API · GET /leads/{id} (branch L AND branch S each make their own call)"
     - "Google Sheets · CS PDCA — client row; <client>/Leads — existing lead?"
     - "Lusha · POST /v3/contacts/search-and-enrich"
     - "Snov.io · OAuth + /v2/li-profiles-by-urls (start, then poll result)"
@@ -37,14 +45,23 @@ writes:
     - "UniTalk · POST /api/message/send — notification"
     - "Bison · POST /replies/{id}/forward — forwards the reply to the client's recipients"
     - "sub-workflow '[HUB] CRMs Add/Update Lead Dispatcher' → HubSpot / LiveSpace / Pipedrive / Salesforce / Zoho"
-  tables: []
-  rpcs: []
-  tablesWritten: []
+  tables:
+    - sequencer_contacts     # via upsert_sequencer_contact RPC
+    - replies                # via upsert_reply RPC
+    - leads                  # via promote_contact_to_lead RPC
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - promote_contact_to_lead
+  tablesWritten:
+    - sequencer_contacts
+    - replies
+    - leads
 
 credentials:
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Get Workspace Api Key — resolves client_sequencers.api_key (no longer mints a token)"
+    usedBy: "Get Workspace Api Key, [S] upsert_sequencer_contact, [S] upsert_reply, [S] Resolve campaign, [S] promote_contact_to_lead"
   - alias: "Google Sheets account"
     type: googleSheetsOAuth2Api
     usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, [96] Update Qualification col, Create Record, Get Table ID"
@@ -56,19 +73,27 @@ credentials:
     usedBy: "HTTP Request (notification)"
 
 transition:
-  phase: 0
-  phaseState: none
+  phase: A
+  phaseState: live
   authoritativeSource: sheets
   legacyStore: "Google Sheets · the client's own Leads tab"
   targetStore: "Supabase · sequencer_contacts + leads (sequencer_id = aimfox)"
   design: docs/reference/n8n/aimfox-phase-a.md
   notes: >-
-    The heaviest workflow of the family and the last of the lead flows to migrate: it also drives the
-    CRM dispatcher, so a second branch would risk a duplicate lead in a client's own CRM — a visible,
-    external side effect (ADR-0017 §1b). Needs the A1 shadow treatment.
+    Branch S 2026-07-22: real RPC writes, not a shadow log — a deliberate reversal of this entry's
+    prior "needs A1 shadow" caution, confirmed with the user before building. That caution was written
+    to prevent two branches disagreeing about whether a lead is new and duplicating it into a client's
+    CRM. It doesn't apply here: branch S never calls `Call '[HUB] CRMs Add/Update Lead Dispatcher'` —
+    that stays branch-L-exclusive, exactly as bison-lead-enrichment's and aimfox-classification's
+    already-shipped branch S do. Branch S makes its own GET lead info Aimfox call (never branch L's),
+    hung off the already-Supabase-only Get Workspace Api Key node. Chain:
+    upsert_sequencer_contact -> upsert_reply (classification hardcoded 'Interested', message text
+    straight from the webhook body — this payload carries it inline, unlike aimfox-premql-to-pdca) ->
+    Resolve campaign (body.event.campaign.id, the same catalog aimfox-campaign-sync builds) ->
+    promote_contact_to_lead. No Lusha/Snov.io duplication — phone_number stays NULL (not measured).
   reconciliation: >-
-    At A1: compare branch S's intended (client, Aimfox lead id, qualification) set against the rows
-    branch L actually appended for the same run.
+    One `leads` row per qualifying reply, matched on (client, Aimfox contact id), leads.sequencer_id =
+    aimfox. Compare against branch L's sheet appends per client per day.
   parityEvidence: null
 
 idempotency:

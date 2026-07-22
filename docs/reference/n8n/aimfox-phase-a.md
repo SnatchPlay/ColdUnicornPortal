@@ -5,8 +5,9 @@ Process: [LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md) 
 Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)
 
 **Status 2026-07-22: all five imported and `managed`. Both blockers cleared.
-`aimfox-daily-metrics` is now PHASE A — branch S is live and writing `sequencer_daily_stats`.
-The other four are still phase 0.**
+Four of five are now PHASE A — branch S live on `aimfox-daily-metrics`, `aimfox-classification`,
+`aimfox-premql-to-pdca` and `aimfox-leads-processing`. Only `aimfox-import-to-connection` remains at
+phase 0 — it queues real LinkedIn invites, so it gets the A1 shadow treatment on its own terms.**
 
 > **Two different things put Aimfox data into Supabase on 2026-07-22, and only one of them is
 > progress on this page.** One-off sheet backfills wrote 30 Aimfox-attributed leads and 117
@@ -23,10 +24,10 @@ The other four are still phase 0.**
 | Workflow | Repository | Postgres branch |
 |---|---|---|
 | `aimfox-daily-metrics` | imported, `managed` | **live 2026-07-22** — one row per account per day |
+| `aimfox-classification` | imported, `managed` | **live 2026-07-22** — gives a reply a home; unblocks the two below |
 | `aimfox-import-to-connection` | imported, `managed` | none — last, needs an A1 shadow |
-| `aimfox-classification` | imported, `managed` | none — **second**: gives a reply a home |
-| `aimfox-premql-to-pdca` | imported, `managed` | none — third, needs a stored contact first |
-| `aimfox-leads-processing` | imported, `managed` | none — fourth, also writes the clients' CRMs |
+| `aimfox-premql-to-pdca` | imported, `managed` | none — next, now has a stored contact to attach a lead to |
+| `aimfox-leads-processing` | imported, `managed` | none — after that, also writes the clients' CRMs |
 
 Verified against production: `sequencer_daily_stats` **0 rows before 2026-07-22**; `client_sequencers` with
 `sequencers.key='aimfox'` **5 rows** as of 2026-07-22 (35 `emailbison` rows, all enabled and keyed).
@@ -162,11 +163,32 @@ date range in `transition.parityEvidence`.
 
 ## Order for the rest
 
-1. `aimfox-classification` — no lead writes; the safest of the three blocked workflows to import once
-   its secrets are gone. Its output (`category`) is the LinkedIn analogue of `replies.classification`.
-2. `aimfox-premql-to-pdca` and `aimfox-leads-processing` — both create leads. They need
-   `sequencer_contacts` first (process invariants 1–3): a LinkedIn contact identity exists nowhere
-   today, so there is nothing for a lead to hang off.
-3. `aimfox-import-to-connection` — last. It queues invites to real people, so it gets the A1 shadow
-   treatment, and its idempotency assumption must be tested against the Aimfox API before anything
-   relies on it.
+1. ~~`aimfox-classification`~~ — **done 2026-07-22, and proven with live traffic.** Branch S:
+   `upsert_sequencer_contact` + `upsert_reply`, hung off the already-Supabase-only `Get Workspace Api
+   Key` node. No blacklist call in branch S. First real inbound reply (execution 50518, Bent Iron PL,
+   category `other`) created the **first aimfox `sequencer_contacts` row from live automation**
+   (`ef5bf256…`) and its `replies` row (`f7a20837…`, `lead_id` NULL — not promoted, correct) — see the
+   workflow manifest's `parityEvidence`.
+2. ~~`aimfox-premql-to-pdca` and `aimfox-leads-processing`~~ — **done 2026-07-22, both.** Each got its
+   own RPC chain (`upsert_sequencer_contact` → `upsert_reply` → `Resolve campaign` →
+   `promote_contact_to_lead`), fully independent of branch L in both directions. Neither has been
+   exercised by a real production execution yet (both are new — watch the first one of each).
+
+   Along the way, `aimfox-leads-processing`'s manifest claim about its own trigger turned out to be
+   wrong: it said "called by the Bison HUB," but grepping all 57 live workflows for its own node id
+   showed the real (only) caller is **`aimfox-classification`**'s `Call 'Test aimfox'` node, gated on
+   `category=='interested'`. That also retired this doc's own "A1 shadow" caution for that workflow —
+   it existed to stop branch S duplicating a CRM write, but branch S never calls the CRM dispatcher at
+   all (same as `bison-lead-enrichment`'s and `aimfox-classification`'s branch S), so the risk it named
+   doesn't apply. Confirmed with the user before building rather than silently reversing it.
+
+   **Task B (campaign attribution) turned out to be resolvable, not a design decision to defer.**
+   `aimfox-premql-to-pdca`: its own `GET lead info Aimfox` response carries `lead.origins[0].id` — the
+   same Aimfox campaign UUID [`aimfox-campaign-sync`](../../../automation/n8n/workflows/ingestion/aimfox-campaign-sync/README.md)
+   catalogs (verified by cross-referencing a real lead profile against a real campaign-sync execution:
+   same id, same name, "Lipiec | K"). `aimfox-leads-processing`: its webhook body already carries
+   `event.campaign.id` directly — no extra lookup needed. Both now resolve a real `campaign_id`
+   through `[S] Resolve campaign`; no reply→lead bridge was needed after all.
+3. `aimfox-import-to-connection` — last, and now the only workflow left at phase 0. It queues invites
+   to real people, so it gets the A1 shadow treatment, and its idempotency assumption must be tested
+   against the Aimfox API before anything relies on it.

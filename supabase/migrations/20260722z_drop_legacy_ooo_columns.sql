@@ -18,21 +18,19 @@
 --            or added_to_ooo_campaign
 --            or expected_return_date is not null;
 --      A non-zero count on rows CREATED AFTER the cutover means n8n is still on the old contract.
---   3. The portal build that removed the OOO WRITE paths is deployed: the lead drawer's OOO fields,
---      `mapLeadPatch`'s `expected_return_date`/`added_to_ooo_campaign` entries and the client-portal
---      OOO block are already gone. Apply this migration together with a portal change that deletes
---      the remaining READ-side legacy display, which is intentionally still live until now:
---        · src/app/lib/crm/lead-status.ts — `deriveContactDisposition`,
---          `mapLegacyQualificationToDisposition`
---        · src/app/types/core.ts — `ContactDisposition`
---        · src/app/lib/lead-crm-columns.tsx — the "Disposition" column + `DISPOSITION_LABELS`
---        · supabase/functions/orm-gateway/index.ts — `expected_return_date` /
---          `added_to_ooo_campaign` / `contact_disposition` in `toLeadRecord` and `mapLeadInsert`
---        · src/app/types/core.ts — the same three fields on `LeadRecord`
---      Dropping the columns without that change leaves the read model selecting columns that no
---      longer exist.
+--   3. The portal + gateway READ-side removal is DEPLOYED. This was done together with moving this
+--      file out of migrations/deferred/ (2026-07-22): `deriveContactDisposition`,
+--      `mapLegacyQualificationToDisposition`, the `ContactDisposition` type, the CRM "Disposition"
+--      column + `DISPOSITION_LABELS`, the three `LeadRecord` fields, every `toLeadRecord` /
+--      `mapLeadInsert` / raw-SELECT reference in orm-gateway, the `replyScope` OOO/active filter
+--      (contract + both leads pages), and `OOO`/`NRR` from the `lead_qualification` union + the
+--      drizzle enum are all gone. Dropping the columns while the OLD gateway is still deployed leaves
+--      the read model selecting columns that no longer exist, so the gateway MUST be redeployed
+--      before this runs.
 --
 -- Deploy order overall: additive migrations → gateway + portal → n8n cutover → THIS FILE.
+-- CRITICAL: redeploy the orm-gateway edge function (and ship the portal build) BEFORE applying this;
+-- the live gateway still SELECTs the dropped columns until it is redeployed.
 --
 -- IRREVERSIBLE: the legacy values are dropped. Everything worth keeping was copied into
 -- sequencer_contacts / ooo_followups by the backfill; leads that were OOO/NRR keep their row but

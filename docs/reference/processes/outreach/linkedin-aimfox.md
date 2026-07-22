@@ -1,6 +1,9 @@
 # Process · LinkedIn outreach (Aimfox)
 
-**Domain:** outreach · **Owner:** automation · **Status:** **phase 0 — Sheets only, nothing reaches Supabase**
+**Domain:** outreach · **Owner:** automation · **Status:** **phase A on 4 of 5 workflows (2026-07-22)**
+— `aimfox-daily-metrics`, `aimfox-classification`, `aimfox-premql-to-pdca` and `aimfox-leads-processing`
+all write Supabase via branch S. Only `aimfox-import-to-connection` remains phase 0 (queues real
+LinkedIn invites — needs the A1 shadow treatment).
 **Governing ADRs:** [ADR-0012](../../../adr/0012-multi-sequencer-model.md) (multi-sequencer),
 [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) (contact vs lead),
 [ADR-0017](../../../adr/0017-sheets-to-supabase-dual-write-transition.md) (how it migrates)
@@ -10,12 +13,11 @@
 > running n8n workflow, the workflow is wrong ([ADR-0016](../../../adr/0016-repository-as-automation-source-of-truth.md)).
 
 > **Read this first.** The database models this channel — `sequencers` has an `aimfox` row,
-> `client_sequencers` now carries the per-client Aimfox token (seeded 2026-07-22),
-> `sequencer_daily_stats` was designed against the live metrics workflow
-> ([`20260705`](../../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)).
-> **No workflow writes any of it.** All five read and write Google Sheets exclusively; not one
-> contains a Postgres node or a Supabase URL. The model is specified and unused — that gap *is* the
-> migration, and the credentials are now in place to close it.
+> `client_sequencers` carries the per-client Aimfox token (seeded 2026-07-22). Four of five workflows
+> now write it: `sequencer_daily_stats` (`aimfox-daily-metrics`), `sequencer_contacts` + `replies`
+> (`aimfox-classification`), `campaigns` (`aimfox-campaign-sync`), and `leads` (`aimfox-premql-to-pdca`,
+> `aimfox-leads-processing`) — all since 2026-07-22. Only `aimfox-import-to-connection` still reads and
+> writes Google Sheets exclusively.
 
 ---
 
@@ -133,13 +135,16 @@ preMQL tag  ─ mint workspace token ─ resolve client via CS PDCA
 | Per-client Aimfox token | CS PDCA `col_105` | `client_sequencers.api_key` |
 | Aimfox workspace id | webhook payload only | `client_sequencers.external_workspace_id` |
 | Capacity + volumes | PDCA sheet cells | `sequencer_daily_stats` |
-| LinkedIn contact identity | none — the Aimfox lead id is passed around, never stored | `sequencer_contacts` |
+| LinkedIn contact identity | `sequencer_contacts` — written by `aimfox-classification` branch S since 2026-07-22 (was: none) | `sequencer_contacts` |
 | LinkedIn lead | the client's own Leads spreadsheet | `leads` (`sequencer_id` = aimfox) |
-| Conversation / reply text | fetched per run, never stored | `replies` |
+| Conversation / reply text | `replies` — written by `aimfox-classification` branch S since 2026-07-22 (was: never stored) | `replies` |
+| Campaign catalog | `campaigns` (`sequencer_id` = aimfox) — written by `aimfox-campaign-sync` since 2026-07-22 | `campaigns` |
 
 ## Database entities
 
-All exist; all are empty for this channel.
+All exist and are now written: `sequencer_daily_stats` (capacity), `sequencer_contacts` + `replies`
+(classification branch S), `campaigns` (the catalog), and `leads` (both lead flows' branch S, since
+2026-07-22). Only `aimfox-import-to-connection` still writes Sheets exclusively.
 
 | Entity | Defined in | Notes |
 |---|---|---|
@@ -176,10 +181,11 @@ we do not control ([migration-backlog cross-cutting §2](../../n8n/migration-bac
 | Logical id | Remote | Role | Repository state |
 |---|---|---|---|
 | [`aimfox-daily-metrics`](../../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md) | `sVev5d0N6rtrbcgI` | capacity, every 2h | **imported** |
+| [`aimfox-campaign-sync`](../../../../automation/n8n/workflows/ingestion/aimfox-campaign-sync/README.md) | `t6a53dLc85FOKFqX` | campaign catalog, hourly | **created 2026-07-22** — the LinkedIn `campaigns` rows |
 | [`aimfox-import-to-connection`](../../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md) | `nG6Q4KEGeXk7tBHm` | audience loading, daily 19:00 | **imported** |
 | [`aimfox-classification`](../../../../automation/n8n/workflows/outreach/aimfox-classification/README.md) | `JnvRBXtRNar7ejeM` | LLM reply classification + blacklisting | **imported** |
-| [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md) | `4OjNRWLaG2IWK6kd` | enrich + create lead + CRM dispatch | **imported** |
-| [`aimfox-premql-to-pdca`](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification | **imported** |
+| [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md) | `4OjNRWLaG2IWK6kd` | enrich + create lead + CRM dispatch | **branch S live 2026-07-22** — called by `aimfox-classification`, not the Bison HUB (corrected) |
+| [`aimfox-premql-to-pdca`](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification | **branch S live 2026-07-22** |
 
 All five entered the repository on 2026-07-22. The last three had been unreachable: `pnpm n8n:export`
 refuses a file the scanner rejects ([security.md](../../n8n/security.md) layer 4), and each carried a
@@ -233,8 +239,12 @@ risk-free ([ADR-0017 §1b](../../../adr/0017-sheets-to-supabase-dual-write-trans
    divergence 2 — an imported defect is still a defect (ADR-0016 §1).
 4. Reconciliation: for each `report_date`, the sheet's cells and the table's row agree per client.
    Record the number in the manifest's `transition.parityEvidence`.
-5. Audience loading and lead creation stay single-branch until the capacity flow has parity. They
-   write to a live sending system and to the funnel; they are the A1-shadow cases, not the easy ones.
+5. ~~Lead creation stays single-branch until the capacity flow has parity~~ — **done 2026-07-22.**
+   `aimfox-premql-to-pdca` and `aimfox-leads-processing` both got real branch S writes (not a shadow
+   log): neither calls an external write endpoint from branch S (no CRM dispatch, no sheet write), so
+   the A1-shadow risk this line was written for doesn't apply to them. **Audience loading
+   (`aimfox-import-to-connection`) is the one true A1-shadow case left** — it queues real LinkedIn
+   invites, a live external send that cannot be un-duplicated.
 
 ## Related ADRs
 

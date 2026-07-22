@@ -99,6 +99,27 @@ workflows:
         remoteWorkflowId: sVev5d0N6rtrbcgI
     lastRepositorySync: 2026-07-21
 
+  # The campaign catalog for the LinkedIn channel — mirrors bison-campaign-sync. Created 2026-07-22 so
+  # promote_contact_to_lead can resolve an Aimfox campaign_id instead of leaving it NULL like the 30
+  # backfilled leads. type='outreach' → clients see LinkedIn campaigns (ADR-0003).
+  - id: aimfox-campaign-sync
+    name: "Aimfox campaign sync"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/aimfox-campaign-sync
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # `campaigns` is the spine every campaign metric hangs off
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: t6a53dLc85FOKFqX
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 created inactive; upsert SQL proven in a rolled-back transaction (type/sequencer_id INSERT-only)
+
   - id: aimfox-import-to-connection
     name: "Import leads to Aimfox connection"
     domain: outreach

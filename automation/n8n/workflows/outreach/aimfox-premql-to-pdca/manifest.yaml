@@ -25,8 +25,9 @@ reads:
   tables:
     - client_sequencers      # the client's Aimfox token — replaces the broken minting endpoint
     - sequencers
+    - campaigns              # [S] Resolve campaign — external_id = lead.origins[0].id
   external:
-    - "Aimfox API · GET /leads/{id}, /accounts/{id}/leads/{id}/conversation, /accounts/{id}/conversations/{urn}"
+    - "Aimfox API · GET /leads/{id}, /accounts/{id}/leads/{id}/conversation, /accounts/{id}/conversations/{urn} (branch L AND branch S each make their own calls)"
     - "Google Sheets · CS PDCA — client row: sheet id (col_4)"
     - "Google Sheets · <client>/Leads — does this lead already exist?"
     - "Lusha · POST /v3/contacts/search-and-enrich"
@@ -35,14 +36,23 @@ writes:
   external:
     - "Google Sheets · <client>/Leads — appends a lead row (sheets batchUpdate), or updates the existing one"
     - "UniTalk · POST /api/message/send — notification"
-  tables: []
-  rpcs: []
-  tablesWritten: []
+  tables:
+    - sequencer_contacts     # via upsert_sequencer_contact RPC
+    - replies                # via upsert_reply RPC
+    - leads                  # via promote_contact_to_lead RPC
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - promote_contact_to_lead
+  tablesWritten:
+    - sequencer_contacts
+    - replies
+    - leads
 
 credentials:
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Get Workspace Api Key — resolves client_sequencers.api_key (no longer mints a token)"
+    usedBy: "Get Workspace Api Key, [S] upsert_sequencer_contact, [S] upsert_reply, [S] Resolve campaign, [S] promote_contact_to_lead"
   - alias: "Google Sheets account"
     type: googleSheetsOAuth2Api
     usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, Update row in sheet, Create Record, Get Table ID"
@@ -54,16 +64,23 @@ credentials:
     usedBy: "HTTP Request (notification)"
 
 transition:
-  phase: 0
-  phaseState: none
+  phase: A
+  phaseState: live
   authoritativeSource: sheets
   legacyStore: "Google Sheets · the client's own Leads tab"
   targetStore: "Supabase · sequencer_contacts + leads (sequencer_id = aimfox)"
   design: docs/reference/n8n/aimfox-phase-a.md
   notes: >-
-    Creates leads, so it comes AFTER aimfox-classification in phase A: a lead must hang off a stored
-    contact identity and a stored reply (ADR-0015). Today no LinkedIn contact is stored anywhere, so
-    there is nothing for a lead to reference.
+    Branch S 2026-07-22: its own GET lead info Aimfox / Search Conversations / Get Conversation calls
+    (never branch L's), hung off the already-Supabase-only Get Workspace Api Key node — the same
+    shared-infra pattern aimfox-classification uses. upsert_sequencer_contact -> upsert_reply
+    (classification hardcoded 'Interested', message text from its own conversation fetch) -> Resolve
+    campaign -> promote_contact_to_lead. Campaign attribution (task B) turned out to be resolvable
+    here: the lead profile response's `lead.origins[0].id` is the same Aimfox campaign UUID
+    aimfox-campaign-sync catalogs (verified against a real execution — same id and name appeared in
+    both), so campaign_id is populated, not NULL. No Lusha/phone duplication in branch S — phone_number
+    stays NULL (not measured) rather than doubling vendor cost for a field this workflow doesn't need
+    to attribute a lead.
   reconciliation: >-
     At phase A: one `leads` row per appended sheet row, matched on (client, Aimfox lead id), with
     leads.sequencer_id = the aimfox sequencer. Compare row counts per client per day.

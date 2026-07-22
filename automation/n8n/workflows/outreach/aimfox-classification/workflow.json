@@ -2,6 +2,42 @@
   "name": "AimFox Classification",
   "nodes": [
     {
+      "id": "s-aimfox-upsert-reply-0001",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1344,
+        40
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('Webhook').item.json.body.id, $('Webhook').item.json.body.event.timestamp, $json.sequencer_contact_id, $('Parse Classification').item.json.category, $('Webhook').item.json.body.event.message || null, Boolean($('Parse Classification').item.json.automated_reply), $('Webhook').item.json.body.event.target.email || null ] }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, $4, null, $5, $6, $7, null)::text as reply_id;"
+      }
+    },
+    {
+      "id": "s-aimfox-upsert-sequencer-contact-0001",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1120,
+        40
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_sequencer_id, String($('Webhook').item.json.body.event.target.id), $('Webhook').item.json.body.event.target.email || null, $('Webhook').item.json.body.event.target.first_name || null, $('Webhook').item.json.body.event.target.last_name || null ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
       "id": "507c7f7a-8a35-4cb3-a8ac-00342aa58f81",
       "name": "Add company to blacklist",
       "type": "n8n-nodes-base.httpRequest",
@@ -577,6 +613,11 @@
             "index": 0,
             "node": "Add contact to blacklist",
             "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
           }
         ]
       ]
@@ -669,11 +710,23 @@
           }
         ]
       ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "binaryMode": "separate",
     "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }

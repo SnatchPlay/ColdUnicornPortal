@@ -1,0 +1,87 @@
+schemaVersion: 1
+
+id: aimfox-campaign-sync
+name: "Aimfox campaign sync"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # `campaigns` is the spine every campaign metric hangs off
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0003-client-campaign-visibility.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "hourly at :45 (offset from bison-campaign-sync at :15)"
+
+reads:
+  external:
+    - "Aimfox API · GET /api/v2/campaigns (per client, bearer from client_sequencers.api_key)"
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+
+writes:
+  external: []
+  tables:
+    - campaigns              # UPSERT on external_id; sequencer_id=aimfox, type=outreach INSERT-only
+  rpcs: []
+  tablesWritten:
+    - campaigns
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Aimfox Clients, Upsert Campaigns"
+
+transition:
+  phase: C                   # Supabase only — campaign records have always lived in Supabase
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · campaigns (aimfox rows)"
+  design: docs/reference/n8n/aimfox-phase-a.md
+  notes: >-
+    Not part of the Sheets transition: like bison-campaign-sync, campaign records live in Supabase,
+    never a spreadsheet. The LinkedIn analogue exists because promote_contact_to_lead needs an Aimfox
+    campaign row to resolve a non-NULL campaign_id — the 30 backfilled Aimfox leads all carry NULL
+    campaign_id for lack of one. Reads GET /api/v2/campaigns per client (bearer from
+    client_sequencers.api_key, ADR-0012) and UPSERTs on external_id = the Aimfox campaign UUID. Unlike
+    bison-campaign-sync it does NOT filter clients.status='Active' — it mirrors the authoritative
+    reader ([S] Aimfox clients in aimfox-daily-metrics), which takes every enabled, keyed aimfox
+    client_sequencer. Attribution of leads.campaign_id (task B) is deliberately NOT part of this: the
+    preMQL lead-creation event carries no campaign reference, so that is a separate design decision.
+  reconciliation: null
+  parityEvidence: >-
+    2026-07-22: created inactive; the generated upsert SQL was executed against production inside a
+    rolled-back transaction (multi-row INSERT with a known state and an unknown state), confirming
+    sequencer_id=aimfox and type=outreach survive ON CONFLICT while name/status/database_size update,
+    and that an unrecognised Aimfox state degrades to 'draft'. First live run 2026-07-22 08:45 UTC
+    (execution 50531, success): all 5 keyed aimfox clients looped (Split in Batches ran per-client, no
+    "15 of 42" drop) and upserted 13 campaigns total — Bent Iron 2, ColdUnicorn 2, EvidencePrime 3,
+    FitMech 2, Runmageddon 4. Verified in Supabase: every row sequencer_id=aimfox and type=outreach;
+    status mapping exercised live (active and completed both present, zero draft fallbacks → no
+    unmapped Aimfox states this run). Note: Bent Iron's campaign 65edf532… is the exact campaign_id
+    the first classification reply carried, so the attribution target (task B) now exists as a row.
+
+idempotency:
+  key: "campaigns UNIQUE (external_id) with ON CONFLICT DO UPDATE"
+  notes: >-
+    Genuinely idempotent. type and sequencer_id are set on INSERT only (not in the UPDATE clause),
+    exactly as bison-campaign-sync protects its ooo_followup reclassification — do not "fix" them into
+    the UPDATE, or a later run would silently retype an Aimfox campaign to emailbison.
+
+retryPolicy:
+  notes: >-
+    Fetch Campaigns is onError=continueRegularOutput, so one client's Aimfox failure does not stop the
+    loop; the client is simply skipped that run. Nothing records which client was skipped (same floor
+    as bison-campaign-sync). Workflow-level failures are caught by the bound errorWorkflow.
+
+knownViolations: []

@@ -69,6 +69,150 @@
       }
     },
     {
+      "id": "S3-get-conv",
+      "name": "[S] Get Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1300,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('[S] GET lead info Aimfox').item.json.lead.lead_of[0] }}/conversations/{{ $json.urn }}"
+      }
+    },
+    {
+      "id": "S1-lead-info",
+      "name": "[S] GET lead info Aimfox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/leads/{{ $('Webhook').item.json.body.event.lead.id }}"
+      }
+    },
+    {
+      "id": "S7-promote",
+      "name": "[S] promote_contact_to_lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2100,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const lead = $('[S] GET lead info Aimfox').first().json.lead || {}; const exp = Array.isArray(lead.current_experience) && lead.current_experience.length ? lead.current_experience[0] : {}; return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($('[S] Resolve campaign').first().json.campaign_id || ''), String(lead.email || ''), String(lead.first_name || ''), String(lead.last_name || ''), String(exp.job_title || ''), String(exp.company?.name || ''), '' ]; })() }}"
+        },
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, '')\n         ))) as result;"
+      }
+    },
+    {
+      "id": "S6-resolve-campaign",
+      "name": "[S] Resolve campaign",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1900,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ String($('[S] GET lead info Aimfox').first().json.lead.origins?.[0]?.id || ''), $('Get Workspace Api Key').item.json.client_sequencer_id ] }}"
+        },
+        "query": "select c.id::text as campaign_id\nfrom public.campaigns c\njoin public.client_sequencers cs on cs.client_id = c.client_id and cs.id = $2::uuid\nwhere c.external_id = $1\nlimit 1;"
+      }
+    },
+    {
+      "id": "S2-search-conv",
+      "name": "[S] Search Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('[S] GET lead info Aimfox').item.json.lead.lead_of[0] }}/leads/{{ $('[S] GET lead info Aimfox').item.json.lead.id }}/conversation"
+      }
+    },
+    {
+      "id": "S5-upsert-reply",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1700,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const root = $('[S] Get Conversation').first().json; const messages = Array.isArray(root.messages) ? root.messages : []; const leadMessages = messages.filter(msg => msg?.sender?.id && msg?.account_id && String(msg.sender.id) !== String(msg.account_id) && msg?.body).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)); const messageText = leadMessages[0]?.body || null; return [ $('Webhook').item.json.body.id, $('Webhook').item.json.body.event.timestamp, $json.sequencer_contact_id, messageText, $('Webhook').item.json.body.event.lead.email || null ]; })() }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'Interested', null, $4, false, $5, null)::text as reply_id;"
+      }
+    },
+    {
+      "id": "S4-upsert-contact",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1500,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('Get Workspace Api Key').item.json.client_sequencer_id, String($('Webhook').item.json.body.event.lead.id), $('Webhook').item.json.body.event.lead.email || null, $('Webhook').item.json.body.event.lead.first_name || null, $('Webhook').item.json.body.event.lead.last_name || null ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
       "id": "db37c83e-f55f-40e6-a33b-96b40935bd98",
       "name": "Create Record",
       "type": "n8n-nodes-base.httpRequest",
@@ -956,6 +1100,11 @@
             "index": 0,
             "node": "[2] Find workspace in CS PDCA",
             "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] GET lead info Aimfox",
+            "type": "main"
           }
         ]
       ]
@@ -1043,11 +1192,78 @@
           }
         ]
       ]
+    },
+    "[S] GET lead info Aimfox": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Search Conversations",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Get Conversation": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] promote_contact_to_lead",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Search Conversations": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Get Conversation",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Resolve campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "binaryMode": "separate",
     "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }
