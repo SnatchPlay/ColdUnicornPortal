@@ -30,26 +30,37 @@ writes:
   external:
     - "Google Sheets · CS PDCA — 'Remaining database', 'Invitations limit', schedule volumes"
     - "Google Sheets · 🤖Daily stats — today's row for the client"
-  tables: []
+  tables:
+    - sequencer_daily_stats
   rpcs: []
-  tablesWritten: []          # NOTHING reaches Supabase. sequencer_daily_stats was designed for this
-                             # workflow (20260705) and has never been written.
+  tablesWritten:
+    - sequencer_daily_stats  # branch S, one row per Aimfox account per day
 
 transition:
-  phase: 0                   # Sheets only — no Supabase branch exists yet
-  phaseState: none
+  phase: A                   # dual-write: branch L to Sheets, branch S to Supabase
+  phaseState: live           # branch S published and writing since 2026-07-22
   authoritativeSource: sheets
   legacyStore: "Google Sheets · CS PDCA + 🤖Daily stats"
   targetStore: "Supabase · sequencer_daily_stats"
   design: docs/reference/processes/outreach/linkedin-aimfox.md
   notes: >-
     The safest phase-A candidate in the whole Aimfox family: a pure UPSERT of derived numbers that
-    touches no person and calls no write endpoint. Blocked only on a precondition — client_sequencers
-    has no seeded aimfox rows, so branch S cannot resolve a client_id.
+    touches no person and calls no write endpoint. Branch S is fully parallel — it hangs off the
+    schedule trigger, resolves clients from client_sequencers and makes its OWN Aimfox calls with
+    client_sequencers.api_key, so branch L can be disconnected in one move (ADR-0017 §1a). It fixes
+    rather than ports four defects of branch L: the double-subtracted remaining limit, profile_id
+    taken from a spreadsheet row number, the averaging of account and workspace identifiers, and the
+    first-bucket artefact in the interactions series. It writes nothing when a client has zero
+    accounts, or more than one — see knownRisks in the README.
   reconciliation: >-
-    Once branch S exists, per report_date compare the PDCA cells against the sequencer_daily_stats
-    row for the same client. Record the agreeing date range in parityEvidence.
-  parityEvidence: null
+    Per report_date compare the PDCA cells against the sequencer_daily_stats rows for the same
+    client, summing across profile_id and EXCLUDING profile_id = '__workspace_total__' (those are the
+    2026-07-22 sheet backfill's rollup rows and would double every overlapping day).
+    Expect branch S to disagree with the sheet on remaining limit: branch L double-subtracts.
+  parityEvidence: >-
+    execution 50246 (2026-07-22): 4 of 5 aimfox clients written, one row each, profile_id = the real
+    Aimfox account id. FitMech skipped with an explicit reason (no LinkedIn account connected).
+    A dry-run variant of the same SQL was run first (execution 50244) and predicted the same 4 rows.
 
 idempotency:
   key: "sheet row matched on row_number; a re-run overwrites the same cells with fresher values"
@@ -60,7 +71,10 @@ idempotency:
 
 retryPolicy:
   notes: >-
-    None. No retry, no error branch, no error workflow. A failed API call leaves the sheets partially
-    updated for that client and the run reports success for the others.
+    Branch L has none — no retry, no error branch. A failed API call leaves the sheets partially
+    updated for that client and the run reports success for the others. Every branch S node is
+    onError=continueRegularOutput so a Supabase or Aimfox failure cannot stop branch L
+    (ADR-0017: Supabase failure is non-fatal in phase A), and settings.errorWorkflow now points at
+    automation-failure-recorder.
 
 knownViolations: []

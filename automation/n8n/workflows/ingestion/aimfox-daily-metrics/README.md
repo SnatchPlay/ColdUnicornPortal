@@ -91,3 +91,61 @@ pnpm n8n:check-drift --id aimfox-daily-metrics
 
 Safe to `execute_workflow`? **No.** It writes live PDCA cells that the team reads for capacity
 planning.
+
+## Branch S — the LinkedIn capacity row, per account (live 2026-07-22)
+
+Branch S is **fully parallel**: it hangs off the schedule trigger, resolves its clients from
+`client_sequencers` and makes its own Aimfox calls with `client_sequencers.api_key`. Branch L can be
+disconnected in one move ([ADR-0017 §1a](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md)).
+
+```
+Schedule (2h) ─┬─ [L] CS PDCA → Aimfox → PDCA + Daily stats cells      (unchanged)
+               └─ [S] client_sequencers (aimfox, enabled)
+                     └─ loop client ─ Accounts ─ Account limits ─ Interactions
+                                    ─ Campaigns ─ detail ─ metrics ─ totals
+                        └─ UPSERT sequencer_daily_stats (client, sequencer, profile, date)
+```
+
+First live run (execution 50246): **4 of 5 clients, one row each**, `profile_id` = the real Aimfox
+account id. FitMech wrote nothing and said why.
+
+### Four defects fixed, not ported
+
+[ADR-0016 §1](../../../../../docs/adr/0016-repository-as-automation-source-of-truth.md): an imported
+defect is still a defect.
+
+| # | Branch L | Branch S |
+|---|---|---|
+| 1 | `remaining_limit = daily − buckets[1] − buckets[0]` while `sent_today = buckets[1] − buckets[0]` — `buckets[0]` subtracted twice | `max(daily − sent, 0)`, one subtraction |
+| 2 | `account_id: $('Filter1').item.json.row_number` — a **spreadsheet row number** | the Aimfox account id from `GET /accounts` |
+| 3 | `Summarize` takes the **average of `account_id` and `workspace_id`** — averaging identifiers | no summarize; one row per account, which is what the unique key was built for |
+| 4 | reads `buckets[1] − buckets[0]` from a single-day query | reads the **last** bucket only — see below |
+
+**Defect 4 was found by probing, not by reading.** Asked for a single day, the interactions endpoint
+returns *two* buckets, and the leading one is a boundary artefact that lies: for 2026-07-20 it
+reported `sent=0` where a multi-day query gave `33`. It is currently zero for `sent_connections`,
+which is why branch L's subtraction has not yet produced a visibly wrong number — the bug is real and
+merely unexpressed. For `accepted_connections` the leading bucket is already non-zero (1 where the
+true value was 10).
+
+### What it refuses to write
+
+Interactions are a **workspace-level** series. The per-account filter could not be verified: the
+`account_ids` parameter returns HTTP 500, and `account_id` / `accounts` / `account_urns` all return
+the workspace numbers unchanged — with every client currently owning exactly one account, a working
+filter is indistinguishable from an ignored one.
+
+So branch S writes a row **only when the client has exactly one account**, and otherwise records the
+reason instead of attributing a workspace total to one of several profiles. Today that excludes only
+FitMech, which has none. Before a second account appears anywhere, the filter must be re-probed.
+
+It also writes nothing when `invites_sent` could not be measured — a missing bucket yields no row
+rather than a zero ([bison-ingestion invariant 3](../../../../../docs/reference/processes/outreach/bison-ingestion.md#business-invariants)).
+
+### Reconciling against the sheet
+
+Sum across `profile_id` **excluding `'__workspace_total__'`** — those are the
+[sheet backfill's](../../ops/sheets-aimfox-metrics-backfill/README.md) rollup rows, and they cover
+2026-06-18…07-22, which overlaps branch S's first day. Counting both doubles it.
+
+Expect one honest disagreement: branch L's remaining limit is too low by `buckets[0]`.

@@ -4,8 +4,9 @@ Counterpart of [ooo-phase-a.md](ooo-phase-a.md), for the LinkedIn channel.
 Process: [LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md) ·
 Transition rules: [ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)
 
-**Status 2026-07-22: all five imported and `managed`. Both blockers cleared. Phase 0 — no Aimfox
-workflow writes Supabase yet; the capacity branch is next and is no longer blocked on anything.**
+**Status 2026-07-22: all five imported and `managed`. Both blockers cleared.
+`aimfox-daily-metrics` is now PHASE A — branch S is live and writing `sequencer_daily_stats`.
+The other four are still phase 0.**
 
 > **Supabase now holds Aimfox data, and none of it came from an Aimfox workflow.** Two one-off sheet
 > backfills put it there on 2026-07-22: 30 Aimfox-attributed leads and 117 `sequencer_daily_stats`
@@ -18,13 +19,13 @@ workflow writes Supabase yet; the capacity branch is next and is no longer block
 
 | Workflow | Repository | Postgres branch |
 |---|---|---|
-| `aimfox-daily-metrics` | imported, `managed` | none — **first candidate** |
+| `aimfox-daily-metrics` | imported, `managed` | **live 2026-07-22** — one row per account per day |
 | `aimfox-import-to-connection` | imported, `managed` | none — last, needs an A1 shadow |
 | `aimfox-classification` | imported, `managed` | none — **second**: gives a reply a home |
 | `aimfox-premql-to-pdca` | imported, `managed` | none — third, needs a stored contact first |
 | `aimfox-leads-processing` | imported, `managed` | none — fourth, also writes the clients' CRMs |
 
-Verified against production: `sequencer_daily_stats` **0 rows**; `client_sequencers` with
+Verified against production: `sequencer_daily_stats` **0 rows before 2026-07-22**; `client_sequencers` with
 `sequencers.key='aimfox'` **5 rows** as of 2026-07-22 (35 `emailbison` rows, all enabled and keyed).
 
 ## ~~Blocker 1~~ · the Aimfox organisation token — cleared 2026-07-22

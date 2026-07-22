@@ -2,12 +2,273 @@
   "name": "Get Metrics from Aimfox",
   "nodes": [
     {
+      "id": "-s-account-limits",
+      "name": "[S] Account limits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('[S] Accounts').first().json.accounts?.[0]?.id }}/limits"
+      }
+    },
+    {
+      "id": "-s-accounts",
+      "name": "[S] Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/accounts"
+      }
+    },
+    {
+      "id": "s-clients",
+      "name": "[S] Aimfox clients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -200,
+        900
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "\n-- ADR-0012: per-client Aimfox credentials live here, not in CS PDCA col_105.\nselect cs.api_key, cs.client_id::text as client_id, cs.external_workspace_id as workspace_id, c.name\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'\njoin public.clients    c on c.id = cs.client_id\nwhere cs.enabled and coalesce(cs.api_key, '') <> ''\norder by c.name;"
+      }
+    },
+    {
+      "id": "s-build",
+      "name": "[S] Build row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// One row per Aimfox account per day, from the account's own numbers.\n// Fixes, rather than ports, four defects of branch L (see the workflow README).\nconst client = $('[S] Loop clients').first().json;\nconst accJson = $('[S] Accounts').first().json || {};\nconst accounts = Array.isArray(accJson.accounts) ? accJson.accounts : [];\n\nconst out = { client_id: client.client_id, client: client.name, accounts: accounts.length,\n              skipped: null, payload: '[]' };\n\n// Interactions are a WORKSPACE-level series; the API's per-account filter could not be verified\n// (account_ids 500s, and no client has more than one account to tell a working filter from an\n// ignored one). Attributing a workspace total to one of several accounts would be a guess.\nif (accounts.length !== 1) {\n  out.skipped = accounts.length === 0 ? 'no LinkedIn account connected'\n                                      : `${accounts.length} accounts — cannot attribute workspace interactions`;\n  return [{ json: out }];\n}\nconst account = accounts[0];\n\nconst num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\n\n// The FIRST bucket of a single-day query is a boundary artefact and lies: asked for 2026-07-20 it\n// returned sent=0 where the true value was 33. Only the last bucket describes the requested day.\nconst buckets = $('[S] Interactions').first().json?.buckets || [];\nconst last = buckets.length ? buckets[buckets.length - 1] : null;\nconst invitesSent = last ? num(last.sent_connections) : null;\nconst invitesAccepted = last ? num(last.accepted_connections) : null;\n\n// limit.connect is the WEEKLY cap; the daily allowance is a fifth of it (process invariant).\nconst weeklyCap = num($('[S] Account limits').first().json?.limit?.connect);\nconst dailyLimit = weeklyCap ? Math.floor(weeklyCap / 5) : null;\n\n// Single subtraction. Branch L computes daily - buckets[1] - buckets[0] and double-counts.\nconst remaining = (dailyLimit === null || invitesSent === null)\n  ? null : Math.max(dailyLimit - invitesSent, 0);\n\n// Remaining database = this account's ACTIVE campaigns, audience minus already-sent.\nlet remainingDb = null;\nconst details = [];\ntry {\n  for (const it of $input.all()) {\n    const j = it.json || {};\n    if (!j || j.error || !j.metrics) continue;\n    details.push(j);\n  }\n} catch (e) { /* no campaign items */ }\nif (details.length) {\n  remainingDb = details.reduce((s, d) => s + Math.max(num(d.audience_size) - num(d.sent_connections), 0), 0);\n}\n\nconst reportDate = $now.toFormat('yyyy-MM-dd');\nout.payload = JSON.stringify([{\n  client_id: client.client_id,\n  profile_id: String(account.id),\n  report_date: reportDate,\n  invites_sent: invitesSent,\n  invites_accepted: invitesAccepted,\n  invite_limit: weeklyCap || null,\n  invite_limit_remaining: remaining,\n  remaining_database_size: remainingDb,\n  schedule_today: remaining,\n  schedule_tomorrow: dailyLimit,\n  schedule_day_after: dailyLimit,\n}]);\nreturn [{ json: out }];\n"
+      }
+    },
+    {
+      "id": "-s-campaign-detail",
+      "name": "[S] Campaign detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.id }}"
+      }
+    },
+    {
+      "id": "-s-campaign-metrics",
+      "name": "[S] Campaign metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.campaign?.id }}/metrics"
+      }
+    },
+    {
+      "id": "s-merge",
+      "name": "[S] Campaign totals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "\n// pairs each campaign's audience with its sent count, keeping only ACTIVE ones\nconst det = $('[S] Campaign detail').all();\nconst out = [];\n$input.all().forEach((it, i) => {\n  const m = it.json?.metrics; const c = det[i]?.json?.campaign;\n  if (!m || !c) return;\n  if (String(c.state || '').toUpperCase() !== 'ACTIVE') return;\n  out.push({ json: { metrics: true, audience_size: c.audience_size, sent_connections: m.sent_connections } });\n});\nreturn out.length ? out : [{ json: {} }];"
+      }
+    },
+    {
+      "id": "-s-campaigns",
+      "name": "[S] Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/campaigns"
+      }
+    },
+    {
+      "id": "-s-interactions",
+      "name": "[S] Interactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('[S] Loop clients').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "bucket",
+              "value": "1 day"
+            },
+            {
+              "name": "from",
+              "value": "={{ $now.startOf('day').toMillis() }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $now.endOf('day').toMillis() }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "sendQuery": true,
+        "url": "https://api.aimfox.com/api/v2/analytics/interactions"
+      }
+    },
+    {
+      "id": "s-loop",
+      "name": "[S] Loop clients",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        20,
+        900
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "s-split",
+      "name": "[S] Split campaigns",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "fieldToSplitOut": "campaigns",
+        "options": {}
+      }
+    },
+    {
+      "id": "s-write",
+      "name": "[S] Upsert sequencer_daily_stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2040,
+        1020
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.payload }}"
+        },
+        "query": "with p as (select $1::jsonb as j),\nsrc as (\n  select (r->>'client_id')::uuid                as client_id,\n         nullif(r->>'profile_id','')            as profile_id,\n         (r->>'report_date')::date              as report_date,\n         (r->>'invites_sent')::int              as invites_sent,\n         (r->>'invites_accepted')::int          as invites_accepted,\n         (r->>'invite_limit')::int              as invite_limit,\n         (r->>'invite_limit_remaining')::int    as invite_limit_remaining,\n         (r->>'remaining_database_size')::int   as remaining_database_size,\n         (r->>'schedule_today')::int            as schedule_today,\n         (r->>'schedule_tomorrow')::int         as schedule_tomorrow,\n         (r->>'schedule_day_after')::int        as schedule_day_after\n  from p, jsonb_array_elements(p.j) r\n  where nullif(r->>'profile_id','') is not null\n    and (r->>'invites_sent') is not null        -- never write a row we could not measure\n)\n, ins as (\n  insert into public.sequencer_daily_stats (\n    id, client_id, sequencer_id, profile_id, report_date,\n    invites_sent, invites_accepted, invite_limit, invite_limit_remaining,\n    remaining_database_size, schedule_today, schedule_tomorrow, schedule_day_after, created_at)\n  select gen_random_uuid(), s.client_id,\n         '00000000-0000-4000-a000-000000000003'::uuid,   -- sequencers.key = 'aimfox'\n         s.profile_id, s.report_date,\n         s.invites_sent, s.invites_accepted, s.invite_limit, s.invite_limit_remaining,\n         s.remaining_database_size,\n         coalesce(s.schedule_today, 0), coalesce(s.schedule_tomorrow, 0), coalesce(s.schedule_day_after, 0),\n         now()\n  from src s\n  on conflict (client_id, sequencer_id, profile_id, report_date) do update set\n    invites_sent            = excluded.invites_sent,\n    invites_accepted        = excluded.invites_accepted,\n    invite_limit            = excluded.invite_limit,\n    invite_limit_remaining  = excluded.invite_limit_remaining,\n    remaining_database_size = excluded.remaining_database_size,\n    schedule_today          = excluded.schedule_today,\n    schedule_tomorrow       = excluded.schedule_tomorrow,\n    schedule_day_after      = excluded.schedule_day_after\n  returning id, profile_id\n)\nselect (select count(*) from src) as candidates,\n       (select count(*) from ins) as written,\n       (select string_agg(profile_id, ',') from ins) as profiles;\n"
+      }
+    },
+    {
       "id": "4e7c027e-f565-4ecf-b5de-61986b04ec9d",
       "name": "Aggregate1",
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        2480,
+        2176,
         -176
       ],
       "parameters": {
@@ -21,7 +282,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1600,
+        1504,
         -272
       ],
       "alwaysOutputData": false,
@@ -36,7 +297,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1600,
+        1504,
         -80
       ],
       "alwaysOutputData": false,
@@ -51,7 +312,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2928,
+        2624,
         -176
       ],
       "parameters": {
@@ -65,7 +326,7 @@
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.3,
       "position": [
-        928,
+        832,
         -272
       ],
       "alwaysOutputData": false,
@@ -99,8 +360,8 @@
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.3,
       "position": [
-        -48,
-        -192
+        -64,
+        64
       ],
       "parameters": {
         "conditions": {
@@ -133,7 +394,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        928,
+        832,
         -80
       ],
       "alwaysOutputData": false,
@@ -157,7 +418,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        480,
+        384,
         -80
       ],
       "onError": "continueErrorOutput",
@@ -181,7 +442,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1152,
+        1056,
         -272
       ],
       "alwaysOutputData": false,
@@ -205,7 +466,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1376,
+        1280,
         -272
       ],
       "alwaysOutputData": false,
@@ -229,7 +490,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1376,
+        1280,
         -80
       ],
       "alwaysOutputData": false,
@@ -270,8 +531,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        -272,
-        -192
+        -288,
+        64
       ],
       "parameters": {
         "documentId": {
@@ -305,7 +566,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        3376,
+        3072,
         -176
       ],
       "parameters": {
@@ -344,7 +605,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        480,
+        384,
         -272
       ],
       "notesInFlow": false,
@@ -372,7 +633,7 @@
       "typeVersion": 3,
       "position": [
         160,
-        -192
+        64
       ],
       "parameters": {
         "options": {}
@@ -384,7 +645,7 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        2256,
+        1952,
         -176
       ],
       "parameters": {}
@@ -396,7 +657,7 @@
       "typeVersion": 1.3,
       "position": [
         -512,
-        -192
+        64
       ],
       "parameters": {
         "rule": {
@@ -415,7 +676,7 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        704,
+        608,
         -272
       ],
       "parameters": {
@@ -430,7 +691,7 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        704,
+        608,
         -80
       ],
       "alwaysOutputData": false,
@@ -446,7 +707,7 @@
       "type": "n8n-nodes-base.summarize",
       "typeVersion": 1.1,
       "position": [
-        1824,
+        1728,
         -272
       ],
       "alwaysOutputData": false,
@@ -476,7 +737,7 @@
       "type": "n8n-nodes-base.summarize",
       "typeVersion": 1.1,
       "position": [
-        1152,
+        1056,
         -80
       ],
       "alwaysOutputData": false,
@@ -498,7 +759,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        2704,
+        2400,
         -176
       ],
       "parameters": {
@@ -768,7 +1029,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        3152,
+        2848,
         -176
       ],
       "parameters": {
@@ -1038,7 +1299,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        3600,
+        3296,
         -176
       ],
       "parameters": {
@@ -1404,8 +1665,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        3824,
-        -112
+        3520,
+        -104
       ],
       "parameters": {
         "amount": 30
@@ -1616,6 +1877,11 @@
             "index": 0,
             "node": "Get row(s) in sheet",
             "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Aimfox clients",
+            "type": "main"
           }
         ]
       ]
@@ -1707,10 +1973,145 @@
           }
         ]
       ]
+    },
+    "[S] Account limits": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Interactions",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Accounts": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Account limits",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Aimfox clients": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Loop clients",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Build row": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Upsert sequencer_daily_stats",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Campaign detail": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Campaign metrics",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Campaign metrics": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Campaign totals",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Campaign totals": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Build row",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Split campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Interactions": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Loop clients": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "[S] Accounts",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Split campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Campaign detail",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Upsert sequencer_daily_stats": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Loop clients",
+            "type": "main"
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }
