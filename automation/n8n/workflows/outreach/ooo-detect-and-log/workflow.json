@@ -118,7 +118,7 @@
     },
     {
       "id": "39174d21-c4f3-452e-b275-9edd4829e3b1",
-      "name": "[326] Set last_reply (oldest by date_received)",
+      "name": "[326] Set last_reply (newest by date_received)",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
@@ -132,7 +132,7 @@
               "id": "last_reply",
               "name": "last_reply",
               "type": "object",
-              "value": "={{ \n  $input.all()\n    .map(item => item.json)\n    .sort((a, b) => new Date(a.date_received) - new Date(b.date_received))[0]\n}}"
+              "value": "={{ \n  $input.all()\n    .map(item => item.json)\n    .sort((a, b) => new Date(b.date_received) - new Date(a.date_received))[0]\n}}"
             }
           ]
         },
@@ -227,11 +227,11 @@
             }
           ],
           "value": {
-            "Expected Return Date": "={{ $json.expected_return_date || $now.plus({ days: 14 }).toFormat(\"yyyy-LL-dd\") }}",
-            "Formatted Expected Date": "={{ ($json.expected_return_date ? DateTime.fromISO($json.expected_return_date).format('yyyy-MM-dd').toDateTime().toSeconds() : $now.plus({ days: 14 })).format('yyyy-MM-dd').toDateTime().toSeconds()}}",
+            "Expected Return Date": "={{ $json.output?.[0]?.content?.[0]?.text?.return_date || $now.plus({ days: 14 }).toFormat(\"yyyy-LL-dd\") }}",
+            "Formatted Expected Date": "={{ ($json.output?.[0]?.content?.[0]?.text?.return_date ? DateTime.fromISO($json.output[0].content[0].text.return_date).format('yyyy-MM-dd').toDateTime().toSeconds() : $now.plus({ days: 14 })).format('yyyy-MM-dd').toDateTime().toSeconds()}}",
             "Gender": "={{ $('[318] Bison: GET /leads/{taggable_id}').item.json.data.custom_variables.find(item => item.name=='gender').value }}",
-            "LeadID": "={{ $('[326] Set last_reply (oldest by date_received)').item.json.last_reply.data[0].lead_id }}",
-            "ReplyID": "={{ $('[326] Set last_reply (oldest by date_received)').item.json.last_reply.data[0].id }}",
+            "LeadID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].lead_id }}",
+            "ReplyID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].id }}",
             "WorkspaceID": "={{ $(\"When Called by HUB\").first().json.event.workspace_id }}"
           }
         },
@@ -369,7 +369,7 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, $('[S] Extract expected return date').first().json.returnDate || null, ($('[S] Extract expected return date').first().json.returnDate ? 'reply_parsed' : 'fallback') ] }}"
+          "queryReplacement": "={{ (() => { const rd = $('[S] Extract expected return date').first().json.output?.[0]?.content?.[0]?.text?.returnDate || null; return [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, rd, rd ? 'reply_parsed' : 'fallback']; })() }}"
         },
         "query": "select id::text as followup_id, status::text, skip_reason::text, expected_return_date::text, scheduled_for::text, date_source::text, routing_key::text from public.record_ooo_followup($1::uuid, $2::uuid, $3::date, null, $4)"
       }
@@ -518,7 +518,7 @@
         [
           {
             "index": 0,
-            "node": "[326] Set last_reply (oldest by date_received)",
+            "node": "[326] Set last_reply (newest by date_received)",
             "type": "main"
           }
         ]
@@ -535,7 +535,7 @@
         ]
       ]
     },
-    "[326] Set last_reply (oldest by date_received)": {
+    "[326] Set last_reply (newest by date_received)": {
       "main": [
         [
           {
@@ -626,6 +626,8 @@
   },
   "settings": {
     "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }

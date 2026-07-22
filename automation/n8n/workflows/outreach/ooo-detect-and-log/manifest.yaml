@@ -57,10 +57,23 @@ transition:
     workflow was published. Verified on real data from a manual run: record_ooo_followup returned
     status=pending, routing_key=male, a resolved target_campaign_id, expected_return_date=NULL and
     scheduled_for=today+2 with date_source=fallback — i.e. the fallback landed in scheduled_for and
-    NOT in expected_return_date (ADR-0015 §2).
+    NOT in expected_return_date (ADR-0015 §2). That single manual run couldn't distinguish "correctly
+    detected no date" from "can never read a date" — and it was the latter. Corrected 2026-07-22: the
+    `blockedBy` claim below that "branch S derives its own date, so defect 9 doesn't block S" was wrong.
+    Checked against all 66 `ooo_followups` rows written up to that point — 100% had
+    `date_source='fallback'`, including executions where the LLM node had demonstrably returned a real
+    date (verified from raw execution data, not assumed). `[S] record_ooo_followup` read
+    `$json.returnDate` off `[S] Extract expected return date`'s output, but the real value nests at
+    `output[0].content[0].text.returnDate` — the same class of bug defect 9 named for branch L, just
+    not yet found in branch S. Fixed on both consumers 2026-07-22 (workflow README, defect 9), and
+    proven on the first real event after the fix (execution 51232): both branches' LLM call returned
+    "2026-07-24", `[327]` wrote it to the sheet instead of the today+14 fallback, and
+    record_ooo_followup produced ooo_followups' first-ever date_source='reply_parsed' row.
   blockedBy:
-    - "defect 9 (branch L only) — [327] and the removed leads node read the LLM output with incompatible shapes; branch S derives its own date, so this no longer blocks S"
-    - "defect 5 — the sheet append is unconditional; must become append-or-update on a stable key or the two stores diverge by construction"
+    - "~~defect 9~~ — fixed 2026-07-22 on both branches, see goLive above"
+    - "~~defect 8~~ — fixed 2026-07-22: [326] now sorts newest-first, matching branch S"
+    - "~~defect 5 (sheet append idempotency)~~ — decided 2026-07-22 won't-fix (branch L only, disconnected at phase C); not a blocker. See README defect 5."
+    - "reconciliation not built yet — the real entry condition for phase B (backlog §1 item 6)"
   reconciliation: null          # required to leave phase A; see ADR-0017 §5
   parityEvidence: null
 
@@ -134,9 +147,10 @@ knownViolations:
     node: "[327] Add OOO Leads row"
     reason: >-
       Branch L still writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the
-      LLM parsed none. Left as-is deliberately: branch L must keep behaving exactly as it did during
+      LLM parses none. Left as-is deliberately: branch L must keep behaving exactly as it did during
       phase A, and changing it would invalidate the very comparison phase A exists to make. Branch S
-      does the right thing — NULL expected_return_date, fallback only in scheduled_for. Closed when
-      branch L is disconnected at phase C.
+      does the right thing — NULL expected_return_date, fallback only in scheduled_for — as of
+      2026-07-22, once its own accessor bug was fixed (it previously always fell back too; see
+      transition.goLive). Closed when branch L is disconnected at phase C.
     trackedIn: docs/reference/n8n/ooo-phase-a.md
     expires: 2026-10-31

@@ -35,7 +35,7 @@ The fields this workflow actually reads:
 When Called by HUB ─┬─▶ [325] Find workspace in CS PDCA (Sheets, retry 5×5s)
                     │        └─▶ [318] Bison GET /leads/{id}
                     │              └─▶ [322] Bison GET /leads/{id}/replies
-                    │                    └─▶ [326] Set last_reply
+                    │                    └─▶ [326] Set last_reply (newest by date_received)
                     │                          └─▶ [317] gpt-5-mini: extract return date
                     │                                ├─▶ [327] Append row to "OOO Leads" sheet
                     │                                └─▶ Update rows in a table (public.leads)
@@ -56,6 +56,12 @@ When Called by HUB ─┬─▶ [325] Find workspace in CS PDCA (Sheets, retry 5
    non-null `expected_return_date`.** This write has never landed. Treat the Postgres branch as
    non-functional, not as a second source of truth.
 
+   **Update 2026-07-22: branch S is no longer non-functional — it now writes `ooo_followups`.** 66
+   rows exist as of this check, all through `record_ooo_followup`, not the direct write above (which
+   remains dead and is still the cutover gate). The earlier "OOO episode gap" (`ooo_followups`
+   apparently stuck at 0 despite `sequencer_contacts`/`replies` growing) had already closed by the time
+   it was re-checked — the migration-backlog entry describing it as open was stale.
+
 ## Known defects
 
 Each is registered in `manifest.yaml:knownViolations` (so `pnpm n8n:validate` reports it as accepted
@@ -64,22 +70,31 @@ debt with an expiry) except where noted.
 | # | Defect | Consequence |
 |---|---|---|
 | 1 | Writes `leads.qualification='OOO'` + `leads.expected_return_date` directly | Contradicts ADR-0015; both are dropped by the deferred `20260722z` migration. **This node is the cutover gate.** |
-| 2 | `Expected Return Date` falls back to `$now.plus({days:14})` when the LLM parses none | Stores a guess in a field read as a fact (ADR-0015 §2). Also inconsistent with the RPC fallback of *today + 2*. |
+| 2 | `Expected Return Date` falls back to `$now.plus({days:14})` when the LLM parses none | Stores a guess in a field read as a fact (ADR-0015 §2). Also inconsistent with the RPC fallback of *today + 2*. Still true when the LLM genuinely finds no date — accepted, expires 2026-10-31. Until 2026-07-22 this fired on **every** event regardless (see defect 9); that part is now fixed. |
 | 3 | `Select rows from a table` (`client_sequencers`) is a **dead-end leaf** | The client is resolved and then discarded, so defect 4 has nothing to scope by. |
 | 4 | `leads` is matched on `external_id` **alone** | Not scoped by client/workspace. Two workspaces sharing a Bison lead id would cross-write. ADR-0015's scoped identity `(client_sequencer_id, external_contact_id)` exists precisely for this. |
-| 5 | **No idempotency.** The sheet append is unconditional | A redelivered `TAG_ATTACHED` writes a duplicate OOO row. |
+| 5 | **No idempotency.** The sheet append is unconditional | A redelivered `TAG_ATTACHED` writes a duplicate OOO row. **Decided 2026-07-22: won't-fix — do not re-raise.** Branch L only (branch S has real idempotency via `record_ooo_followup`'s partial unique indexes + `upsert_reply`'s `external_id` uniqueness). Branch L is the Google Sheets side that gets disconnected outright at phase C (ADR-0017); building append-or-update logic against a system on its way out, for a symptom that is an occasional duplicate row in a human-reviewed spreadsheet, is not worth it. Re-raise only with evidence the duplicates cause wrong re-enrolments, not just visual noise. |
 | 6 | No error branch on the Bison calls, the LLM call or either write | A failure drops the OOO event silently — there is nowhere that records "this one failed". |
 | 7 | The Bison API key travels from a Google Sheet cell into an `Authorization` header expression | Per-client API keys live in a spreadsheet rather than `client_sequencers.api_key`. Tracked in [security.md](../../../../../docs/reference/n8n/security.md), not in `knownViolations` (it is not a rule the offline validator can express). |
-| 8 | `[326]` is named "Set last_reply (**oldest** by date_received)" and does sort **ascending** | Takes the *oldest* reply, not the newest. For a contact with several replies the LLM is fed the wrong message. Name and behaviour agree; both look wrong. Not yet accepted — needs a product decision, see the process doc. |
-| 9 | The two branches read `[317]`'s output with **incompatible shapes** | Sheet: `$json.expected_return_date`. Postgres: `$json.output[0].content[0].text.returnDate`. Both consume the same node, so at most one can be correct — and the production evidence (0 rows written) says the Postgres one is not. |
+| 8 | ~~`[326]` sorted **ascending** and took the oldest reply~~ — **fixed 2026-07-22** | Branch L's `[326]` now sorts **descending** and takes the newest reply (renamed to "Set last_reply (**newest** by date_received)", comparator flipped to `new Date(b…) - new Date(a…)`), matching branch S's `[S] Pick newest OOO reply`, which was already correct. For a contact with several replies the newest is the current OOO auto-reply, so both branches now feed the LLM the right message. |
+| 9 | ~~The two branches read `[317]`'s output with incompatible shapes~~ — **fixed 2026-07-22** | Both `[327] Add OOO Leads row` and `[S] record_ooo_followup` read a flat field (`$json.expected_return_date` / `$json.returnDate`) that never existed — the real langchain-openai response nests it at `output[0].content[0].text.{return_date\|returnDate}`. Neither consumer path could ever have worked. |
 
-**Open question raised by defect 9.** If `$json.expected_return_date` is *also* undefined, then the
-`|| $now.plus({days:14})` fallback fires on every event and the gpt-5-mini extraction is decorative —
-every OOO contact would be scheduled exactly 14 days out. This is checkable and not yet checked:
-read the `Expected Return Date` column of the `OOO Leads` sheet and see whether the values cluster on
-`created + 14d`. Resolve it before porting any extraction logic to the RPC path, or the cutover will
-faithfully reproduce a broken behaviour. Tracked in
-[migration-backlog.md §1](../../../../../docs/reference/n8n/migration-backlog.md#1-ooo-cutover).
+**Defect 9 resolved, not just described.** The open question this defect raised ("is the fallback
+firing on every event, or only when the LLM genuinely finds nothing?") was checked against real
+production data, not assumed: of the 66 `ooo_followups` rows written before the fix, **all 66** had
+`date_source='fallback'` — including executions where `[317]`/`[S] Extract expected return date` had
+demonstrably returned a real date (verified by pulling `GET /executions/{id}?includeData=true` and
+reading the raw LLM output directly). The gpt-5-mini extraction was 100% decorative on both branches,
+not "correctly falling back when the AI found nothing." Fixed on both consumers by reading the correct
+nested path (`$json.output?.[0]?.content?.[0]?.text?.return_date`, with the equivalent `returnDate` key
+for branch S) — a targeted accessor fix, not a change to branch L's design.
+
+**Proven, not just patched.** Execution 51232 (2026-07-22 13:49 UTC, the first real event after the
+fix) — the LLM returned `"2026-07-24"` on both branches, `[327]` wrote `2026-07-24` into the sheet
+(not the `2026-08-05` today+14 fallback), and `[S] record_ooo_followup` produced
+`ae1abbc8-351d-40f5-b481-8e0470a3f5b9` with `expected_return_date="2026-07-24"`,
+`date_source='reply_parsed'` — the first `reply_parsed` row `ooo_followups` has ever had (69
+`fallback` / 1 `reply_parsed` as of this write).
 
 ## Migration
 
