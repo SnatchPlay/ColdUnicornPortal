@@ -297,3 +297,40 @@ workflows:
       production:
         remoteWorkflowId: 1hHbU2hYYcsktLUP
     lastRepositorySync: 2026-07-21
+
+  # One-off Sheets → Supabase migrations. Ran once on 2026-07-22, then deactivated.
+  # Kept under repository control because they are the only record of how the rows got there.
+  # docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  - id: sheets-lead-backfill
+    name: "[BACKFILL] Sheets → Supabase · leads"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-lead-backfill
+    businessProcess: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+    owner: automation
+    lifecycle: managed
+    status: deprecated
+    criticality: medium
+    trigger: manual
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: KoLN4bU7qe7RwnGT
+    lastRepositorySync: 2026-07-22
+
+  - id: sheets-aimfox-metrics-backfill
+    name: "[BACKFILL] Sheets → Supabase · Aimfox daily metrics"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-aimfox-metrics-backfill
+    businessProcess: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+    owner: automation
+    lifecycle: managed
+    status: deprecated
+    criticality: medium
+    trigger: manual
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: YLfQZBprSRIT6hLm
+    lastRepositorySync: 2026-07-22

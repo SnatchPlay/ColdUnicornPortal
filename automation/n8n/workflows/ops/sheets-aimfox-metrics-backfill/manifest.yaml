@@ -1,0 +1,80 @@
+schemaVersion: 1
+
+id: sheets-aimfox-metrics-backfill
+name: "[BACKFILL] Sheets → Supabase · Aimfox daily metrics"
+domain: ops
+owner: automation
+lifecycle: managed
+status: deprecated        # a completed one-off: it ran once on 2026-07-22 and must not run again.
+                          # 'deprecated' is the closest value the schema allows — there is no 'completed'.
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+  - docs/adr/0012-multi-sequencer-model.md
+
+triggers:
+  - type: manual
+    detail: "one-off migration — published, executed once, then deactivated. Not scheduled."
+
+reads:
+  tables:
+    - client_sequencers
+    - sequencers
+  external:
+    - "Google Sheets · 🤖Daily stats — the Aimfox columns carried on Bison-sequencer rows"
+
+writes:
+  tables:
+    - sequencer_daily_stats     # first data this table has ever held
+  tablesWritten:
+    - sequencer_daily_stats
+  rpcs: []
+  external: []
+
+credentials:
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "Read Daily Stats"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Backfill Sequencer Stats"
+
+transition:
+  phase: A
+  phaseState: complete
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · 🤖Daily stats, columns 'Invitations sent' and the three Aimfox schedule volumes"
+  targetStore: "Supabase · public.sequencer_daily_stats"
+  design: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  notes: >-
+    The Aimfox metrics are not stored as their own rows: 'Get Metrics from Aimfox' writes them into
+    the EXISTING Bison-sequencer row for that client and day, as four extra columns. So the sheet has
+    no Sequencer='Aimfox' row at all, and the mapping runs bison workspace id -> client -> that
+    client's aimfox client_sequencers row.
+  reconciliation: >-
+    select c.name, count(*), sum(d.invites_sent), count(d.invites_accepted)
+    from public.sequencer_daily_stats d join public.clients c on c.id = d.client_id
+    group by 1;
+    Expect 117 rows over 5 clients, 2026-06-18..2026-07-22, and count(invites_accepted) = 0 —
+    acceptances are NULL because the sheet does not carry them.
+  parityEvidence: "execution 50205 (2026-07-22): candidate_rows=118, mapped_rows=117, written=117, workspaces_in_sheet=6, workspaces_mapped=5"
+
+idempotency:
+  key: "UNIQUE (client_id, sequencer_id, profile_id, report_date)"
+  notes: >-
+    ON CONFLICT DO UPDATE on the natural key. Re-running overwrites the same 117 rows; it never
+    appends. invites_accepted is deliberately left out of the update clause so a later, real
+    per-profile ingestion cannot be overwritten with NULL by a re-run of this backfill.
+
+retryPolicy:
+  notes: >-
+    Single statement, no partial state. A workspace with no aimfox client_sequencers row is dropped
+    by the join rather than defaulted — UniTalk (bison workspace 36, one row) is the only such case
+    and is the difference between candidate_rows=118 and written=117.
+
+knownViolations: []

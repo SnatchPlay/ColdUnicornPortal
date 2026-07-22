@@ -1,6 +1,6 @@
 # Process · Sheets ↔ Supabase reconciliation (leads and daily stats)
 
-**Domain:** outreach · **Owner:** automation · **Status:** measured 2026-07-22, **no sync built**
+**Domain:** outreach · **Owner:** automation · **Status:** measured **and back-filled** 2026-07-22
 **Governing ADR:** [ADR-0017](../../../adr/0017-sheets-to-supabase-dual-write-transition.md) —
 a dual-write must declare its phase, its authoritative source and **its reconciliation**. This
 document is that reconciliation, for the two stores that were never compared.
@@ -134,6 +134,28 @@ Anything reading these tabs must normalise, not trust:
   `(blank)`, and — in RevOpsi and Spiree — `1`, `2`, `3`, `@`, `@1`, `@2`, `@3`.
 - **`LEAD RECEIVED` dates are inconsistent**, including day/month swaps: `2026-30-06`, `2026-21-07`.
 - Two client workbooks are unreachable: `OliveMedia TTS` (`Forbidden`) and `Komandor` (`not found`).
+
+## What was back-filled, 2026-07-22
+
+Two one-off migrations, each dry-run first and each validated against production inside
+`begin … rollback` before it wrote anything.
+
+| | Workflow | Result |
+|---|---|---|
+| Leads | [`sheets-lead-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-backfill/README.md) | **184 inserted** (30 Aimfox), `leads` 4787 → 4971 |
+| Aimfox metrics | [`sheets-aimfox-metrics-backfill`](../../../../automation/n8n/workflows/ops/sheets-aimfox-metrics-backfill/README.md) | **117 client-days**, the first rows `sequencer_daily_stats` has ever held |
+
+Both workflows are deactivated. Both READMEs record what was deliberately *not* invented — 13 leads
+with no date, 45 with no campaign, the unmappable churned workspaces, and `invites_accepted` left
+NULL rather than zeroed.
+
+The dry-run earned its place: it caught two defects that would have imported silently.
+Client workbooks disagree on date locale, so `04/27/2026` was being read as D/M/Y — and while
+`2026-27-04` errored loudly, `05/03/2026` would have imported as the wrong month without a sound.
+And a `splitInBatches` loop ended at client 15 of 42 while reporting success, because a node that
+matched nothing returned nothing; it confidently said "28 leads".
+
+**Neither is a sync, and neither may become one** — see below.
 
 ## What this means for a sync
 

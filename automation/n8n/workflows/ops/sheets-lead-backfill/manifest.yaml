@@ -1,0 +1,97 @@
+schemaVersion: 1
+
+id: sheets-lead-backfill
+name: "[BACKFILL] Sheets → Supabase · leads"
+domain: ops
+owner: automation
+lifecycle: managed
+status: deprecated        # a completed one-off: it ran once on 2026-07-22 and must not run again.
+                          # 'deprecated' is the closest value the schema allows — there is no 'completed'.
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+
+architectureDecisions:
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0004-lead-state-boundaries.md
+
+triggers:
+  - type: manual
+    detail: "one-off migration — published, executed once, then deactivated. Not scheduled."
+
+reads:
+  tables:
+    - client_sequencers
+    - sequencers
+    - campaigns
+    - leads               # to decide what is missing
+  external:
+    - "Google Sheets · CS PDCA (client list, Bison workspace id, Leads spreadsheet id)"
+    - "Google Sheets · <client>/Leads — one tab per client, 42 workbooks"
+
+writes:
+  tables: []
+  tablesWritten:
+    - leads               # direct insert — see knownViolations
+  rpcs: []
+  external: []
+
+credentials:
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "Read CS PDCA, Read Client Leads"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve Client, Backfill Leads"
+
+transition:
+  phase: A
+  phaseState: complete
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · public.leads"
+  design: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  notes: >-
+    Completes the one-off import of 2026-05-27, which left 184 sheet rows behind — mostly clients
+    seeded into client_sequencers after that date, so nothing ever back-filled their history.
+    This is NOT a recurring sync and must not become one: branch S of bison-lead-enrichment has
+    written new leads through promote_contact_to_lead since 2026-07-22, and a second writer would
+    race it. Ran once on 2026-07-22; the workflow is deactivated.
+  reconciliation: >-
+    Measured before and after. Dry-run (a counting variant of the same SQL, no insert) predicted
+    184 inserts / 30 Aimfox across 42 clients; the run produced exactly that, 4787 -> 4971 leads.
+    Re-measure with:
+      select count(*) from public.leads;                    -- 4971
+      select count(*) from public.leads
+       where sequencer_id = '00000000-0000-4000-a000-000000000003';   -- 30
+  parityEvidence: "execution 50204 (2026-07-22): inserted=184, aimfox=30, sheet_rows=4979, after_dedupe=4881"
+
+idempotency:
+  key: "(client_id, lower(email)); (client_id, company_name, first_name) when the sheet row has no email"
+  notes: >-
+    Safe to re-run: every row is guarded by NOT EXISTS against public.leads, and the in-payload
+    DISTINCT ON collapses duplicates inside a single sheet. A second run inserts nothing.
+
+retryPolicy:
+  notes: >-
+    Resolve Client and Read Client Leads are alwaysOutputData so a client that resolves to nothing
+    cannot silently end the splitInBatches loop — that defect made the first dry-run stop at 15 of
+    42 clients while reporting success.
+
+knownViolations:
+  - rule: business/direct-table-write
+    node: "Backfill Leads"
+    reason: >-
+      Writes public.leads directly instead of through promote_contact_to_lead (ADR-0015 §5). The RPC
+      cannot express this case: it creates a lead FROM a positive reply, one per sequencer contact,
+      and these are historical sheet rows with no reply and no contact to attach. Synthesising a fake
+      sequencer_contacts + replies pair per row to satisfy the signature would have put invented
+      evidence into two ingestion-owned tables — worse than a declared direct write. The 4787 rows
+      already in the table were imported the same way on 2026-05-27, with source_sequencer_contact_id
+      NULL, so this completes an existing shape rather than introducing a new one. One-off: the
+      workflow is deactivated and the live path (branch S) does use the RPC.
+    trackedIn: automation/n8n/workflows/ops/sheets-lead-backfill/README.md
+    expires: 2026-10-31
