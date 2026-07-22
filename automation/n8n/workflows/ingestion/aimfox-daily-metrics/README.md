@@ -3,13 +3,13 @@
 **Logical ID:** `aimfox-daily-metrics` · **Domain:** `ingestion` · **Criticality:** medium
 **Remote (production):** `sVev5d0N6rtrbcgI` — `Get Metrics from Aimfox`
 **Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
-**Phase:** **0 — Sheets only.** Imported unchanged 2026-07-21; nothing on the instance was modified.
+**Phase:** **A — live (2026-07-22).** Branch S writes per-account `sequencer_daily_stats` every 2
+hours; branch L still writes the PDCA sheet. See [Branch S](#branch-s--the-linkedin-capacity-row-per-account-live-2026-07-22).
 
-> **The table this workflow is documented as writing, it does not write.**
+> **History:** when first imported (2026-07-21) this workflow wrote **only** the sheet —
 > [`20260705_sequencer_daily_stats_schedule.sql`](../../../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)
-> was written *by reading this workflow* — the column comments quote its formulas. The write itself
-> was never built. `sequencer_daily_stats` has no Postgres node here and no Supabase URL anywhere in
-> the graph.
+> was written *by reading this workflow* (its column comments quote these formulas), but the Supabase
+> write itself had never been built. Branch S added it on 2026-07-22.
 
 ## Business purpose
 
@@ -145,7 +145,11 @@ rather than a zero ([bison-ingestion invariant 3](../../../../../docs/reference/
 ### Reconciling against the sheet
 
 Sum across `profile_id` **excluding `'__workspace_total__'`** — those are the
-[sheet backfill's](../../ops/sheets-aimfox-metrics-backfill/README.md) rollup rows, and they cover
-2026-06-18…07-22, which overlaps branch S's first day. Counting both doubles it.
+[sheet backfill's](../../ops/sheets-aimfox-metrics-backfill/README.md) rollup rows, covering
+2026-06-18…07-21. The single overlap day (2026-07-22, where a garbage `__workspace_total__` snapshot
+coexisted with the real per-account rows) was **cleaned up 2026-07-22** — those 3 total rows were
+deleted, so `__workspace_total__` and per-account rows no longer share any date. Excluding
+`__workspace_total__` is still the rule for a clean per-account sum (the pre-07-22 history is
+workspace-grain), but there is no longer a double-count on any single day.
 
 Expect one honest disagreement: branch L's remaining limit is too low by `buckets[0]`.

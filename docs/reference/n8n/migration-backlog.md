@@ -20,24 +20,42 @@ The state of the migration in one table. Everything here is measured against pro
 
 | Process | Phase | Evidence |
 |---|---|---|
-| OOO / NRR (§1) | **A, live** — all four workflows call the RPCs | `ooo_followups` still 0 rows; see the open gap below |
+| OOO / NRR (§1) | **A, live** — all four workflows call the RPCs | 66 `ooo_followups` rows (2026-07-22) — the "0 rows" gap had already closed; the real defect found instead: 100% had `date_source='fallback'` even when the LLM found a real date (accessor bug, fixed 2026-07-22) |
 | Bison ingestion (§3) | **C** — Supabase-only by construction | repaired 2026-07-22 after days of silent failure |
-| Bison lead enrichment (§2) | **A, live** — branch S writes leads via `promote_contact_to_lead` | credentials no longer come from Sheets |
-| Aimfox metrics (§5) | **A, live** — branch S writes `sequencer_daily_stats` per account | execution 50246 |
-| Aimfox lead flows (§5) | **0** — nothing reaches Supabase | blocked on `sequencer_contacts` for LinkedIn |
+| Bison lead enrichment (§2) | **A, live, independent** — branch S writes leads via `promote_contact_to_lead` on its own Bison/Snov.io/Lusha/OpenAI calls | repaired 2026-07-22: branch L reverted to CS PDCA col_6, branch S given its own data-fetch chain — neither branch's credential resolution references the other |
+| Aimfox metrics (§5) | **A, live** — branch S writes `sequencer_daily_stats` per account, every 2h | execution 50246; runs verified successful through 17:00 on 2026-07-22. **Completeness verified 2026-07-22**: backfill captured all 118 sheet candidates (117 written, UniTalk's 1 day accepted-as-lost); 3 garbage `__workspace_total__` overlap rows for 07-22 deleted; date gaps confirmed as zero-activity days by the backfill's own filter. Residual: a live sheet↔Supabase Aimfox diff can't be run from a headless session (public n8n REST can't execute a workflow) — only needed if paranoid about the zero-activity gaps before the sheet is deleted |
+| Aimfox classification (§5) | **A, live** — branch S writes `sequencer_contacts` + `replies` | shipped 2026-07-22, execution 50518 — real inbound reply, verified end to end |
+| Aimfox lead flows (§5) | **A, live** on both — `aimfox-premql-to-pdca` and `aimfox-leads-processing` write `leads` via `promote_contact_to_lead` | shipped 2026-07-22; campaign attribution resolved for both (see item 2 below), not yet exercised by a real production execution |
 | Bison credentials (§8) | **A, live** — synced every 6 hours | 39 of 42 workspaces keyed |
 | Historical import (§9) | **done** | 184 leads, 117 Aimfox client-days |
 
 **The three things most worth doing next**, in order:
 
-1. **Chase the OOO episode gap.** Contact and reply rows are written; `ooo_followups` is still empty
-   and the RPC is verified working. Something between them fails silently. This is the oldest
-   unexplained defect in the estate — §1.
-2. **Give LinkedIn contacts an identity.** `sequencer_contacts` has 0 aimfox rows, `campaigns` has 0
-   aimfox rows. Until both exist, neither Aimfox lead flow can move off phase 0, and the 30
-   back-filled Aimfox leads keep a NULL `campaign_id` — §5.
-3. **Delete the sheet fallback in `bison-lead-enrichment`.** It exists only because SalesBook, Tryumf
-   and Kamiński have no `clients` row. That is a business act, not an automation one — §8.
+1. ~~Chase the OOO episode gap~~ — **turned out to already be closed, then a real bug was found and
+   fixed in its place (both 2026-07-22).** `ooo_followups` was not stuck at 0 — 66 rows existed by the
+   time this was re-checked against production rather than trusted from the earlier note. What *was*
+   broken, and confirmed on real data: `[S] record_ooo_followup` and branch L's `[327] Add OOO Leads
+   row` both read the gpt-5-mini return-date extraction at the wrong JSON path
+   (`$json.returnDate`/`$json.expected_return_date`, flat) — the real value nests at
+   `output[0].content[0].text.{returnDate|return_date}`. Result: **100% of the 66 rows had
+   `date_source='fallback'`, including runs where the LLM had demonstrably returned a real date.** Not
+   "correctly falling back when the AI found nothing" — the AI's answer was silently discarded every
+   time, on both branches. Fixed on both consumers — see
+   [`ooo-detect-and-log/README.md` defect 9](../../../automation/n8n/workflows/outreach/ooo-detect-and-log/README.md#known-defects).
+   Proven on the first real event after the fix (execution 51232, 13:49 UTC): LLM returned
+   `"2026-07-24"` on both branches, the sheet got the real date instead of the today+14 fallback, and
+   `ooo_followups` got its first-ever `date_source='reply_parsed'` row.
+2. ~~Give `campaigns` aimfox rows~~ / ~~task B attribution~~ — **both done 2026-07-22.** The catalog
+   ([`aimfox-campaign-sync`](../../../automation/n8n/workflows/ingestion/aimfox-campaign-sync/README.md),
+   `t6a53dLc85FOKFqX`) exists, and attribution turned out not to need the reply→lead bridge design this
+   entry called for: `aimfox-premql-to-pdca`'s `GET lead info Aimfox` response carries
+   `lead.origins[0].id` (the same campaign UUID the catalog keys on — verified against a real execution),
+   and `aimfox-leads-processing`'s webhook body carries `event.campaign.id` directly. Both lead flows'
+   branch S resolve a real `campaign_id` now — §5.
+3. ~~Delete the sheet fallback in `bison-lead-enrichment`~~ — the three missing `clients` rows
+   (SalesBook, Tryumf, Kamiński) now exist, and `RedIntoGreen DAPR`'s `client_sequencers` row points at
+   the existing `DAPR` client (done 2026-07-22). The fallback itself is still in the graph — remove it
+   once `sheets-bison-credential-sync`'s next run confirms all three are keyed — §8.
 
 **Do not** build a recurring Sheets → Supabase sync for leads or stats. Two one-off backfills covered
 the history; a standing sync would race branch S — [reconciliation](../processes/outreach/sheets-supabase-reconciliation.md).
@@ -49,8 +67,10 @@ the history; a standing sync would race branch S — [reconciliation](../process
 **Priority: highest. Blocks a deferred migration and 13 rows of the traceability matrix.**
 
 [ADR-0015](../../adr/0015-sequencer-contacts-and-ooo-followups.md) shipped the whole OOO model —
-tables, RPCs, RLS, ~70 invariant assertions — on 2026-07-21. **Automation has not cut over.** OOO
-state still lives in the `OOO Leads` Google Sheet; `ooo_followups` has 0 rows in production.
+tables, RPCs, RLS, ~70 invariant assertions — on 2026-07-21. Automation cut over the same week: all
+four workflows below call the RPCs, and `ooo_followups` carries 66 rows as of 2026-07-22 (this line
+previously said "0 rows" — stale, corrected after re-checking production directly). OOO state still
+lives in the `OOO Leads` Google Sheet too, unchanged — that's branch L, by design, not a gap.
 
 Migration is by **dual-write**, not replacement
 ([ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md)). Every row below **keeps its
@@ -68,30 +88,69 @@ license bypassing the RPC contract (ADR-0015 §5), and it has never landed a row
 
 **Blocking, in order:**
 
-1. **Resolve the open question in
-   [`ooo-detect-and-log/README.md` defect 9](../../../automation/n8n/workflows/outreach/ooo-detect-and-log/README.md#known-defects).**
-   The two output branches read the LLM node with incompatible shapes. If the sheet's
-   `$json.expected_return_date` is also undefined, every OOO contact has silently been scheduled at
-   `today + 14` and the gpt-5-mini extraction is decorative. Check the sheet before porting any
-   extraction logic, or the cutover will faithfully reproduce a broken behaviour.
-2. Decide the oldest-vs-newest reply question (defect 8): `[326]` deliberately takes the **oldest**
-   reply. For a repeat OOO that is almost certainly wrong.
+1. ~~Resolve the open question in
+   [`ooo-detect-and-log/README.md` defect 9](../../../automation/n8n/workflows/outreach/ooo-detect-and-log/README.md#known-defects)~~
+   — **checked and fixed 2026-07-22.** It was the worse of the two possibilities: not "the AI
+   genuinely finds nothing, so today+14 is a correct fallback," but the LLM's real answer being
+   silently discarded on **every single event** because both consumers (`[327]` on branch L, `[S]
+   record_ooo_followup` on branch S) read a flat field that never existed in the response shape. Proof
+   pulled from real execution data, not inferred: of 66 `ooo_followups` rows, 100% were
+   `date_source='fallback'`, including runs where the LLM had returned a real date. Fixed on both
+   consumers by reading the correct nested path.
+2. ~~Decide the oldest-vs-newest reply question (defect 8)~~ — **fixed 2026-07-22.** Branch L's
+   `[326]` sorted ascending and fed the LLM the *oldest* reply; for a repeat OOO that is the wrong
+   message. Flipped the comparator to descending and renamed the node "Set last_reply (**newest** by
+   date_received)", matching branch S's `[S] Pick newest OOO reply` (already correct). PUT to
+   production and verified live; committed artifact updated by hand and confirmed byte-identical to the
+   live graph (`pnpm n8n:export` was blocked — see the `availableInMCP` note below). Detail:
+   [`ooo-detect-and-log/README.md` defect 8](../../../automation/n8n/workflows/outreach/ooo-detect-and-log/README.md#known-defects).
 3. ~~Move per-client Bison API keys from the CS PDCA sheet to `client_sequencers.api_key`~~ —
-   **done for the data (§8)**, and done for `bison-lead-enrichment`. The four OOO/NRR workflows still
-   read `col_6` and must be repointed at `[S0]`-style resolution before their sheet reads can go.
-4. Make the sheet append **idempotent** (append-or-update on `LeadID` + `ReplyID`). Precondition for
-   phase A: two stores with different duplicate behaviour diverge by construction.
-5. Add the Supabase side to the four workflows — Sheets first, Supabase second, Supabase failure
-   non-fatal and logged to `integration_sync_runs`. This is **phase A**.
-6. Remove the direct `leads` write, then apply
-   [`20260722z_drop_legacy_ooo_columns.sql`](../../../supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql).
-   Unblocked by phase A — no phase writes the legacy lead columns.
-7. Build the reconciliation (sheet rows vs `ooo_followups`, compared on the natural key) and run it
-   until the two agree. Parity is the entry condition for **phase B**; record the number in the manifest.
-8. Backfill the sheet's open absences into `ooo_followups`, or accept starting empty — a product
-   decision, not a technical one. Note it proves the data copies, not that the write path works, so
-   it belongs after phase A rather than instead of it.
-9. **Phase C** only once the sheet has no readers left — including the dashboards and reports built
+   **done, including the four OOO/NRR workflows.** This entry was stale: checked all four against a
+   fresh production `GET` (2026-07-22), not assumed. Each already resolves branch S's own Bison
+   auth from `client_sequencers.api_key` via its own `[S] Resolve client sequencer` node (which returns
+   `api_key` directly — no separate token-wrapping step needed) — `ooo-detect-and-log` and
+   `nrr-daily-stats` each make their own `[S]`-prefixed Bison calls with it;
+   `ooo-remove-on-tag-removed`'s branch S needs no Bison call at all (resolves the contact straight
+   from Postgres — a sticky note in the workflow explains why a call would be "worse, not more
+   faithful"); `ooo-enrol-followups`'s branch S is an A1 shadow that also makes no Bison call, by
+   design. **`col_6` is read only by branch L** in the two workflows that use it at all
+   (`ooo-detect-and-log`, `ooo-remove-on-tag-removed`) — unchanged, sheet-authenticated, exactly as
+   intended. No coupling in either direction.
+4. ~~Add the Supabase side to the four workflows~~ — **done.** All four call the ADR-0015 RPCs; see
+   item 3. `onError: continueRegularOutput` throughout, confirmed on every `[S]` node.
+5. ~~Remove the direct `leads` write, then apply
+   [`20260722z_drop_legacy_ooo_columns.sql`](../../../supabase/migrations/20260722z_drop_legacy_ooo_columns.sql)~~
+   — **done 2026-07-22.** Direct write was already gone (`ooo-detect-and-log` had no such node).
+   Portal/gateway read-side removed the same day — `contact_disposition` / `expected_return_date` /
+   `added_to_ooo_campaign` deleted from `LeadRecord`, the drizzle schema, every `orm-gateway`
+   mapper/SELECT, the CRM "Disposition" column, and the `replyScope` OOO filter; `OOO`/`NRR` removed
+   from the `lead_qualification` union + enum. Deploy order followed exactly: `orm-gateway` redeployed
+   first (confirmed by the user), then the migration dry-run (`begin`/`rollback`, clean), then applied
+   for real via the Management API. Verified against production: the three columns and
+   `client_ooo_routing.gender` are gone, the enum holds exactly 7 values (no `OOO`/`NRR`),
+   `public_lead_stats()` returns real numbers, and the exact `orm-gateway` SELECT shape runs clean
+   against live data. Migration file lives in `migrations/`, not `deferred/`, going forward.
+6. ~~Build the OOO reconciliation (sheet rows vs `ooo_followups`)~~ — **decided 2026-07-22: not
+   building.** The `OOO Leads` sheet is being disconnected within the week; it holds **secondary** OOO
+   data (the authoritative episode record is `ooo_followups`, written by branch S since 2026-07-22).
+   Standing up a probe just to compare a store that is about to disappear is wasted effort. Formal
+   parity was the paper entry condition for phase B, but with the sheet retired that gate is moot —
+   branch S simply becomes the only writer. `transition.reconciliation` / `parityEvidence` stay `null`;
+   phase advances by the sheet going away, not by a measured comparison. **Do not re-raise.**
+7. ~~Backfill the sheet's open absences into `ooo_followups`~~ — **decided 2026-07-22: not backfilling.**
+   Same objection as the leads backfill in
+   [`sheets-supabase-reconciliation.md`](../processes/outreach/sheets-supabase-reconciliation.md#what-this-means-for-a-sync):
+   `ooo_followups.source_reply_id` exists precisely to prove an episode came from a real, RPC-recorded
+   reply. Historical `OOO Leads` sheet rows predate branch S and have no `replies` row underneath them
+   — backfilling would mean fabricating a `sequencer_contacts`/`replies` pair (or leaving
+   `source_reply_id` NULL) for provenance that was never actually captured through the pipeline, which
+   is exactly the invariant this table exists to preserve. The sheet keeps being the historical record
+   until phase C; nothing forces it into Supabase early, and starting `ooo_followups` from "only new
+   episodes onward" is not data loss — it is the honest state. **Do not re-raise without a concrete
+   product need** (e.g. a report that must show pre-2026-07-22 OOO history from Supabase specifically)
+   — proving "the data copies" was never the open question; whether fabricated provenance is
+   acceptable is, and the answer here is no.
+8. **Phase C** only once the sheet has no readers left — including the dashboards and reports built
    on it, which are outside this repository.
 
 **Accepted violations expire 2026-10-31.** After that, `pnpm n8n:validate` fails.
@@ -103,24 +162,28 @@ unenforced; OOO data stays outside RLS in a shared spreadsheet.
 
 ## 2 · HUB dispatcher
 
-**Priority: high — security-relevant, and the parent of everything in §1.**
+**Deprioritized 2026-07-22 — not pursuing for now.** Do not re-propose importing this without a new
+reason to (e.g. a concrete incident traced to the unverified webhook auth, or a child workflow that
+needs changing). The security-relevant part (unauthenticated webhook) stays correctly tracked as an
+open finding in [security.md §3](security.md#3-the-hub-webhook-is-the-entry-point-for-all-reply-processing--medium)
+regardless of whether this repository ever imports the HUB workflow itself.
 
 | Remote | Name |
 |---|---|
 | `xPzdtWQiY3lGtqI1` | `[HUB] Bison Replies Dispatcher` |
 
 The entry point for **all** reply processing: an `n8n-nodes-base.webhook` normalizes the Bison
-payload and fans out to seven children. Import it next, because:
+payload and fans out to seven children.
 
 - it defines the payload contract every child depends on — currently reverse-engineered in
   [`hub-child-input.schema.json`](../../../automation/n8n/workflows/outreach/ooo-detect-and-log/contracts/hub-child-input.schema.json)
   and enforced by nothing at runtime;
-- its webhook authentication is **unverified**
-  ([security.md §3](security.md#3-the-hub-webhook-is-the-entry-point-for-all-reply-processing--medium)).
-  `scan.mjs` will answer this the moment it is imported.
+- its webhook authentication is **unverified** — see security.md §3 above. `scan.mjs` would answer
+  this the moment it is imported, but importing it is not planned.
 
 Children not covered by §1: `bEB3aOHEq2lEpubp` (child-4, blacklist add), `FZSFz5bcgigUneQZ`
-(child-5, unblacklist), `wJZbg0cRsdF58ylE` (child-6, MQL delete + unblacklist).
+(child-5, unblacklist), `wJZbg0cRsdF58ylE` (child-6, MQL delete + unblacklist). None of these three
+are being imported either.
 
 **child-1 is done.** `lBOyL8ZPA3SZSvDW` was imported as
 [`bison-lead-enrichment`](../../../automation/n8n/workflows/outreach/bison-lead-enrichment/README.md)
@@ -129,12 +192,21 @@ lead through `upsert_sequencer_contact` → `upsert_reply` → `promote_contact_
 first caller `promote_contact_to_lead` has ever had.
 
 It also turned out to contain **31 orphaned Supabase nodes** — an unfinished branch that was never
-wired to its trigger, whose root selects a dropped column, and which writes `leads` directly in
-violation of ADR-0015 §5. Recorded as an accepted violation expiring 2026-09-30; the right fix is
-deletion, which is a human's call.
+wired to its trigger, whose root selected a dropped column, and which wrote `leads` directly in
+violation of ADR-0015 §5.
 
-child-6 still **deletes** leads and is worth questioning against
-[ADR-0004](../../adr/0004-lead-state-boundaries.md).
+**Resolved 2026-07-22, same day.** 18 of the 31 were exactly what branch S needed for real
+independence from branch L (its first version shared branch L's Bison/Snov.io/Lusha/OpenAI calls,
+which turned out to make branch L depend on `client_sequencers` data quality — the coupling problem
+just moved, it didn't disappear) — repaired and wired to `[S0]`. The other 11 (direct-`leads`-write
+nodes, a redundant dedup check, and a duplicate blacklist path branch S doesn't need) were deleted.
+`knownViolations` is now empty for this workflow. Detail:
+[`bison-lead-enrichment/README.md`](../../../automation/n8n/workflows/outreach/bison-lead-enrichment/README.md#the-two-branches-share-nothing-2026-07-22).
+
+~~child-6 still **deletes** leads and is worth questioning against
+[ADR-0004](../../adr/0004-lead-state-boundaries.md).~~ — **deprioritized 2026-07-22 along with the
+rest of this section.** Still true (child-6 is uninspected, per the note above), just not being
+pursued right now. Do not re-raise without importing the HUB family first.
 
 ---
 
@@ -181,8 +253,9 @@ A clean dispatcher + per-provider-child pattern; likely the best-structured grou
 ## 5 · Aimfox / LinkedIn
 
 **Priority: high. All five imported 2026-07-22; both critical secret findings closed.
-`aimfox-daily-metrics` reached phase A the same day — branch S writes `sequencer_daily_stats`, one
-row per LinkedIn account. The other four are still phase 0.**
+Four of five reached phase A the same day: `aimfox-daily-metrics`, `aimfox-classification`,
+`aimfox-premql-to-pdca` and `aimfox-leads-processing`. Only `aimfox-import-to-connection` remains
+phase 0 — it queues real LinkedIn invites, so it gets its own A1 shadow treatment.**
 
 The whole channel is now described in one place:
 [process · LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md).
@@ -200,20 +273,26 @@ Those three were unreachable until 2026-07-22: `pnpm n8n:export` refuses a file 
 repository could not see. Moving their literals into the `Aimfox Master` and `OpenAi account`
 credentials closed that.
 
-**The channel is phase 0.** Not one of the five contains a Postgres node or a Supabase URL. Meanwhile
+**Four of five are phase A.** `aimfox-daily-metrics`, `aimfox-classification`, `aimfox-premql-to-pdca`
+and `aimfox-leads-processing` all write Supabase now. Only `aimfox-import-to-connection` still doesn't —
 `sequencers` has an `aimfox` row, `client_sequencers` carries the token field, and
 `sequencer_daily_stats` was designed *by reading* `Get Metrics from Aimfox`
 ([`20260705`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)). The model is
-specified and unused. [11-integrations §2](../functional/11-integrations.md) described that row as a
-live write until this inventory corrected it.
+specified and increasingly used. [11-integrations §2](../functional/11-integrations.md) described that
+row as a live write before this inventory corrected it in the first place.
 
 **Blocking, in order:**
 
 1. ~~Move the two leaked secrets into n8n credentials and import the three blocked workflows~~ —
-   **done 2026-07-22** (findings 7 and 8). Rotating the old values in Aimfox and OpenAI is still
-   outstanding and is the owner's step.
-2. **Authenticate the two Aimfox webhooks** (`aimfox-classifier`, `preMQL-Aimfox`) — finding 3.
-   **Open.**
+   **done 2026-07-22** (findings 7 and 8). ~~Rotating the old values in Aimfox and OpenAI is still
+   outstanding~~ — **owner action, deprioritized from this backlog 2026-07-22.** Correctly tracked as
+   the owner's step in [security.md findings 7](security.md#7-an-aimfox-organisation-token-written-literally-into-three-workflow-graphs--resolved-2026-07-22)/[8](security.md#8-an-openai-api-key-written-literally-into-aimfox-classification--resolved-2026-07-22);
+   not something this repo tracks as an actionable task, since nobody here can rotate a third-party key.
+2. ~~Authenticate the two Aimfox webhooks (`aimfox-classifier`, `preMQL-Aimfox`)~~ — finding 3,
+   **owner action, deprioritized from this backlog 2026-07-22.** Stays correctly tracked as an open
+   finding in [security.md §3](security.md#3-the-hub-webhook-is-the-entry-point-for-all-reply-processing--medium);
+   configuring webhook auth in n8n is an instance-config change, not something to re-propose here
+   without a reason to (e.g. evidence one of the two paths is actually being hit externally).
 3. ~~Seed `client_sequencers` for aimfox~~ — **done 2026-07-22**: five clients, `api_key` from CS
    PDCA `col_105` and `external_workspace_id` read from each token's own `GET /accounts`. FitMech has
    no workspace id (no LinkedIn account connected); EvidencePrime had no `emailbison` row at all and
@@ -225,10 +304,20 @@ live write until this inventory corrected it.
    interactions filter is unverified, so branch S writes nothing for a client with more than one
    LinkedIn account. Re-probe before a second account appears
    ([README](../../../automation/n8n/workflows/ingestion/aimfox-daily-metrics/README.md)).
-5. **Then the lead flows.** `4OjNRWLaG2IWK6kd` and `s0GqDtCzyLAvVnm1` create leads — check against
-   invariants 1–3 of the process doc before any cutover, and note that neither can store a contact
-   identity today, so `sequencer_contacts` comes first.
-6. **`aimfox-import-to-connection` last.** It POSTs to a campaign audience, which queues LinkedIn
+5. ~~Phase A on `aimfox-classification` (contact identity)~~ — **done 2026-07-22.** Branch S:
+   `upsert_sequencer_contact` + `upsert_reply`, hung off the already-Supabase-only
+   `Get Workspace Api Key` node — no blacklist call in branch S
+   ([README](../../../automation/n8n/workflows/outreach/aimfox-classification/README.md)).
+6. ~~Then the lead flows~~ — **done 2026-07-22, both.** `4OjNRWLaG2IWK6kd` (`aimfox-leads-processing`)
+   and `s0GqDtCzyLAvVnm1` (`aimfox-premql-to-pdca`) each got their own RPC chain
+   (`upsert_sequencer_contact` → `upsert_reply` → `Resolve campaign` → `promote_contact_to_lead`), fully
+   independent of branch L. Along the way: `aimfox-leads-processing`'s manifest wrongly claimed the
+   Bison HUB as its trigger — the real caller is `aimfox-classification`'s `Call 'Test aimfox'` node,
+   found by grepping all 57 live workflows for its own node id. That also retired the "needs A1 shadow"
+   caution: branch S never calls the CRM dispatcher, so the duplicate-write risk the caution was
+   written for doesn't apply (confirmed with the user before building). Neither has been exercised by a
+   real production execution yet — watch the first one.
+7. **`aimfox-import-to-connection` last.** It POSTs to a campaign audience, which queues LinkedIn
    invites to real people — the A1 shadow case ([ADR-0017 §1b](../../adr/0017-sheets-to-supabase-dual-write-transition.md)).
    Its idempotency claim is **unverified**: nobody has tested whether the audience endpoint ignores a
    profile it already holds.
@@ -241,19 +330,20 @@ metric, because none of its data exists in the database.
 
 ## 6 · Reply classification
 
-**Priority: medium.** `XdTMd1KJX0cRmF9u` — `Bison Replies Classification - Sheets Primary 401
-Fallback`.
+**Deprioritized 2026-07-22 — not pursuing for now.** `XdTMd1KJX0cRmF9u` — `Bison Replies
+Classification - Sheets Primary 401 Fallback`.
 
 The name states the problem: **Sheets is primary.** It produces the `replies.classification` values
 that [11-integrations §6](../functional/11-integrations.md#6-reply-classification) treats as the live
-contract, and ADR-0015 chose not to rename that enum precisely because it is the live contract. Worth
-importing before anything depends further on it.
+contract, and ADR-0015 chose not to rename that enum precisely because it is the live contract. Do not
+re-propose importing this without a new reason to.
 
 ---
 
 ## 7 · Housekeeping — delete or claim
 
-**Priority: low, but cheap.**
+**Deprioritized 2026-07-22 — not pursuing for now.** Do not re-propose without a new reason to (e.g.
+one of these turns out to be live and undocumented, not just orphaned).
 
 | Remote | Name | Note |
 |---|---|---|
@@ -281,17 +371,32 @@ there, which meant the whole pipeline died the moment Sheets was disconnected �
 survived even after `bison-lead-enrichment` grew a "parallel" branch S, because branch S sat
 downstream of API calls the sheet was authenticating.
 
-Done 2026-07-22: the sync, plus `[S0] Resolve Bison credentials` in `bison-lead-enrichment`, where
-all eight Bison `Authorization` headers now read `client_sequencers.api_key`.
+Done 2026-07-22: the sync, plus `[S0] Resolve Bison credentials` in `bison-lead-enrichment`. Same day,
+corrected same day: `[S0]` first became the primary source for all eight of branch L's + branch S's
+Bison `Authorization` headers (sheet as fallback) — which fixed branch S but made branch L depend on
+`client_sequencers` data quality, the coupling problem in the other direction. Branch L's 8 headers now
+read only `col_6` again; branch S has its own 5, reading only `[S0]`, no fallback — see
+[`bison-lead-enrichment/README.md`](../../../automation/n8n/workflows/outreach/bison-lead-enrichment/README.md#the-two-branches-share-nothing-2026-07-22).
 
 **Remaining:**
 
-1. **Three clients have no `clients` row at all** — SalesBook, Tryumf, Kamiński. Until they exist the
-   guarded sheet fallback cannot be deleted. A business act.
-2. **`RedIntoGreen DAPR` (workspace 149) does not match the client named `DAPR`.** The sync refuses to
-   guess; someone must confirm they are the same client.
-3. **Repoint the four OOO/NRR workflows** the same way — they still read `col_6`.
-4. **Aimfox keys have no sync.** They were seeded once by hand for five clients.
+1. ~~Three clients have no `clients` row at all~~ — **done 2026-07-22.** SalesBook, Tryumf and Kamiński
+   now have a `clients` row (`status='On hold'`, `manager_id`=Natalia, `kpi_leads` from CS PDCA
+   `col_15`), waiting on the sync's next run (≤6h) to key them. The guarded sheet fallback on branch
+   L's headers is still in the graph — remove it once confirmed keyed.
+2. ~~`RedIntoGreen DAPR` (workspace 149) does not match the client named `DAPR`~~ — **confirmed same
+   client 2026-07-22** (human decision, not the sync's to make). Its `client_sequencers` row was
+   created directly (client_id = the existing `DAPR` row), `api_key` left NULL for the sync to fill.
+3. ~~Repoint the four OOO/NRR workflows the same way~~ — **already done, this entry was stale.**
+   Duplicated [§1 item 3](#1--ooo-cutover): branch S in all four already resolves Bison auth from
+   `client_sequencers.api_key` via its own `[S] Resolve client sequencer` node; branch L's `col_6`
+   reads are unchanged, sheet-authenticated, exactly as intended. Verified against a fresh production
+   `GET` 2026-07-22, not assumed.
+4. ~~Aimfox keys have no sync~~ — **decided 2026-07-22: not pursuing.** Seeded once by hand for five
+   clients; there are only five (vs. Bison's ~42 workspaces), Aimfox onboarding is far slower than
+   Bison's, and a scheduled sync workflow is real ongoing maintenance for a credential set that changes
+   rarely. Re-seed by hand when a client is added or a key rotates. **Do not re-raise unless Aimfox
+   client count grows enough that manual seeding becomes the actual bottleneck.**
 
 ---
 

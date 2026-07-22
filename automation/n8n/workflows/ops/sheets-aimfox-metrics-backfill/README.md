@@ -56,6 +56,19 @@ documented in the column comment.
 > **Any future per-profile Aimfox ingestion MUST exclude `'__workspace_total__'`** or it will
 > double-count every one of these days.
 
+**Completeness verified + one cleanup, 2026-07-22.** After branch S of `aimfox-daily-metrics` went
+live (per-account rows from 2026-07-22), the single overlap day — 2026-07-22 — carried BOTH a
+`__workspace_total__` row (an early-morning backfill snapshot, `invites_sent` = 0 / **−2**, i.e. a
+garbage delta) AND the real per-account rows. Those 3 total rows (Bent Iron, EvidencePrime,
+Runmageddon) were **deleted** (dry-run `begin/rollback` first, then committed; only total rows that had
+a per-account sibling for the same client/date were removed). `overlap_days_remaining = 0` after.
+Every earlier date (2026-06-18…07-21) keeps its `__workspace_total__` row — it is the only record for
+those days. **UniTalk** (1 candidate day, Bison ws 36, no `aimfox` `client_sequencers` row) was
+**accepted as lost** 2026-07-22 — UniTalk is not an Aimfox client, so the 1 row is almost certainly a
+sheet data-entry artefact, not real activity. The date gaps in the imported series (2026-07-08 across
+clients; ColdUnicorn 07-17…07-21; FitMech 07-15) are **zero-activity days** the backfill correctly
+skips (its filter requires a non-zero Aimfox column) — not import misses.
+
 ## Verification
 
 ```sql
@@ -73,5 +86,5 @@ covering both the mapped and the unmappable case: `mapped_rows=1, written=1` of 
 ## Never
 
 Do not schedule this. It is a historical import; ongoing Aimfox metrics belong to
-[`aimfox-daily-metrics`](../../ingestion/aimfox-daily-metrics/README.md), which is still phase 0 and
-writes only to the sheet.
+[`aimfox-daily-metrics`](../../ingestion/aimfox-daily-metrics/README.md), whose branch S reached
+**phase A (live)** on 2026-07-22 — it writes per-account `sequencer_daily_stats` rows every 2 hours.

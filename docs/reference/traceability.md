@@ -53,8 +53,11 @@ violated". The genuine violations are narrower: row 3 (a direct `leads` write by
 contract) and row 11 (the sheet **deletes** where the contract **cancels and keeps history** — a
 semantic gap dual-write must reconcile, not paper over).
 
-Rows 3 and 6 additionally block
-[`20260722z_drop_legacy_ooo_columns.sql`](../../supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql).
+[`20260722z_drop_legacy_ooo_columns.sql`](../../supabase/migrations/20260722z_drop_legacy_ooo_columns.sql)
+is now unblocked in code: the direct `leads` write is gone and the portal/gateway read-side was
+removed on 2026-07-22 (`contact_disposition` / `expected_return_date` / `added_to_ooo_campaign`, the
+`replyScope` OOO filter, and the `OOO`/`NRR` `lead_qualification` values). The file was moved out of
+`deferred/`; the only remaining gate is deploy ordering — **redeploy `orm-gateway` before applying it**.
 
 ---
 
@@ -62,27 +65,26 @@ Rows 3 and 6 additionally block
 
 [Process doc](processes/outreach/linkedin-aimfox.md) · [ADR-0012](../adr/0012-multi-sequencer-model.md)
 
-Every row is ⛔ or ⚠️ for the same reason: **no Aimfox workflow writes Supabase at all.** The model is
-specified, the automation is entirely Sheets-based ([migration-backlog §5](n8n/migration-backlog.md)).
+Four of five workflows write Supabase as of 2026-07-22 (branch S, phase A); only
+`aimfox-import-to-connection` is still Sheets-only, deliberately last —
+[migration-backlog §5](n8n/migration-backlog.md).
 
 | # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | A LinkedIn contact is not a lead; `preMQL` creates it | `leads`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | CRM view | lead counts | `aimfox-premql-to-pdca` ⛔ appends a spreadsheet row | — | ⛔ |
-| 2 | Contact identity is scoped `(client_sequencer_id, external_contact_id)` | `sequencer_contacts` | `upsert_sequencer_contact` | — | — | — | ⛔ no LinkedIn contact is stored anywhere | `ooo-invariants.sql` (contract only) | ⛔ |
-| 3 | A lead carries its channel (`sequencer_id` = aimfox) | `leads` | — | — | CRM view | per-channel splits | ⛔ | — | ⛔ |
-| 4 | `profile_id` is the Aimfox **account** id | `sequencer_daily_stats` | — | — | — | capacity per profile | `aimfox-daily-metrics` ⚠️ uses the sheet **row number** | — | ⚠️ |
-| 5 | Invite counters never mix channels | `sequencer_daily_stats`, `daily_stats` | — | — | — | invites vs sends | ⛔ table never written | — | ⛔ |
-| 6 | Snapshots are overwritten, per-day facts are keyed | `sequencer_daily_stats` | unique `(client, sequencer, profile, date)` | — | — | — | ⛔ | — | ⛔ |
-| 7 | Blacklisting follows an explicit classification only | — (no table) | — | — | — | — | `aimfox-classification` ⚠️ classifies correctly, records nothing | — | ⚠️ |
+| 1 | A LinkedIn contact is not a lead; `preMQL` creates it | `leads`, `sequencer_contacts` | `promote_contact_to_lead` | — (ingestion) | CRM view | lead counts | `aimfox-premql-to-pdca` ✅ branch S, `aimfox-leads-processing` ✅ branch S (2026-07-22, neither yet exercised by a real execution) | — | ✅ |
+| 2 | Contact identity is scoped `(client_sequencer_id, external_contact_id)` | `sequencer_contacts` | `upsert_sequencer_contact` | — | — | — | `aimfox-classification`, `aimfox-premql-to-pdca`, `aimfox-leads-processing` all call it | `ooo-invariants.sql` (contract only) | ✅ |
+| 3 | A lead carries its channel (`sequencer_id` = aimfox) | `leads` | — | — | CRM view | per-channel splits | `promote_contact_to_lead` reads `sequencer_id` from the contact's `client_sequencers` row, not the campaign — always aimfox here | — | ✅ |
+| 4 | `profile_id` is the Aimfox **account** id | `sequencer_daily_stats` | — | — | — | capacity per profile | `aimfox-daily-metrics` ✅ branch S fixed it (2026-07-22) | — | ✅ |
+| 5 | Invite counters never mix channels | `sequencer_daily_stats`, `daily_stats` | — | — | — | invites vs sends | `aimfox-daily-metrics` branch S writes `sequencer_daily_stats` only | — | ✅ |
+| 6 | Snapshots are overwritten, per-day facts are keyed | `sequencer_daily_stats` | unique `(client, sequencer, profile, date)` | — | — | — | `aimfox-daily-metrics` branch S UPSERTs on that key | — | ✅ |
+| 7 | Blacklisting follows an explicit classification only | `replies` | `upsert_reply` | — | — | — | `aimfox-classification` branch S now records every classification as a `replies` row (execution 50518 — real reply, `classification='other'`) | — | ✅ |
 | 8 | Audience loading is a live send; no blind second branch | — | — | — | — | — | `aimfox-import-to-connection` — A1 shadow required at cutover | — | ⛔ |
 
-**What closes these.** Row 4 is a defect in a workflow this repository now owns and can fix. Rows 5
-and 6 close together, with the capacity branch S. Rows 1–3 needed `client_sequencers` seeded — done
-2026-07-22, five clients — and now need branch S on the classification and lead flows, in that order.
-Row 7 closes when a classification produces a `replies` row, which is the same step as rows 1–2.
-
-All five workflows are `managed` as of 2026-07-22, so every row above is now a defect this repository
-can see and fix rather than one it merely suspects.
+**What's left.** Only row 8 (`aimfox-import-to-connection`) remains — it queues real LinkedIn invites,
+so a second branch cannot simply be duplicated the way rows 1–7 were; it needs the A1 shadow treatment
+(build the intended action, compare, only then wire a real send). Rows 1 and 3 are unproven under real
+traffic — both lead-flow branch S builds shipped 2026-07-22 but have not yet processed a live event;
+watch the first execution of each before treating them as more than wired-correctly.
 
 ---
 
