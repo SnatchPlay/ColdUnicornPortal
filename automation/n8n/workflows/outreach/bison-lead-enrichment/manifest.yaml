@@ -28,11 +28,11 @@ reads:
     - sequencers
     - campaigns
   external:
-    - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps"
-    - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List"
-    - "Snov.io · local list + global profile lookup"
-    - "Lusha · POST /v2/person (fallback phone)"
-    - "OpenAI · gpt-4o reply analysis"
+    - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps — called TWICE per lead, once per branch, each on its own credential (branch L: CS PDCA col_6; branch S: client_sequencers.api_key via [S0])"
+    - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List — branch L only"
+    - "Snov.io · local list + global profile lookup — called once per branch (double cost, deliberate — ADR-0017 §1a)"
+    - "Lusha · POST /v2/person (fallback phone) — called once per branch (double cost, deliberate)"
+    - "OpenAI · gpt-4o reply analysis — called once per branch (double cost, deliberate)"
 
 writes:
   external:
@@ -54,19 +54,19 @@ writes:
 credentials:
   - alias: "Postgres account"
     type: postgres
-    usedBy: "[S0] Resolve Bison credentials and the five [S] branch nodes"
+    usedBy: "[S0] Resolve Bison credentials and the five [S] RPC nodes"
   - alias: "Google Sheets account"
     type: googleSheetsOAuth2Api
-    usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes"
+    usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes — branch L only"
   - alias: "Lusha"
     type: httpHeaderAuth
-    usedBy: "[181] Lusha: POST /v2/person"
+    usedBy: "[181] Lusha: POST /v2/person (branch L) and [S] Lusha: POST /v2/person (branch S) — same credential, two independent calls"
   - alias: "UniTalk"
     type: httpHeaderAuth
-    usedBy: "HTTP Request (notification)"
+    usedBy: "HTTP Request (notification) — branch L only"
   - alias: "OpenAi account"
     type: openAiApi
-    usedBy: "[18] OpenAI: gpt-4o analyze email"
+    usedBy: "[18] OpenAI: gpt-4o analyze email (branch L) and [S] OpenAI: gpt-4o analyze email (branch S) — same credential, two independent calls"
 
 transition:
   phase: A                   # dual-write: sheet first, Supabase second, Supabase failure non-fatal
@@ -76,16 +76,22 @@ transition:
   targetStore: "Supabase · sequencer_contacts + replies + leads"
   design: docs/reference/processes/outreach/bison-ingestion.md
   notes: >-
-    Every Bison call now takes its bearer token from client_sequencers via [S0] Resolve Bison
-    credentials (ADR-0012), not from CS PDCA col_6 — without that, disconnecting Sheets killed the
-    run at [40] and branch S was parallel in the graph but serial in its dependencies. A guarded
-    sheet fallback remains for the 7 onboarding workspaces that have no client_sequencers row yet.
-    Branch S hangs off "Edit Fields1" — the point where branch L has already appended the sheet row
-    and gathered every enriched field. It reuses that enrichment rather than duplicating it: Snov.io,
-    Lusha and OpenAI cost money per lead, so a second independent chain would double the bill for no
-    added confidence. This is a deliberate, declared narrowing of ADR-0017 §1a: what branch L owns
-    exclusively is the sheet write, the CRM dispatch and the blacklisting, and those are what phase C
-    disconnects. The enrichment nodes move to branch S rather than being deleted.
+    2026-07-22: branch L and branch S each read Bison credentials from exactly one place, no fallback
+    in either direction. Branch L's 8 Bison/forward-email calls read only CS PDCA col_6, as before
+    [S0] existed — a guarded sheet fallback remains for the 7 onboarding workspaces that have no
+    client_sequencers row yet. Branch S has its own copy of the data-fetch chain ([S] Bison: GET
+    /leads/{taggable_id} through [S] Bison: GET /campaigns/v1.1/{id}/sequence-steps, plus its own
+    Snov.io/Lusha/OpenAI calls), reading only client_sequencers.api_key via [S0], no fallback — a
+    Supabase failure there degrades that one execution's branch-S data (every reactivated node is
+    onError=continueRegularOutput) and never touches branch L.
+
+    This reverses the previous narrowing: Snov.io, Lusha and OpenAI are now called once per branch
+    (double vendor cost per lead), accepted explicitly in exchange for the literal reading of
+    ADR-0017 §1a — either branch can be disconnected without the other's correctness depending on
+    what's in the other branch's data source. The reactivated chain is 18 nodes that already existed
+    in the workflow, built once and never wired to a trigger (see "Where branch S's chain came from"
+    in the README) — repaired rather than built from scratch. Blacklisting ([284]/[306]) and the CRM
+    reply-forward stay branch-L-exclusive; branch S has no reason to blacklist via a second credential.
   reconciliation: >-
     Per run, one leads row per appended sheet row:
       select l.id, l.qualification, l.created_at, sc.external_contact_id
@@ -107,20 +113,13 @@ idempotency:
 
 retryPolicy:
   notes: >-
-    Every [S] node is onError=continueRegularOutput, so a Supabase or resolution failure cannot stop
-    the sheet or CRM path (ADR-0017: Supabase failure is non-fatal in phase A). Branch L has no error
-    branch — pre-existing.
+    Every [S]-prefixed node (the RPC chain and the reactivated Bison/Snov.io/Lusha/OpenAI chain) is
+    onError=continueRegularOutput, so a Supabase or vendor failure on branch S cannot stop the sheet
+    or CRM path (ADR-0017: Supabase failure is non-fatal in phase A). Branch L has no error branch —
+    pre-existing.
 
-knownViolations:
-  - rule: business/direct-table-write
-    node: "Update rows in a table"
-    reason: >-
-      One of the 31 orphaned nodes of the unfinished Supabase branch someone built earlier. It writes
-      leads directly, which ADR-0015 §5 forbids — but it is UNREACHABLE: its branch root
-      ("Get Client Data") has no inbound edge, and across 15 consecutive executions not one of those
-      nodes ran. It is also broken at the root, selecting the dropped clients.external_workspace_id.
-      Accepted rather than silently deleted: removing 31 nodes someone authored is a human decision,
-      not an agent's. The correct resolution is deletion — branch S replaces it through the RPC
-      contract and is live.
-    trackedIn: automation/n8n/workflows/outreach/bison-lead-enrichment/README.md
-    expires: 2026-09-30
+knownViolations: []
+    # Resolved 2026-07-22: the direct-table-write nodes ("Update rows in a table", "Insert rows in a
+    # table") and their unreachable, broken root ("Get Client Data", selecting the dropped
+    # clients.external_workspace_id) are deleted. Branch S's lead write goes through
+    # promote_contact_to_lead exclusively.
