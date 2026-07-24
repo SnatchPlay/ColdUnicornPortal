@@ -1,0 +1,120 @@
+{
+  "name": "[CRED] CS PDCA → client_sequencers · Bison keys",
+  "nodes": [
+    {
+      "id": "b",
+      "name": "Collect Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Emits (workspace id, client name, api key) from CS PDCA. Keys never leave n8n:\n// this payload goes straight into the Postgres node below it.\nconst rows = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  const ws = String(j.col_5 ?? '').trim();\n  const key = String(j.col_6 ?? '').trim();\n  const name = String(j['Customer Success'] ?? '').trim();\n  const doc = String(j.col_4 ?? '').trim();\n  if (!ws || !key || !name || doc.length < 30) continue;\n  if (!/^\\d+$/.test(ws)) continue;              // skips the header row\n  rows.push({ ws, key, name });\n}\nreturn [{ json: { candidates: rows.length, payload: JSON.stringify(rows) } }];\n"
+      }
+    },
+    {
+      "id": "t",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cs",
+      "name": "Read CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "read",
+        "options": {},
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "w",
+      "name": "Sync client_sequencers",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.payload }}"
+        },
+        "query": "with p as (select $1::jsonb as j),\nsrc as (\n  select nullif(r->>'ws','')   as ws,\n         nullif(r->>'key','')  as api_key,\n         nullif(r->>'name','') as sheet_name\n  from p, jsonb_array_elements(p.j) r\n),\nbison as (select id from public.sequencers where key = 'emailbison'),\n-- 1. existing rows: keep the key fresh, matched on the workspace id (never on a name)\nupd as (\n  update public.client_sequencers cs\n     set api_key = src.api_key, enabled = true, updated_at = now()\n    from src, bison\n   where cs.external_workspace_id = src.ws\n     and cs.sequencer_id = bison.id\n     and cs.api_key is distinct from src.api_key\n  returning cs.id\n),\n-- 2. workspaces with no row yet: only when the client name matches EXACTLY (case-insensitive)\nnew_rows as (\n  select c.id as client_id, src.ws, src.api_key\n  from src\n  join public.clients c on lower(btrim(c.name)) = lower(btrim(src.sheet_name))\n  join bison on true\n  where not exists (\n    select 1 from public.client_sequencers cs\n    where cs.external_workspace_id = src.ws and cs.sequencer_id = bison.id\n  )\n),\nins as (\n  insert into public.client_sequencers (client_id, sequencer_id, api_key, external_workspace_id, enabled)\n  select n.client_id, (select id from bison), n.api_key, n.ws, true\n  from new_rows n\n  on conflict (client_id, sequencer_id) do update\n    set api_key = excluded.api_key,\n        external_workspace_id = coalesce(excluded.external_workspace_id, public.client_sequencers.external_workspace_id),\n        enabled = true, updated_at = now()\n  returning id\n)\nselect (select count(*) from src)                                  as sheet_clients,\n       (select count(*) from upd)                                  as keys_refreshed,\n       (select count(*) from ins)                                  as rows_created,\n       (select string_agg(src.ws || ':' || src.sheet_name, ', ' order by src.ws)\n          from src\n         where not exists (select 1 from public.client_sequencers cs\n                            where cs.external_workspace_id = src.ws\n                              and cs.sequencer_id = (select id from bison))\n           and not exists (select 1 from public.clients c\n                            where lower(btrim(c.name)) = lower(btrim(src.sheet_name)))) as unmatched;\n"
+      }
+    }
+  ],
+  "connections": {
+    "Collect Credentials": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Sync client_sequencers",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Collect Credentials",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

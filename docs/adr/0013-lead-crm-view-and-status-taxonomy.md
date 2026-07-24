@@ -52,9 +52,11 @@ The taxonomy is three separate things:
 - **`final_outcome`** (`won | lost | lost_premql`) — the explicit terminal decision, the ONLY stored
   column (`leads.final_outcome`), set atomically with `conclusion` + `concluded_at` by the conclusion
   action (Phase 5). A CHECK enforces `final_outcome ⇒ concluded_at`.
-- **`contact_disposition`** (`ooo | nrr`) — a separate dimension **DERIVED** from the n8n-owned
-  `leads.qualification`; it does not change the funnel stage (OOO preserves it; NRR becomes `lost` only
-  via an explicit decision). OOO/NRR stay read-only — reclassifying them would be an n8n contract change.
+- ~~**`contact_disposition`** (`ooo | nrr`)~~ — **SUPERSEDED by ADR-0015, removed 2026-07-22.** This
+  was a derived dimension over the n8n-owned `leads.qualification`. Under ADR-0015 OOO/NRR are outreach
+  states of a `sequencer_contacts` row (`ooo_followups`), never a lead dimension; migration `20260722z`
+  dropped the `contact_disposition` column and the `OOO`/`NRR` `lead_qualification` values, and the
+  `deriveContactDisposition` resolver + CRM "Disposition" column were deleted with it.
 
 `resolveCrmStatus` collapses stage + outcome into the single display/health status and bridges the
 legacy terminal signals (`won` boolean, `qualification='rejected'`). Terminal `lost`/`lost_premql`

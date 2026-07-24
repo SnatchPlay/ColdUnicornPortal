@@ -1,0 +1,192 @@
+{
+  "name": "Bison campaign sync",
+  "nodes": [
+    {
+      "id": "04191c39-3a29-4bab-84ee-1eda7a4d97e6",
+      "name": "Get Active Clients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        304
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select c.id,\n       c.name,\n       cs.api_key as external_api_key\nfrom public.clients c\njoin public.client_sequencers cs on cs.client_id = c.id and cs.enabled\njoin public.sequencers        s  on s.id = cs.sequencer_id and s.key = 'emailbison'\nwhere c.status = 'Active'\n  and coalesce(cs.api_key, '') <> ''\norder by c.name;"
+      }
+    },
+    {
+      "id": "b8a0f2d5-84f2-4581-bedb-812431cc6e75",
+      "name": "HTTP Fetch All Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        304
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Split in Batches').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "completeExpression": "={{ $response.body.links.next==null }}",
+              "nextURL": "={{ $response.body.links.next }}",
+              "paginationCompleteWhen": "other",
+              "paginationMode": "responseContainsNextURL",
+              "requestInterval": 200
+            }
+          }
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/campaigns"
+      }
+    },
+    {
+      "id": "b8918886-d9be-4fe7-b3d5-f7fd00322f2a",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        304
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "46865493-898f-4a29-b74d-8aa9777ffd8c",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        304
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "01cefb80-725c-4966-8831-c2ff8dee0093",
+      "name": "Transform Campaigns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        304
+      ],
+      "parameters": {
+        "jsCode": "\n// Run Once for All Items — receives all paginated pages\nconst pages = $input.all();\nconst client = $('Split in Batches').first().json;\n\n// Flatten all campaigns from all pages\nconst allCampaigns = [];\nfor (const page of pages) {\n  const items = page.json?.data;\n  if (Array.isArray(items)) allCampaigns.push(...items);\n}\n\nif (allCampaigns.length === 0) {\n  return [{ json: { sql: 'SELECT 1', count: 0, client_name: client.name } }];\n}\n\nconst typeMap = {\n  'outbound':      'outreach',\n  'reply_followup': 'nurture',\n};\nconst statusMap = {\n  'active':    'active',\n  'launching': 'launching',\n  'draft':     'draft',\n  'paused':    'stopped',\n  'failed':    'stopped',\n  'archived':  'completed',\n  'completed': 'completed',\n};\n\nconst safe = s => (s || '').replace(/'/g, \"''\");\n\nconst values = allCampaigns.map(c => {\n  const type   = typeMap[c.type]     || 'outreach';\n  const status = statusMap[c.status] || 'draft';\n  const name   = safe(c.name);\n  const dbSize = Number(c.total_leads)  || 0;\n  const posRes = Number(c.interested)   || 0;\n  const startDate = c.created_at ? `'${c.created_at.substring(0, 10)}'` : 'NULL';\n  return `('${client.id}', '${c.id}', '${type}'::campaign_type, '${name}', '${status}'::campaign_status, ${dbSize}, ${posRes}, ${startDate})`;\n}).join(',\\n');\n\nconst sql = `\nINSERT INTO campaigns\n  (client_id, external_id, type, name, status, database_size, positive_responses, start_date)\nVALUES\n${values}\nON CONFLICT (external_id) DO UPDATE SET\n  name               = EXCLUDED.name,\n  status             = EXCLUDED.status,\n  database_size      = EXCLUDED.database_size,\n  positive_responses = EXCLUDED.positive_responses,\n  updated_at         = NOW()\nRETURNING external_id, name, status\n`;\n\nreturn [{ json: { sql, count: allCampaigns.length, client_name: client.name } }];\n"
+      }
+    },
+    {
+      "id": "7515c408-4110-4f8f-af57-e6582963a612",
+      "name": "Upsert Campaigns",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1104,
+        304
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "{{ $json.sql }}"
+      }
+    }
+  ],
+  "connections": {
+    "Get Active Clients": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Fetch All Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Transform Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Active Clients",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "HTTP Fetch All Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Transform Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Upsert Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Upsert Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "",
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timeSavedMode": "fixed"
+  }
+}

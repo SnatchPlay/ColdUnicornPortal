@@ -45,12 +45,6 @@ describe("buildLeadCrmColumns", () => {
     expect(col("status").value(row({ final_outcome: "won", concluded_at: "x" }))).toBe("Won");
   });
 
-  it("Disposition derives the domain-named disposition from qualification", () => {
-    expect(col("disposition").value(row({ qualification: "OOO" }))).toBe("Out of office");
-    expect(col("disposition").value(row({ qualification: "NRR" }))).toBe("Not right role");
-    expect(col("disposition").value(row({ qualification: "MQL" }))).toBe("");
-  });
-
   it("Contact made shows date + method", () => {
     expect(col("contact_made").value(row({ contact_made_at: "2026-07-13T10:00:00Z", contact_method: "phone" }))).toMatch(/phone/);
   });
@@ -87,7 +81,6 @@ describe("buildLeadCrmColumns", () => {
     expect(col("company").meta?.spreadsheetColumn).toBe("A"); // letter kept as traceability metadata
     expect(col("msg_history").meta?.implementationStatus).toBe("partial");
     expect(col("offer_date").meta?.source).toBe("offer");
-    expect(col("disposition").meta).toBeUndefined(); // derived sub-view of status, no registry entry
   });
 
   it("AO is non-authoritative while the feature flag is off (no health colour)", () => {
@@ -105,7 +98,6 @@ describe("buildLeadCrmColumns", () => {
     expect(col("conclusion").healthId).toBe("conclusion");
     // Non-SLA columns carry no health letter.
     expect(col("status").healthId).toBeUndefined();
-    expect(col("disposition").healthId).toBeUndefined();
   });
 
   it("appends the AO process-issues column only for internal + includeProcessIssues", () => {

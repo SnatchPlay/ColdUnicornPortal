@@ -28,7 +28,7 @@ The **purpose** of this file is to prevent re-discovery: when an engineer or sta
 | OoS-9 | **In-portal email/SMS dispatch** (sending notifications from the portal directly) | PROJECT_SPEC.md В§6.1 US-C8 | 2026-04-25 |
 | OoS-10 | **RR/BR per-team-member reports** (US-A9) | PROJECT_SPEC.md В§6.3 | 2026-04-25 |
 | OoS-11 | **CRM platform plug-ins** (`client_crm_integrations` table for Pipedrive / HubSpot / Zoho / Salesforce / Livespace) | PROJECT_SPEC.md В§3.3 | 2026-04-25 |
-| OoS-12 | **Smartlead / Bison API sync from portal** (Phase 2 / future, В§8.1-8.2) | PROJECT_SPEC.md В§8 | 2026-04-25 |
+| OoS-12 | **Bison API sync from portal** (Phase 2 / future, В§8.1-8.2) | PROJECT_SPEC.md В§8 | 2026-04-25 |
 | OoS-13 | **Account-Based Selling (ABS) scoring** (`account_based_selling` table) | PROJECT_SPEC.md В§3.12 | 2026-04-25 |
 | OoS-14 | **`crm_prospects` / `lg_pipeline` separate from `agency_crm_deals`** | PROJECT_SPEC.md В§3.10-3.11 | 2026-04-25 |
 | OoS-15 | **Server-side metric rollup tables / pre-computed `daily_snapshots` with diff columns** | PROJECT_SPEC.md В§3.7 | 2026-04-25 |
@@ -82,9 +82,9 @@ Team-member-level performance is not a portal-level metric. Manager capacity sur
 
 The `crm_config` JSONB column on `clients` exists for future integration with the agency's own CRM stack. Multi-CRM with first-class config tables is **deferred**. If pushed live later, prefer extending the JSONB column over creating a new normalised table.
 
-### OoS-12 вЂ” Smartlead / Bison API sync from portal
+### OoS-12 вЂ” Bison API sync from portal
 
-The portal does **not** call Smartlead/Bison/**Aimfox** APIs directly. n8n owns those integrations. Pushing data from the portal directly would duplicate logic and split error handling. Since ADR-0012 the portal stores per-client sequencer credentials in `client_sequencers` and reads `sequencer_daily_stats` — configuration and display only; execution stays in n8n. The full sequencer-management UI (catalog editing, enable/disable, Aimfox PDCA panels) is phase 2 (backlog BL-3).
+The portal does **not** call Bison/**Aimfox** APIs directly. n8n owns those integrations. Pushing data from the portal directly would duplicate logic and split error handling. Since ADR-0012 the portal stores per-client sequencer credentials in `client_sequencers` and reads `sequencer_daily_stats` — configuration and display only; execution stays in n8n. The full sequencer-management UI (catalog editing, enable/disable, Aimfox PDCA panels) is phase 2 (backlog BL-3).
 
 ### OoS-13 вЂ” ABS scoring
 

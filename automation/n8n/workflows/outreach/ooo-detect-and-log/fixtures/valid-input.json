@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED",
+    "tag": "OOO"
+  },
+  "data": {
+    "taggable_id": 5500123,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "male"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. OOO auto-reply body: 'I am out of the office until 4 August 2026.' Target: expected_return_date=2026-08-04, date_source=reply_parsed, status=pending."
+}

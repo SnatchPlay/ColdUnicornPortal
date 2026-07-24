@@ -1,0 +1,61 @@
+schemaVersion: 1
+
+id: bison-daily-stats-process
+name: "Daily Stats Process"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: high
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    detail: "called once per client by bison-daily-stats-population"
+
+reads:
+  external:
+    - "Bison API · workspace line-area-chart-stats, stats, sender-emails, leads, replies, sending-schedules"
+  tables:
+    - daily_stats            # yesterday's totals, for month-to-date deltas
+
+writes:
+  external: []
+  tables:
+    - daily_stats            # UPSERT on (client_id, report_date)
+  rpcs: []
+  tablesWritten:
+    - daily_stats
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Yesterday Totals1, Upsert Daily Stats1"
+
+transition:
+  phase: C
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · daily_stats"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: "Supabase-only ingestion; declared for completeness."
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "daily_stats UNIQUE (client_id, report_date)"
+  notes: >-
+    Idempotent per day. Note it reads yesterday's row to derive month-to-date deltas, so a missing
+    day propagates into the next day's numbers rather than only leaving a gap.
+
+retryPolicy:
+  notes: "None on the nine Bison calls; a partial fetch produces a row with zeroes in the missing fields."
+
+knownViolations: []

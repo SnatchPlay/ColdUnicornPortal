@@ -64,16 +64,15 @@ logo — requires a new ADR. Do not add parameters to this function; add a new, 
 
 ### What counts as a lead
 
-`count(leads)` excluding OOO / NRR / rejected. The predicate mirrors `deriveContactDisposition()`
-([src/app/lib/crm/lead-status.ts:73](../../src/app/lib/crm/lead-status.ts#L73)): the canonical
-`contact_disposition` column plus the legacy fallback for rows where n8n still writes `OOO`/`NRR`
-into `qualification` ([11-integrations.md §6](../reference/functional/11-integrations.md)). The SQL
-is a deliberate duplicate of that TS logic — Postgres cannot import the module. When n8n cuts over,
-**keep the legacy `CASE` branch**: historical rows retain those qualification values forever.
+`count(leads)` excluding `rejected`. **Simplified 2026-07-22 by `20260722z`:** the OOO/NRR carve-out
+(and the `deriveContactDisposition` TS logic it duplicated) is gone — OOO/NRR contacts are no longer
+`leads` at all (ADR-0015), the `contact_disposition` column and the `OOO`/`NRR` `lead_qualification`
+values were dropped, so there is nothing left to exclude beyond `rejected`. The predicate is now just
+`qualification IS DISTINCT FROM 'rejected'`.
 
 This number is **not** the same as any portal KPI. `getClientKpis` counts MQLs
 ([client-view-models.ts:37](../../src/app/lib/client-view-models.ts#L37)); the public counter counts
-all non-OOO/NRR/rejected leads and is therefore larger. Expected, documented in
+all non-rejected leads and is therefore larger. Expected, documented in
 [04-metrics-catalog.md](../reference/functional/04-metrics-catalog.md).
 
 ### Windows

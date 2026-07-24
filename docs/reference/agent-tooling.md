@@ -91,6 +91,18 @@ A screenshot saved to disk is worth more in a PR description than three paragrap
 
 The Supabase MCP exposes the live project as tools the agent can call. **This is your fastest path** for DB exploration without writing one-off scripts.
 
+> ⚠️ **Confirm which project you are attached to before you trust a single query.** The
+> interactively-connected Supabase MCP has pointed at a *different organisation* than this product —
+> which looks like a working connection right up until a table "does not exist" and you conclude the
+> schema is wrong. Check with `list_projects` / `get_project`; this product is project ref
+> **`bnetnuzxynmdftiadwef`**.
+>
+> When the MCP is attached elsewhere, go through the Management API instead — `POST
+> https://api.supabase.com/v1/projects/{ref}/database/query` with the `sbp_` token in
+> `SUPABASE_MCP_KEY` (`.env.local`, gitignored). It runs arbitrary SQL, which makes
+> `begin; … rollback;` the standard way to prove a migration or a bulk write **against production
+> data** before running it for real. Several 2026-07-22 changes were validated exactly that way.
+
 ### Common operations
 
 - `supabase_list_tables` / `supabase_describe_table` — schema sanity check.
@@ -98,6 +110,23 @@ The Supabase MCP exposes the live project as tools the agent can call. **This is
 - `supabase_apply_migration` — apply a generated migration to the project (verify against staging first).
 - `supabase_get_logs` — pull recent edge-function or database logs to debug a 500 / RLS denial.
 - `supabase_get_project_url` / `supabase_generate_types` — wiring sanity.
+
+### n8n, beyond the MCP
+
+The n8n MCP cannot do everything, and two of its gaps have cost real time:
+
+- **It strips node `credentials`.** To read or set them, use the public REST API (`/api/v1`,
+  `X-N8N-API-KEY` from `N8N_REST_API_KEY` in `.env.local`). Re-authoring a workflow through the MCP
+  SDK **silently unbinds credentials on `httpRequest` nodes** —
+  [security finding 9](n8n/security.md). Prefer a REST `PUT` for a targeted node change; use the SDK
+  only when the graph itself changes.
+- **`PUT /workflows/{id}` resets `settings`.** Always send `availableInMCP` (losing it breaks
+  `pnpm n8n:export`) and `errorWorkflow`. The API rejects the full settings object — send only those
+  keys plus `executionOrder`.
+- **A published version is not the draft.** `PUT` edits the draft; production keeps running the last
+  published version until `publish_workflow`. That is a safety property worth using: deploy, inspect,
+  publish.
+- **`execute_workflow` ignores webhook input** and fires the workflow's own trigger.
 
 ### RLS verification recipe
 

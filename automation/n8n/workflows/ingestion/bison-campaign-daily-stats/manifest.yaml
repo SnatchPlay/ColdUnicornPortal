@@ -1,0 +1,67 @@
+schemaVersion: 1
+
+id: bison-campaign-daily-stats
+name: "Bison campaign daily stats"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # feeds every per-campaign chart in the portal
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "daily at 21:30 (rule: triggerAtMinute 30, default daily field)"
+
+reads:
+  external:
+    - "Bison API · GET /campaigns/{id}/line-area-chart-stats"
+    - "Bison API · GET /campaigns/{id}/sender-emails?limit=1"
+  tables:
+    - campaigns
+    - clients
+    - client_sequencers
+
+writes:
+  external: []
+  tables:
+    - campaign_daily_stats   # UPSERT on (campaign_id, report_date)
+  rpcs: []
+  tablesWritten:
+    - campaign_daily_stats
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Active Campaigns, Upsert Campaign Stats"
+
+transition:
+  phase: C
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · campaign_daily_stats"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: "Supabase-only ingestion; declared for completeness."
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "campaign_daily_stats UNIQUE (campaign_id, report_date)"
+  notes: >-
+    Re-running the same day overwrites the same row. But the report date is always TODAY — there is no
+    date override and no backfill trigger, so a day missed while the workflow was broken cannot be
+    recovered by re-running it. 2026-07-20 and 2026-07-21 are lost for this reason.
+
+retryPolicy:
+  notes: >-
+    Both Bison calls are onError=continueRegularOutput, so a failed campaign yields zeroes rather
+    than an error — a silent zero is indistinguishable from a real zero in the stored row.
+
+knownViolations: []

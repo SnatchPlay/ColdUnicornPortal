@@ -6,7 +6,6 @@
 -- The fixed UUIDs below are LOAD-BEARING: they are the column DEFAULTs on
 -- campaigns.sequencer_id / leads.sequencer_id and the constants n8n uses.
 -- Never change them.
---   smartlead  00000000-0000-4000-a000-000000000001
 --   emailbison 00000000-0000-4000-a000-000000000002
 --   aimfox     00000000-0000-4000-a000-000000000003
 --
@@ -41,7 +40,6 @@ comment on table public.sequencers is
   'Catalog of external sending tools (sequencers). Fixed UUIDs are load-bearing (column defaults + n8n constants). ADR-0012.';
 
 insert into public.sequencers (id, key, name, channel) values
-  ('00000000-0000-4000-a000-000000000001', 'smartlead',  'Smartlead',  'email'),
   ('00000000-0000-4000-a000-000000000002', 'emailbison', 'EmailBison', 'email'),
   ('00000000-0000-4000-a000-000000000003', 'aimfox',     'Aimfox',     'linkedin')
 on conflict (key) do nothing;

@@ -315,7 +315,7 @@ export interface UpdateInvoicePayload {
 
 /**
  * Per-sequencer credential patch (ADR-0012). Only present fields overwrite;
- * `sequencer_key` is the sequencers catalog key ('smartlead' | 'emailbison' | 'aimfox' | …).
+ * `sequencer_key` is the sequencers catalog key ('emailbison' | 'aimfox' | …).
  */
 export interface SequencerCredentialInput {
   sequencer_key: string;
@@ -790,7 +790,6 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
           clientId: isString(p.clientId) ? p.clientId : undefined,
           campaignId: isString(p.campaignId) ? p.campaignId : undefined,
           stage: isString(p.stage) ? p.stage : undefined,
-          replyScope: (p.replyScope === "active" || p.replyScope === "ooo") ? p.replyScope : "all",
           dateFrom: isString(p.dateFrom) ? p.dateFrom : undefined,
           dateTo: isString(p.dateTo) ? p.dateTo : undefined,
           search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,
@@ -821,7 +820,6 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
           clientId: isString(p.clientId) ? p.clientId : undefined,
           campaignId: isString(p.campaignId) ? p.campaignId : undefined,
           stage: isString(p.stage) ? p.stage : undefined,
-          replyScope: (p.replyScope === "active" || p.replyScope === "ooo") ? p.replyScope : "all",
           dateFrom: isString(p.dateFrom) ? p.dateFrom : undefined,
           dateTo: isString(p.dateTo) ? p.dateTo : undefined,
           search: isString(p.search) && p.search.trim().length > 0 ? p.search.trim() : undefined,

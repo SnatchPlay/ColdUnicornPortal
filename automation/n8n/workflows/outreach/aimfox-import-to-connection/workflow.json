@@ -1,0 +1,358 @@
+{
+  "name": "Import leads to Aimfox connection",
+  "nodes": [
+    {
+      "id": "535d807a-f5b0-46aa-ba0b-ac5eac3784d8",
+      "name": "Filter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "7fc500bb-0379-4403-a7a1-aa75d4a9253a",
+              "leftValue": "={{ $json.col_4 }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "b95e96cf-e9ca-4d79-9c7d-d8454f057b4a",
+              "leftValue": "={{ $json.col_105 }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9db5726e-0425-4a16-b3ad-13c568878f39",
+      "name": "Filter1",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f5dbb448-f52a-48c4-8766-7d7694ecf8a2",
+              "leftValue": "={{ $json.campaigns[0].id }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "4c5eaa80-5430-4790-8373-ed14639357a6",
+              "leftValue": "={{ $json.campaigns[0].state }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "ACTIVE"
+            },
+            {
+              "id": "de788014-f7f3-4edc-9a01-bc5544642555",
+              "leftValue": "={{ $json.campaigns[0].name }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "AutoConnect"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "510ed5cc-828e-44da-bcca-ffa548f43c83",
+      "name": "Filter2",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fddbdc0d-a742-45fe-8f3e-4626f16ef48d",
+              "leftValue": "={{ $json['LinkedIn URL'] }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6aebac4e-4493-4877-9f56-5d2827b8d90b",
+      "name": "Get row(s) in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        208,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_7",
+              "lookupValue": "Active"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1287241336",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "6c4121a5-02eb-4e8e-88fd-b435c8825b58",
+      "name": "Get row(s) in sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1040,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Get row(s) in sheet').item.json.col_4 }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "LEAD RECEIVED",
+              "lookupValue": "={{ $now.minus({ days: 1 }).toFormat('M/d/yyyy') }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "41f1a60f-98e5-462d-a170-c4b432575f19",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        0
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.col_105 }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/campaigns"
+      }
+    },
+    {
+      "id": "ceeb3234-62c1-45e9-aa2c-23000f9201ea",
+      "name": "HTTP Request1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1456,
+        0
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Filter').item.json.col_105 }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"profile_url\": \"{{ $json['LinkedIn URL'] }}\"\n}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $('HTTP Request').item.json.campaigns[0].id }}/audience"
+      }
+    },
+    {
+      "id": "15f5c360-abbc-4f3f-9230-00ae9fd948fa",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 19
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Filter": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Request",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get row(s) in sheet1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Request1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get row(s) in sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}

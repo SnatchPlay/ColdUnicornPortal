@@ -1,0 +1,92 @@
+schemaVersion: 1
+
+id: aimfox-classification
+name: "AimFox Classification"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # blacklisting permanently removes a company or contact from reach
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: webhook
+    detail: "POST /webhook/aimfox-classifier — no authentication (security.md §3)"
+
+reads:
+  tables:
+    - client_sequencers      # the client's Aimfox token — replaces the broken minting endpoint
+    - sequencers
+  external:
+    - "Aimfox API · GET /leads/{id} — the contact and their current LinkedIn experience"
+    - "OpenAI · POST /v1/responses — classification, and a company-mention check"
+
+writes:
+  external:
+    - "Aimfox API · POST /blacklist/{urn}          ← IRREVERSIBLE for that contact"
+    - "Aimfox API · POST /blacklist-companies      ← IRREVERSIBLE for that company"
+    - "sub-workflow 'Test aimfox' for the Interested branch"
+  tables: []
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+  tablesWritten:
+    - sequencer_contacts     # via RPC
+    - replies                # via RPC
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Workspace Api Key (resolves client_sequencers.api_key), and the two [S] branch nodes"
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "OpenAI - Classify Email, OpenAI - Search for the company name"
+
+transition:
+  phase: A                    # dual-write: branch L blacklists (vendor), branch S stores the reply
+  phaseState: live            # branch S published 2026-07-22
+  authoritativeSource: vendor  # branch L's blacklist call is the only thing with a real-world effect
+  legacyStore: "Aimfox workspace state (blacklists); no local store at all"
+  targetStore: "Supabase · replies (classification), sequencer_contacts"
+  design: docs/reference/n8n/aimfox-phase-a.md
+  notes: >-
+    The LinkedIn analogue of Bison reply classification. Its `category` values are the same vocabulary
+    as replies.classification (OOO / Interested / NRR / …), which is why it went first in phase A,
+    before the lead flows: a stored reply is what a contact identity and an OOO episode hang off.
+    Branch S hangs off "Get Workspace Api Key", which was already the sole, Supabase-only credential
+    resolution for this workflow (it replaced a broken Aimfox token-mint call, never a sheet read) —
+    no coupling risk of the kind bison-lead-enrichment had, since Sheets was never an alternate source
+    for this token. No blacklist call in branch S; that stays branch-L-exclusive until phase C.
+  reconciliation: >-
+    Every classified reply becomes one `replies` row via upsert_reply, keyed on the Aimfox webhook
+    delivery id (body.id); compare counts per category per day once real traffic has flowed.
+  parityEvidence: >-
+    2026-07-22 08:41 UTC — first live inbound LinkedIn reply through branch S (execution 50518,
+    workspace Bent Iron PL, category 'other' @94%). Both branch-S nodes ran clean and persisted:
+    sequencer_contacts row ef5bf256-7516-4527-81a7-7da7e12c920a (keyed to the aimfox client_sequencer,
+    external_contact_id 575474915) and replies row f7a20837-2279-4c8f-9a3c-a24b8d4599c1
+    (classification 'other', lead_id NULL — correctly not promoted). This is the first aimfox
+    sequencer_contacts row created by live automation rather than the one-off sheet backfill.
+
+idempotency:
+  key: "replies UNIQUE (external_id) — the Aimfox webhook delivery id"
+  notes: >-
+    Branch S is idempotent: a redelivered webhook resolves to the same reply row via upsert_reply's
+    UNIQUE on external_id. Branch L is not — blacklisting the same contact twice is harmless at the
+    vendor, but the OpenAI calls are billed again on every redelivery, and that half of defect 2 is
+    unchanged.
+
+retryPolicy:
+  notes: >-
+    Branch S is onError=continueRegularOutput on both nodes, so a Supabase failure cannot stop
+    blacklisting (ADR-0017: Supabase failure is non-fatal in phase A). Branch L still has no retry, no
+    error branch — pre-existing, unaffected by this change.
+
+knownViolations: []

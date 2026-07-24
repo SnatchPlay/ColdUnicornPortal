@@ -1,0 +1,240 @@
+{
+  "name": "Bison campaign daily stats",
+  "nodes": [
+    {
+      "id": "ae9b6c9a-d95a-42d2-9865-8b28d68452e5",
+      "name": "Get Active Campaigns",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        304
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select camp.id            as campaign_id,\n       camp.external_id   as campaign_external_id,\n       camp.name          as campaign_name,\n       camp.status        as campaign_status,\n       cs.api_key         as external_api_key\nfrom public.campaigns camp\njoin public.clients c on c.id = camp.client_id\njoin public.client_sequencers cs on cs.client_id = c.id and cs.enabled\njoin public.sequencers        s  on s.id = cs.sequencer_id and s.key = 'emailbison'\nwhere c.status = 'Active'\n  and coalesce(cs.api_key, '') <> ''\n  and camp.status in ('active', 'launching', 'stopped', 'completed')\norder by c.name, camp.name;"
+      }
+    },
+    {
+      "id": "9820d3a3-2fbf-49cc-93c3-57a908ec27b2",
+      "name": "HTTP Campaign Inboxes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1104,
+        304
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Split in Batches').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ 'https://go.gheads.com/api/campaigns/' + $('Split in Batches').item.json.campaign_external_id + '/sender-emails?limit=1' }}"
+      }
+    },
+    {
+      "id": "3ff3a99d-cb6f-4d7c-ac4c-67aa11b54f52",
+      "name": "HTTP Campaign Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        304
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Split in Batches').item.json.external_api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ 'https://go.gheads.com/api/campaigns/' + $('Split in Batches').item.json.campaign_external_id + '/line-area-chart-stats?start_date=' + $('Set Report Date').first().json.reportDate + '&end_date=' + $('Set Report Date').first().json.reportDate }}"
+      }
+    },
+    {
+      "id": "7ebd6ddd-7c3a-473e-98e5-9d6db6831bc5",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        304
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "055b4059-fa1f-4e0f-9cbb-2c12d709dc73",
+      "name": "Set Report Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst pad = n => String(n).padStart(2, '0');\nconst y = now.getUTCFullYear();\nconst m = pad(now.getUTCMonth() + 1);\nconst d = pad(now.getUTCDate());\nreturn [{ json: { reportDate: y + '-' + m + '-' + d } }];"
+      }
+    },
+    {
+      "id": "66d6797d-4baa-4971-ad23-fe8645877d88",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        672,
+        304
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "58903ec5-2739-4584-bd44-49cd957b83c4",
+      "name": "Transform Campaign Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const camp = $('Split in Batches').item.json;\nconst reportDate = $('Set Report Date').first().json.reportDate;\n\n// Parse line-area-chart-stats: Sent, Replied, Bounced, Unique Opens, Interested\nconst statsJson = $('HTTP Campaign Stats').item.json;\nlet sentCount = 0, replyCount = 0, bounceCount = 0, uniqueOpenCount = 0, positiveRepliesCount = 0;\nif (statsJson && statsJson.data && Array.isArray(statsJson.data)) {\n  for (const item of statsJson.data) {\n    const dateEntry = (item.dates || []).find(d => d[0] === reportDate);\n    const val = dateEntry ? (dateEntry[1] || 0) : 0;\n    if (item.label === 'Sent')           sentCount = val;\n    else if (item.label === 'Replied')   replyCount = val;\n    else if (item.label === 'Bounced')   bounceCount = val;\n    else if (item.label === 'Unique Opens') uniqueOpenCount = val;\n    else if (item.label === 'Interested')   positiveRepliesCount = val;\n  }\n}\n\n// Parse sender-emails: meta.total = inboxes_active\nconst inboxJson = $('HTTP Campaign Inboxes').item.json;\nconst inboxesActive = (inboxJson && inboxJson.meta) ? (inboxJson.meta.total || 0) : 0;\n\nreturn [{ json: {\n  campaign_id: camp.campaign_id,\n  report_date: reportDate,\n  sent_count: sentCount,\n  reply_count: replyCount,\n  bounce_count: bounceCount,\n  unique_open_count: uniqueOpenCount,\n  positive_replies_count: positiveRepliesCount,\n  inboxes_active: inboxesActive\n} }];"
+      }
+    },
+    {
+      "id": "51f6eac8-7367-499c-8cd2-b2f70433059d",
+      "name": "Upsert Campaign Daily Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        304
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "INSERT INTO campaign_daily_stats (campaign_id, report_date, sent_count, reply_count, bounce_count, unique_open_count, positive_replies_count, inboxes_active) VALUES ('{{ $json.campaign_id }}', '{{ $json.report_date }}', {{ $json.sent_count }}, {{ $json.reply_count }}, {{ $json.bounce_count }}, {{ $json.unique_open_count }}, {{ $json.positive_replies_count }}, {{ $json.inboxes_active }}) ON CONFLICT (campaign_id, report_date) DO UPDATE SET   sent_count             = EXCLUDED.sent_count,   reply_count            = EXCLUDED.reply_count,   bounce_count           = EXCLUDED.bounce_count,   unique_open_count      = EXCLUDED.unique_open_count,   positive_replies_count = EXCLUDED.positive_replies_count,   inboxes_active         = EXCLUDED.inboxes_active RETURNING campaign_id, report_date, sent_count, reply_count"
+      }
+    }
+  ],
+  "connections": {
+    "Get Active Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Campaign Inboxes": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Transform Campaign Metrics",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "HTTP Campaign Stats": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Campaign Inboxes",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Report Date",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Set Report Date": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Active Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "HTTP Campaign Stats",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Transform Campaign Metrics": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Upsert Campaign Daily Stats",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Upsert Campaign Daily Stats": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "",
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timeSavedMode": "fixed"
+  }
+}

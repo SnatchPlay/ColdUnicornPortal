@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldunicorn.internal/n8n/outreach/ooo-detect-and-log/hub-child-input.schema.json",
+  "title": "HUB → OOO child sub-workflow input",
+  "description": "Payload passed by '[HUB] Bison Replies Dispatcher' (xPzdtWQiY3lGtqI1) to the OOO child workflows via executeWorkflowTrigger in passthrough mode. Derived by inspection of the live workflows on 2026-07-21: the HUB normalizes the raw Bison webhook body, and the children read the fields below. It is NOT a schema the HUB enforces today — nothing validates this boundary at runtime, which is why an unexpected shape fails deep inside a child rather than at the edge.",
+  "type": "object",
+  "required": ["event", "data"],
+  "properties": {
+    "event": {
+      "type": "object",
+      "required": ["workspace_id"],
+      "properties": {
+        "workspace_id": {
+          "description": "Bison workspace id. Joins to client_sequencers.external_workspace_id (TEXT since ADR-0012 — the workflow casts it with .toString()).",
+          "type": ["integer", "string"]
+        },
+        "type": {
+          "description": "Bison event name. The HUB switches on this before calling a child.",
+          "type": "string",
+          "enum": ["TAG_ATTACHED", "TAG_REMOVED"]
+        },
+        "tag": {
+          "description": "The tag whose attach/detach triggered the dispatch.",
+          "type": "string"
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": ["taggable_id"],
+      "properties": {
+        "taggable_id": {
+          "description": "Bison lead id. Used as the Bison API path segment and, today, as the leads.external_id match key. Under ADR-0015 this becomes sequencer_contacts.external_contact_id, scoped by client_sequencer_id.",
+          "type": ["integer", "string"]
+        },
+        "custom_variables": {
+          "description": "Bison per-lead custom fields. The workflow looks for name == 'gender' to derive the OOO routing category.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string" },
+              "value": { "type": ["string", "number", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -55,16 +55,27 @@ interface DatedEntry<T> {
   value: T;
 }
 
+// Per-channel and Aimfox fields are optional: the raw createClientMetrics() path (used by tests and
+// the condition context) has no sequencer dimension and leaves them undefined, which the mega-table
+// renders as "—". Only the summary path (createClientMetricsFromSummary) populates them.
 export interface DodRow {
   bucket: string;
   schedule: number | null;
   sent: number | null;
+  /** Aimfox planned invite volume for this bucket (+2/+1/0 only), else null. */
+  aimfoxSchedule?: number | null;
+  /** Aimfox invites_sent for this daily-sent bucket (0..-4 only), else null. */
+  aimfoxSent?: number | null;
 }
 
 export interface ThreeDodRow {
   bucket: string;
   totalLeads: number;
   sqlLeads: number;
+  totalLeadsEb?: number;
+  totalLeadsAf?: number;
+  sqlLeadsEb?: number;
+  sqlLeadsAf?: number;
 }
 
 export interface WowRow {
@@ -76,6 +87,12 @@ export interface WowRow {
   bounceRate: number | null;
   oooRate: number | null;
   negativeRate: number | null;
+  totalLeadsEb?: number;
+  totalLeadsAf?: number;
+  sqlLeadsEb?: number;
+  sqlLeadsAf?: number;
+  /** Aimfox acceptance rate for the week: accepted/sent. null when sent=0 or accepted unmeasured. */
+  acceptRate?: number | null;
 }
 
 export interface MomRow {
@@ -84,6 +101,8 @@ export interface MomRow {
   sqlLeads: number;
   meetings: number;
   won: number;
+  sqlLeadsEb?: number;
+  sqlLeadsAf?: number;
 }
 
 export interface ClientMetricsOverview {
@@ -103,6 +122,12 @@ export interface ClientMetricsOverview {
   momSql: number;
   /** Latest daily_stats.prospects_count by report_date; 0 when no daily_stats rows exist. */
   latestProspectsCount: number;
+  /** Aimfox weekly connect-cap snapshot ("~195 per account"), latest day. undefined in the raw path. */
+  aimfoxInviteLimit?: number | null;
+  /** Aimfox invites still available today (PDCA sheet column S "Invitations limit"). undefined in the raw path. */
+  aimfoxInviteLimitRemaining?: number | null;
+  /** Aimfox remaining database size, latest day. undefined in the raw path. */
+  aimfoxRemainingDb?: number | null;
 }
 
 export interface ClientMetricsPack {
@@ -383,22 +408,29 @@ export function createClientMetrics(dailyStats: DailyStatInput[], leads: LeadMet
  * done server-side. Output shape is identical to createClientMetrics().
  */
 export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientMetricsPack {
-  const g = (arr: number[], i: number) => arr[i] ?? 0;
+  // Defensive against undefined arrays: the per-channel/Aimfox fields are optional on the contract
+  // and older test fixtures may omit them; a bare arr[i] would throw on undefined.
+  const g = (arr: number[] | undefined, i: number) => arr?.[i] ?? 0;
+  const gN = (arr: Array<number | null> | undefined, i: number) => arr?.[i] ?? null;
 
   const dodRows: DodRow[] = [
-    { bucket: "+2", schedule: s.schedule_day_after, sent: null },
-    { bucket: "+1", schedule: s.schedule_tomorrow,  sent: null },
-    { bucket:  "0", schedule: s.schedule_today,     sent: g(s.daily_sent, 0) },
-    { bucket: "-1", schedule: null,                 sent: g(s.daily_sent, 1) },
-    { bucket: "-2", schedule: null,                 sent: g(s.daily_sent, 2) },
-    { bucket: "-3", schedule: null,                 sent: g(s.daily_sent, 3) },
-    { bucket: "-4", schedule: null,                 sent: g(s.daily_sent, 4) },
+    { bucket: "+2", schedule: s.schedule_day_after, sent: null,             aimfoxSchedule: s.aimfox_schedule_day_after ?? null, aimfoxSent: null },
+    { bucket: "+1", schedule: s.schedule_tomorrow,  sent: null,             aimfoxSchedule: s.aimfox_schedule_tomorrow ?? null,  aimfoxSent: null },
+    { bucket:  "0", schedule: s.schedule_today,     sent: g(s.daily_sent, 0), aimfoxSchedule: s.aimfox_schedule_today ?? null,   aimfoxSent: g(s.aimfox_daily_sent, 0) },
+    { bucket: "-1", schedule: null,                 sent: g(s.daily_sent, 1), aimfoxSchedule: null,                              aimfoxSent: g(s.aimfox_daily_sent, 1) },
+    { bucket: "-2", schedule: null,                 sent: g(s.daily_sent, 2), aimfoxSchedule: null,                              aimfoxSent: g(s.aimfox_daily_sent, 2) },
+    { bucket: "-3", schedule: null,                 sent: g(s.daily_sent, 3), aimfoxSchedule: null,                              aimfoxSent: g(s.aimfox_daily_sent, 3) },
+    { bucket: "-4", schedule: null,                 sent: g(s.daily_sent, 4), aimfoxSchedule: null,                              aimfoxSent: g(s.aimfox_daily_sent, 4) },
   ];
 
   const threeDodRows: ThreeDodRow[] = [0, 1, 2, 3, 4].map((i) => ({
     bucket: i === 0 ? "0" : `-${i}`,
-    totalLeads: g(s.threedod_total, i),
-    sqlLeads:   g(s.threedod_sql,   i),
+    totalLeads:   g(s.threedod_total,    i),
+    sqlLeads:     g(s.threedod_sql,      i),
+    totalLeadsEb: g(s.threedod_total_eb, i),
+    totalLeadsAf: g(s.threedod_total_af, i),
+    sqlLeadsEb:   g(s.threedod_sql_eb,   i),
+    sqlLeadsAf:   g(s.threedod_sql_af,   i),
   }));
 
   const wowRows: WowRow[] = [0, 1, 2, 3, 4].map((i) => {
@@ -407,6 +439,8 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
     const bounce  = g(s.wow_bounce,   i);
     const ooo     = g(s.wow_ooo,      i);
     const negative = g(s.wow_negative, i);
+    const afSent     = g(s.aimfox_wow_sent, i);
+    const afAccepted = gN(s.aimfox_wow_accepted, i);
     return {
       bucket: i === 0 ? "0" : `-${i}`,
       totalLeads:   g(s.wow_leads, i),
@@ -416,6 +450,12 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
       bounceRate:   toRate(bounce,      sent),
       oooRate:      toRate(ooo,         sent),
       negativeRate: toRate(negative,    sent),
+      totalLeadsEb: g(s.wow_leads_eb, i),
+      totalLeadsAf: g(s.wow_leads_af, i),
+      sqlLeadsEb:   g(s.wow_sql_eb,   i),
+      sqlLeadsAf:   g(s.wow_sql_af,   i),
+      // Acceptance rate: null (not 0) when nothing was sent or acceptances were unmeasured.
+      acceptRate:   afAccepted === null ? null : toRate(afAccepted, afSent),
     };
   });
 
@@ -425,6 +465,8 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
     sqlLeads:   g(s.mom_sql,      i),
     meetings:   g(s.mom_meetings, i),
     won:        g(s.mom_won,      i),
+    sqlLeadsEb: g(s.mom_sql_eb,   i),
+    sqlLeadsAf: g(s.mom_sql_af,   i),
   }));
 
   const threeDodTotal = [0, 1, 2].reduce((acc, i) => acc + g(s.threedod_total, i), 0);
@@ -446,6 +488,9 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
     wowSql:           wowRows[0]?.sqlLeads       ?? 0,
     momSql:           momRows[0]?.sqlLeads       ?? 0,
     latestProspectsCount: s.latest_prospects_count,
+    aimfoxInviteLimit: s.aimfox_invite_limit ?? null,
+    aimfoxInviteLimitRemaining: s.aimfox_invite_limit_remaining ?? null,
+    aimfoxRemainingDb: s.aimfox_remaining_database_size ?? null,
   };
 
   return { overview, dodRows, threeDodRows, wowRows, momRows };

@@ -35,6 +35,12 @@ jobs:
       - name: Build production bundle
         run: pnpm build
 
+      # Automation artifacts (ADR-0016). Offline by design — no n8n token, no network — so it runs
+      # on every pull request including forks. The MCP-backed checks (n8n:inventory,
+      # n8n:check-drift) need a credential and stay manual; see docs/reference/n8n/README.md.
+      - name: Validate n8n workflow artifacts
+        run: pnpm n8n:validate
+
   # ── Apply pending DB migrations to the cloud project ──────────────────────────────────────────
   # Reuses the same runner as local dev (scripts/db-apply-migrations.mjs), tracking state in
   # private.schema_migrations. Disabled until you set repo variable ENABLE_DB_MIGRATE=true and

@@ -1,0 +1,70 @@
+schemaVersion: 1
+
+id: bison-campaign-sync
+name: "Bison campaign sync"
+domain: ingestion
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # `campaigns` is the spine every campaign metric hangs off
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: schedule
+    detail: "hourly at :15"
+
+reads:
+  external:
+    - "Bison API · GET /campaigns (paginated)"
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+
+writes:
+  external: []
+  tables:
+    - campaigns              # UPSERT on external_id
+  rpcs: []
+  tablesWritten:
+    - campaigns
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Get Active Clients, Upsert Campaigns"
+
+transition:
+  phase: C                   # Supabase only — this path never wrote Sheets
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: null
+  targetStore: "Supabase · campaigns"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: >-
+    Not part of the Sheets transition: campaign records have always lived in Supabase. Listed with a
+    phase so the dual-write rule is explicitly answered rather than silently skipped.
+  reconciliation: null
+  parityEvidence: >-
+    2026-07-22: 16 clients resolved, 390 campaigns upserted in one run, and the 52 campaigns
+    reclassified to ooo_followup by 20260722g were preserved — the ON CONFLICT clause deliberately
+    does not update `type`.
+
+idempotency:
+  key: "campaigns UNIQUE (external_id) with ON CONFLICT DO UPDATE"
+  notes: >-
+    Genuinely idempotent, but `type` is set on INSERT only. That is what protects the ooo_followup
+    reclassification from being overwritten on every run — do not "fix" it into the UPDATE clause.
+
+retryPolicy:
+  notes: >-
+    The Bison fetch is onError=continueRegularOutput, so one client's failure does not stop the loop.
+    Nothing records which client was skipped.
+
+knownViolations: []

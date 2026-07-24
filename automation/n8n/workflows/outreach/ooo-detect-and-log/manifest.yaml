@@ -1,0 +1,156 @@
+schemaVersion: 1
+
+id: ooo-detect-and-log
+name: "[child-3] TAG_ATTACHED · OOO · Detect return date and log"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0012-multi-sequencer-model.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+    event: TAG_ATTACHED
+    tag: OOO
+
+# ── What it actually touches TODAY (as imported 2026-07-21) ──────────────────────────────────
+# This is a description of the live workflow, not of the target contract. The gap between the two
+# is the migration, and it is recorded in `knownViolations` + the process document.
+reads:
+  external:
+    - "Google Sheets · CS PDCA (workspace → Bison API key, col_5 / col_6)"
+    - "Bison API · GET /leads/{taggable_id}"
+    - "Bison API · GET /leads/{taggable_id}/replies"
+    - "OpenAI · gpt-5-mini (expected return date extraction)"
+  tables:
+    - client_sequencers        # branch S resolves the client here, not from the CS PDCA sheet
+
+writes:
+  external:
+    - "Google Sheets · OOO Leads (append one row per OOO event) — branch L"
+  tables: []
+  rpcs:                        # branch S, through the ADR-0015 contract only
+    - upsert_sequencer_contact
+    - upsert_reply
+    - record_ooo_followup
+
+# ── Sheets → Supabase transition (ADR-0017) ───────────────────────────────────────────────────
+# The OOO Leads sheet is the system the business runs on today. Migration is by dual-write, not
+# replacement: the sheet keeps being written until Supabase has been proven against it.
+transition:
+  phase: A                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
+  phaseState: live              # published 2026-07-21; branch S runs on every OOO TAG_ATTACHED
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…)"
+  targetStore: "Supabase · sequencer_contacts + ooo_followups"
+  ordering: "branch L and branch S are independent from the trigger; every S node is onError=continueRegularOutput"
+  goLive: >-
+    Done. Migration 20260722g was applied first (42 routing rules, 14 clients enabled), then the
+    workflow was published. Verified on real data from a manual run: record_ooo_followup returned
+    status=pending, routing_key=male, a resolved target_campaign_id, expected_return_date=NULL and
+    scheduled_for=today+2 with date_source=fallback — i.e. the fallback landed in scheduled_for and
+    NOT in expected_return_date (ADR-0015 §2). That single manual run couldn't distinguish "correctly
+    detected no date" from "can never read a date" — and it was the latter. Corrected 2026-07-22: the
+    `blockedBy` claim below that "branch S derives its own date, so defect 9 doesn't block S" was wrong.
+    Checked against all 66 `ooo_followups` rows written up to that point — 100% had
+    `date_source='fallback'`, including executions where the LLM node had demonstrably returned a real
+    date (verified from raw execution data, not assumed). `[S] record_ooo_followup` read
+    `$json.returnDate` off `[S] Extract expected return date`'s output, but the real value nests at
+    `output[0].content[0].text.returnDate` — the same class of bug defect 9 named for branch L, just
+    not yet found in branch S. Fixed on both consumers 2026-07-22 (workflow README, defect 9), and
+    proven on the first real event after the fix (execution 51232): both branches' LLM call returned
+    "2026-07-24", `[327]` wrote it to the sheet instead of the today+14 fallback, and
+    record_ooo_followup produced ooo_followups' first-ever date_source='reply_parsed' row.
+  blockedBy:
+    - "~~defect 9~~ — fixed 2026-07-22 on both branches, see goLive above"
+    - "~~defect 8~~ — fixed 2026-07-22: [326] now sorts newest-first, matching branch S"
+    - "~~defect 5 (sheet append idempotency)~~ — decided 2026-07-22 won't-fix (branch L only, disconnected at phase C); not a blocker. See README defect 5."
+    - "reconciliation not built yet — the real entry condition for phase B (backlog §1 item 6)"
+  reconciliation: null          # required to leave phase A; see ADR-0017 §5
+  parityEvidence: null
+
+# ── The Supabase side the dual-write must add (ADR-0015 §5, 11-integrations §6a) ───────────────
+targetContract:
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - record_ooo_followup
+  tables: []
+  ordering: "sheets first, supabase second; supabase failure non-fatal in phase A"
+  notes: >-
+    OOO stops being a lead field entirely. The episode becomes an ooo_followups row against a
+    sequencer_contacts identity. See the process document for the step-by-step call order. The
+    direct `leads` write is NOT a second source — it is removed, not kept (ADR-0015 §5).
+
+portalSurfaces:
+  # ADR-0015 / OoS-16: there is deliberately NO portal list or editor for episodes.
+  - /manager/clients → client drawer → OOO routing editor (rules only)
+
+metrics:
+  - daily_stats.ooo_count  # sequencer-reported daily OOO events — NOT a CRM figure (ADR-0015 §9)
+
+credentials:
+  - alias: google-sheets-cs-pdca
+    type: googleSheetsOAuth2Api
+  - alias: openai-classification
+    type: openAiApi
+  - alias: supabase-postgres
+    type: postgres
+  # Bison is NOT an n8n credential: the per-workspace API key is read out of the CS PDCA sheet at
+  # runtime and injected as an Authorization header expression. That is itself a finding — see
+  # docs/reference/n8n/security.md.
+
+idempotency:
+  key: null
+  notes: >-
+    NONE TODAY. The Google Sheets append is unconditional, so a redelivered TAG_ATTACHED event
+    writes a second "OOO Leads" row for the same contact. The target contract fixes this with
+    record_ooo_followup's two partial unique indexes (uq_ooo_followups_active and
+    uq_ooo_followups_source_reply, ADR-0015 §3).
+
+retryPolicy:
+  notes: >-
+    Only "[325] Find workspace in CS PDCA" retries (5 tries, 5s apart). The Bison calls, the LLM
+    call and both writes have no retry and no error branch, so a failure loses the OOO event
+    silently.
+
+cancellation:
+  notes: >-
+    Handled by a sibling workflow, "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
+    (ZZ0ughB302WdDJOf), which DELETES the sheet row. ADR-0015 replaces deletion with
+    cancel_active_ooo_followup, which preserves history.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: O4DqMEu1Z9LcxikE
+
+# ── Accepted contradictions with the current business contract ────────────────────────────────
+# Each of these is a REAL defect in the live workflow. They are accepted (downgraded to warnings)
+# only so the gate can be switched on before the cutover ships; every entry expires, and on expiry
+# `pnpm n8n:validate` fails again. Do not extend a date without the process owner.
+knownViolations:
+  # RESOLVED 2026-07-21 by adding branch S: the "Update rows in a table" node is deleted, so
+  # business/direct-table-write, business/ooo-as-qualification and business/legacy-ooo-column no
+  # longer report. Their acceptances were removed rather than left to rot — a stale acceptance is
+  # itself an error (see conventions.md).
+  - rule: business/fallback-date-as-fact
+    node: "[327] Add OOO Leads row"
+    reason: >-
+      Branch L still writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the
+      LLM parses none. Left as-is deliberately: branch L must keep behaving exactly as it did during
+      phase A, and changing it would invalidate the very comparison phase A exists to make. Branch S
+      does the right thing — NULL expected_return_date, fallback only in scheduled_for — as of
+      2026-07-22, once its own accessor bug was fixed (it previously always fell back too; see
+      transition.goLive). Closed when branch L is disconnected at phase C.
+    trackedIn: docs/reference/n8n/ooo-phase-a.md
+    expires: 2026-10-31

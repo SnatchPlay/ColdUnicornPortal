@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldunicorn.internal/n8n/contracts/rpc/record_ooo_followup.json",
+  "title": "public.record_ooo_followup — TARGET ingestion contract",
+  "description": "The RPC this workflow must call instead of writing leads/sheets (ADR-0015 §5). Signature transcribed from supabase/migrations/20260722e_ooo_rpcs.sql. SECURITY DEFINER, service_role only. Not called by the workflow yet — this file is the contract the cutover implements.",
+  "type": "object",
+  "required": ["p_sequencer_contact_id"],
+  "additionalProperties": false,
+  "properties": {
+    "p_sequencer_contact_id": {
+      "description": "uuid — from upsert_sequencer_contact(client_sequencer_id, external_contact_id, …). The scoped identity; a bare Bison lead id is NOT sufficient.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "p_source_reply_id": {
+      "description": "uuid|null — from upsert_reply(). Carries the second idempotency invariant: uq_ooo_followups_source_reply stops a redelivered event opening a duplicate episode once the previous one is 'submitted' and the active index no longer covers it.",
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "p_expected_return_date": {
+      "description": "date|null — the date ACTUALLY PARSED from the reply. MUST be null when none was parseable. Never a fallback: this column is read as a fact (ADR-0015 §2). Passing null on a repeat OOO reply does not erase a previously known date.",
+      "type": ["string", "null"],
+      "format": "date"
+    },
+    "p_scheduled_for": {
+      "description": "date|null — when to re-enrol. MAY be a fallback (today + 2 when omitted). This is where a guess belongs.",
+      "type": ["string", "null"],
+      "format": "date"
+    },
+    "p_date_source": {
+      "description": "Which mechanism produced the dates.",
+      "type": "string",
+      "enum": ["reply_parsed", "fallback", "manual"],
+      "default": "fallback"
+    }
+  },
+  "x-returns": {
+    "description": "The ooo_followups row. Status is NOT always 'pending': missing routing yields 'skipped' + routing_missing, and clients.auto_ooo_enabled=false yields 'skipped' + automation_disabled. Both are visible states, never silent drops — the caller must not treat a non-pending return as an error.",
+    "statuses": ["pending", "processing", "submitted", "confirmed", "failed", "skipped", "cancelled"],
+    "skipReasons": ["routing_missing", "automation_disabled", "contact_ineligible"]
+  },
+  "x-invariants": [
+    "uq_ooo_followups_active — at most ONE active episode per contact (active = pending|processing|failed).",
+    "uq_ooo_followups_source_reply — one episode per source reply.",
+    "Routing resolution is specific routing_key → 'general' → NULL; NULL surfaces as skipped/routing_missing.",
+    "The routing snapshot (routing_key + target_campaign_id + routing_source) freezes once the episode leaves an active status, so later config changes cannot rewrite history."
+  ],
+  "x-related": {
+    "callOrder": [
+      "upsert_sequencer_contact",
+      "upsert_reply",
+      "record_ooo_followup"
+    ],
+    "onPositiveReply": "promote_contact_to_lead — creates the CRM lead (one per contact) AND cancels the active episode.",
+    "onOooRemoved": "cancel_active_ooo_followup — cancels, never deletes.",
+    "source": "supabase/migrations/20260722e_ooo_rpcs.sql",
+    "documentation": "docs/reference/functional/11-integrations.md#6a-ooo--nrr-write-path-adr-0015--the-current-contract"
+  }
+}

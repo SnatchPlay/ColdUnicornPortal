@@ -1,0 +1,303 @@
+{
+  "name": "Bison daily stats population",
+  "description": "Hourly + on-demand workflow that pulls per-workspace Bison metrics and upserts daily_stats. Adds: HTTP retry (3x/5s), NULL on API failure, COALESCE-preserving backfill mode via /backfill-daily-stats?targetDate=YYYY-MM-DD webhook.",
+  "nodes": [
+    {
+      "id": "bae37b2e-32c7-4a19-8208-c6dc4ff733fd",
+      "name": "Backfill Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2272,
+        -304
+      ],
+      "parameters": {
+        "options": {},
+        "path": "backfill-daily-stats"
+      }
+    },
+    {
+      "id": "e688db56-999e-47e9-af20-aec5ef9556c3",
+      "name": "Call Daily Stats Process",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -1376,
+        -384
+      ],
+      "parameters": {
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "cachedResultName": "Daily Stats Process",
+          "cachedResultUrl": "/workflow/BQbFKHUaIcEKPc01",
+          "mode": "list",
+          "value": "BQbFKHUaIcEKPc01"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "reportDate_firstItem",
+            "external_api_key",
+            "firstDayOfMonth_firstItem",
+            "isBackfill_firstItem",
+            ""
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "reportDate_firstItem",
+              "id": "reportDate_firstItem",
+              "removed": false,
+              "required": false
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "external_api_key",
+              "id": "external_api_key",
+              "removed": false,
+              "required": false
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "firstDayOfMonth_firstItem",
+              "id": "firstDayOfMonth_firstItem",
+              "removed": false,
+              "required": false
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "isBackfill_firstItem",
+              "id": "isBackfill_firstItem",
+              "removed": false,
+              "required": false
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "client_id",
+              "id": "client_id",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "client_id": "={{ $json.id }}",
+            "external_api_key": "={{ $('Split in Batches1').item.json.external_api_key }}",
+            "firstDayOfMonth_firstItem": "={{ $('Set Report Date1').first().json.firstDayOfMonth }}",
+            "isBackfill_firstItem": "={{ $('Set Report Date1').first().json.isBackfill }}",
+            "reportDate_firstItem": "={{ $('Set Report Date1').first().json.reportDate }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "1f111111-0000-4000-8000-000000000001",
+      "name": "Finalize Prev Day (Schedule)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2272,
+        -296
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 15 5 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a9355f54-ea89-4bea-909d-bec6fdf8c186",
+      "name": "Get Active Clients1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1824,
+        -400
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select c.id,\n       c.name,\n       cs.external_workspace_id,\n       cs.api_key as external_api_key\nfrom public.clients c\njoin public.client_sequencers cs on cs.client_id = c.id and cs.enabled\njoin public.sequencers        s  on s.id = cs.sequencer_id and s.key = 'emailbison'\nwhere c.status = 'Active'\n  and cs.external_workspace_id is not null\n  and coalesce(cs.api_key, '') <> ''\norder by c.name;"
+      }
+    },
+    {
+      "id": "8e625d11-f9e6-4471-9ecb-ece4ff938d66",
+      "name": "Schedule Trigger1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2272,
+        -496
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 26 */2 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "51991f93-b092-48f5-86fe-611c63765a72",
+      "name": "Set Report Date1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2048,
+        -400
+      ],
+      "parameters": {
+        "jsCode": "const incoming = $input.first()?.json || {};\nconst target = incoming.query?.targetDate || incoming.body?.targetDate || incoming.targetDate || null;\nconst dt = target ? new Date(target + 'T12:00:00Z') : new Date();\nconst pad = n => String(n).padStart(2, '0');\nconst y = dt.getUTCFullYear();\nconst m = pad(dt.getUTCMonth() + 1);\nconst d = pad(dt.getUTCDate());\nreturn [{ json: {\n  reportDate: y + '-' + m + '-' + d,\n  firstDayOfMonth: y + '-' + m + '-01',\n  isBackfill: !!target\n} }];"
+      }
+    },
+    {
+      "id": "1f111111-0000-4000-8000-000000000002",
+      "name": "Set Yesterday Target",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2048,
+        -296
+      ],
+      "parameters": {
+        "jsCode": "const dt = new Date();\ndt.setUTCDate(dt.getUTCDate() - 1);\nconst pad = n => String(n).padStart(2, '0');\nconst targetDate = dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate());\n// Feeds the existing Set Report Date1 backfill path (isBackfill=true, reportDate=yesterday).\nreturn [{ json: { targetDate } }];"
+      }
+    },
+    {
+      "id": "de74f482-f3c6-4979-bc54-ef8249059596",
+      "name": "Split in Batches1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1600,
+        -400
+      ],
+      "parameters": {
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Backfill Webhook1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Report Date1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Call Daily Stats Process": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Finalize Prev Day (Schedule)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Yesterday Target",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Active Clients1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split in Batches1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Report Date1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Set Report Date1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Active Clients1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Set Yesterday Target": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Report Date1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split in Batches1": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "Call Daily Stats Process",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "",
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timeSavedMode": "fixed"
+  }
+}

@@ -34,7 +34,7 @@ Non-obvious branches, magic numbers, and implicit business rules that live insid
 | Default timeframe | **30 days** (`createDefaultTimeframe()`) | [timeframe.ts](../../../src/app/lib/timeframe.ts) | Loaded into pages on first render. |
 | `today` normalisation | **noon** local | [client-metrics.ts:249-250](../../../src/app/lib/client-metrics.ts#L249-L250) | Avoids DST boundary issues when bucketing days. |
 | Condition severity rank | `critical_over > danger > warning > info > good` | `src/app/lib/conditions/types.ts`, `evaluator.ts` | Highest rank wins visual precedence; lower `priority` breaks ties. |
-| Sequencer catalog UUIDs (ADR-0012) | smartlead `00000000-0000-4000-a000-000000000001`, emailbison `…-0002`, aimfox `…-0003` | `20260704_sequencers_catalog.sql`, `supabase/drizzle/schema.ts` (campaigns default) | **Load-bearing** — they are the column DEFAULTs on `campaigns.sequencer_id` / `leads.sequencer_id` and the constants n8n hardcodes. Never change. |
+| Sequencer catalog UUIDs (ADR-0012) | emailbison `00000000-0000-4000-a000-000000000002`, aimfox `…-0003` | `20260704_sequencers_catalog.sql`, `supabase/drizzle/schema.ts` (campaigns default) | **Load-bearing** — they are the column DEFAULTs on `campaigns.sequencer_id` / `leads.sequencer_id` and the constants n8n hardcodes. Never change. |
 | `sequencer_id` default | **EmailBison** (`…-0002`) | `campaigns` / `leads` DDL | Inserts that omit `sequencer_id` attribute to EmailBison — all pre-2026-07-04 rows were backfilled this way. Aimfox flows must set it explicitly. |
 | `sequencer_daily_stats.profile_id` sentinel | `''` (empty string, NOT NULL) | `20260704_sequencers_catalog.sql` | Means "account-level rollup"; kept non-null so the UNIQUE(client, sequencer, profile, date) key stays honest. |
 | `invite_limit` vs `invite_limit_remaining` | weekly cap vs left-today | `sequencer_daily_stats` | `invite_limit` = Σ Aimfox accounts' `limit.connect` (≈195/account, weekly); `invite_limit_remaining` = what n8n says is left today. The legacy sheet's "Invitations limit" column held the REMAINING value — do not conflate. |
@@ -108,15 +108,13 @@ Two SECURITY DEFINER helpers exist with the same name in different schemas. RLS 
 
 [client-metrics.ts:195-202](../../../src/app/lib/client-metrics.ts#L195-L202) вЂ” `threeDodTotal` increments for `qualification в€€ {preMQL, MQL}`; `sql` (= MQL leads) increments only for `MQL`. A lead at preMQL counts toward the "total" bucket but not toward the "SQL" bucket вЂ” by design.
 
-### Reply scope filter on lead pages
+### ~~Reply scope filter on lead pages~~ — REMOVED 2026-07-22
 
-[leads-page.tsx:152-153](../../../src/app/pages/leads-page.tsx#L152-L153), [client-leads-page.tsx](../../../src/app/pages/client-leads-page.tsx) вЂ” Filters **leads by `qualification`**:
-
-- `replyScope === "ooo"` в†’ `qualification === "OOO"`.
-- `replyScope === "active"` в†’ `qualification !== "OOO"`.
-- `replyScope === "all"` в†’ no filter.
-
-It does **not** filter replies by `replies.classification`. The label is misleading; rename tracked as BL-7.
+The `replyScope` filter (`ooo` → `qualification === "OOO"`, `active` → `!== "OOO"`, `all` → no
+filter) on `leads-page.tsx` and `client-leads-page.tsx` was **removed** with migration `20260722z`.
+OOO is no longer a lead state (ADR-0015) — `OOO`/`NRR` were dropped from the `lead_qualification`
+enum — so there is nothing to scope by. BL-7 (the "rename the misleading label" task) is closed as
+obsolete.
 
 ### CSV export filename
 
@@ -176,7 +174,7 @@ There is no longer an explicit role check: condition rules only travel inside th
 | **`positive_responses`** (campaign drawer) vs `positive_replies_count` (daily stats) | Look like the same metric | The drawer field is a manually curated lifetime counter; the daily-stats column is ingestion-derived per day. They can diverge intentionally. |
 | **`meeting_booked`** vs **`meeting_held`** | Often used interchangeably in conversation | Two separate booleans. Some metrics use one, some the other. |
 | **`getClientKpis().mqls`** | Looks like a stage count | `count(qualification === 'MQL')` вЂ” uses the raw qualification, not `getLeadStage`. Differs from "MQL stage count" once a lead progresses past MQL. |
-| **`leads.source`** vs **`leads.sequencer_id`** | Both sound like "which tool sent this" | `source` is free-text channel provenance (`'cold_email'`, gateway fallback `"smartlead"`); `sequencer_id` is the FK attribution (ADR-0012). Do not unify them. |
+| **`leads.source`** vs **`leads.sequencer_id`** | Both sound like "which tool sent this" | `source` is free-text channel provenance (`'cold_email'`, gateway fallback `"cold_email"`); `sequencer_id` is the FK attribution (ADR-0012). Do not unify them. |
 
 ---
 

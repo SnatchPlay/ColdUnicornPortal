@@ -1,0 +1,732 @@
+{
+  "name": "AimFox Classification",
+  "nodes": [
+    {
+      "id": "s-aimfox-upsert-reply-0001",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1344,
+        40
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('Webhook').item.json.body.id, $('Webhook').item.json.body.event.timestamp, $json.sequencer_contact_id, $('Parse Classification').item.json.category, $('Webhook').item.json.body.event.message || null, Boolean($('Parse Classification').item.json.automated_reply), $('Webhook').item.json.body.event.target.email || null ] }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, $4, null, $5, $6, $7, null)::text as reply_id;"
+      }
+    },
+    {
+      "id": "s-aimfox-upsert-sequencer-contact-0001",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1120,
+        40
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_sequencer_id, String($('Webhook').item.json.body.event.target.id), $('Webhook').item.json.body.event.target.email || null, $('Webhook').item.json.body.event.target.first_name || null, $('Webhook').item.json.body.event.target.last_name || null ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
+      "id": "507c7f7a-8a35-4cb3-a8ac-00342aa58f81",
+      "name": "Add company to blacklist",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2016,
+        -256
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"companies\": [\n    \"https://www.linkedin.com/company/{{ $json.lead.current_experience[0].company.universal_name }}/\"\n  ]\n}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/blacklist-companies"
+      }
+    },
+    {
+      "id": "6555b068-f6b5-44e6-8b0d-c22562f984bc",
+      "name": "Add company to blacklist1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2464,
+        -64
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"companies\": [\n    \"https://www.linkedin.com/company/{{ JSON.parse($json.output[1].content[0].text).mentioned_company_universal_name }}/\"\n  ]\n}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/blacklist-companies"
+      }
+    },
+    {
+      "id": "230d80de-0d61-44a1-a6ff-527be1fb2303",
+      "name": "Add contact to blacklist",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        -160
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.tokens[0].token }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/blacklist/{{ $('Webhook').item.json.body.event.target.urn }}"
+      }
+    },
+    {
+      "id": "a1e32134-330a-4fe9-aebb-36d7c0586bf9",
+      "name": "Call 'Test aimfox'",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1344,
+        -352
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "cachedResultName": "AimFox Leads Processing",
+          "cachedResultUrl": "/workflow/4OjNRWLaG2IWK6kd",
+          "mode": "list",
+          "value": "4OjNRWLaG2IWK6kd"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        }
+      }
+    },
+    {
+      "id": "d1cb4ec0-7bdc-4ca0-a606-b453412554dd",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1120,
+        -352
+      ],
+      "parameters": {
+        "jsonOutput": "={{$('Webhook').item.json}}",
+        "mode": "raw",
+        "options": {}
+      }
+    },
+    {
+      "id": "337bdf48-9db3-4277-9683-622968f43bcd",
+      "name": "Filter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "be174677-e048-4aae-b544-0f855777983a",
+              "leftValue": "={{ $('Parse Classification').item.json.category.toLowerCase() }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "interested"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2ec39c9a-bd0e-4486-8def-777a94b0f886",
+      "name": "Filter1",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        -352
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "be174677-e048-4aae-b544-0f855777983a",
+              "leftValue": "={{ $json.category.toLowerCase() }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "interested"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "902aa38b-3ab3-4f28-a679-74b8eeea5e1a",
+      "name": "Filter2",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2240,
+        -64
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c33e7edb-dcc8-44c4-84a5-cbc50b07beb4",
+              "leftValue": "={{ JSON.parse($json.output[1].content[0].text).mentioned_company_universal_name }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "009cf451-1d0d-447e-8848-b722f0d560eb",
+              "leftValue": "={{ JSON.parse($json.output[1].content[0].text).mentioned_company_universal_name }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "fa5ad1ee-7b0f-4f2b-b665-dbecb7a113d7",
+              "leftValue": "={{ JSON.parse($json.output[1].content[0].text).mentioned_company_universal_name }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "null"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ed181c4a-8ba5-4e50-ab91-f553c7dab9ff",
+      "name": "Get contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        -160
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/leads/{{ $('Webhook').item.json.body.event.target.id }}"
+      }
+    },
+    {
+      "id": "ea8264b7-1667-4664-9460-ec4501f9f414",
+      "name": "Get Workspace Api Key",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        -160
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.workspace_id)] }}"
+        },
+        "query": "select jsonb_build_array(jsonb_build_object('token', cs.api_key)) as tokens,\n       cs.id::text                as client_sequencer_id,\n       cs.client_id::text         as client_id,\n       cs.external_workspace_id   as workspace_id\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'\nwhere cs.external_workspace_id = $1\n  and cs.enabled\n  and coalesce(cs.api_key, '') <> ''\nlimit 1;"
+      }
+    },
+    {
+      "id": "64e8289e-328a-4a34-8820-799013f005d0",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "de8cd925-86ab-4ce2-bf12-362360da8da5",
+              "leftValue": "={{ $json.lead.current_experience }}",
+              "operator": {
+                "operation": "lengthEquals",
+                "rightType": "number",
+                "type": "array"
+              },
+              "rightValue": 1
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d78d0038-3acd-4fd4-aeac-6b71fcc5ae97",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        -256
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "81b20f2f-8840-45bf-a7b8-1aa6abedf78a",
+              "name": "reply_input",
+              "type": "string",
+              "value": "={{ $json.body }}"
+            },
+            {
+              "id": "aaf7db1e-6c98-4690-b5f6-0abe3eec1ccd",
+              "name": "classification_instructions",
+              "type": "string",
+              "value": "You are an assistant for analyzing email replies in order to automate B2B email campaigns.\r\n\r\n========================\r\n1. GENERAL INSTRUCTIONS\r\n========================\r\n- Your job is to read a single email reply and:\r\n  1) determine its primary type / category,\r\n  2) provide a very short reason,\r\n  3) extract useful structured fields if available.\r\n- Most emails will be in Polish, but some may be in English or other European languages. You MUST understand and classify replies written in Polish.\r\n- Always answer ONLY in JSON, with no additional text, comments, or explanations.\r\n- Ignore email signatures, legal footers, unsubscribe blocks, tracking noise, and previous quoted campaign messages when determining the category.\r\n- Do NOT rely on the subject line, even if it contains \"Re:\" — always classify based on the latest reply body content and intent.\r\n- When the reply contains a forwarded or quoted original message, classify only the newest human reply unless the newest reply is empty or impossible to interpret.\r\n- Be conservative with \"Interested\". Do not mark a lead as interested unless there is clear, current, direct interest in YOUR offer.\r\n\r\n========================\r\n2. CATEGORIES / LABELS\r\n========================\r\n\r\nYou must classify each email into exactly one of the following categories:\r\n\r\n1) \"OOO\"\r\n-------------------\r\nDefinition:\r\n- Automatic or semi-automatic \"out of office\" / \"vacation\" replies.\r\n- Messages clearly saying the person is temporarily unavailable.\r\n\r\nTypical patterns:\r\nPolish:\r\n- \"Jestem poza biurem do [data]\"\r\n- \"Jestem na urlopie\"\r\n- \"Odpowiem po [data]\"\r\n- \"Automatyczna odpowiedź\"\r\n- \"Przebywam na zwolnieniu lekarskim\"\r\n\r\nEnglish:\r\n- \"Out of office\"\r\n- \"OOO\"\r\n- \"I am currently on vacation\"\r\n- \"I will be back on [date]\"\r\n\r\nRules:\r\n- If the email clearly looks like an automatic OOO response, choose \"OOO\" even if there is extra text.\r\n- If it contains OOO plus clear buying intent, for example \"I'm interested, please write after 15.02\", still choose \"OOO\" and mention the interest in `short_reason`.\r\n\r\n2) \"Interested\"\r\n---------------\r\nDefinition:\r\n- The person clearly shows positive interest in YOUR offer and wants to move forward directly.\r\n- Genuine interest requires a clear next-step signal directed toward YOUR campaign/offer.\r\n- The engagement must be direct, current, and related to YOUR service/product.\r\n- Administrative forwarding, internal routing, internal review, or future possible interest is NOT enough.\r\n\r\nStrong positive signals:\r\n- They explicitly say they are interested.\r\n- They ask for more information about YOUR offer.\r\n- They ask for a quote, proposal, demo, pricing, or contract.\r\n- They propose or accept a meeting/call about YOUR offer.\r\n- They ask you to call them.\r\n- They say the topic sounds relevant and request next steps.\r\n\r\nTypical patterns in Polish:\r\n- \"Jestem zainteresowany\"\r\n- \"Jestem zainteresowana\"\r\n- \"Jesteśmy zainteresowani\"\r\n- \"Proszę o więcej informacji\"\r\n- \"Proszę przesłać szczegóły oferty\"\r\n- \"Proszę przesłać ofertę\"\r\n- \"Możemy umówić się na rozmowę\"\r\n- \"Możemy umówić spotkanie\"\r\n- \"Chętnie porozmawiamy\"\r\n- \"Proszę zadzwonić\"\r\n- \"Proszę o kontakt telefoniczny\"\r\n- \"Tak, to brzmi ciekawie\"\r\n- \"Możemy przetestować\"\r\n- \"Możemy spróbować\"\r\n\r\nTypical patterns in English:\r\n- \"We are interested\"\r\n- \"I am interested\"\r\n- \"Sounds interesting\"\r\n- \"Please send more details\"\r\n- \"Please send a proposal\"\r\n- \"Can you send pricing?\"\r\n- \"Let's schedule a call\"\r\n- \"Can we arrange a meeting?\"\r\n- \"We would like a demo\"\r\n\r\nRules:\r\n- Classify as \"Interested\" ONLY when the sender clearly engages with YOUR offer and indicates a concrete next step.\r\n- If there are doubts but the overall message clearly asks to proceed with YOUR offer, choose \"Interested\".\r\n- If they ask for a quote/proposal/demo/call about YOUR service, choose \"Interested\".\r\n- Do NOT classify as \"Interested\" just because the email contains words like \"contact\", \"talk\", \"manager\", \"colleague\", \"forward\", \"discuss\", \"consult\", or \"will get back\".\r\n- Do NOT classify as \"Interested\" if the sender only says they will forward the message to a colleague, manager, department, or another company.\r\n- Do NOT classify as \"Interested\" if the sender asks you to contact someone else, unless the reply also contains a clear explicit statement that the company is interested in YOUR offer.\r\n- Do NOT classify as \"Interested\" if the sender says they need to discuss, check, verify, or consult internally and will come back later.\r\n- Do NOT classify as \"Interested\" if the sender says they will verify whether there is room for discussion.\r\n- Do NOT classify as \"Interested\" if the sender says another person may contact you later.\r\n- Future possible interest is not current interest.\r\n- A third party being copied, mentioned, or assigned is not current interest.\r\n- A phrase like \"someone will contact you\", \"someone will gladly talk\", or \"I will pass this to the responsible person\" is not enough.\r\n- A reply that only redirects to their own website, form, portal, or catalog is NOT \"Interested\" — classify as \"other\".\r\n- A reply that promotes the lead's own product/service is NOT \"Interested\" — classify as \"Spam_Inbound\".\r\n\r\n3) \"NRR\"\r\n--------------------\r\nDefinition:\r\n- The person clearly rejects the offer.\r\n- The person does not want further contact.\r\n- The person says the service is not relevant, not needed, or not planned.\r\n\r\nTypical patterns in Polish:\r\n- \"Nie jesteśmy zainteresowani\"\r\n- \"Nie jestem zainteresowany\"\r\n- \"Nie potrzebujemy takiej usługi\"\r\n- \"Dziękuję, ale nie skorzystamy\"\r\n- \"Temat nas nie interesuje\"\r\n- \"Nie planujemy współpracy\"\r\n- \"Proszę nie wysyłać więcej wiadomości\"\r\n- \"Proszę usunąć mnie z listy\"\r\n- \"Nieaktualne\"\r\n- \"Nie widzimy potrzeby\"\r\n\r\nTypical patterns in English:\r\n- \"We are not interested\"\r\n- \"I am not interested\"\r\n- \"No, thank you\"\r\n- \"This is not relevant for us\"\r\n- \"Please remove me from your list\"\r\n- \"Do not contact me again\"\r\n\r\nRules:\r\n- If they ask you to stop writing, choose \"NRR\".\r\n- If they politely decline, choose \"NRR\".\r\n- If they say \"maybe in the future\" but clearly reject now, choose \"NRR\".\r\n- Be careful with polite rejections: friendly tone does not mean interest.\r\n\r\n4) \"Left_Company\"\r\n-------------------\r\nDefinition:\r\n- Permanent unavailability.\r\n- The person no longer works at the company, retired, or the mailbox is permanently inactive/disabled/blocked.\r\n\r\nTypical patterns:\r\nPolish:\r\n- \"Nie pracuje już w firmie\"\r\n- \"Nie jest już częścią naszej organizacji\"\r\n- \"Konto jest nieaktywne\"\r\n- \"Adres jest nieaktywny\"\r\n- \"Skrzynka została zamknięta\"\r\n- \"Przeszedł/przeszła na emeryturę\"\r\n\r\nEnglish:\r\n- \"No longer works here\"\r\n- \"No longer with the company\"\r\n- \"This mailbox is no longer active\"\r\n- \"Address is inactive\"\r\n- \"Account disabled\"\r\n- \"Retired\"\r\n\r\nRules:\r\n- If the automated email states the person is permanently gone and redirects to another employee, choose \"Left_Company\".\r\n- If the person is only temporarily unavailable, choose \"OOO\", not \"Left_Company\".\r\n\r\n5) \"Spam_Inbound\"\r\n-------------------\r\nDefinition:\r\n- The reply is NOT a response to your offer.\r\n- Instead, the lead is sending their own commercial pitch, advertisement, partnership proposal, or promotional content.\r\n- It is essentially cold outreach back to you.\r\n\r\nContextual signals:\r\n- The email body promotes the sender's own product/service.\r\n- It contains their own metrics, pricing, features, platform capabilities, catalog, offer, or advertisement.\r\n- It asks you to buy, test, use, promote, partner with, or check their product/service.\r\n- The content has no real connection to your original campaign topic.\r\n- It reads like a marketing or sales email, not a personal reply to your message.\r\n- It may include SEO, SaaS, link building, directories, software, recruitment, outsourcing, marketing services, or other commercial pitches.\r\n\r\nRules:\r\n- Check this BEFORE considering \"Interested\".\r\n- Do NOT rely on \"Re:\" in the subject.\r\n- If they are selling something to you, choose \"Spam_Inbound\".\r\n- Even if politely written, an inbound pitch is never interest in your offer.\r\n\r\n6) \"other\"\r\n----------\r\nDefinition:\r\n- Any reply that does not fit the five categories above.\r\n- Use this when there is no clear current direct interest, no clear rejection, no OOO, no permanent unavailability, and no inbound commercial pitch.\r\n\r\nCommon \"other\" cases:\r\n- Internal forwarding with no clear signal.\r\n- Adding someone to CC without direct interest.\r\n- Asking you to contact another person.\r\n- Saying another person will contact you later.\r\n- Saying they need to discuss/check/consult internally.\r\n- Saying they will return with an answer later.\r\n- Saying they need to verify whether the topic is relevant.\r\n- Redirecting to their own website, form, catalog, or portal.\r\n- Technical bounce that is not a typical OOO and not permanent unavailability.\r\n- Random/irrelevant text.\r\n- Impossible to classify due to missing or unclear body text.\r\n\r\nAdditional \"other\" cases — NOT Interested:\r\n\r\nA) Forwarding / internal routing:\r\nThe sender only forwards the email, adds someone in CC, or says they are passing the message to another person/team/department.\r\n\r\nPolish examples:\r\n- \"Przekazuję maila koleżance...\"\r\n- \"Załączam do wiadomości managera...\"\r\n- \"Dodaję do kopii osobę odpowiedzialną...\"\r\n- \"Przekażę Pana maila do project managera...\"\r\n- \"Tematem zajmuje się inny dział/osoba...\"\r\n- \"Przekierowuję wiadomość do osoby odpowiedzialnej...\"\r\n- \"Dodaję kolegę/koleżankę do korespondencji...\"\r\n\r\nEnglish examples:\r\n- \"I am forwarding this to my colleague.\"\r\n- \"I have copied our manager.\"\r\n- \"I am adding the responsible person.\"\r\n- \"I will pass this to the relevant department.\"\r\n\r\nRule:\r\n- These are \"other\" unless there is also an explicit current buying signal.\r\n\r\nB) Contact someone else:\r\nThe sender asks you to contact another person or says another person may contact you, without confirming interest.\r\n\r\nPolish examples:\r\n- \"Proszę kontaktować się z...\"\r\n- \"W tej sprawie proszę pisać do...\"\r\n- \"Kasia będzie w bezpośrednim kontakcie...\"\r\n- \"Nasz manager się odezwie...\"\r\n- \"On chętnie z Panem porozmawia...\"\r\n- \"Proszę przesłać wiadomość do...\"\r\n- \"Najlepiej skontaktować się z...\"\r\n\r\nEnglish examples:\r\n- \"Please contact...\"\r\n- \"Please reach out to...\"\r\n- \"Our manager will contact you.\"\r\n- \"She will be in touch.\"\r\n- \"He will gladly speak with you.\"\r\n\r\nRule:\r\n- These are \"other\" unless the sender also clearly confirms that the company is interested in YOUR offer.\r\n\r\nC) Internal discussion / pending decision:\r\nThe sender says they need to consult, discuss internally, verify relevance, or return later with an answer.\r\n\r\nPolish examples:\r\n- \"Skonsultuję temat z osobami odpowiedzialnymi...\"\r\n- \"Przedyskutujemy to wewnętrznie...\"\r\n- \"Wrócę z odpowiedzią...\"\r\n- \"Damy znać, czy jesteśmy zainteresowani...\"\r\n- \"Sprawdzimy, czy widzimy przestrzeń do rozmów...\"\r\n- \"Po konsultacji wrócimy z informacją...\"\r\n- \"Musimy to omówić w zespole...\"\r\n- \"Przekażę temat dalej i zobaczymy...\"\r\n- \"Zweryfikujemy temat i wrócimy z informacją...\"\r\n\r\nEnglish examples:\r\n- \"We will discuss this internally.\"\r\n- \"I need to check with the team.\"\r\n- \"We will get back to you if interested.\"\r\n- \"Let us review this and come back to you.\"\r\n- \"We need to verify whether this is relevant.\"\r\n\r\nRule:\r\n- These are \"other\" unless the reply also contains a clear, explicit, present-tense buying signal such as:\r\n  - \"jesteśmy zainteresowani\"\r\n  - \"proszę przesłać ofertę\"\r\n  - \"umówmy spotkanie\"\r\n  - \"chcemy porozmawiać o wdrożeniu\"\r\n  - \"we are interested\"\r\n  - \"please send a proposal\"\r\n  - \"let's schedule a call\"\r\n\r\nD) Redirect / deflection to their own process:\r\nThe lead acknowledges your message but only redirects to their own website, form, portal, procurement process, catalog, or general inquiry channel without showing direct engagement toward YOUR offer.\r\n\r\nExamples:\r\n- \"Please visit our website and fill out the inquiry form.\"\r\n- \"You can find our catalog at [link].\"\r\n- \"Submit your request through our portal.\"\r\n- \"Proszę wypełnić formularz na stronie.\"\r\n- \"Zapraszamy do zapoznania się z naszą ofertą na stronie.\"\r\n\r\nRule:\r\n- These are \"other\", not \"Interested\".\r\n\r\n=============================\r\n3. PRIORITY / CONFLICT RULES\r\n=============================\r\n\r\nWhen an email contains multiple signals, apply this priority:\r\n\r\n1) If the body content is a commercial pitch / inbound cold outreach from the lead promoting their own product/service:\r\n   - category = \"Spam_Inbound\"\r\n   - Check this FIRST before any other category.\r\n\r\n2) If it is clearly an automatic out of office:\r\n   - category = \"OOO\"\r\n   - Put all additional info into `short_reason`.\r\n\r\n3) If there is a clear rejection phrase:\r\n   - category = \"NRR\"\r\n   - Even if polite, indirect, or softened, the current status is rejection.\r\n\r\n4) If the person is permanently unavailable:\r\n   - category = \"Left_Company\"\r\n\r\n5) If the reply is forwarding, internal routing, adding another person, asking to contact another person, saying another person will contact you, internal consultation, pending decision, or future possible interest:\r\n   - category = \"other\"\r\n   - This rule applies BEFORE \"Interested\".\r\n   - Do not treat forwarded messages, CC additions, internal consultation, or future follow-up as interest.\r\n\r\n6) If there is a clear direct invitation to proceed with YOUR offer:\r\n   - category = \"Interested\"\r\n   - Requires present, explicit, direct engagement with YOUR offer.\r\n\r\n7) If the reply is a deflection/redirect to their own process without engaging YOUR offer:\r\n   - category = \"other\"\r\n\r\n8) If you really cannot decide:\r\n   - category = \"other\"\r\n\r\n================================\r\n4. OUTPUT FORMAT / STRICT JSON\r\n================================\r\n\r\nYou must always respond with valid JSON and nothing else.\r\n\r\nJSON schema:\r\n\r\n{\r\n  \"category\": \"OOO\" | \"Interested\" | \"NRR\" | \"Left_Company\" | \"Spam_Inbound\" | \"other\",\r\n  \"confidence\": 0-100,\r\n  \"short_reason\": \"very short explanation in English, 1 sentence max\",\r\n  \"language_detected\": \"pl\" | \"en\" | \"de\" | \"other\"\r\n}\r\n\r\nDetails:\r\n- `category`: choose ONLY from the fixed list.\r\n- `confidence`: integer from 0 to 100.\r\n- `short_reason`: one short sentence in English.\r\n- `language_detected`: choose the most probable language.\r\n- If the email is mostly Polish with some English signature/footer, choose \"pl\".\r\n- Do not output markdown.\r\n- Do not add comments.\r\n- Do not add fields not listed in the schema.\r\n\r\n=========================================\r\n5. EXAMPLES OF CLASSIFICATION\r\n=========================================\r\n\r\nExample 1 — OOO:\r\nEmail:\r\n\"Dzień dobry, jestem obecnie na urlopie do 15.08 i nie mam dostępu do poczty. Odpowiem po powrocie.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"OOO\",\r\n  \"confidence\": 98,\r\n  \"short_reason\": \"Automatic out of office message in Polish mentioning vacation and return date.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 2 — Interested:\r\nEmail:\r\n\"Tak, jesteśmy zainteresowani. Możemy umówić się na krótką rozmowę w przyszłym tygodniu? Pozdrawiam, Anna Nowak.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The contact clearly states they are interested and proposes a call.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 3 — NRR:\r\nEmail:\r\n\"Dziękuję za wiadomość, ale w tej chwili nie jesteśmy zainteresowani taką usługą. Proszę nie wysyłać kolejnych ofert.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"NRR\",\r\n  \"confidence\": 97,\r\n  \"short_reason\": \"The contact clearly declines the offer and asks to stop sending offers.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 4 — Left_Company:\r\nEmail:\r\n\"This mailbox is no longer active. Please contact Mariusz Kowalski at m.kowalski@company.com.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Left_Company\",\r\n  \"confidence\": 96,\r\n  \"short_reason\": \"Mailbox is permanently inactive and redirects to another person.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 5 — Spam_Inbound:\r\nEmail:\r\n\"Hi, now's the perfect moment to level up your SEO strategy. Our platform has 249,284+ live pages, Ahrefs DR:77, 300,000+ monthly traffic, permanent do-follow links. Let's make this month a real advantage for your brand.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Spam_Inbound\",\r\n  \"confidence\": 97,\r\n  \"short_reason\": \"Lead replied with their own commercial SEO pitch unrelated to the original campaign.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 6 — other, redirect/deflection:\r\nEmail:\r\n\"Hi, thank you for sending the inquiry. I would like to invite you to visit our website where you can see our range of products. Please submit an inquiry via the website. Our team will contact you to set up a meeting.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 82,\r\n  \"short_reason\": \"Lead acknowledged the message but redirected to their own website and form.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 7 — other, forwarding only:\r\nEmail:\r\n\"Dzień dobry, załączam do wiadomości mojego managera oraz koleżankę z działu marketingu. Pozdrawiam.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 92,\r\n  \"short_reason\": \"The sender only added other people to the thread without showing direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 8 — other, internal consultation:\r\nEmail:\r\n\"Dziękuję za wiadomość. Skonsultuję temat z osobami odpowiedzialnymi za ten obszar w naszej firmie. Wrócę do Pani z odpowiedzią, gdy otrzymam informację, czy widzimy przestrzeń do rozmów.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender needs internal consultation and has not confirmed current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 9 — other, contact another person:\r\nEmail:\r\n\"Przekażę Pana e-mail do naszego project managera w kopii. On chętnie z Panem porozmawia.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 90,\r\n  \"short_reason\": \"The sender redirects the conversation to another person without directly confirming interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 10 — other, possible future interest:\r\nEmail:\r\n\"Przedyskutujemy Państwa propozycję wewnętrznie i damy znać, jeśli będziemy zainteresowani.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender only mentions a possible future decision, not current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 11 — Interested, explicit direct interest:\r\nEmail:\r\n\"Dziękuję za wiadomość. Jesteśmy zainteresowani rozmową. Proszę przesłać dostępne terminy spotkania.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 96,\r\n  \"short_reason\": \"The sender explicitly confirms interest and asks to schedule a meeting.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 12 — other, manager copied:\r\nEmail:\r\n\"Dzień dobry, załączam do wiadomości mojego managera oraz koleżankę z działu marketingu. Pozdrawiam, Maria.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 93,\r\n  \"short_reason\": \"The sender only copied internal contacts and did not confirm interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 13 — other, passed to sister company:\r\nEmail:\r\n\"Bardzo dziękuję za zainteresowanie i kontakt z nami. Z uwagi na to, że propozycja niekoniecznie jest adresowana dla nas jako pracowników Dirlango, to pozwoliłam sobie przekazać ją jednej z naszych spółek córek. Kasia będzie w bezpośrednim kontakcie albo przekaże mi wiążące informacje po przedyskutowaniu ich z zespołem.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender forwards the topic to another company and waits for internal feedback without current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 14 — other, consultation with responsible people:\r\nEmail:\r\n\"Dziękuję za wiadomość i przedstawioną propozycję. Skonsultuję temat z osobami odpowiedzialnymi za ten obszar w naszej firmie. Wrócę do Pani z odpowiedzią, gdy otrzymam informację, czy widzimy przestrzeń do rozmów w tej kwestii.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender will consult internally and only later decide whether there is room for discussion.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 15 — other, forwarding to responsible colleague:\r\nEmail:\r\n\"Pani Agnieszko, przekazuję Pani maila koleżance Beacie, która koordynuje u nas tematy związane z ekologią, a którą od razu dodaję do niniejszej odpowiedzi.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender only forwards the email to a responsible colleague without showing direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 16 — other, will pass to project manager:\r\nEmail:\r\n\"Dzień dobry, przekażę pana e-mail do naszego project managera w kopii. On chętnie z panem porozmawia. Pozdrawiam.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 91,\r\n  \"short_reason\": \"The sender says they will pass the email to a project manager but does not confirm direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 17 — Interested, contact person plus explicit interest:\r\nEmail:\r\n\"Dzień dobry, temat jest dla nas interesujący. Proszę przesłać szczegóły oferty do mnie oraz do naszej managerki Anny, którą dodaję w kopii.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender explicitly says the topic is interesting and asks for offer details.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 18 — other, copied person but no explicit interest:\r\nEmail:\r\n\"Dzień dobry, dodaję do korespondencji Annę, która zajmuje się tym obszarem.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 93,\r\n  \"short_reason\": \"The sender only adds the responsible person without confirming interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\n=============================\r\n6. FINAL BEHAVIOR\r\n=============================\r\n\r\nAlways:\r\n- Detect the language.\r\n- Ignore signatures, footers, old quoted messages, and subject lines.\r\n- Apply the priority rules exactly.\r\n- Be conservative with \"Interested\".\r\n- Return valid JSON only.\r\n\r\nNever:\r\n- Add explanations outside JSON.\r\n- Change the allowed category names.\r\n- Classify based on subject line alone.\r\n- Treat forwarding, CC additions, internal consultation, or future possible interest as \"Interested\".\r\n- Invent data.\r\n- Output markdown.\r\n\r\nNow the user will provide the raw email reply with headers, signature, and possibly quoted messages. Analyze the email and respond ONLY with the JSON object described above."
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "01d933a3-61b5-44fa-9b88-1513c221e16d",
+      "name": "OpenAI - Classify Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        -256
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ ({\n  model: 'gpt-5-mini',\n  store: true,\n  input: [\n    {\n      role: 'developer',\n      content: $json.classification_instructions\n    },\n    {\n      role: 'user',\n      content: $json.reply_input\n    }\n  ],\n  text: {\n    format: {\n      type: 'json_schema',\n      name: 'lead_intent_classification',\n      strict: true,\n      schema: {\n        type: 'object',\n        properties: {\n          category: {\n            type: 'string',\n            description: 'Intent classification for the lead.',\n            enum: ['OOO', 'Interested', 'NRR', 'Spam_Inbound', 'Left_Company', 'other']\n          },\n          confidence: {\n            type: 'number',\n            description: \"Model's confidence in the classification (0-100).\",\n            minimum: 0,\n            maximum: 100\n          },\n          short_reason: {\n            type: 'string',\n            description: 'Very short explanation (1 sentence max) of why this category was chosen.',\n            minLength: 1,\n            maxLength: 200\n          },\n          language_detected: {\n            type: 'string',\n            description: 'Top-level detected language code for the message.',\n            enum: ['pl', 'en', 'de', 'other']\n          }\n        },\n        required: ['category', 'confidence', 'short_reason', 'language_detected'],\n        additionalProperties: false\n      }\n    }\n  }\n}) }}",
+        "method": "POST",
+        "nodeCredentialType": "openAiApi",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/responses"
+      }
+    },
+    {
+      "id": "1fa5779e-a928-4995-b68e-316a255fefb5",
+      "name": "OpenAI - Search for the company name",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        -64
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ (() => {\n  const companies = (\n    $('Get contact').item.json.lead.current_experience\n    ?? []\n  ).map(company => ({\n    name: company.name ?? '',\n    universal_name: company.universal_name ?? ''\n  })).filter(company => company.name || company.universal_name);\n\n  const companyUniversalNames = [\n    ...new Set(\n      companies\n        .map(company => company.universal_name)\n        .filter(Boolean)\n    )\n  ];\n\n  return {\n    model: 'gpt-5-mini',\n    store: true,\n    input: [\n      {\n        role: 'developer',\n        content: `You are checking whether a lead reply mentions any company from the person's current LinkedIn experience.\n\nRules:\n- You will receive the lead reply text and a list of companies.\n- Check whether the reply explicitly mentions any company from the provided list.\n- If a company is mentioned, return that company's universal_name exactly as provided.\n- Only return universal_name values from the provided company list.\n- If no provided company is mentioned, return null.`\n      },\n      {\n        role: 'user',\n        content: JSON.stringify({\n          reply_text: $('Webhook').item.json.body.event.message,\n          current_experience_companies: companies\n        })\n      }\n    ],\n    text: {\n      format: {\n        type: 'json_schema',\n        name: 'company_mention_check',\n        strict: true,\n        schema: {\n          type: 'object',\n          properties: {\n            mentioned_company_universal_name: {\n              type: ['string', 'null'],\n              description: 'The universal_name of the current LinkedIn experience company mentioned in the reply. Return null if no provided company is mentioned.',\n              enum: [...companyUniversalNames, null]\n            }\n          },\n          required: ['mentioned_company_universal_name'],\n          additionalProperties: false\n        }\n      }\n    }\n  };\n})() }}",
+        "method": "POST",
+        "nodeCredentialType": "openAiApi",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/responses"
+      }
+    },
+    {
+      "id": "3dc88c1c-b393-4f20-8a81-804942458eed",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        -256
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98efeb59-a4c5-4238-991f-8fedb13fab63",
+              "name": "category",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).category || 'other' }}"
+            },
+            {
+              "id": "6f786671-a9bc-4bca-9e44-7158a5aef07a",
+              "name": "confidence",
+              "type": "number",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).confidence || 0 }}"
+            },
+            {
+              "id": "cebe7746-8b5a-4618-bbea-bdf5a7d5126b",
+              "name": "short_reason",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).short_reason || '' }}"
+            },
+            {
+              "id": "167adc21-009e-45b9-a2be-5dc4da01dcab",
+              "name": "language_detected",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).language_detected || 'other' }}"
+            },
+            {
+              "id": "0c1559e5-a43c-4387-85a7-deedfce5dcf7",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.workspace.id }}"
+            },
+            {
+              "id": "dde9db84-4455-48a9-ba43-7db3a5d035eb",
+              "name": "lead_id",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.event.target.id }}"
+            },
+            {
+              "id": "2d2b77fb-feb4-4eb6-b0b9-6914be99e2bf",
+              "name": "lead_email",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.event.target.email }}"
+            },
+            {
+              "id": "a1d4bf14-de20-48a4-9ccf-926a8db58e01",
+              "name": "automated_reply",
+              "type": "boolean",
+              "value": "={{ $('Normalize Payload').item.json.automated_reply }}"
+            },
+            {
+              "id": "bfad8742-f25b-46e1-b12a-242aa2d40db9",
+              "name": "workspace_name",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.workspace.name }}"
+            },
+            {
+              "id": "97c251f1-2780-4827-830c-dea6818fd503",
+              "name": "public_identifier",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.event.target.public_identifier }}"
+            },
+            {
+              "id": "a23acf6b-fc16-49ff-8522-c32c703f6692",
+              "name": "campaign_id",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.event.campaign.id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7b1553d2-0290-469f-a1e6-37aafc425ac7",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -256
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "aimfox-classifier"
+      }
+    }
+  ],
+  "connections": {
+    "Add company to blacklist": {
+      "main": [
+        []
+      ]
+    },
+    "Add contact to blacklist": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Call 'Test aimfox'",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter2": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Add company to blacklist1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Workspace Api Key": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Add contact to blacklist",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "If",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Add company to blacklist",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "OpenAI - Search for the company name",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "OpenAI - Classify Email",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "OpenAI - Classify Email": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Parse Classification",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "OpenAI - Search for the company name": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Workspace Api Key",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Filter1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Normalize Payload",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

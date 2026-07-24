@@ -1,0 +1,374 @@
+# Registry of every n8n workflow this repository knows about.
+#
+# The LOGICAL ID is the primary key. A workflow name is edited in the n8n UI and a remote id is
+# per-environment, so neither is an identity. See automation/n8n/conventions.md.
+#
+# lifecycle:
+#   managed   — repository owns it: workflow.json + manifest + contracts committed
+#   observed  — inventoried and documented, artifact not yet imported (mid-migration)
+#   orphan    — exists on the instance, nobody has claimed it
+#
+# `pnpm n8n:inventory` reconciles this file against the live instance.
+# `pnpm n8n:validate` checks it offline, on every pull request.
+
+schemaVersion: 1
+
+environments:
+  development:
+    # No development n8n instance exists yet. Until one does, every write path stays closed
+    # (docs/reference/n8n/environments.md).
+    available: false
+  production:
+    available: true
+    # The MCP token in .env.local points here. Read-only by policy.
+    writable: false
+
+workflows:
+  - id: ooo-detect-and-log
+    name: "[child-3] TAG_ATTACHED · OOO · Detect return date and log"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-detect-and-log
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: O4DqMEu1Z9LcxikE
+    lastRepositorySync: 2026-07-21
+    lastValidation: 2026-07-21 pnpm n8n:validate — 0 errors, accepted violations recorded in manifest
+
+  # The rest of the OOO family. Imported as `imported`: the graph is committed and diffable, the
+  # documentation is not written yet. See docs/reference/n8n/ooo-phase-a.md.
+  - id: ooo-enrol-followups
+    name: "Add OOO Leads"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-enrol-followups
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # the only OOO workflow that calls a Bison WRITE endpoint
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: zaPkpSAuvjibUUDU
+    lastRepositorySync: 2026-07-21
+
+  - id: ooo-remove-on-tag-removed
+    name: "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/ooo-remove-on-tag-removed
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: ZZ0ughB302WdDJOf
+    lastRepositorySync: 2026-07-21
+    lastValidation: 2026-07-21 phase A branch S published
+
+  # LinkedIn channel (Aimfox). All five imported; phase 0 — no Supabase branch exists yet.
+  # The three lead/classification workflows became importable on 2026-07-22, once their literal
+  # secrets moved into the `Aimfox Master` and `OpenAi account` credentials (security.md §7, §8).
+  - id: aimfox-daily-metrics
+    name: "Get Metrics from Aimfox"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/aimfox-daily-metrics
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: sVev5d0N6rtrbcgI
+    lastRepositorySync: 2026-07-21
+
+  # The campaign catalog for the LinkedIn channel — mirrors bison-campaign-sync. Created 2026-07-22 so
+  # promote_contact_to_lead can resolve an Aimfox campaign_id instead of leaving it NULL like the 30
+  # backfilled leads. type='outreach' → clients see LinkedIn campaigns (ADR-0003).
+  - id: aimfox-campaign-sync
+    name: "Aimfox campaign sync"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/aimfox-campaign-sync
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # `campaigns` is the spine every campaign metric hangs off
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: t6a53dLc85FOKFqX
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 created inactive; upsert SQL proven in a rolled-back transaction (type/sequencer_id INSERT-only)
+
+  - id: aimfox-import-to-connection
+    name: "Import leads to Aimfox connection"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-import-to-connection
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # POSTs to a campaign audience — queues real LinkedIn invites
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: nG6Q4KEGeXk7tBHm
+    lastRepositorySync: 2026-07-21
+
+  - id: aimfox-classification
+    name: "AimFox Classification"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-classification
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # blacklisting is irreversible for that client
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: JnvRBXtRNar7ejeM
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal OpenAI key replaced by the OpenAi account credential
+
+  - id: aimfox-premql-to-pdca
+    name: "preMGL tag added (Aimfox) -> Add lead to PDCA"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-premql-to-pdca
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: s0GqDtCzyLAvVnm1
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
+
+  - id: aimfox-leads-processing
+    name: "AimFox Leads Processing"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-leads-processing
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads AND dispatches them to the clients' CRMs
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: 4OjNRWLaG2IWK6kd
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
+
+  - id: bison-lead-enrichment
+    name: "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/bison-lead-enrichment
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # creates leads and dispatches them to the clients' CRMs
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: lBOyL8ZPA3SZSvDW
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 phase A branch S published — RPC chain verified in a rolled-back transaction
+
+  # Ops. Bound as settings.errorWorkflow on every managed workflow above.
+  - id: automation-failure-recorder
+    name: "[ERR] Automation failure recorder"
+    domain: ops
+    path: automation/n8n/workflows/ops/automation-failure-recorder
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: error
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: Pmz0JjRRuJNdNpSE
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 proved end to end — a deliberate failure produced one integration_sync_runs row
+
+  # Bison ingestion — the counters every portal dashboard reads. Imported 2026-07-22 in the same
+  # change that repaired them: all three top-level workflows had been failing on the dropped
+  # clients.external_* columns (ADR-0012). See processes/outreach/bison-ingestion.md.
+  - id: bison-campaign-sync
+    name: "Bison campaign sync"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-campaign-sync
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: UXpSOrgsN2TxjXUu
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired and executed — 16 clients, 390 campaigns
+
+  - id: bison-campaign-daily-stats
+    name: "Bison campaign daily stats"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-campaign-daily-stats
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: AEgpCGoSpiZ7PA90
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired — 416 campaigns resolve
+
+  - id: bison-daily-stats-population
+    name: "Bison daily stats population"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-daily-stats-population
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: amJdB2eGXxUNyCPY
+    lastRepositorySync: 2026-07-22
+    lastValidation: 2026-07-22 repaired and executed — daily_stats written for 2026-07-22
+
+  - id: bison-daily-stats-process
+    name: "Daily Stats Process"
+    domain: ingestion
+    path: automation/n8n/workflows/ingestion/bison-daily-stats-process
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: BQbFKHUaIcEKPc01
+    lastRepositorySync: 2026-07-22
+
+  - id: nrr-daily-stats
+    name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/nrr-daily-stats
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: low
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: 1hHbU2hYYcsktLUP
+    lastRepositorySync: 2026-07-21
+
+  # One-off Sheets → Supabase migrations. Ran once on 2026-07-22, then deactivated.
+  # Kept under repository control because they are the only record of how the rows got there.
+  # docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  - id: sheets-lead-backfill
+    name: "[BACKFILL] Sheets → Supabase · leads"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-lead-backfill
+    businessProcess: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+    owner: automation
+    lifecycle: managed
+    status: deprecated
+    criticality: medium
+    trigger: manual
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: KoLN4bU7qe7RwnGT
+    lastRepositorySync: 2026-07-22
+
+  - id: sheets-aimfox-metrics-backfill
+    name: "[BACKFILL] Sheets → Supabase · Aimfox daily metrics"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-aimfox-metrics-backfill
+    businessProcess: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+    owner: automation
+    lifecycle: managed
+    status: deprecated
+    criticality: medium
+    trigger: manual
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: YLfQZBprSRIT6hLm
+    lastRepositorySync: 2026-07-22
+
+  - id: sheets-bison-credential-sync
+    name: "[CRED] CS PDCA → client_sequencers · Bison keys"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-bison-credential-sync
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: Hzar4pwdAXrDHAwn
+    lastRepositorySync: 2026-07-22

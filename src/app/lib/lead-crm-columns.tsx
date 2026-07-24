@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import type { AppRole, ContactDisposition } from "../types/core";
+import type { AppRole } from "../types/core";
 import type { LeadCrmRow } from "../types/view-contracts";
-import { resolveCrmStatus, deriveContactDisposition } from "./crm/lead-status";
+import { resolveCrmStatus } from "./crm/lead-status";
 import { calendarDaysBetween, workingDaysToContact, DEFAULT_BUSINESS_DAY_CONFIG, type BusinessDayConfig } from "./crm/business-days";
 import { CRM_PROCESS_ISSUES_ENABLED, CRM_PROCESS_ISSUES_PENDING_LABEL } from "./crm/crm-features";
 import { LEAD_CRM_REGISTRY, type LeadCrmRegistryEntry, type LeadCrmColumnId } from "./crm/lead-crm-registry";
@@ -62,11 +62,6 @@ const STATUS_LABELS: Record<string, string> = {
   won: "Won",
   lost: "Lost",
   lost_premql: "Lost (pre-MQL)",
-};
-
-const DISPOSITION_LABELS: Record<ContactDisposition, string> = {
-  out_of_office: "Out of office",
-  not_right_role: "Not right role",
 };
 
 function shortDate(value: string | null | undefined): string {
@@ -177,13 +172,6 @@ export function buildLeadCrmColumns(options: BuildLeadCrmColumnsOptions): LeadCr
     {
       id: "status", label: "Status", stage: "lead", width: 130, minWidth: 100, registryId: "status",
       value: (r) => STATUS_LABELS[resolveCrmStatus(r)] ?? resolveCrmStatus(r),
-    },
-    {
-      id: "disposition", label: "Disposition", stage: "lead", width: 110, minWidth: 80,
-      value: (r) => {
-        const d = deriveContactDisposition(r);
-        return d ? DISPOSITION_LABELS[d] : "";
-      },
     },
     { id: "lead_received", label: "Lead received", stage: "lead", width: 120, minWidth: 90, healthId: "lead_received", registryId: "lead_received", value: (r) => shortDate(r.created_at) },
   );

@@ -1,6 +1,6 @@
 # 11 · Integrations & Ingestion Topology
 
-Where the portal ends and n8n / Smartlead / Bison begin. This file is the implementation pair to [BUSINESS_LOGIC.md §2 System boundaries](../../BUSINESS_LOGIC.md#2-system-boundaries) and [§9 Notifications](../../BUSINESS_LOGIC.md#9-notifications).
+Where the portal ends and n8n / Bison begin. This file is the implementation pair to [BUSINESS_LOGIC.md §2 System boundaries](../../BUSINESS_LOGIC.md#2-system-boundaries) and [§9 Notifications](../../BUSINESS_LOGIC.md#9-notifications).
 
 ## Contents
 
@@ -18,7 +18,7 @@ Where the portal ends and n8n / Smartlead / Bison begin. This file is the implem
 ## 1. Topology
 
 ```
-Smartlead / Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
+             Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
                                     │                    │
                                     │ webhooks           │
                                     ▼                    ▼
@@ -41,7 +41,7 @@ Four actors that touch Supabase:
   [03-data-model §4a](03-data-model.md#4a-public-functions-anon-callable), formula in
   [04-metrics-catalog §16](04-metrics-catalog.md#16-public-marketing-counters)).
 
-The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
+The portal **never** reaches Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
 
 ---
 
@@ -56,7 +56,7 @@ Read windows are enforced **server-side** in the `orm-gateway` edge function ([A
 | `replies` | n8n: insert + classify | never bulk-loaded. List/dashboard actions read **server-side aggregates only** (reply count + last reply per lead, e.g. [orm-gateway/index.ts:1807](../../../supabase/functions/orm-gateway/index.ts#L1807)); the full thread for **one** lead is fetched on demand by `loadLeadDetail` ([index.ts:1949](../../../supabase/functions/orm-gateway/index.ts#L1949), full history, no window) | scoped via RLS |
 | `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** — `CAMPAIGN_DAILY_STATS_WINDOW_DAYS` ([index.ts:19](../../../supabase/functions/orm-gateway/index.ts#L19)) | scoped via set-based RLS |
 | `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** — `DAILY_STATS_WINDOW_DAYS` ([index.ts:20](../../../supabase/functions/orm-gateway/index.ts#L20)) | scoped via RLS |
-| `sequencer_daily_stats` (ADR-0012) | n8n ("Get Metrics from Aimfox", 2-hourly): UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas). `profile_id` = Aimfox account id, `''` = client rollup (current workflow) | not read by the portal yet (phase-2 UI) | scoped via set-based RLS |
+| `sequencer_daily_stats` (ADR-0012) | **Historical rows only, from a one-off sheet backfill** — [`sheets-aimfox-metrics-backfill`](../../../automation/n8n/workflows/ops/sheets-aimfox-metrics-backfill/README.md) wrote the table's first 117 rows on 2026-07-22 (5 clients, 2026-06-18…07-22, `profile_id = '__workspace_total__'`, `invites_accepted` NULL — the sheet does not carry acceptances). **No recurring writer exists**; before that date the table had never been written at all (verified 2026-07-21). *Specified* writer: n8n `Get Metrics from Aimfox`, 2-hourly, UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (Σ active campaigns `audience_size − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas), `profile_id` = Aimfox account id. The workflow computes every one of these and writes them **to the PDCA spreadsheet**; the schema was designed by reading it ([`20260705`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)) and the Supabase write was never built — no Postgres node, no Supabase URL in the graph. Closing this is phase A of [LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md) | not read by the portal yet (phase-2 UI) | scoped via set-based RLS |
 | `email_accounts` (`20260720e`) | **n8n from Winnr**: UPSERT on `winnr_email_user_id` from `/v1/email-users` (mailbox identity) + `/v1/warming` (current health score, inbox/spam rate, daily volume, warm-up progress) | read whole by `loadEmailAccountsPage` / `loadDomainsPage` (no window; one row per mailbox) | scoped via set-based RLS (through `domain → client`) |
 | `email_account_warming_daily` (`20260720e`) | **n8n from Winnr**: UPSERT on (`email_account_id`, `metric_date`) from `/v1/warming/{id}/metrics` | fetched per-mailbox on demand by `loadEmailAccountWarming` (full history, no window) | scoped via set-based RLS (through `email_account → domain → client`) |
 
@@ -82,7 +82,7 @@ These exist primarily so the portal can write configuration that downstream syst
 | `clients.sms_phone_numbers` (text[]) | Where n8n sends SMS alerts | n8n |
 | `clients.auto_ooo_enabled` (bool) | Is OOO auto-routing on? | n8n (gate) |
 | `client_ooo_routing` (table) | Mapping of `(client, gender?)` → follow-up `campaign_id` | n8n (rule source) |
-| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (smartlead / emailbison / aimfox — fixed UUIDs `…0001`/`…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
+| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (emailbison / aimfox — fixed UUIDs `…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
 | `email_exclude_list` | Agency-wide domain blacklist | n8n (pre-send filter) |
 
 Editing these in the portal does not produce immediate side-effects. n8n picks up changes on its next run (timing depends on n8n flow schedule).
@@ -184,11 +184,13 @@ Key contract points n8n must respect:
   `qualification`, `won`, timestamps etc. are derived inside the function; a repeat call returns the existing
   lead with `created: false` rather than raising.
 
-**Legacy fallback (display-only, pre-cutover).** Until n8n is on this contract, old rows where
-`leads.qualification` is `'OOO'`/`'NRR'` still render via `deriveContactDisposition` (a display fallback, no
-backfill). The disposition columns and the `OOO`/`NRR` qualification values are removed by the **deferred**
-`supabase/migrations/deferred/20260722z_drop_legacy_ooo_columns.sql`, whose precondition is exactly that n8n
-has stopped writing them — see that file's header before applying.
+**Legacy disposition display — REMOVED 2026-07-22.** The old display-only fallback (rows where
+`leads.qualification` was `'OOO'`/`'NRR'` rendered via `deriveContactDisposition`) is gone. The
+disposition column + resolver, the CRM "Disposition" column, and the `OOO`/`NRR` `lead_qualification`
+values were all removed from the portal and gateway, and
+[`supabase/migrations/20260722z_drop_legacy_ooo_columns.sql`](../../../supabase/migrations/20260722z_drop_legacy_ooo_columns.sql)
+(no longer deferred) drops the underlying columns + enum values. Its remaining precondition is the
+deploy order: **redeploy `orm-gateway` before applying it** — see the file header.
 
 ---
 

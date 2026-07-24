@@ -20,7 +20,6 @@ describe("getLeadStage precedence (mirrors SQL CASE in loadLeadsList)", () => {
 
   it("returns qualification when no boolean flags are set", () => {
     expect(getLeadStage({ won: false, offer_sent: false, meeting_held: false, meeting_booked: false, qualification: "MQL" })).toBe("MQL");
-    expect(getLeadStage({ won: false, offer_sent: false, meeting_held: false, meeting_booked: false, qualification: "OOO" })).toBe("OOO");
     expect(getLeadStage({ won: false, offer_sent: false, meeting_held: false, meeting_booked: false, qualification: "rejected" })).toBe("rejected");
   });
 

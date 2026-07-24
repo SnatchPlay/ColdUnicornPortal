@@ -1,0 +1,129 @@
+schemaVersion: 1
+
+id: bison-lead-enrichment
+name: "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # the entry point into the funnel for the email channel
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0004-lead-state-boundaries.md
+  - docs/adr/0010-legacy-crm-integration.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    detail: "called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1) on Interested / preMQL"
+
+reads:
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+    - campaigns
+  external:
+    - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps — called TWICE per lead, once per branch, each on its own credential (branch L: CS PDCA col_6; branch S: client_sequencers.api_key via [S0])"
+    - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List — branch L only"
+    - "Snov.io · local list + global profile lookup — called once per branch (double cost, deliberate — ADR-0017 §1a)"
+    - "Lusha · POST /v2/person (fallback phone) — called once per branch (double cost, deliberate)"
+    - "OpenAI · gpt-4o reply analysis — called once per branch (double cost, deliberate)"
+
+writes:
+  external:
+    - "Google Sheets · <client>/Leads — appends a lead row, or updates the Qualification column"
+    - "Bison · POST /blacklisted-emails, /blacklisted-domains (3rd-party sender)"
+    - "Bison · POST /replies/{id}/forward"
+    - "UniTalk · notification"
+    - "sub-workflow '[HUB] CRMs Add/Update Lead Dispatcher'"
+  tables: []
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+    - promote_contact_to_lead
+  tablesWritten:
+    - sequencer_contacts     # via RPC
+    - replies                # via RPC
+    - leads                  # via RPC — never a direct insert (ADR-0015 §5)
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "[S0] Resolve Bison credentials and the five [S] RPC nodes"
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes — branch L only"
+  - alias: "Lusha"
+    type: httpHeaderAuth
+    usedBy: "[181] Lusha: POST /v2/person (branch L) and [S] Lusha: POST /v2/person (branch S) — same credential, two independent calls"
+  - alias: "UniTalk"
+    type: httpHeaderAuth
+    usedBy: "HTTP Request (notification) — branch L only"
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "[18] OpenAI: gpt-4o analyze email (branch L) and [S] OpenAI: gpt-4o analyze email (branch S) — same credential, two independent calls"
+
+transition:
+  phase: A                   # dual-write: sheet first, Supabase second, Supabase failure non-fatal
+  phaseState: live           # branch S published 2026-07-22
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · sequencer_contacts + replies + leads"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: >-
+    2026-07-22: branch L and branch S each read Bison credentials from exactly one place, no fallback
+    in either direction. Branch L's 8 Bison/forward-email calls read only CS PDCA col_6, as before
+    [S0] existed — a guarded sheet fallback remains for the 7 onboarding workspaces that have no
+    client_sequencers row yet. Branch S has its own copy of the data-fetch chain ([S] Bison: GET
+    /leads/{taggable_id} through [S] Bison: GET /campaigns/v1.1/{id}/sequence-steps, plus its own
+    Snov.io/Lusha/OpenAI calls), reading only client_sequencers.api_key via [S0], no fallback — a
+    Supabase failure there degrades that one execution's branch-S data (every reactivated node is
+    onError=continueRegularOutput) and never touches branch L.
+
+    This reverses the previous narrowing: Snov.io, Lusha and OpenAI are now called once per branch
+    (double vendor cost per lead), accepted explicitly in exchange for the literal reading of
+    ADR-0017 §1a — either branch can be disconnected without the other's correctness depending on
+    what's in the other branch's data source. The reactivated chain is 18 nodes that already existed
+    in the workflow, built once and never wired to a trigger (see "Where branch S's chain came from"
+    in the README) — repaired rather than built from scratch. Blacklisting ([284]/[306]) and the CRM
+    reply-forward stay branch-L-exclusive; branch S has no reason to blacklist via a second credential.
+  reconciliation: >-
+    Per run, one leads row per appended sheet row:
+      select l.id, l.qualification, l.created_at, sc.external_contact_id
+      from public.leads l
+      join public.sequencer_contacts sc on sc.id = l.source_sequencer_contact_id
+      where l.created_at > now() - interval '1 day';
+    Qualification now MATCHES the sheet (fixed 2026-07-23). Branch S passes qualification =
+    (tag_name == 'interested' ? 'MQL' : 'preMQL') — the same rule branch L writes into the sheet's
+    Qualification column — into promote_contact_to_lead, which applies it and upgrades preMQL -> MQL
+    on a later MQL-tag run (upgrade-only, never downgrades a human-curated MQL). Migration
+    20260723_promote_contact_qualification_sync.sql. So compare on existence AND qualification; a
+    preMQL-in-Supabase / MQL-in-sheet split is now a defect, not expected divergence. ADR-0004 governs
+    what the PORTAL may edit, not whether n8n may set qualification from the tag.
+  parityEvidence: "2026-07-23: 54 historical preMQL leads with MQL signals reconciled; flow deployed."
+
+idempotency:
+  key: "uq_leads_source_sequencer_contact + leads.origin_reply_id + replies UNIQUE (external_id)"
+  notes: >-
+    Branch S is genuinely idempotent: promote_contact_to_lead returns the existing lead for a repeat
+    reply and never creates a second one. Branch L is not — its duplicate check is a sheet lookup,
+    so two deliveries can both append. They will therefore disagree on redelivery, and branch S is
+    the correct side.
+
+retryPolicy:
+  notes: >-
+    Every [S]-prefixed node (the RPC chain and the reactivated Bison/Snov.io/Lusha/OpenAI chain) is
+    onError=continueRegularOutput, so a Supabase or vendor failure on branch S cannot stop the sheet
+    or CRM path (ADR-0017: Supabase failure is non-fatal in phase A). Branch L has no error branch —
+    pre-existing.
+
+knownViolations: []
+    # Resolved 2026-07-22: the direct-table-write nodes ("Update rows in a table", "Insert rows in a
+    # table") and their unreachable, broken root ("Get Client Data", selecting the dropped
+    # clients.external_workspace_id) are deleted. Branch S's lead write goes through
+    # promote_contact_to_lead exclusively.

@@ -1,0 +1,74 @@
+{
+  "name": "[ERR] Automation failure recorder",
+  "description": "Error-trigger handler: records any managed workflow failure into integration_sync_runs.",
+  "nodes": [
+    {
+      "id": "d5caa27e-9287-481e-92e6-4522da012202",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "00d1f68b-29a9-4b5b-b30a-fa86216d4fdf",
+      "name": "Normalize Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst execution = input?.execution ?? {};\nconst workflow = input?.workflow ?? {};\nconst error = execution?.error ?? input?.error ?? {};\nconst name = workflow?.name ?? input?.workflowName ?? 'Unknown workflow';\nconst lower = String(name).toLowerCase();\n\n// Provider is the vendor the workflow talks to, so a failure lands next to that vendor's sync rows.\nconst provider =\n  lower.includes('aimfox') ? 'aimfox' :\n  lower.includes('winnr')  ? 'winnr'  :\n  (lower.includes('bison') || lower.includes('ooo') || lower.includes('nrr') ||\n   lower.includes('mql') || lower.includes('daily stats') || lower.includes('campaign')) ? 'bison' :\n  'n8n';\n\nreturn [{ json: {\n  provider,\n  n8n_execution_id: String(execution?.id ?? input?.executionId ?? ('unknown-' + name)),\n  workflow_id: String(workflow?.id ?? ''),\n  workflow_name: String(name),\n  last_node: String(execution?.lastNodeExecuted ?? ''),\n  error_message: String(error?.message ?? input?.message ?? 'Unknown workflow failure'),\n  error_stack: error?.stack ? String(error.stack).slice(0, 2000) : null,\n} }];"
+      }
+    },
+    {
+      "id": "cb3f0d8d-5934-4e56-9aa2-99d9d6f643b9",
+      "name": "Record Failed Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        },
+        "query": "with p as (select $1::jsonb as j)\ninsert into public.integration_sync_runs (\n  provider, sync_type, n8n_execution_id, status, started_at, finished_at, error_message, metadata\n)\nselect j->>'provider',\n       'workflow_failure',\n       j->>'n8n_execution_id',\n       'failed',\n       now(),\n       now(),\n       left(coalesce(j->>'error_message', 'Unknown workflow failure'), 4000),\n       jsonb_build_object(\n         'workflow_id',   j->>'workflow_id',\n         'workflow_name', j->>'workflow_name',\n         'last_node',     j->>'last_node',\n         'error_stack',   j->>'error_stack'\n       )\nfrom p\non conflict (n8n_execution_id) do update set\n  status        = 'failed',\n  finished_at   = now(),\n  error_message = excluded.error_message,\n  metadata      = public.integration_sync_runs.metadata || excluded.metadata\nreturning id::text as sync_run_id, provider, n8n_execution_id;"
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Normalize Failure",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Normalize Failure": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Record Failed Run",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

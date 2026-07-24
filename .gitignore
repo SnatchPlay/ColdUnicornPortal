@@ -23,6 +23,13 @@ supabase/.temp/
 supabase/.branches/
 supabase/.local/
 
+# n8n: MCP credentials and per-environment remote IDs stay local (docs/reference/n8n/security.md).
+# The tracked artifacts are automation/n8n/** — sanitized workflow JSON only, never a credential.
+.mcp.local.json
+.n8n.local.json
+automation/n8n/environments.local.*
+automation/n8n/.exports/
+
 # Logs
 *.log
 npm-debug.log*
@@ -44,6 +51,11 @@ test-results/
 .DS_Store
 Thumbs.db
 
+
+# The `skills` CLI also emits a "universal" copy of every skill under agent/ for other agent
+# tools (Amp, Cline, Codex-universal, …). This repo drives Claude Code from .claude/skills and
+# Codex from the .agents/skills symlinks, so that copy is an unused duplicate of every SKILL.md.
+agent/
 
 #Legacy files
 legacy crm integration/

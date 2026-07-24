@@ -1,0 +1,57 @@
+schemaVersion: 1
+
+id: nrr-daily-stats
+name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: low
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1)"
+    event: TAG_ATTACHED
+    tag: NRR
+
+reads:
+  external:
+    - "Google Sheets · Daily Stats — today's row"
+
+writes:
+  external:
+    - "Google Sheets · Daily Stats — increment the NRR counter, or insert today's row"
+  tables: []
+  rpcs:
+    - upsert_sequencer_contact
+    - upsert_reply
+
+transition:
+  phase: A
+  phaseState: live              # published 2026-07-21; branch S runs on every NRR TAG_ATTACHED
+  authoritativeSource: sheets
+  targetStore: "Supabase · replies (upsert_reply with classification NRR)"
+  design: docs/reference/n8n/ooo-phase-a.md
+  notes: >-
+    NRR creates NO lead and NO episode, and must not set final_outcome — a lost outcome is a human
+    decision on a lead that already exists (ADR-0015). Branch S is only upsert_reply.
+    daily_stats.ooo_count stays a sequencer-reported EVENT count, never a CRM figure.
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: null
+  notes: >-
+    NONE. The counter is incremented unconditionally, so a redelivered TAG_ATTACHED double-counts.
+    Branch S is idempotent by construction (upsert_reply on external_id), so the two will disagree
+    exactly when an event is redelivered — which makes this a useful divergence signal.
+
+retryPolicy:
+  notes: "None."

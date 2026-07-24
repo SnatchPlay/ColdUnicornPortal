@@ -21,13 +21,12 @@ describe("parseOrmGatewayRequest", () => {
   it("accepts loadLeadCrmList and normalizes params", () => {
     const parsed = parseOrmGatewayRequest({
       action: "loadLeadCrmList",
-      params: { sortField: "lead", sortDir: "asc", page: 2, pageSize: 999, replyScope: "ooo", search: "  acme  " },
+      params: { sortField: "lead", sortDir: "asc", page: 2, pageSize: 999, search: "  acme  " },
     });
     expect(parsed.ok).toBe(true);
     if (parsed.ok && parsed.value.action === "loadLeadCrmList") {
       expect(parsed.value.params.pageSize).toBe(100); // clamped to max
       expect(parsed.value.params.page).toBe(2);
-      expect(parsed.value.params.replyScope).toBe("ooo");
       expect(parsed.value.params.search).toBe("acme"); // trimmed
     }
   });

@@ -346,6 +346,58 @@ export interface ClientMetricsSummary {
   threedod_sql: number[];
   /** MAX(prospects_count) filtered to rows where prospects_count > 0 */
   latest_prospects_count: number;
+
+  // ── Per-channel lead splits (leads.sequencer_id, ADR-0012) ─────────────────────────────────
+  // The blended fields above stay the "Total" series. These add the EmailBison-only (…_eb) and
+  // Aimfox-only (…_af) breakdowns for the metrics the manager mega-table splits. Same 5-element
+  // bucket shape and window definitions as their blended counterparts. MoM total/meetings/won
+  // are intentionally NOT split — only MoM SQL was requested.
+  /** 3-DoD (MQL|preMQL) leads by day, EmailBison sequencer only */
+  threedod_total_eb: number[];
+  /** 3-DoD (MQL|preMQL) leads by day, Aimfox sequencer only */
+  threedod_total_af: number[];
+  /** 3-DoD MQL leads by day, EmailBison only */
+  threedod_sql_eb: number[];
+  /** 3-DoD MQL leads by day, Aimfox only */
+  threedod_sql_af: number[];
+  /** WoW all-leads by week, EmailBison only */
+  wow_leads_eb: number[];
+  /** WoW all-leads by week, Aimfox only */
+  wow_leads_af: number[];
+  /** WoW MQL leads by week, EmailBison only */
+  wow_sql_eb: number[];
+  /** WoW MQL leads by week, Aimfox only */
+  wow_sql_af: number[];
+  /** MoM MQL leads by month, EmailBison only */
+  mom_sql_eb: number[];
+  /** MoM MQL leads by month, Aimfox only */
+  mom_sql_af: number[];
+
+  // ── Aimfox (LinkedIn) daily volume / acceptance / capacity ─────────────────────────────────
+  // Sourced from sequencer_daily_stats, summed across the client's enabled LinkedIn profiles.
+  // A client with no Aimfox client_sequencers row has no rows here → every field is 0 / null.
+  /** Aimfox invites_sent per day: [today, -1d, -2d, -3d, -4d] */
+  aimfox_daily_sent: number[];
+  /** Aimfox schedule_today from the latest snapshot day (mirrors DoD Schedule bucket "0") */
+  aimfox_schedule_today: number;
+  /** Aimfox schedule_tomorrow from the latest snapshot day (bucket "+1") */
+  aimfox_schedule_tomorrow: number;
+  /** Aimfox schedule_day_after from the latest snapshot day (bucket "+2") */
+  aimfox_schedule_day_after: number;
+  /** SUM(invites_sent) per ISO week: [current, -1w, -2w, -3w, -4w] */
+  aimfox_wow_sent: number[];
+  /** SUM(invites_accepted) per ISO week. null = unmeasured (never coerced to 0). */
+  aimfox_wow_accepted: Array<number | null>;
+  /** Latest-day SUM(invite_limit): the weekly connect-cap snapshot ("~195 per account"). null = unmeasured. */
+  aimfox_invite_limit: number | null;
+  /**
+   * Latest-day SUM(invite_limit_remaining): invites still available today. This — NOT invite_limit —
+   * is what the PDCA sheet's column S "Invitations limit" shows (cached values 8/20/8 reconcile with
+   * this field, not the ~195 cap). See 20260705 migration + 04-metrics §18.4. null = unmeasured.
+   */
+  aimfox_invite_limit_remaining: number | null;
+  /** Latest-day SUM(remaining_database_size). null = unmeasured. */
+  aimfox_remaining_database_size: number | null;
 }
 
 /** Payload returned by loadClientsMetricsSummary. */
@@ -452,7 +504,6 @@ export interface LeadsListParams {
   campaignId?: string;
   /** PIPELINE_STAGES key, or undefined for "all" stages. */
   stage?: string;
-  replyScope?: "all" | "active" | "ooo";
   /** ISO date string (inclusive). Resolved from TimeframeValue on the frontend. */
   dateFrom?: string;
   dateTo?: string;

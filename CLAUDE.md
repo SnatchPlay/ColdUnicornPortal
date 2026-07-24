@@ -15,7 +15,7 @@ of task should be loaded for that task, not carried in every session.
   "Internal" = anything that is not `client`.
 - **Stack:** React 18 + TypeScript + Vite, Tailwind v4, Radix/shadcn primitives, recharts,
   react-router-dom 7, Supabase.
-- **Three cooperating systems.** Smartlead/Bison send and receive email; **n8n** ingests counters and
+- **Three cooperating systems.** Bison sends and receives email; **n8n** ingests counters and
   replies and dispatches notifications + OOO routing; **the portal is a thin read + config surface**.
   The portal never writes to ingestion-only tables (`replies`, `campaign_daily_stats`, `daily_stats`)
   and never sends notifications itself.
@@ -60,6 +60,8 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 
 | Task | Read / invoke |
 |---|---|
+| **Any n8n workflow change** | [reference/n8n/](docs/reference/n8n/README.md) — §6 below is binding |
+| **A business rule, end to end** | [reference/processes/](docs/reference/processes/README.md) |
 | New page, route, or tab | `portal-page` skill |
 | New data read/write, new gateway action | `gateway-action` skill |
 | Schema, RLS policy, migration, index | `rls-migration` skill |
@@ -68,11 +70,11 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 | Find something reusable | [docs/reuse-catalog.md](docs/reuse-catalog.md) |
 | Colours, tokens, primitives, states, charts | [docs/reference/design-system.md](docs/reference/design-system.md) |
 | Commands, quality gate, env, observability | [docs/development-standards-and-operations.md](docs/development-standards-and-operations.md) |
-| "Why is it like this?" | [docs/ADR.md](docs/ADR.md) → the 11 ADRs |
+| "Why is it like this?" | [docs/ADR.md](docs/ADR.md) → the 16 ADRs |
 | "Is this in scope?" | [docs/BUSINESS_LOGIC.md](docs/BUSINESS_LOGIC.md) + [13-out-of-scope.md](docs/reference/functional/13-out-of-scope.md) |
 | How a page/metric/chart currently works | [docs/reference/functional/INDEX.md](docs/reference/functional/INDEX.md) |
 | A metric formula | [04-metrics-catalog.md](docs/reference/functional/04-metrics-catalog.md) |
-| n8n / Smartlead / Bison boundary | [11-integrations.md](docs/reference/functional/11-integrations.md) |
+| n8n / Bison boundary | [11-integrations.md](docs/reference/functional/11-integrations.md) |
 | Magic numbers, hidden branches, auth error codes | [12-hidden-rules.md](docs/reference/functional/12-hidden-rules.md) |
 | UI design / polish / redesign | `impeccable` skill first, then the design/taste skills |
 | Supabase / Postgres / query performance | `supabase` + `supabase-postgres-best-practices` skills |
@@ -86,7 +88,7 @@ moved, fix the doc as part of your change.
 
 | ADR | Rule |
 |---|---|
-| [0001](docs/adr/0001-live-supabase-source-of-truth.md) | Live Supabase is the only data system. No alternative backend, no local-first mode, no mock-mode runtime branch. |
+| [0001](docs/adr/0001-live-supabase-source-of-truth.md) | Live Supabase is the only data system **the portal reads**. No alternative backend, no local-first mode, no mock-mode runtime branch. (n8n may write a second, non-authoritative store during the Sheets migration — [ADR-0017](docs/adr/0017-sheets-to-supabase-dual-write-transition.md).) |
 | [0002](docs/adr/0002-route-based-role-shells.md) | Each role owns a URL prefix. No runtime role switcher — use impersonation. |
 | [0003](docs/adr/0003-client-campaign-visibility.md) | Clients see only `campaigns.type='outreach'`. Enforce in **both** RLS and `scopeCampaigns`. |
 | [0004](docs/adr/0004-lead-state-boundaries.md) | Editable lead fields are exactly: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`, `comments`. Replies are read-only. |
@@ -95,6 +97,8 @@ moved, fix the doc as part of your change.
 | [0009](docs/adr/0009-per-page-data-contracts.md) | One page → one gateway action → one hook with a `loadIdRef` stale guard. No global store, no snapshot, no legacy fallback. |
 | [0010](docs/adr/0010-legacy-crm-integration.md) | `lib/crm-integration.ts` is the **single** sanctioned second Supabase client — read-only, config metadata only. A third data source needs a new ADR. |
 | [0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md) | OOO/NRR are **outreach** states of a `sequencer_contacts` row, never fields on a lead. A CRM lead is created only by a positive reply, at most one per contact. The whole episode lifecycle is `service_role` RPCs driven by n8n — the portal has **no** follow-up list or editor ([OoS-16](docs/reference/functional/13-out-of-scope.md)); its only OOO surface is the per-client routing editor. |
+| [0016](docs/adr/0016-repository-as-automation-source-of-truth.md) | This repository is the source of truth for **automation**, not just for the portal. n8n is a deployment target. A workflow that contradicts a business rule, an ADR or a data contract is a defect **in the workflow**. |
+| [0017](docs/adr/0017-sheets-to-supabase-dual-write-transition.md) | The agency still runs on Google Sheets. Migration is **dual-write per process**, never a hard cutover: phase A (Sheets authoritative) → B (parity, Supabase authoritative) → C (Supabase only). Sheets first, Supabase second, Supabase failure non-fatal in phase A. A dual-write must **declare** its phase, authoritative source and reconciliation. A second store never licenses bypassing an RPC contract. |
 
 Full index, including `master_admin` (0005), lead custom fields (0007) and the conditions engine
 (0011): [docs/ADR.md](docs/ADR.md).
@@ -137,6 +141,46 @@ calculator, a second lead drawer. Never import `@supabase/supabase-js` outside `
 
 ---
 
+## 5a. n8n and automation
+
+The repository is the source of truth for automation too ([ADR-0016](docs/adr/0016-repository-as-automation-source-of-truth.md)).
+Five levels, and a conflict is always resolved **downward**:
+
+> business rules → architecture decisions → data contracts → application → **n8n workflows**
+
+**Routing.** OOO · NRR · positive reply · sequencer contact →
+[process doc](docs/reference/processes/outreach/ooo-followups.md) → data contracts
+([ADR-0015](docs/adr/0015-sequencer-contacts-and-ooo-followups.md),
+[11-integrations §6a](docs/reference/functional/11-integrations.md)) → portal/dashboard impact →
+**only then** the workflow.
+
+Before any n8n change, read: the business process → the ADRs → the workflow's `manifest.yaml` → the
+RPC/API contract. Then:
+
+1. **Never treat the current workflow as correct.** It is evidence of what runs, not of what should run.
+2. **Never write a credential into workflow JSON**, and never commit `pinData`.
+3. **Never change or activate a production workflow via MCP without explicit approval.** The only
+   instance is production and the token is unrestricted — see [environments.md](docs/reference/n8n/environments.md).
+4. **Use the RPC contract, not raw table writes.** `leads`, `replies`, `ooo_followups` and
+   `sequencer_contacts` are written through `SECURITY DEFINER` RPCs. Never move a database invariant
+   into n8n.
+5. **No new table, enum, RPC or metric** without checking [reuse-catalog.md](docs/reuse-catalog.md) first.
+6. **After any remote change, commit the canonical artifact** (`pnpm n8n:export`). Otherwise it is drift.
+7. **Update [traceability.md](docs/reference/traceability.md)**, and check portal + dashboard impact.
+8. **Register contradictions, don't hide them** — `knownViolations` with a reason, a tracking link and
+   an expiry date.
+
+```bash
+pnpm n8n:validate      # offline; runs in CI
+pnpm n8n:inventory     # live workflows, classified
+pnpm n8n:check-drift   # artifact vs instance
+```
+
+The 14 official `n8n-*-official` skills advise on building workflows well. Like the design skills,
+**they never override this file or the ADRs.**
+
+---
+
 ## 6. Behaviour
 
 - Read before you edit. Do not guess architecture.
@@ -161,7 +205,7 @@ asked, point at the file and confirm before doing any work:
 Health Assessments · CSV/Excel **bulk import** UI · cash-flow projections · ABS scoring · partnerships
 dashboards · lost-client tracking · per-client issue tracking · auto-generated weekly/monthly reports ·
 **reply triage UI** (n8n classifies every reply; the portal never does) · **sending email/SMS from the
-portal** (n8n owns that; the portal stores destinations only) · calling Smartlead/Bison APIs directly ·
+portal** (n8n owns that; the portal stores destinations only) · calling Bison APIs directly ·
 pre-aggregated `daily_snapshots` tables.
 
 *(A leads **export** exists and is in scope — that is not the same thing as generated reports.)*

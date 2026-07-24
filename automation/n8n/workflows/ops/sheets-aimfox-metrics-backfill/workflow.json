@@ -1,0 +1,119 @@
+{
+  "name": "[BACKFILL] Sheets → Supabase · Aimfox daily metrics",
+  "nodes": [
+    {
+      "id": "w",
+      "name": "Backfill Sequencer Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.payload }}"
+        },
+        "query": "with p as (select $1::jsonb as j),\nsrc as (\n  select nullif(r->>'ws','')            as ws,\n         (r->>'date')::date             as report_date,\n         (r->>'invites_sent')::int      as invites_sent,\n         (r->>'sched_today')::int       as schedule_today,\n         (r->>'sched_tomorrow')::int    as schedule_tomorrow,\n         (r->>'sched_day_after')::int   as schedule_day_after\n  from p, jsonb_array_elements(p.j) r\n),\nmapped as (\n  select cs_a.client_id, cs_a.sequencer_id, src.*\n  from src\n  join public.client_sequencers cs_b on cs_b.external_workspace_id = src.ws\n  join public.sequencers        s_b  on s_b.id = cs_b.sequencer_id and s_b.key = 'emailbison'\n  join public.client_sequencers cs_a on cs_a.client_id = cs_b.client_id\n  join public.sequencers        s_a  on s_a.id = cs_a.sequencer_id and s_a.key = 'aimfox'\n  where src.invites_sent is not null\n),\nins as (\n  insert into public.sequencer_daily_stats (\n    id, client_id, sequencer_id, profile_id, report_date,\n    invites_sent, invites_accepted, schedule_today, schedule_tomorrow, schedule_day_after, created_at)\n  select gen_random_uuid(), m.client_id, m.sequencer_id, '__workspace_total__', m.report_date,\n         m.invites_sent,\n         null,                       -- acceptances are not in the sheet; NULL means not measured\n         coalesce(m.schedule_today, 0), coalesce(m.schedule_tomorrow, 0), coalesce(m.schedule_day_after, 0),\n         now()\n  from mapped m\n  on conflict (client_id, sequencer_id, profile_id, report_date) do update set\n    invites_sent       = excluded.invites_sent,\n    schedule_today     = excluded.schedule_today,\n    schedule_tomorrow  = excluded.schedule_tomorrow,\n    schedule_day_after = excluded.schedule_day_after\n  returning id\n)\nselect (select count(*) from src)    as candidate_rows,\n       (select count(*) from mapped) as mapped_rows,\n       (select count(*) from ins)    as written,\n       (select count(distinct ws) from src)    as workspaces_in_sheet,\n       (select count(distinct ws) from mapped) as workspaces_mapped;\n"
+      }
+    },
+    {
+      "id": "b",
+      "name": "Build Aimfox Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const ACOLS = ['Invitations sent','Schedule volume for Today (Aimfox)',\n               'Schedule volume for Tomorrow (Aimfox)','Schedule volume for Day after tomorrow (Aimfox)'];\nconst n = v => { const t = String(v ?? '').trim(); if (t === '') return null;\n                 const x = Number(t.replace(/[^\\d.-]/g, '')); return Number.isFinite(x) ? Math.round(x) : null; };\nconst rows = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  if (String(j.Sequencer ?? '').trim() !== 'Bizon') continue;\n  const ws = String(j.Client ?? '').trim();\n  const date = String(j.Date ?? '').trim().slice(0, 10);\n  if (!ws || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) continue;\n  if (!ACOLS.some(c => (n(j[c]) ?? 0) !== 0)) continue;   // no Aimfox signal on this row\n  rows.push({ ws, date,\n    invites_sent:      n(j['Invitations sent']),\n    sched_today:       n(j['Schedule volume for Today (Aimfox)']),\n    sched_tomorrow:    n(j['Schedule volume for Tomorrow (Aimfox)']),\n    sched_day_after:   n(j['Schedule volume for Day after tomorrow (Aimfox)']) });\n}\nreturn [{ json: { candidate_rows: rows.length, payload: JSON.stringify(rows) } }];\n"
+      }
+    },
+    {
+      "id": "ds",
+      "name": "Read Daily Stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "read",
+        "options": {},
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "🤖Daily stats"
+        }
+      }
+    },
+    {
+      "id": "t",
+      "name": "Run Manually",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 4
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Build Aimfox Rows": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Backfill Sequencer Stats",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Daily Stats": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Aimfox Rows",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Run Manually": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Daily Stats",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

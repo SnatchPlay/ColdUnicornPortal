@@ -1,0 +1,633 @@
+{
+  "name": "[child-3] TAG_ATTACHED · OOO · Detect return date and log",
+  "description": "OOO add: fetches lead+replies, uses gpt-5-mini (Responses API) for return date extraction, appends to OOO Leads with full column mapping (LeadID, ReplyID, WorkspaceID, Expected Return Date, Formatted Expected Date pl-locale, Gender).",
+  "nodes": [
+    {
+      "id": "4c549506-d0cd-4efe-b8d1-d2584dae6e98",
+      "name": "[317] OOO expected return date (gpt-5-mini)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1360,
+        208
+      ],
+      "parameters": {
+        "builtInTools": {},
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "options": {
+          "instructions": "You are extracting the expected return-from-office date from an out-of-office auto-reply email. Return only the structured JSON. If no clear return date is present, return null.",
+          "store": true,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ $json.last_reply.data[0].text_body }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "76f34165-2e22-40e9-a4e7-432872d7dbaf",
+      "name": "[318] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        208
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "43885fe9-b8d3-4c8a-bbaf-4be86a288bdd",
+      "name": "[322] Bison: GET /leads/{taggable_id}/replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        208
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[325] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id + \"/replies\" }}"
+      }
+    },
+    {
+      "id": "5f35508f-1b17-42c7-add3-aecdf07e8bf7",
+      "name": "[325] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        464,
+        208
+      ],
+      "retryOnFail": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "39174d21-c4f3-452e-b275-9edd4829e3b1",
+      "name": "[326] Set last_reply (newest by date_received)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1136,
+        208
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "last_reply",
+              "name": "last_reply",
+              "type": "object",
+              "value": "={{ \n  $input.all()\n    .map(item => item.json)\n    .sort((a, b) => new Date(b.date_received) - new Date(a.date_received))[0]\n}}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a9c470dd-816c-45f0-951d-305c74762d6a",
+      "name": "[327] Add OOO Leads row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1712,
+        208
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LeadID",
+              "id": "LeadID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "ReplyID",
+              "id": "ReplyID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WorkspaceID",
+              "id": "WorkspaceID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Expected Return Date",
+              "id": "Expected Return Date",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Added to OOO Campaign?",
+              "id": "Added to OOO Campaign?",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Formatted Expected Date",
+              "id": "Formatted Expected Date",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Gender",
+              "id": "Gender",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "Expected Return Date": "={{ $json.output?.[0]?.content?.[0]?.text?.return_date || $now.plus({ days: 14 }).toFormat(\"yyyy-LL-dd\") }}",
+            "Formatted Expected Date": "={{ ($json.output?.[0]?.content?.[0]?.text?.return_date ? DateTime.fromISO($json.output[0].content[0].text.return_date).format('yyyy-MM-dd').toDateTime().toSeconds() : $now.plus({ days: 14 })).format('yyyy-MM-dd').toDateTime().toSeconds()}}",
+            "Gender": "={{ $('[318] Bison: GET /leads/{taggable_id}').item.json.data.custom_variables.find(item => item.name=='gender').value }}",
+            "LeadID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].lead_id }}",
+            "ReplyID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].id }}",
+            "WorkspaceID": "={{ $(\"When Called by HUB\").first().json.event.workspace_id }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "operation": "append",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "OOO Leads"
+        }
+      }
+    },
+    {
+      "id": "6833ea87-7cd2-4d43-a4d5-71784660e9c0",
+      "name": "[S] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "2154bdff-6c54-4481-8313-75d7c62fd9e0",
+      "name": "[S] Bison: GET /leads/{taggable_id}/replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('[S] Resolve client sequencer').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://go.gheads.com/api/leads/{{ $('When Called by HUB').first().json.data.taggable_id }}/replies"
+      }
+    },
+    {
+      "id": "e80f29ca-4e9d-4de2-915b-b35cb766c1db",
+      "name": "[S] Extract expected return date",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1360,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "builtInTools": {},
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "options": {
+          "instructions": "Extract the expected return-from-office date from this out-of-office auto-reply. Respond with JSON {\"returnDate\": \"YYYY-MM-DD\"} or {\"returnDate\": null} when no clear date is present. Never guess a date.",
+          "store": true,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "={{ $json.ooo_reply.text_body }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9095b62b-062a-42ee-a195-47d2338e19aa",
+      "name": "[S] Pick newest OOO reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1136,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ooo_reply",
+              "name": "ooo_reply",
+              "type": "object",
+              "value": "={{ ($json.data || []).slice().sort((a, b) => new Date(b.date_received) - new Date(a.date_received))[0] || {} }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "71a63a93-e46b-4f47-a093-4e109b1600c7",
+      "name": "[S] record_ooo_followup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2032,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const rd = $('[S] Extract expected return date').first().json.output?.[0]?.content?.[0]?.text?.returnDate || null; return [$('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $json.reply_id, rd, rd ? 'reply_parsed' : 'fallback']; })() }}"
+        },
+        "query": "select id::text as followup_id, status::text, skip_reason::text, expected_return_date::text, scheduled_for::text, date_source::text, routing_key::text from public.record_ooo_followup($1::uuid, $2::uuid, $3::date, null, $4)"
+      }
+    },
+    {
+      "id": "1fee1f8f-070d-415b-af96-2424ecc98954",
+      "name": "[S] Resolve client sequencer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.event.workspace_id)] }}"
+        },
+        "query": "select cs.id::text as client_sequencer_id, cs.client_id::text as client_id, cs.api_key from public.client_sequencers cs where cs.external_workspace_id = $1 and cs.enabled limit 1"
+      }
+    },
+    {
+      "id": "12e1a655-176f-4a32-a542-34a4533123ea",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1808,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('[S] Pick newest OOO reply').first().json.ooo_reply.id), $('[S] Pick newest OOO reply').first().json.ooo_reply.date_received, $json.sequencer_contact_id, $('[S] Pick newest OOO reply').first().json.ooo_reply.subject || null, $('[S] Pick newest OOO reply').first().json.ooo_reply.text_body || null, $('[S] Pick newest OOO reply').first().json.ooo_reply.from_email_address || null ] }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'OOO', $4, $5, false, $6, null)::text as reply_id"
+      }
+    },
+    {
+      "id": "bfdc00d1-5729-40da-963e-69641094f1dd",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1584,
+        480
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$('[S] Resolve client sequencer').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.first_name || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data.last_name || null, ((($('[S] Bison: GET /leads/{taggable_id}').first().json.data.custom_variables || []).find(v => v.name === 'gender') || {}).value) || 'general' ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, $6, null)::text as sequencer_contact_id"
+      }
+    },
+    {
+      "id": "46760823-9d73-49f5-a021-1c7ac785d810",
+      "name": "Sticky Note 8ca1ace2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        158
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nExactly what ran before. The business reads the OOO Leads sheet, so this path must keep working and must not be broken by branch S.",
+        "height": 200,
+        "width": 1548
+      }
+    },
+    {
+      "id": "4c0daaee-4599-4846-b107-376a58981cc6",
+      "name": "Sticky Note 8ddb616c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        430
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (shadow, phase A)\n\nIndependent end to end: own client resolution, own Bison calls, own extraction, own field mapping. Writes through the ADR-0015 RPCs only.\n\nEvery node is onError: continueRegularOutput — a failure here must never break branch L.\n\nPhase C = delete this sticky's nodes' counterpart above and make this the only path.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 1868
+      }
+    },
+    {
+      "id": "f3f9e183-7601-4127-a20e-cf7b73bd8f31",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        208
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[325] Find workspace in CS PDCA",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Resolve client sequencer",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[317] OOO expected return date (gpt-5-mini)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[327] Add OOO Leads row",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[318] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[322] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[322] Bison: GET /leads/{taggable_id}/replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[326] Set last_reply (newest by date_received)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[325] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[318] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[326] Set last_reply (newest by date_received)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[317] OOO expected return date (gpt-5-mini)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Bison: GET /leads/{taggable_id}/replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Pick newest OOO reply",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Extract expected return date": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Pick newest OOO reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Extract expected return date",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve client sequencer": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] record_ooo_followup",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

@@ -33,7 +33,7 @@ Hard boundaries:
 
 - No `eval` / Function constructor / executable formulas.
 - No writes to ingestion-only tables (`replies`, `campaign_daily_stats`, `daily_stats`).
-- No Smartlead/Bison direct calls from the portal.
+- No Bison direct calls from the portal.
 - No notification dispatch from the portal.
 
 This capability is **not** the legacy biweekly Health Assessment form. It is a runtime health layer over existing metrics.

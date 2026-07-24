@@ -1,0 +1,250 @@
+{
+  "name": "[BACKFILL] Sheets → Supabase · leads",
+  "nodes": [
+    {
+      "id": "backfill-leads",
+      "name": "Backfill Leads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.client_id }},={{ $json.payload }}"
+        },
+        "query": "with p as (select $1::uuid as client_id, $2::jsonb as j),\nraw as (\n  select p.client_id,\n         nullif(r->>'email','')                as email,\n         nullif(r->>'first_name','')           as first_name,\n         nullif(r->>'last_name','')            as last_name,\n         nullif(r->>'job_title','')            as job_title,\n         nullif(r->>'company_name','')         as company_name,\n         nullif(r->>'website','')              as website,\n         nullif(r->>'industry','')             as industry,\n         nullif(r->>'headcount','')            as headcount_range,\n         nullif(r->>'phone','')                as phone_number,\n         nullif(r->>'phone_source','')         as phone_source,\n         nullif(r->>'linkedin','')             as linkedin_url,\n         nullif(r->>'country','')              as country,\n         nullif(r->>'message_title','')        as message_title,\n         (nullif(r->>'qualification',''))::public.lead_qualification as qualification,\n         coalesce((r->>'meeting_booked')::boolean, false) as meeting_booked,\n         coalesce((r->>'meeting_held')::boolean, false)   as meeting_held,\n         coalesce((r->>'offer_sent')::boolean, false)     as offer_sent,\n         coalesce((r->>'won')::boolean, false)            as won,\n         nullif(r->>'reply_text','')           as reply_text,\n         nullif(r->>'client_note','')          as client_note,\n         nullif(r->>'campaign_external_id','') as campaign_external_id,\n         (nullif(r->>'lead_received',''))::date as lead_received,\n         (r->>'sequencer_id')::uuid            as sequencer_id\n  from p, jsonb_array_elements(p.j) r\n),\nsrc as (\n  select distinct on (lower(coalesce(email,'')), coalesce(first_name,''), coalesce(company_name,''))\n         *\n  from raw\n  order by lower(coalesce(email,'')), coalesce(first_name,''), coalesce(company_name,''), lead_received nulls last\n),\nmissing as (\n  select s.*, c.id as campaign_id\n  from src s\n  left join public.campaigns c\n         on c.client_id = s.client_id and c.external_id = s.campaign_external_id\n  where not exists (\n    select 1 from public.leads l\n    where l.client_id = s.client_id\n      and ( (s.email is not null and lower(l.email) = lower(s.email))\n         or (s.email is null\n             and l.company_name is not distinct from s.company_name\n             and l.first_name  is not distinct from s.first_name) )\n  )\n)\n, ins as (\ninsert into public.leads (\n  id, client_id, campaign_id, email, first_name, last_name, job_title, company_name, website,\n  industry, headcount_range, phone_number, phone_source, linkedin_url, country, message_title,\n  qualification, meeting_booked, meeting_held, offer_sent, won, reply_text, client_note,\n  coldunicorn_note, source, sequencer_id, created_at, updated_at)\nselect gen_random_uuid(), m.client_id, m.campaign_id, m.email, m.first_name, m.last_name,\n       m.job_title, m.company_name, m.website, m.industry, m.headcount_range, m.phone_number,\n       m.phone_source, m.linkedin_url, m.country, m.message_title, m.qualification,\n       m.meeting_booked, m.meeting_held, m.offer_sent, m.won, m.reply_text, m.client_note,\n       case when m.lead_received is null\n            then 'Imported from the client Leads sheet 2026-07-22; the sheet row had no LEAD RECEIVED date, so created_at is the import time, not the real one.'\n       end,\n       'cold_email', m.sequencer_id,\n       coalesce(m.lead_received::timestamptz, now()), now()\nfrom missing m\nreturning id, sequencer_id, created_at\n)\nselect (select client_id from p)                                        as client_id,\n       (select count(*) from raw)                                       as sheet_rows,\n       (select count(*) from src)                                       as after_dedupe,\n       (select count(*) from ins)                                       as inserted,\n       (select count(*) from ins where sequencer_id = '00000000-0000-4000-a000-000000000003') as aimfox;\n"
+      }
+    },
+    {
+      "id": "build",
+      "name": "Build Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        400
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "const meta = $('Resolve Client').first().json || {};\nconst NO_CLIENT = '00000000-0000-0000-0000-000000000000';\nconst BISON = '00000000-0000-4000-a000-000000000002';\nconst AIMFOX = '00000000-0000-4000-a000-000000000003';\nconst s = v => { const t = String(v ?? '').trim(); return t === '' ? null : t; };\nconst bool = v => /^(true|yes|tak|1|x|✓|v|done|y)$/i.test(String(v ?? '').trim());\nconst pad = n => String(n).padStart(2, '0');\n// Client sheets use different date locales. Detect the order from the whole tab\n// (a value > 12 in one position settles it) instead of assuming D/M/Y per row.\nconst detectOrder = vals => {\n  let dmy = 0, mdy = 0;\n  for (const v of vals) {\n    let m = String(v ?? '').trim().match(/^(\\d{1,2})[./](\\d{1,2})[./]\\d{4}/);\n    if (m) { if (Number(m[1]) > 12) dmy++; if (Number(m[2]) > 12) mdy++; continue; }\n    m = String(v ?? '').trim().match(/^\\d{4}-(\\d{1,2})-(\\d{1,2})/);\n    if (m) { if (Number(m[2]) > 12) dmy++; if (Number(m[1]) > 12) mdy++; }\n  }\n  return mdy > dmy ? 'mdy' : 'dmy';\n};\nconst isoDate = (v, order) => {\n  const t = String(v ?? '').trim();\n  let m = t.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})/);\n  if (m) { let a = Number(m[2]), b = Number(m[3]);\n    let mo = order === 'mdy' ? a : (a > 12 ? b : a);\n    let d  = order === 'mdy' ? b : (a > 12 ? a : b);\n    if (mo > 12) { const t2 = mo; mo = d; d = t2; }\n    return (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) ? `${m[1]}-${pad(mo)}-${pad(d)}` : null; }\n  m = t.match(/^(\\d{1,2})[./](\\d{1,2})[./](\\d{4})/);\n  if (m) { let d = Number(m[1]), mo = Number(m[2]);\n    if (order === 'mdy') { const t2 = d; d = mo; mo = t2; }\n    if (mo > 12 && d <= 12) { const t2 = mo; mo = d; d = t2; }\n    return (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) ? `${m[3]}-${pad(mo)}-${pad(d)}` : null; }\n  return null;\n};\nconst qual = v => { const t = String(v ?? '').trim().toLowerCase();\n  if (t === 'mql') return 'MQL'; if (t === 'premql') return 'preMQL'; return null; };\nconst order = detectOrder($input.all().map(i => (i.json || {})['LEAD RECEIVED']));\nconst rows = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  if (j.error || (j.message && Object.keys(j).length <= 3)) continue;\n  if (!j['E-MAIL'] && !j['FULL NAME'] && !j['LEAD RECEIVED']) continue;\n  const full = s(j['FULL NAME']) || '';\n  const parts = full.split(/\\s+/).filter(Boolean);\n  const cid = s(j['Campaign ID']);\n  const isAimfox = !!cid && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cid);\n  rows.push({\n    email: s(j['E-MAIL']), first_name: parts[0] || null,\n    last_name: parts.length > 1 ? parts.slice(1).join(' ') : null,\n    job_title: s(j['JOB TITLE']), company_name: s(j['COMPANY NAME']),\n    website: s(j['WEBSITE']), industry: s(j['INDUSTRY']), headcount: s(j['HEADCOUNT']),\n    phone: s(j['Phone Number']), phone_source: s(j['Phone Source']),\n    linkedin: s(j['LinkedIn URL']), country: s(j['Column 29']),\n    message_title: s(j['MESSAGE TITLE']),\n    qualification: qual(j['QUALIFICATION']),\n    meeting_booked: bool(j['MEETINGS']), meeting_held: bool(j['MEETINGS HELD']),\n    offer_sent: bool(j['OFFER SENT']), won: bool(j['WON']),\n    reply_text: s(j['Mail from lead']), client_note: s(j['COMMENTS']),\n    campaign_external_id: isAimfox ? null : cid,\n    lead_received: isoDate(j['LEAD RECEIVED'], order),\n    sequencer_id: isAimfox ? AIMFOX : BISON,\n  });\n}\nif (!meta.client_id) return [{ json: { client_id: NO_CLIENT, client: (meta.name || $('Loop Over Items').first().json.client || 'unresolved'), sheet_rows: 0, date_order: 'n/a', payload: '[]' } }];\nreturn [{ json: { client_id: meta.client_id, client: meta.name, sheet_rows: rows.length, date_order: order, payload: JSON.stringify(rows) } }];\n"
+      }
+    },
+    {
+      "id": "loop",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "pick",
+      "name": "Pick Clients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst out = [];\nfor (const i of $input.all()) {\n  const j = i.json;\n  const doc = String(j.col_4 ?? '').trim();\n  const ws  = String(j.col_5 ?? '').trim();\n  const name = String(j['Customer Success'] ?? '').trim();\n  if (!doc || doc.length < 30 || !ws) continue;\n  out.push({ json: { client: name, ws, doc } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "leads",
+      "name": "Read Client Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        400
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Loop Over Items').first().json.doc }}"
+        },
+        "operation": "read",
+        "options": {},
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "cs",
+      "name": "Read CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        400,
+        300
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "operation": "read",
+        "options": {},
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "resolve-client",
+      "name": "Resolve Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1000,
+        400
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.ws }}"
+        },
+        "query": "select c.id::text as client_id, c.name\nfrom public.clients c\njoin public.client_sequencers cs on cs.client_id = c.id\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison'\nwhere cs.external_workspace_id = $1\nlimit 1;"
+      }
+    },
+    {
+      "id": "t",
+      "name": "Run Manually",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 4
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Backfill Leads": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Build Rows": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Backfill Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "Resolve Client",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Pick Clients": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Loop Over Items",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Pick Clients",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Client Leads": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Rows",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Client Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Run Manually": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "event": {
+    "workspace_id": 900002,
+    "type": "TAG_ATTACHED",
+    "tag": "OOO"
+  },
+  "data": {
+    "taggable_id": 5500200,
+    "custom_variables": [
+      {
+        "name": "gender",
+        "value": "female"
+      }
+    ]
+  },
+  "_fixture": "Synthetic. Workspace 900002 has no client_ooo_routing row for 'female' and no 'general' fallback. Target: status=skipped, skip_reason=routing_missing \u2014 visible, not dropped."
+}

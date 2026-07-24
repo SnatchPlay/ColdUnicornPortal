@@ -1,0 +1,327 @@
+{
+  "name": "Add OOO Leads",
+  "nodes": [
+    {
+      "id": "44f1bbdd-8937-450e-8d02-24b348233121",
+      "name": "[S] SHADOW · record intended enrolment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        560
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($execution.id)] }}"
+        },
+        "query": "with due as (\n  select f.id                        as followup_id,\n         sc.external_contact_id      as bison_lead_id,\n         c.external_id               as bison_campaign_id,\n         f.routing_key               as routing_key,\n         cs.external_workspace_id    as workspace_id,\n         f.target_campaign_id is null as unrouted\n  from public.ooo_followups f\n  join public.sequencer_contacts sc on sc.id = f.sequencer_contact_id\n  join public.client_sequencers  cs on cs.id = sc.client_sequencer_id and cs.enabled\n  left join public.campaigns      c on c.id = f.target_campaign_id\n  where f.status = 'pending'\n    and f.scheduled_for <= current_date\n),\npayload as (\n  select coalesce(jsonb_agg(jsonb_build_object(\n           'workspace_id', workspace_id,\n           'bison_campaign_id', bison_campaign_id,\n           'bison_lead_id', bison_lead_id,\n           'routing_key', routing_key,\n           'followup_id', followup_id\n         ) order by workspace_id, bison_campaign_id, bison_lead_id), '[]'::jsonb) as items,\n         count(*)                                  as due_count,\n         count(*) filter (where unrouted)          as unrouted_count\n  from due\n)\ninsert into public.integration_sync_runs\n  (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\nselect 'bison', 'ooo_enrol_shadow', $1, 'success', now(), now(),\n       jsonb_build_object('phase', 'A1', 'branch', 'S',\n                          'due_count', due_count, 'unrouted_count', unrouted_count,\n                          'intended_attach', items)\nfrom payload\nreturning id::text as run_id,\n          (metadata->>'due_count')      as due_count,\n          (metadata->>'unrouted_count') as unrouted_count"
+      }
+    },
+    {
+      "id": "7a28c37e-d595-4f37-b079-ac5ee1c867c1",
+      "name": "Attach leads to campaign1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2048,
+        256
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.apiKey }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ lead_ids: $json.leadIds }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://go.gheads.com/api/campaigns/{{ $json.campaignId }}/leads/attach-leads"
+      }
+    },
+    {
+      "id": "dfb6b299-7db1-4004-b812-60809fcb6467",
+      "name": "Build attach requests1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Фінальна збірка: 1 item = 1 HTTP-запит (клієнт + тип кампанії).\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\n// apiKeys: clientKey -> перший непорожній ключ\n// CS PDCA: колонка E = 'col_5' (workspace id), колонка F = 'col_6' (API key)\nconst apiKeys = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const clientKey = norm(row['col_5']);\n  const key = norm(row['col_6']);\n  if (clientKey && key && !(clientKey in apiKeys)) apiKeys[clientKey] = key;\n}\n\nconst out = [];\nfor (const item of $('Combine client data').all()) {\n  const c = item.json;\n  const apiKey = apiKeys[norm(c.clientKey)];\n  if (!apiKey) {\n    console.log(`Клієнт ${c.clientKey}: API key не знайдено. Є ключі для: ${Object.keys(apiKeys).join(', ') || '(нічого)'}`);\n    continue;\n  }\n  for (const type of TYPES) {\n    const leadIds = c[type] || [];\n    const campaignId = c.campaigns[type];\n    if (!leadIds.length || !campaignId) continue;\n    out.push({\n      json: {\n        clientKey: c.clientKey,\n        type,\n        campaignId,\n        apiKey,\n        leadIds: leadIds.map((v) => (v !== '' && !isNaN(Number(v)) ? Number(v) : v)),\n      },\n    });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "e95e1ebb-49fd-4a20-ad65-353c0ced1d39",
+      "name": "Combine client data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Об'єднуємо кампанії з ARM із згрупованими лідами → знову 1 item на клієнта.\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\n// campaigns: clientKey -> { male: campaignId, female: ..., general: ... }\nconst campaigns = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const clientKey = norm(row['bison workspace id']);\n  const campaignId = norm(row['bison ooo campaign id']);\n  const type = norm(row['gender']).toLowerCase();\n  if (!clientKey || !campaignId || !TYPES.includes(type)) continue;\n  if (!campaigns[clientKey]) campaigns[clientKey] = {};\n  if (!(type in campaigns[clientKey])) campaigns[clientKey][type] = campaignId;\n}\n\nconst out = [];\nfor (const item of $('Group leads by client').all()) {\n  const c = item.json;\n  const clientCampaigns = campaigns[norm(c.clientKey)];\n  if (!clientCampaigns) {\n    console.log(`Клієнт ${c.clientKey}: кампаній в ARM не знайдено. Є ключі: ${Object.keys(campaigns).join(', ')}`);\n    continue;\n  }\n  out.push({ json: { ...c, campaigns: clientCampaigns } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "97d323f5-df9e-48ef-82d6-8769628dfe1c",
+      "name": "Get API key (CS PDCA)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1632,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.clientKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "83975924-6aed-4c91-bdfa-cc920ec031e8",
+      "name": "Get ARM campaigns1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1216,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "Automated Replies Management",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "bison workspace id",
+              "lookupValue": "={{ $json.clientKey }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "ARM"
+        }
+      }
+    },
+    {
+      "id": "65e2a628-2088-453e-ada4-0891b4a4825c",
+      "name": "Get OOO leads1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        256
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Formatted Expected Date",
+              "lookupValue": "={{ Math.floor($now.minus(2, 'days').startOf('day').toSeconds()) }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "OOO Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0/edit#gid=2036914555",
+          "mode": "list",
+          "value": 2036914555
+        }
+      }
+    },
+    {
+      "id": "ba197d94-8f58-42f9-96c8-8853fbe0d52a",
+      "name": "Group leads by client",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        256
+      ],
+      "parameters": {
+        "jsCode": "// Агрегація: з N лідів робимо 1 item на клієнта (workspace).\nconst TYPES = ['male', 'female', 'general'];\nconst norm = (v) => String(v ?? '').trim();\n\nconst clients = {};\nfor (const item of $input.all()) {\n  const row = item.json;\n  const leadId = norm(row.LeadID);\n  const clientKey = norm(row.WorkspaceID);\n  let gender = norm(row.Gender).toLowerCase();\n  if (!gender) gender = 'general'; // порожній gender → general\n\n  if (!clientKey || !leadId) continue;\n  if (!clients[clientKey]) clients[clientKey] = { male: [], female: [], general: [] };\n  if (TYPES.includes(gender)) clients[clientKey][gender].push(leadId);\n}\n\nreturn Object.entries(clients)\n  .filter(([, b]) => b.male.length || b.female.length || b.general.length)\n  .map(([clientKey, b]) => ({ json: { clientKey, ...b } }));"
+      }
+    },
+    {
+      "id": "eac19549-03ac-41a0-a6ec-0e524213d6d6",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        592,
+        256
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4db55a96-a0b6-49bb-a2b2-adff6a83833e",
+      "name": "Sticky Note 121f8a75",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        414,
+        510
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — SHADOW (phase A1) — SENDS NOTHING\n\nSelects the episodes Supabase thinks are due and records the attach requests it WOULD\nhave sent, into integration_sync_runs (provider=bison, sync_type=ooo_enrol_shadow).\n\nIt deliberately does NOT call claim_ooo_followup: claiming moves pending -> processing,\nand with no submit the episodes would be stranded. A1 is read-only by design.\n\nWHY A SHADOW AT ALL: two branches resolving DIFFERENT campaigns would enrol one contact\ninto two sequences and email them twice. Same campaign is a safe no-op (Bison ignores a\nlead already in the campaign, ADR-0015 §4). So agreement must be MEASURED before the\nPOST is switched on in A2.\n\nCompare per run:\n  branch S intent -> integration_sync_runs.metadata->'intended_attach'\n  branch L actual -> the attach-leads calls in this execution\n\nExpect branch S to have MORE rows: Postgres catches up on missed runs, the sheet does not.\nThat is branch S being correct. Do not \"fix\" it.\n\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 300
+      }
+    },
+    {
+      "id": "dc2cbdb1-2691-40ab-b251-cc9e33072dce",
+      "name": "Sticky Note a31663f6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        750,
+        206
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nReads rows due today from OOO Leads, resolves the campaign from ARM, and POSTs\nattach-leads to Bison. THIS is the branch that actually enrols people.\n\nKnown defect, deliberately NOT copied into branch S: the due filter is an exact\nequality on today-2d, so a missed run drops that day's cohort forever.",
+        "height": 200,
+        "width": 1548
+      }
+    }
+  ],
+  "connections": {
+    "Build attach requests1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Attach leads to campaign1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Combine client data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get API key (CS PDCA)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get API key (CS PDCA)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build attach requests1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get ARM campaigns1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Combine client data",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get OOO leads1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Group leads by client",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Group leads by client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get ARM campaigns1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get OOO leads1",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] SHADOW · record intended enrolment",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed"
+  }
+}

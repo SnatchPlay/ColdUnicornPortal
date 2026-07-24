@@ -272,7 +272,7 @@ You will need engineering help for any of the following:
 - Adding a brand-new metric to the Simple-triggers list (e.g. "DoD Sent drop %").
 - Setting a threshold that depends on more than one value, or that only applies to some clients.
 - Reordering built-in columns or grouping them differently.
-- Anything involving Smartlead, Bison, n8n, or external integrations.
+- Anything involving Bison, n8n, or external integrations.
 - Inviting someone else as a master admin (this is a manual database operation by design).
 
 For everything else listed in this guide, you do not need to ask — just do it.

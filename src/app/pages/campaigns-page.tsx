@@ -213,7 +213,7 @@ const CreateCampaignSheetHost = memo(function CreateCampaignSheetHost({
             </label>
 
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">External ID (Smartlead/Bison) *</span>
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">External ID (Bison) *</span>
               <input
                 value={draft.externalId}
                 onChange={(e) => setDraft((d) => d ? { ...d, externalId: e.target.value } : d)}

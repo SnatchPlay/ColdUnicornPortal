@@ -1,0 +1,237 @@
+{
+  "name": "[child-7] TAG_REMOVED · OOO · Remove from OOO Leads",
+  "description": "Removes a lead from the OOO Leads sheet when OOO tag is removed in Bison. Looks up workspace config to obtain Bison token, fetches lead, finds matching row, deletes it.",
+  "nodes": [
+    {
+      "id": "5865bc01-e5ab-449f-ad51-75e4425e0696",
+      "name": "[328] Find lead in OOO Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1120,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "LeadID",
+              "lookupValue": "={{ $json.data.id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "OOO Leads"
+        }
+      }
+    },
+    {
+      "id": "14a7bb40-70d3-4687-9223-cdba30fd5278",
+      "name": "[329] Delete row from OOO Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BGjr3EWsv_vRltkg15B3adoyJYEX7hB3e4d0y3Sp3x0"
+        },
+        "operation": "delete",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "OOO Leads"
+        },
+        "startIndex": "={{ $json.row_number }}"
+      }
+    },
+    {
+      "id": "08d0bc47-43fd-4190-a51f-425cc25a5e28",
+      "name": "[86] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        528,
+        304
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "785f02ae-e857-4fa5-9d04-d170b3dde0f0",
+      "name": "[88] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        832,
+        304
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json.col_6}}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "5624567b-a94a-4bd6-a592-bc689361615e",
+      "name": "[S] cancel_active_ooo_followup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        528,
+        560
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.event.workspace_id), String($json.data.taggable_id), 'ooo_tag_removed'] }}"
+        },
+        "query": "select sc.id::text as sequencer_contact_id, f.id::text as cancelled_followup_id, f.status::text as cancelled_status from public.client_sequencers cs join public.sequencer_contacts sc on sc.client_sequencer_id = cs.id and sc.external_contact_id = $2 left join lateral public.cancel_active_ooo_followup(sc.id, $3) f on true where cs.external_workspace_id = $1 and cs.enabled"
+      }
+    },
+    {
+      "id": "83dd8e49-ca3a-4c0f-a2ce-a9390f30b918",
+      "name": "Sticky Note 35b051f3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        478,
+        254
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## Branch L — Google Sheets (authoritative, phase A)\n\nDeletes the OOO Leads row. Unchanged.",
+        "height": 200,
+        "width": 1196
+      }
+    },
+    {
+      "id": "6b73445e-1df9-4722-99df-5e567d84ddf4",
+      "name": "Sticky Note 7c1aa332",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        478,
+        510
+      ],
+      "parameters": {
+        "color": 5,
+        "content": "## Branch S — Supabase (phase A)\n\nSEMANTIC GAP, deliberate: branch L DELETES the sheet row, this CANCELS the episode and keeps the history, so a past absence stays explainable (ADR-0015).\n\nIdempotent: cancel_active_ooo_followup returns NULL when nothing is active.\n\nNo Bison call here — branch L needs one to find the lead, this resolves the contact straight from Postgres. A pointless API call would be worse, not more faithful.\n\nonError: continueRegularOutput — must never break branch L.\nRepo: docs/reference/n8n/ooo-phase-a.md",
+        "height": 200,
+        "width": 300
+      }
+    },
+    {
+      "id": "46c6b6c3-715f-4881-bc94-261b35ff8b98",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        304
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[86] Find workspace in CS PDCA",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] cancel_active_ooo_followup",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[328] Find lead in OOO Leads": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[329] Delete row from OOO Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[86] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[88] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[88] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[328] Find lead in OOO Leads",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "executionOrder": "v1"
+  }
+}

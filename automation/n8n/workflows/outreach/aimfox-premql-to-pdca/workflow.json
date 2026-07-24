@@ -1,0 +1,1269 @@
+{
+  "name": "preMGL tag added (Aimfox) -> Add lead to PDCA",
+  "nodes": [
+    {
+      "id": "f82489da-7958-45a6-8c63-8b6d88fa3421",
+      "name": "[2] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit?usp=drivesdk",
+          "mode": "list",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_105",
+              "lookupValue": "={{ $json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM/edit#gid=1287241336",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "a255bf44-c4c4-463d-a947-6872be4a0cb9",
+      "name": "[4] Check if lead already in Leads sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1100,
+        300
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "LinkedIn URL",
+              "lookupValue": "=https://www.linkedin.com/in/{{ $json.lead.public_identifier }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "S3-get-conv",
+      "name": "[S] Get Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1300,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('[S] GET lead info Aimfox').item.json.lead.lead_of[0] }}/conversations/{{ $json.urn }}"
+      }
+    },
+    {
+      "id": "S1-lead-info",
+      "name": "[S] GET lead info Aimfox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/leads/{{ $('Webhook').item.json.body.event.lead.id }}"
+      }
+    },
+    {
+      "id": "S7-promote",
+      "name": "[S] promote_contact_to_lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2100,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const lead = $('[S] GET lead info Aimfox').first().json.lead || {}; const exp = Array.isArray(lead.current_experience) && lead.current_experience.length ? lead.current_experience[0] : {}; return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($('[S] Resolve campaign').first().json.campaign_id || ''), String(lead.email || ''), String(lead.first_name || ''), String(lead.last_name || ''), String(exp.job_title || ''), String(exp.company?.name || ''), '', (() => { const ns = (Array.isArray(lead.labels) ? lead.labels : []).map(l => typeof l === 'string' ? l : l?.name).filter(Boolean).map(v => String(v).trim().toLowerCase()); if (ns.includes('mql') || ns.includes('interested')) return 'MQL'; if (ns.includes('premql') || ns.includes('pre-mql')) return 'preMQL'; return ''; })() ]; })() }}"
+        },
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'qualification', nullif($10, '')\n         ))) as result;"
+      }
+    },
+    {
+      "id": "S6-resolve-campaign",
+      "name": "[S] Resolve campaign",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1900,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ String($('[S] GET lead info Aimfox').first().json.lead.origins?.[0]?.id || ''), $('Get Workspace Api Key').item.json.client_sequencer_id ] }}"
+        },
+        "query": "select c.id::text as campaign_id\nfrom public.campaigns c\njoin public.client_sequencers cs on cs.client_id = c.client_id and cs.id = $2::uuid\nwhere c.external_id = $1\nlimit 1;"
+      }
+    },
+    {
+      "id": "S2-search-conv",
+      "name": "[S] Search Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('[S] GET lead info Aimfox').item.json.lead.lead_of[0] }}/leads/{{ $('[S] GET lead info Aimfox').item.json.lead.id }}/conversation"
+      }
+    },
+    {
+      "id": "S5-upsert-reply",
+      "name": "[S] upsert_reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1700,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => { const root = $('[S] Get Conversation').first().json; const messages = Array.isArray(root.messages) ? root.messages : []; const leadMessages = messages.filter(msg => msg?.sender?.id && msg?.account_id && String(msg.sender.id) !== String(msg.account_id) && msg?.body).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)); const messageText = leadMessages[0]?.body || null; return [ $('Webhook').item.json.body.id, $('Webhook').item.json.body.event.timestamp, $json.sequencer_contact_id, messageText, $('Webhook').item.json.body.event.lead.email || null ]; })() }}"
+        },
+        "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'Interested', null, $4, false, $5, null)::text as reply_id;"
+      }
+    },
+    {
+      "id": "S4-upsert-contact",
+      "name": "[S] upsert_sequencer_contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1500,
+        700
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('Get Workspace Api Key').item.json.client_sequencer_id, String($('Webhook').item.json.body.event.lead.id), $('Webhook').item.json.body.event.lead.email || null, $('Webhook').item.json.body.event.lead.first_name || null, $('Webhook').item.json.body.event.lead.last_name || null ] }}"
+        },
+        "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
+      }
+    },
+    {
+      "id": "db37c83e-f55f-40e6-a33b-96b40935bd98",
+      "name": "Create Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2500,
+        450
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ (() => {\n  const str = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value);\n  };\n\n  const safe = (fn, fallback = '') => {\n    try {\n      const value = fn();\n      return value === undefined || value === null ? fallback : value;\n    } catch (e) {\n      return fallback;\n    }\n  };\n\n  const unwrapSource = (raw) => {\n    if (!raw) return {};\n    if (Array.isArray(raw)) return raw[0] || {};\n    if (Array.isArray(raw.body)) return raw.body[0] || {};\n    if (Array.isArray(raw.data)) return raw.data[0] || {};\n    if (Array.isArray(raw.results)) return raw.results[0] || {};\n    return raw;\n  };\n\n  const makeCell = (value) => {\n    return {\n      userEnteredValue: {\n        stringValue: str(value)\n      }\n    };\n  };\n\n  // Values come from Edit Fields\n  const source = unwrapSource($('Edit Fields').first().json);\n\n  // Sheet/table metadata comes from current Get Table ID node output\n  const sheet = safe(\n    () => $json.sheets.find(sheet => sheet.properties?.title === 'Leads'),\n    null\n  );\n\n  if (!sheet) {\n    throw new Error('Sheet \"Leads\" not found');\n  }\n\n  const table = safe(\n    () =>\n      (sheet.tables || []).find(table => table.name === 'Leads') ||\n      (sheet.tables || []).find(table => table.name === 'Table3') ||\n      (sheet.tables || [])[0],\n    null\n  );\n\n  if (!table) {\n    throw new Error('No table found inside sheet \"Leads\"');\n  }\n\n  const values = [\n    source.full_name,\n    source.jobTitle,\n    source.email,\n    source.phoneNumber,\n    source.phoneSource,\n    source.companyName,\n    source.industry,\n    source.headcount,\n    source.leadReceived,\n    source.campaign_name,\n    source.messageTitle,\n    source.messageNumber,\n    source.website,\n    source.qualification,\n    source.responseTime,\n    '',\n    '',\n    '',\n    '',\n    '',\n    '',\n    source.reply_message,\n    '',\n    '',\n    source.campaign_id,\n    '',\n    '',\n    source.linkedin_profile_url,\n    source.country\n  ];\n\n  return JSON.stringify({\n    requests: [\n      {\n        appendCells: {\n          sheetId: Number(sheet.properties.sheetId),\n          tableId: String(table.tableId),\n          rows: [\n            {\n              values: values.map(value => makeCell(value))\n            }\n          ],\n          fields: 'userEnteredValue'\n        }\n      }\n    ]\n  });\n})() }}",
+        "method": "POST",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}:batchUpdate"
+      }
+    },
+    {
+      "id": "44359ae0-5045-4dc3-879b-5340e2908146",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2100,
+        450
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c471df2-1048-4e27-8c82-6ef569fe5d0c",
+              "name": "first_name",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.first_name }}"
+            },
+            {
+              "id": "2fcdd248-72bc-49be-a6ca-cb2d1b8cbfa9",
+              "name": "last_name",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.last_name }}"
+            },
+            {
+              "id": "0c7bfc6b-5488-4ba5-895a-e53a85b07e05",
+              "name": "full_name",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.full_name }}"
+            },
+            {
+              "id": "d1f072ca-88fe-4863-b214-aed14de76820",
+              "name": "campaign_name",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.origins[0].name }}"
+            },
+            {
+              "id": "fe1011f6-f9f7-4b99-a620-b8e4485f74a8",
+              "name": "linkedin_profile_url",
+              "type": "string",
+              "value": "=https://www.linkedin.com/in/{{ $('GET lead info Aimfox').item.json.lead.public_identifier }}"
+            },
+            {
+              "id": "b41ea398-00be-474d-95b1-eed6be82059a",
+              "name": "campaign_id",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.origins[0].id }}"
+            },
+            {
+              "id": "9e4391ee-9b2b-46d5-9b74-2b5168abadba",
+              "name": "target_public_identifier",
+              "type": "string",
+              "value": "={{ $('GET lead info Aimfox').item.json.lead.public_identifier }}"
+            },
+            {
+              "id": "9955df28-57d1-4ae3-8c2f-2147bd0abaa4",
+              "name": "jobTitle",
+              "type": "string",
+              "value": "={{   (() => {     const lead = $('GET lead info Aimfox').item.json.lead ?? $json;      const experiences = Array.isArray(lead.current_experience)       ? lead.current_experience       : [];      const jobTitles = experiences       .map(exp => exp?.job_title)       .filter(title => title && String(title).trim())       .map(title => String(title).trim());      if (jobTitles.length > 0) {       return jobTitles.join(', ');     }      return lead.occupation \n\n '';   })() }}"
+            },
+            {
+              "id": "69124503-eaca-4c3e-b6fd-79f3b4206ad8",
+              "name": "companyName",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const lead = $('GET lead info Aimfox').item.json.lead ?? $json;\n\n    const experiences = Array.isArray(lead.current_experience)\n      ? lead.current_experience\n      : [];\n\n    const companyNames = experiences\n      .map(exp => exp?.company?.name)\n      .filter(name => name && String(name).trim())\n      .map(name => String(name).trim());\n\n    if (companyNames.length > 0) {\n      return companyNames.join(', ');\n    }\n\n    return lead.company?.name || lead.company_name || '';\n  })()\n}}"
+            },
+            {
+              "id": "30929f89-708f-4bb5-a0f1-2f1a500aed7a",
+              "name": "reply_message",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const root = Array.isArray($json) ? $json[0] : $json;\n    const messages = Array.isArray(root.messages) ? root.messages : [];\n\n    const leadMessages = messages\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) !== String(msg.account_id) &&\n        msg?.body\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));\n\n    return leadMessages[0]?.body || '';\n  })()\n}}"
+            },
+            {
+              "id": "772908ad-b616-46b6-9ad4-f4c857f13bb1",
+              "name": "messageNumber",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const root = Array.isArray($json) ? $json[0] : $json;\n    const messages = Array.isArray(root.messages) ? root.messages : [];\n\n    const latestLeadMessage = messages\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) !== String(msg.account_id)\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];\n\n    if (!latestLeadMessage) return 0;\n\n    return messages.filter(msg =>\n      msg?.sender?.id &&\n      msg?.account_id &&\n      String(msg.sender.id) === String(msg.account_id) &&\n      Number(msg.created_at || 0) < Number(latestLeadMessage.created_at || 0)\n    ).length;\n  })()\n}}"
+            },
+            {
+              "id": "d0e7de10-d84d-4994-aced-8a536e72db4c",
+              "name": "messageTitle",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const root = Array.isArray($json) ? $json[0] : $json;\n    const messages = Array.isArray(root.messages) ? root.messages : [];\n\n    const latestLeadMessage = [...messages]\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) !== String(msg.account_id)\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];\n\n    const leadSubject = latestLeadMessage?.subject;\n\n    if (leadSubject && String(leadSubject).trim()) {\n      return String(leadSubject).trim();\n    }\n\n    const firstAccountMessage = [...messages]\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) === String(msg.account_id)\n      )\n      .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0))[0];\n\n    const accountSubject = firstAccountMessage?.subject;\n\n    return accountSubject && String(accountSubject).trim()\n      ? String(accountSubject).trim()\n      : '';\n  })()\n}}"
+            },
+            {
+              "id": "bbfadd7f-3c9f-43bb-a2ba-372cb1a9e645",
+              "name": "responseTime",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const root = Array.isArray($json) ? $json[0] : $json;\n    const messages = Array.isArray(root.messages) ? root.messages : [];\n\n    const sortedMessages = [...messages].sort(\n      (a, b) => Number(a.created_at || 0) - Number(b.created_at || 0)\n    );\n\n    const latestLeadMessage = [...sortedMessages]\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) !== String(msg.account_id)\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];\n\n    if (!latestLeadMessage) return '';\n\n    const previousAccountMessage = [...sortedMessages]\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) === String(msg.account_id) &&\n        Number(msg.created_at || 0) < Number(latestLeadMessage.created_at || 0)\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];\n\n    if (!previousAccountMessage) return '';\n\n    const diffMs =\n      Number(latestLeadMessage.created_at || 0) -\n      Number(previousAccountMessage.created_at || 0);\n\n    const minutes = diffMs / 1000 / 60;\n\n    if (minutes < 15) return 'less than 15 minutes';\n    if (minutes < 60) return 'less than 1 hour';\n    if (minutes < 720) return 'less than 12 hours';\n\n    return 'another day';\n  })()\n}}"
+            },
+            {
+              "id": "30393a85-ae95-45f1-83c7-9a3534790b31",
+              "name": "leadReceived",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const root = Array.isArray($json) ? $json[0] : $json;\n    const messages = Array.isArray(root.messages) ? root.messages : [];\n\n    const latestLeadMessage = [...messages]\n      .filter(msg =>\n        msg?.sender?.id &&\n        msg?.account_id &&\n        String(msg.sender.id) !== String(msg.account_id) &&\n        msg?.created_at\n      )\n      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];\n\n    if (!latestLeadMessage) return '';\n\n    return new Date(Number(latestLeadMessage.created_at))\n      .toISOString()\n      .slice(0, 10);\n  })()\n}}"
+            },
+            {
+              "id": "7cfdb4ac-d0d6-4b9c-8d1c-1b2563d0f613",
+              "name": "qualification",
+              "type": "string",
+              "value": "={{ $('Webhook').item.json.body.event.label_name }}"
+            },
+            {
+              "id": "1f4fd2b4-70ac-4a9b-86ab-d4a6924d03dc",
+              "name": "country",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const lushaRoot = $('Lusha Enrichment').item.json;\n    const lusha = Array.isArray(lushaRoot) ? lushaRoot[0] : lushaRoot;\n\n    const lushaCountry = lusha?.body?.results?.[0]?.location?.country;\n\n    if (lushaCountry && String(lushaCountry).trim()) {\n      return String(lushaCountry).trim();\n    }\n\n    const aimfoxLocation = $('GET lead info Aimfox').item.json.lead?.location?.name || '';\n\n    if (!aimfoxLocation) {\n      return '';\n    }\n\n    if (!aimfoxLocation.includes(',')) {\n      return aimfoxLocation.trim();\n    }\n\n    return aimfoxLocation\n      .split(',')\n      .pop()\n      .trim();\n  })()\n}}"
+            },
+            {
+              "id": "f0f1c8bc-079f-4b9d-a35d-698f49e29c45",
+              "name": "email",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const lushaJson = $('Lusha Enrichment').first().json;\n\n    const lushaBody = lushaJson.body ?? lushaJson;\n\n    const emails = Array.isArray(lushaBody?.results?.[0]?.emails)\n      ? lushaBody.results[0].emails\n      : [];\n\n    const lushaWorkEmail = emails.find(item => {\n      const emailValue = typeof item === 'string' ? item : item?.email;\n      const typeValue = typeof item === 'string' ? '' : item?.type;\n\n      return (\n        emailValue &&\n        String(emailValue).trim() &&\n        String(typeValue || '').trim().toLowerCase() === 'work'\n      );\n    });\n\n    const workEmailValue =\n      typeof lushaWorkEmail === 'string'\n        ? lushaWorkEmail\n        : lushaWorkEmail?.email;\n\n    if (workEmailValue && String(workEmailValue).trim()) {\n      return String(workEmailValue).trim();\n    }\n\n    const aimfoxEmail = $('GET lead info Aimfox').item.json.lead?.email;\n\n    return aimfoxEmail && String(aimfoxEmail).trim()\n      ? String(aimfoxEmail).trim()\n      : '';\n  })()\n}}"
+            },
+            {
+              "id": "f5e41ae3-aef8-47c8-9693-7bb7e1527cfd",
+              "name": "phoneSource",
+              "type": "string",
+              "value": "Lusha"
+            },
+            {
+              "id": "3c2bd354-3a61-4c24-8863-ee9caa2c4e56",
+              "name": "phoneNumber",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const lushaJson = $('Lusha Enrichment').first().json;\n    const lushaBody = lushaJson.body ?? lushaJson;\n\n    const phones = Array.isArray(lushaBody?.results?.[0]?.phones)\n      ? lushaBody.results[0].phones\n      : [];\n\n    const mobilePhone = phones.find(phone => {\n      const number = phone?.number;\n      const type = String(phone?.type || '').trim().toLowerCase();\n      const doNotCall = phone?.doNotCall;\n\n      return (\n        number &&\n        String(number).trim() &&\n        type === 'mobile' &&\n        (doNotCall === false || String(doNotCall).toLowerCase() === 'false')\n      );\n    });\n\n    return mobilePhone?.number\n      ? String(mobilePhone.number).trim()\n      : '';\n  })()\n}}"
+            },
+            {
+              "id": "da85f65d-b3cf-46c6-87ab-0265a0aaf89f",
+              "name": "industry",
+              "type": "string",
+              "value": "={{ $('Lusha Enrichment').item.json.results[0].company.industry || '' }}"
+            },
+            {
+              "id": "997b91be-0862-4981-b77e-440e0224c9db",
+              "name": "headcount",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "2a6b2527-3a93-49f7-94d4-d9bf49692294",
+              "name": "website",
+              "type": "string",
+              "value": "={{\n  (() => {\n    const lushaJson = $('Lusha Enrichment').first().json;\n    const lushaBody = lushaJson.body ?? lushaJson;\n\n    // 1. First priority: Lusha company domain, return as-is\n    const lushaDomain = lushaBody?.results?.[0]?.company?.domain;\n\n    if (lushaDomain && String(lushaDomain).trim()) {\n      return String(lushaDomain).trim();\n    }\n\n    // 2. If no Lusha domain, use email logic\n    const emails = Array.isArray(lushaBody?.results?.[0]?.emails)\n      ? lushaBody.results[0].emails\n      : [];\n\n    const lushaWorkEmail = emails.find(item => {\n      const emailValue = typeof item === 'string' ? item : item?.email;\n      const typeValue = typeof item === 'string' ? '' : item?.type;\n\n      return (\n        emailValue &&\n        String(emailValue).trim() &&\n        String(typeValue || '').trim().toLowerCase() === 'work'\n      );\n    });\n\n    const workEmailValue =\n      typeof lushaWorkEmail === 'string'\n        ? lushaWorkEmail\n        : lushaWorkEmail?.email;\n\n    const aimfoxEmail = $('GET lead info Aimfox').item.json.lead?.email;\n\n    const email =\n      workEmailValue && String(workEmailValue).trim()\n        ? String(workEmailValue).trim()\n        : aimfoxEmail && String(aimfoxEmail).trim()\n          ? String(aimfoxEmail).trim()\n          : '';\n\n    // 3. Cut domain from email\n    if (!email || !String(email).includes('@')) {\n      return '';\n    }\n\n    return String(email)\n      .split('@')\n      .pop()\n      .trim();\n  })()\n}}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5ac0488e-14ec-450c-aa19-376aed71af63",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2700,
+        450
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "936a5389-f7e6-45b5-b79d-bba3031b3fd0",
+              "name": "phones",
+              "type": "string",
+              "value": "={{ $('[2] Find workspace in CS PDCA').item.json['Ecosystem integration - ABM stage 1'].split(',') }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c255213f-8277-4546-987c-8558f7f976eb",
+      "name": "Filter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8727b8de-915b-4276-b34b-87ef7f8d1d39",
+              "leftValue": "={{ $json.QUALIFICATION }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "MQL"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c3cd676-4d51-4e47-9d49-0d25c70f50ba",
+      "name": "Filter1",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        300,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ab870bd2-2cbc-4657-827a-f533daa330c5",
+              "leftValue": "={{ $json.body.event.label_name }}",
+              "operator": {
+                "operation": "contains",
+                "type": "string"
+              },
+              "rightValue": "MQL"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f515ee0b-b995-4131-bfc1-162126ecf15a",
+      "name": "Get Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1900,
+        450
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('GET lead info Aimfox').item.json.lead.lead_of[0] }}/conversations/{{ $json.urn }}"
+      }
+    },
+    {
+      "id": "4b8d97ef-3b9e-4bc7-8149-5923316e9289",
+      "name": "GET lead info Aimfox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/leads/{{ $('Webhook').item.json.body.event.lead.id }}"
+      }
+    },
+    {
+      "id": "badd08d0-e2b1-4223-9f3b-94c100d7c848",
+      "name": "Get Table ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2300,
+        450
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {},
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}?fields=sheets(properties(sheetId,title),tables(tableId,name,range,columnProperties(columnName,columnIndex)))"
+      }
+    },
+    {
+      "id": "9e257f03-1d33-4ed7-9d33-ea7bf56d1416",
+      "name": "Get Workspace Api Key",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.body.workspace.id)] }}"
+        },
+        "query": "select jsonb_build_array(jsonb_build_object('token', cs.api_key)) as tokens,\n       cs.id::text                as client_sequencer_id,\n       cs.client_id::text         as client_id,\n       cs.external_workspace_id   as workspace_id\nfrom public.client_sequencers cs\njoin public.sequencers s on s.id = cs.sequencer_id and s.key = 'aimfox'\nwhere cs.external_workspace_id = $1\n  and cs.enabled\n  and coalesce(cs.api_key, '') <> ''\nlimit 1;"
+      }
+    },
+    {
+      "id": "2a63a982-b029-4fb0-b983-2aca2b5e4207",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3100,
+        450
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "={{ $json.phones.parseJson()[0] }}"
+            },
+            {
+              "name": "messageType",
+              "value": "SMS"
+            },
+            {
+              "name": "text",
+              "value": "Nowy, zimny lead wplynal wlasnie na Twojego maila - podejmij go do 5 minut, a znacznie latwiej odczarujesz jego lodowe serce"
+            }
+          ]
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "url": "https://api.unitalk.cloud/api/message/send"
+      }
+    },
+    {
+      "id": "54bf73d0-8082-4184-91c7-2e3199a7f935",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b5500eec-05b7-408a-bd2b-e4b2b42ec7a6",
+              "leftValue": "={{ $('[4] Check if lead already in Leads sheet').item.json }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f3620bc9-fac0-42fd-859e-405445db4077",
+      "name": "Lusha Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1500,
+        450
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\n  \"contacts\": [\n    {\n      \"linkedinUrl\": \"https://www.linkedin.com/in/{{ $('GET lead info Aimfox').item.json.lead.public_identifier }}\"\n    }\n  ],\n  \"reveal\": [\n    \"phones\",\n    \"emails\"\n  ],\n  \"options\": {\n    \"includePartialProfiles\": false\n  }\n} ",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.lusha.com/v3/contacts/search-and-enrich"
+      }
+    },
+    {
+      "id": "5e60a20d-e7d2-4905-a881-e00fba9deca8",
+      "name": "Search Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1700,
+        450
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Workspace Api Key').item.json.tokens[0].token }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "=https://api.aimfox.com/api/v2/accounts/{{ $('GET lead info Aimfox').item.json.lead.lead_of[0] }}/leads/{{ $('GET lead info Aimfox').item.json.lead.id }}/conversation"
+      }
+    },
+    {
+      "id": "a2775203-9bef-4019-8f77-fb1398d65513",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        2900,
+        450
+      ],
+      "parameters": {
+        "fieldToSplitOut": "phones",
+        "options": {}
+      }
+    },
+    {
+      "id": "d09790fb-9ccd-4834-b4e1-00b75dcb780b",
+      "name": "Update row in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1700,
+        300
+      ],
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "FULL NAME",
+              "id": "FULL NAME",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "JOB TITLE",
+              "id": "JOB TITLE",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-MAIL",
+              "id": "E-MAIL",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Number",
+              "id": "Phone Number",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Source",
+              "id": "Phone Source",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMPANY NAME",
+              "id": "COMPANY NAME",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "INDUSTRY",
+              "id": "INDUSTRY",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "HEADCOUNT",
+              "id": "HEADCOUNT",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RECEIVED",
+              "id": "LEAD RECEIVED",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "CAMPAIGN NAME",
+              "id": "CAMPAIGN NAME",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE TITLE",
+              "id": "MESSAGE TITLE",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE #",
+              "id": "MESSAGE #",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WEBSITE",
+              "id": "WEBSITE",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "QUALIFICATION",
+              "id": "QUALIFICATION",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RESPONSE TIME",
+              "id": "LEAD RESPONSE TIME",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS",
+              "id": "MEETINGS",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS HELD",
+              "id": "MEETINGS HELD",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "OFFER SENT",
+              "id": "OFFER SENT",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMMENTS",
+              "id": "COMMENTS",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Mail from lead",
+              "id": "Mail from lead",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "TIP",
+              "id": "TIP",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Campaign ID",
+              "id": "Campaign ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Blacklist ID",
+              "id": "Blacklist ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Domain Blacklist ID",
+              "id": "Domain Blacklist ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LinkedIn URL",
+              "id": "LinkedIn URL",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Osoba kontaktowa ",
+              "id": "Osoba kontaktowa ",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "QUALIFICATION": "={{ $('Webhook').item.json.body.event.label_name }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "c7c41ac0-a8af-4630-bd03-c1c395a0b26c",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "preMQL-Aimfox"
+      }
+    }
+  ],
+  "connections": {
+    "Create Record": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Split Out",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Update row in sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter1": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Workspace Api Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "GET lead info Aimfox": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[4] Check if lead already in Leads sheet",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Conversation": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Table ID": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Create Record",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get Workspace Api Key": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[2] Find workspace in CS PDCA",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] GET lead info Aimfox",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Lusha Enrichment",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lusha Enrichment": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Search Conversations",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Search Conversations": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Conversation",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "HTTP Request",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[2] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "GET lead info Aimfox",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[4] Check if lead already in Leads sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "If",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] GET lead info Aimfox": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Search Conversations",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Get Conversation": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_sequencer_contact",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] promote_contact_to_lead",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Search Conversations": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Get Conversation",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_reply": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Resolve campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] upsert_sequencer_contact": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] upsert_reply",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}
