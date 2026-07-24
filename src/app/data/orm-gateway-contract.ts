@@ -315,7 +315,7 @@ export interface UpdateInvoicePayload {
 
 /**
  * Per-sequencer credential patch (ADR-0012). Only present fields overwrite;
- * `sequencer_key` is the sequencers catalog key ('smartlead' | 'emailbison' | 'aimfox' | …).
+ * `sequencer_key` is the sequencers catalog key ('emailbison' | 'aimfox' | …).
  */
 export interface SequencerCredentialInput {
   sequencer_key: string;

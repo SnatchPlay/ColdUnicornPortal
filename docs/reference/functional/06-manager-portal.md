@@ -112,19 +112,37 @@ Single dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in **one horizontally-s
 
 One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx) (`MEGA_COLUMNS` constant). Two-level header bands: top-level **group band** + sub-level **sub band** + column-name header row. First 3 columns are CSS-sticky (left edge).
 
+Lead-count and Aimfox split: see [04-metrics §18](./04-metrics-catalog.md#18-per-channel--aimfox-split-manager-mega-table).
+Every blended column is now the **Total** series; `· EB` / `· AF` sub-bands add the EmailBison-only
+and Aimfox-only breakdown. Aimfox volume/capacity come from `sequencer_daily_stats`; a client with no
+Aimfox `client_sequencers` row shows "—" in every Aimfox column.
+
+**Channel view switch** — a `ToggleGroup` in the filter bar (`Both` / `EmailBison` / `Aimfox`,
+persisted per-user in `user_table_preferences.channelView`) narrows the visible columns to one
+channel. Each column carries a `channel` tag (`"email"` / `"aimfox"` / undefined); `EmailBison` hides
+the `aimfox` columns, `Aimfox` hides the `email` columns, and shared columns (identity, Basic, blended
+Total metrics — `channel` undefined) always stay. It is a display filter only — no refetch.
+
 | Group band | Sub band | Columns |
 |-----------|----------|---------|
 | **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
 | **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
 | **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
+| **DoD Schedule (Aimfox)** | Schedule (Aimfox) | +2, +1, 0 — `dodRows[bucket].aimfoxSchedule` |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
-| **3-Day rolling** | 3-DoD TOTAL leads | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads` |
-|  | 3-DoD SQL leads | 0, -1, -2 — `threeDodRows[bucket].sqlLeads` |
-| **Week over Week** | WoW Resp / Human / Bnc / OOO | 0/-1/-2/-3 per metric — rates from `wowRows[bucket]` |
-|  | WoW SQL | 0/-1/-2/-3 — `wowRows[bucket].sqlLeads` |
-| **Month over Month** | MoM SQL / Mtg / Won | 0/-1/-2/-3 per metric — `momRows[bucket]` |
+| **DoD Daily sent (Aimfox)** | Daily sent (Aimfox) | 0, -1, -2, -3, -4 — `dodRows[bucket].aimfoxSent` |
+| **Aimfox capacity** | Aimfox capacity | Rem DB, Inv left — `overview.aimfoxRemainingDb` / `aimfoxInviteLimitRemaining` (sheet R "Remaining database" / S "Invitations limit" = remaining today) |
+| **3-Day rolling** | 3-DoD TOTAL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads{,Eb,Af}` |
+|  | 3-DoD SQL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].sqlLeads{,Eb,Af}` |
+| **Week over Week** | WoW Total · (Total / EB / AF) | 0/-1/-2/-3/-4 — `wowRows[bucket].totalLeads{,Eb,Af}` |
+|  | WoW SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `wowRows[bucket].sqlLeads{,Eb,Af}` |
+|  | WoW Resp / Human / Bnc / OOO | 0/-1/-2/-3/-4 per metric — rates from `wowRows[bucket]` |
+|  | WoW Accept | 0/-1/-2/-3/-4 — `wowRows[bucket].acceptRate` (Aimfox invites accepted/sent) |
+| **Month over Month** | MoM Total | 0/-1/-2/-3/-4 — `momRows[bucket].totalLeads` |
+|  | MoM SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `momRows[bucket].sqlLeads{,Eb,Af}` |
+|  | MoM Mtg / Won | 0/-1/-2/-3/-4 per metric — `momRows[bucket]` |
 
-Total ≈ 61 columns. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
+Total ≈ 126 columns (was 61 before the per-channel/Aimfox split). Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
@@ -350,7 +368,7 @@ Save: `repository.updateCampaign(campaign.id, patch)` called directly from the p
 
 ### 4.4 Create campaign Sheet
 
-“New campaign” button in `PageHeader` actions (alongside the `DateRangeButton`). Required fields: `client_id`, `external_id` (Smartlead/Bison ID — unique, user-entered), `name`, `type`, `status`. Optional: `database_size`, `start_date`.
+“New campaign” button in `PageHeader` actions (alongside the `DateRangeButton`). Required fields: `client_id`, `external_id` (Bison ID — unique, user-entered), `name`, `type`, `status`. Optional: `database_size`, `start_date`.
 
 Calls `repository.createCampaign(input)` ([campaigns-page.tsx:480](../../../src/app/pages/campaigns-page.tsx#L480)), then `useCampaignsList().refresh()`. See [09-mutations §2.11](./09-mutations-rls.md).
 

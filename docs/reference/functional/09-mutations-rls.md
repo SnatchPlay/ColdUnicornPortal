@@ -193,7 +193,7 @@ patch cannot carry them and the old reject-guard was deleted. OOO state belongs 
 - **RLS policy:** `campaigns_insert_internal` — admin/super_admin any client; manager scoped to own `clients.manager_id`. Migration: `20260517_entity_insert_policies.sql`.
 - **Allowed roles:** admin, super_admin, manager (scoped).
 - **Called from:** Campaigns page "New campaign" Sheet ([campaigns-page.tsx:480](../../../src/app/pages/campaigns-page.tsx#L480)).
-- **Fields:** `client_id`, `external_id` (required, unique in Smartlead/Bison), `name`, `type`, `status`, `database_size`, `start_date`, optional `sequencer_id` (omitted → DB default EmailBison; ADR-0012). `sequencer_id` is NOT in `mapCampaignPatch` — immutable via portal after creation.
+- **Fields:** `client_id`, `external_id` (required, unique in Bison), `name`, `type`, `status`, `database_size`, `start_date`, optional `sequencer_id` (omitted → DB default EmailBison; ADR-0012). `sequencer_id` is NOT in `mapCampaignPatch` — immutable via portal after creation.
 - **Update pattern:** no optimistic update; the page calls its hook's `refresh()` after the insert resolves.
 
 ### 2.12 `createLead(input)` — [repository.ts:800-802](../../../src/app/data/repository.ts#L800-L802) · gateway [index.ts:2364](../../../supabase/functions/orm-gateway/index.ts#L2364)

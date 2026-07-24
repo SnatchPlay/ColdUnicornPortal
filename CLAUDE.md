@@ -15,7 +15,7 @@ of task should be loaded for that task, not carried in every session.
   "Internal" = anything that is not `client`.
 - **Stack:** React 18 + TypeScript + Vite, Tailwind v4, Radix/shadcn primitives, recharts,
   react-router-dom 7, Supabase.
-- **Three cooperating systems.** Smartlead/Bison send and receive email; **n8n** ingests counters and
+- **Three cooperating systems.** Bison sends and receives email; **n8n** ingests counters and
   replies and dispatches notifications + OOO routing; **the portal is a thin read + config surface**.
   The portal never writes to ingestion-only tables (`replies`, `campaign_daily_stats`, `daily_stats`)
   and never sends notifications itself.
@@ -74,7 +74,7 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
 | "Is this in scope?" | [docs/BUSINESS_LOGIC.md](docs/BUSINESS_LOGIC.md) + [13-out-of-scope.md](docs/reference/functional/13-out-of-scope.md) |
 | How a page/metric/chart currently works | [docs/reference/functional/INDEX.md](docs/reference/functional/INDEX.md) |
 | A metric formula | [04-metrics-catalog.md](docs/reference/functional/04-metrics-catalog.md) |
-| n8n / Smartlead / Bison boundary | [11-integrations.md](docs/reference/functional/11-integrations.md) |
+| n8n / Bison boundary | [11-integrations.md](docs/reference/functional/11-integrations.md) |
 | Magic numbers, hidden branches, auth error codes | [12-hidden-rules.md](docs/reference/functional/12-hidden-rules.md) |
 | UI design / polish / redesign | `impeccable` skill first, then the design/taste skills |
 | Supabase / Postgres / query performance | `supabase` + `supabase-postgres-best-practices` skills |
@@ -205,7 +205,7 @@ asked, point at the file and confirm before doing any work:
 Health Assessments · CSV/Excel **bulk import** UI · cash-flow projections · ABS scoring · partnerships
 dashboards · lost-client tracking · per-client issue tracking · auto-generated weekly/monthly reports ·
 **reply triage UI** (n8n classifies every reply; the portal never does) · **sending email/SMS from the
-portal** (n8n owns that; the portal stores destinations only) · calling Smartlead/Bison APIs directly ·
+portal** (n8n owns that; the portal stores destinations only) · calling Bison APIs directly ·
 pre-aggregated `daily_snapshots` tables.
 
 *(A leads **export** exists and is in scope — that is not the same thing as generated reports.)*

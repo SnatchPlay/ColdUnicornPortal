@@ -83,7 +83,10 @@ transition:
     to attribute a lead.
   reconciliation: >-
     At phase A: one `leads` row per appended sheet row, matched on (client, Aimfox lead id), with
-    leads.sequencer_id = the aimfox sequencer. Compare row counts per client per day.
+    leads.sequencer_id = the aimfox sequencer. Compare row counts per client per day. Qualification is
+    synced as of 2026-07-23: branch S passes qualificationFromLabels(lead.labels) into
+    promote_contact_to_lead (mql|interested -> MQL, premql|pre-mql -> preMQL), upgrade-only. Compare
+    on qualification too.
   parityEvidence: null
 
 idempotency:

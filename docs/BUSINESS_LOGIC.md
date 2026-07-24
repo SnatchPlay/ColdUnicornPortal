@@ -36,7 +36,7 @@ ColdUnicorn PDCA Portal is the **agency operations cockpit** for running outboun
 - **Customer-success Managers** ("CS Managers") run day-to-day operations on assigned clients.
 - **Admins / Super-admins** manage the entire agency: users, all clients, billing, blacklist, and workspace integrations.
 
-The platform does not generate or send emails. Outbound sending, reply ingestion, and notification dispatch happen **outside the portal** (Smartlead/Bison + n8n). The portal is the *visualisation, qualification, and configuration* surface on top of a shared Supabase database that those systems write into.
+The platform does not generate or send emails. Outbound sending, reply ingestion, and notification dispatch happen **outside the portal** (Bison + n8n). The portal is the *visualisation, qualification, and configuration* surface on top of a shared Supabase database that those systems write into.
 
 The product cycle is PDCA: **Plan** (campaigns, domains, contracted KPIs), **Do** (sends + replies arrive), **Check** (DoD/3-DoD/WoW/MoM dashboards), **Act** (qualify leads, mark milestones, escalate).
 
@@ -49,7 +49,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 ```
                   в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
                   в”‚     External outreach       в”‚
-                  в”‚   (Smartlead / Bison)       в”‚
+                  в”‚   (Bison)                   в”‚
                   в”‚  в†’ sends emails, captures   в”‚
                   в”‚    replies, exposes API     в”‚
                   в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¬в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
@@ -62,7 +62,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
    в”‚     daily_stats                                          в”‚
    в”‚  вЂў Classifies replies в†’ writes replies + classification в”‚
    в”‚  вЂў Reads client_ooo_routing в†’ assigns OOO leads to      в”‚
-   в”‚     follow-up campaigns in Smartlead/Bison              в”‚
+   в”‚     follow-up campaigns in Bison                        в”‚
    в”‚  вЂў Sends notifications by email / SMS based on          в”‚
    в”‚     clients.notification_emails + sms_phone_numbers     в”‚
    в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
@@ -99,7 +99,7 @@ The portal is one of three cooperating systems. Each owns a clear slice of behav
 ### n8n responsibilities
 
 - **Ingestion:** populate `campaign_daily_stats`, `daily_stats`, `replies` (with classification), `domains` reputation/verification updates, and `sequencer_daily_stats` (Aimfox LinkedIn invitation counters, remaining database size, invite limits — ADR-0008).
-- **Routing:** consume `client_ooo_routing` rows + OOO replies to assign follow-up campaigns in Smartlead/Bison.
+- **Routing:** consume `client_ooo_routing` rows + OOO replies to assign follow-up campaigns in Bison.
 - **Notifications:** dispatch email/SMS to addresses found in `clients.notification_emails` / `sms_phone_numbers` when triggers fire (new lead, stalled campaign, etc.).
 - **Reply classification:** every reply that lands in `replies` is classified by n8n (using LLM + rules). The portal does not re-classify; "unclassified" is a transient ingestion state, not an action item.
 
@@ -231,9 +231,9 @@ Many features look "missing" from the portal's perspective because their **execu
 | Feature | Portal does | n8n does |
 |---------|-------------|----------|
 | Email/SMS notifications | UI to maintain `notification_emails` / `sms_phone_numbers` arrays per client | Sends the actual email/SMS based on triggers |
-| OOO auto-routing | UI to toggle `clients.auto_ooo_enabled`, populate `client_ooo_routing` (planned) | Reads the routing rows and executes Smartlead/Bison API calls |
+| OOO auto-routing | UI to toggle `clients.auto_ooo_enabled`, populate `client_ooo_routing` (planned) | Reads the routing rows and executes Bison API calls |
 | Reply classification | Display classification badge | Classify and write `replies.classification` |
-| Daily counters | Render `campaign_daily_stats` and `daily_stats` rows | Pull from Smartlead/Bison and INSERT/UPSERT |
+| Daily counters | Render `campaign_daily_stats` and `daily_stats` rows | Pull from Bison and INSERT/UPSERT |
 | Ingestion metrics (sent/replies/bounces/opens) | Visualise | Write |
 | LinkedIn invitations (Aimfox) | Store `client_sequencers` credentials; display `sequencer_daily_stats` | Call the Aimfox API, send invites, UPSERT the daily stats |
 
@@ -352,7 +352,7 @@ client_ooo_routing row exists for (client, gender?, follow-up campaign)
     в†“
 ingestion classifies a reply as OOO
     в†“
-n8n picks up the lead, creates a contact in the follow-up campaign in Smartlead/Bison
+n8n picks up the lead, creates a contact in the follow-up campaign in Bison
     в†“
 ingestion eventually creates new replies / counters tied to the follow-up campaign
 ```
@@ -588,7 +588,7 @@ read-only for them, with a regression test. → [09-mutations-rls.md](reference/
 
 ### Decision (2026-07-04): Multi-sequencer model — catalog + per-client credentials (ADR-0012)
 
-Sequencers (Smartlead, EmailBison, Aimfox — the look4lead concept is replaced by Aimfox) became first-class data: a global `sequencers` catalog (fixed load-bearing UUIDs), per-client credentials in `client_sequencers` (replacing the dropped `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` columns), `sequencer_id NOT NULL DEFAULT EmailBison` on `campaigns` and `leads` (all historical rows attributed to EmailBison), and the ingestion-only `sequencer_daily_stats` table for Aimfox LinkedIn PDCA metrics (invites sent/accepted per profile, remaining database size, invite limit ≈195/week). The client drawer's credential fields now read/write `client_sequencers` via the `upsertClientSequencer` gateway action. AI reply classification and SMS/email notifications for LinkedIn leads stay in n8n (OoS-12). The destructive column-drop migration (`20260704b`) applies only after the n8n cutover.
+Sequencers (EmailBison, Aimfox — the look4lead concept is replaced by Aimfox) became first-class data: a global `sequencers` catalog (fixed load-bearing UUIDs), per-client credentials in `client_sequencers` (replacing the dropped `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` columns), `sequencer_id NOT NULL DEFAULT EmailBison` on `campaigns` and `leads` (all historical rows attributed to EmailBison), and the ingestion-only `sequencer_daily_stats` table for Aimfox LinkedIn PDCA metrics (invites sent/accepted per profile, remaining database size, invite limit ≈195/week). The client drawer's credential fields now read/write `client_sequencers` via the `upsertClientSequencer` gateway action. AI reply classification and SMS/email notifications for LinkedIn leads stay in n8n (OoS-12). The destructive column-drop migration (`20260704b`) applies only after the n8n cutover.
 
 **Rationale:** Aimfox integration + upcoming per-sequencer PDCA statistics require attributing campaigns/leads/stats to a specific tool and holding more than one credential set per client. **References:** [ADR-0012](adr/0012-multi-sequencer-model.md), migrations `20260704_sequencers_catalog.sql` / `20260704b_drop_client_sequencer_credentials.sql`, [03-data-model.md](reference/functional/03-data-model.md), [09-mutations-rls.md](reference/functional/09-mutations-rls.md), [11-integrations.md](reference/functional/11-integrations.md).
 

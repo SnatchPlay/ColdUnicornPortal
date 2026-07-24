@@ -100,7 +100,7 @@ A change is incomplete if the docs were not touched. Update **in the same change
 | A chart | [08-charts-catalog.md](reference/functional/08-charts-catalog.md) |
 | A mutation, gateway action, edge function | [09-mutations-rls.md](reference/functional/09-mutations-rls.md) |
 | Snapshot/auth/perf/deploy behaviour | [10-nfr.md](reference/functional/10-nfr.md) |
-| n8n / Smartlead / Bison boundary | [11-integrations.md](reference/functional/11-integrations.md) |
+| n8n / Bison boundary | [11-integrations.md](reference/functional/11-integrations.md) |
 | A magic number, threshold, hidden branch | [12-hidden-rules.md](reference/functional/12-hidden-rules.md) |
 | Colours, tokens, primitives, states | [design-system.md](reference/design-system.md) |
 | A reusable component/hook/helper | [reuse-catalog.md](reuse-catalog.md) |

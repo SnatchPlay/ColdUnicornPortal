@@ -67,6 +67,15 @@ function makeEmptySummary(clientId: string) {
     mom_meetings: [0, 0, 0, 0, 0], mom_won: [0, 0, 0, 0, 0],
     threedod_total: [0, 0, 0, 0, 0], threedod_sql: [0, 0, 0, 0, 0],
     latest_prospects_count: 0,
+    threedod_total_eb: [0, 0, 0, 0, 0], threedod_total_af: [0, 0, 0, 0, 0],
+    threedod_sql_eb: [0, 0, 0, 0, 0], threedod_sql_af: [0, 0, 0, 0, 0],
+    wow_leads_eb: [0, 0, 0, 0, 0], wow_leads_af: [0, 0, 0, 0, 0],
+    wow_sql_eb: [0, 0, 0, 0, 0], wow_sql_af: [0, 0, 0, 0, 0],
+    mom_sql_eb: [0, 0, 0, 0, 0], mom_sql_af: [0, 0, 0, 0, 0],
+    aimfox_daily_sent: [0, 0, 0, 0, 0],
+    aimfox_schedule_today: 0, aimfox_schedule_tomorrow: 0, aimfox_schedule_day_after: 0,
+    aimfox_wow_sent: [0, 0, 0, 0, 0], aimfox_wow_accepted: [null, null, null, null, null],
+    aimfox_invite_limit: null, aimfox_invite_limit_remaining: null, aimfox_remaining_database_size: null,
   };
 }
 

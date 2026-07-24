@@ -1320,7 +1320,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         won: Boolean(r.won),
         external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
         external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
-        source: r.source ? String(r.source) : "smartlead",
+        source: r.source ? String(r.source) : "cold_email",
         reply_text: r.reply_text ? String(r.reply_text) : null,
         client_note: r.client_note ? String(r.client_note) : null,
         coldunicorn_note: r.coldunicorn_note ? String(r.coldunicorn_note) : null,
@@ -1594,6 +1594,18 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       return 0;
     }
 
+    // Like toInt but preserves NULL (unmeasured) as null instead of collapsing it to 0. Used for
+    // Aimfox invites_accepted / invite_limit / remaining_database_size, where a real 0 and "the
+    // source did not report it" must stay distinguishable (20260722h migration invariant).
+    function toIntOrNull(v: unknown): number | null {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "number") return Math.round(v);
+      if (typeof v === "string") { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : null; }
+      return null;
+    }
+    const EMAILBISON_SEQ = "00000000-0000-4000-a000-000000000002";
+    const AIMFOX_SEQ = "00000000-0000-4000-a000-000000000003";
+
     // Daily-stats aggregation: one row per client_id.
     // Week boundaries use date_trunc('week', CURRENT_DATE) which is Monday-based in PostgreSQL,
     // matching the JS startOfWeek() function in client-metrics.ts.
@@ -1701,10 +1713,96 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       GROUP BY client_id
     `);
 
+    // Per-channel lead split (ADR-0012 sequencer ids). One row per (client, sequencer) for the
+    // two channels the mega-table splits; the blended Total stays in leadSummaryRows above. Only
+    // the metrics the team asked to split are computed here (3-DoD total+sql, WoW leads+sql, MoM
+    // sql) — MoM total/meetings/won stay blended by design. Windows copy leadSummaryRows exactly.
+    const leadChannelRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT
+        client_id,
+        sequencer_id::text AS sequencer_id,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE))::int     AS td_total_d0,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 1))::int AS td_total_d1,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 2))::int AS td_total_d2,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 3))::int AS td_total_d3,
+        (COUNT(*) FILTER (WHERE (qualification::text = 'MQL' OR qualification::text = 'preMQL') AND created_at::date = CURRENT_DATE - 4))::int AS td_total_d4,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date = CURRENT_DATE))::int     AS td_sql_d0,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date = CURRENT_DATE - 1))::int AS td_sql_d1,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date = CURRENT_DATE - 2))::int AS td_sql_d2,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date = CURRENT_DATE - 3))::int AS td_sql_d3,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date = CURRENT_DATE - 4))::int AS td_sql_d4,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date      AND created_at::date <= date_trunc('week', CURRENT_DATE)::date + 6))::int AS wow_leads_w0,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 7  AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 1))::int  AS wow_leads_w1,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 14 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 8))::int   AS wow_leads_w2,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 21 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 15))::int  AS wow_leads_w3,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('week', CURRENT_DATE)::date - 28 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 22))::int  AS wow_leads_w4,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date      AND created_at::date <= date_trunc('week', CURRENT_DATE)::date + 6))::int AS wow_sql_w0,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 7  AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 1))::int  AS wow_sql_w1,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 14 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 8))::int   AS wow_sql_w2,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 21 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 15))::int  AS wow_sql_w3,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('week', CURRENT_DATE)::date - 28 AND created_at::date <= date_trunc('week', CURRENT_DATE)::date - 22))::int  AS wow_sql_w4,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE)::date                                AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_sql_m0,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date            AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                                           AS mom_sql_m1,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int                      AS mom_sql_m2,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int                      AS mom_sql_m3,
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int                      AS mom_sql_m4
+      FROM leads
+      WHERE sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid
+         OR sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid
+      GROUP BY client_id, sequencer_id
+    `);
+
+    // Aimfox daily sequencer stats (sequencer_daily_stats, ADR-0012), summed across the client's
+    // enabled LinkedIn profiles. The '__workspace_total__' sentinel is excluded so a Sheets-backfill
+    // workspace row never double-counts against per-profile rows (see 20260722h migration). Daily
+    // sent buckets use fixed CURRENT_DATE offsets to line up with the Bison daily_sent columns;
+    // schedule + capacity are read from each client's LATEST report_date (the 2-hourly snapshot),
+    // so a client whose today-row has not landed yet still shows its most recent capacity.
+    const aimfoxSummaryRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      WITH af AS (
+        SELECT sds.client_id, sds.report_date,
+               sds.invites_sent, sds.invites_accepted,
+               sds.schedule_today, sds.schedule_tomorrow, sds.schedule_day_after,
+               sds.invite_limit, sds.invite_limit_remaining, sds.remaining_database_size
+        FROM sequencer_daily_stats sds
+        JOIN sequencers s ON s.id = sds.sequencer_id AND s.key = 'aimfox'
+        WHERE sds.profile_id <> '__workspace_total__'
+          AND sds.report_date >= CURRENT_DATE - 45
+      ),
+      latest AS (SELECT client_id, MAX(report_date) AS d FROM af GROUP BY client_id)
+      SELECT
+        af.client_id,
+        COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE), 0)::int     AS af_sent_d0,
+        COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 1), 0)::int AS af_sent_d1,
+        COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 2), 0)::int AS af_sent_d2,
+        COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 3), 0)::int AS af_sent_d3,
+        COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 4), 0)::int AS af_sent_d4,
+        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date      AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS af_sent_w0,
+        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS af_sent_w1,
+        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS af_sent_w2,
+        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS af_sent_w3,
+        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS af_sent_w4,
+        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date      AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6))::int  AS af_acc_w0,
+        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1))::int   AS af_acc_w1,
+        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8))::int    AS af_acc_w2,
+        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15))::int   AS af_acc_w3,
+        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22))::int   AS af_acc_w4,
+        COALESCE(SUM(schedule_today)     FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_today,
+        COALESCE(SUM(schedule_tomorrow)  FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_tomorrow,
+        COALESCE(SUM(schedule_day_after) FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_day_after,
+        (SUM(invite_limit)            FILTER (WHERE report_date = lt.d))::int AS af_invite_limit,
+        (SUM(invite_limit_remaining)  FILTER (WHERE report_date = lt.d))::int AS af_invite_limit_remaining,
+        (SUM(remaining_database_size) FILTER (WHERE report_date = lt.d))::int AS af_remaining_db
+      FROM af
+      JOIN latest lt ON lt.client_id = af.client_id
+      GROUP BY af.client_id, lt.d
+    `);
+
     const durationMs = performance.now() - t0;
     console.log(
       `[PERF][orm-gateway] loadClientsMetricsSummary: ${durationMs.toFixed(1)}ms ` +
-        `(dailyStatClients=${dailySummaryRows.length}, leadClients=${leadSummaryRows.length})`,
+        `(dailyStatClients=${dailySummaryRows.length}, leadClients=${leadSummaryRows.length}, ` +
+        `leadChannelRows=${leadChannelRows.length}, aimfoxClients=${aimfoxSummaryRows.length})`,
     );
 
     // Merge daily-stats and leads summaries by client_id into compact per-client objects.
@@ -1716,11 +1814,30 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     for (const row of leadSummaryRows) {
       if (typeof row.client_id === "string") leadByClient.set(row.client_id, row);
     }
+    // Per-channel lead rows pivot to one map per channel (up to one row per client each).
+    const ebByClient = new Map<string, Record<string, unknown>>();
+    const afLeadByClient = new Map<string, Record<string, unknown>>();
+    for (const row of leadChannelRows) {
+      if (typeof row.client_id !== "string") continue;
+      if (row.sequencer_id === EMAILBISON_SEQ) ebByClient.set(row.client_id, row);
+      else if (row.sequencer_id === AIMFOX_SEQ) afLeadByClient.set(row.client_id, row);
+    }
+    const aimfoxByClient = new Map<string, Record<string, unknown>>();
+    for (const row of aimfoxSummaryRows) {
+      if (typeof row.client_id === "string") aimfoxByClient.set(row.client_id, row);
+    }
 
-    const allClientIds = new Set([...dailyByClient.keys(), ...leadByClient.keys()]);
+    const allClientIds = new Set([
+      ...dailyByClient.keys(),
+      ...leadByClient.keys(),
+      ...aimfoxByClient.keys(),
+    ]);
     const summaries = Array.from(allClientIds).map((clientId) => {
       const d = dailyByClient.get(clientId) ?? {};
       const l = leadByClient.get(clientId) ?? {};
+      const eb = ebByClient.get(clientId) ?? {};
+      const af = afLeadByClient.get(clientId) ?? {};
+      const ax = aimfoxByClient.get(clientId) ?? {};
       return {
         client_id: clientId,
         daily_sent:         [toInt(d.sent_d0),    toInt(d.sent_d1),    toInt(d.sent_d2),    toInt(d.sent_d3),    toInt(d.sent_d4)],
@@ -1741,6 +1858,27 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         threedod_total:     [toInt(l.td_total_d0),   toInt(l.td_total_d1),   toInt(l.td_total_d2),   toInt(l.td_total_d3),   toInt(l.td_total_d4)],
         threedod_sql:       [toInt(l.td_sql_d0),     toInt(l.td_sql_d1),     toInt(l.td_sql_d2),     toInt(l.td_sql_d3),     toInt(l.td_sql_d4)],
         latest_prospects_count: toInt(d.latest_prospects),
+        // ── Per-channel lead splits (Total above stays blended) ──────────────────────────────
+        threedod_total_eb:  [toInt(eb.td_total_d0),  toInt(eb.td_total_d1),  toInt(eb.td_total_d2),  toInt(eb.td_total_d3),  toInt(eb.td_total_d4)],
+        threedod_total_af:  [toInt(af.td_total_d0),  toInt(af.td_total_d1),  toInt(af.td_total_d2),  toInt(af.td_total_d3),  toInt(af.td_total_d4)],
+        threedod_sql_eb:    [toInt(eb.td_sql_d0),    toInt(eb.td_sql_d1),    toInt(eb.td_sql_d2),    toInt(eb.td_sql_d3),    toInt(eb.td_sql_d4)],
+        threedod_sql_af:    [toInt(af.td_sql_d0),    toInt(af.td_sql_d1),    toInt(af.td_sql_d2),    toInt(af.td_sql_d3),    toInt(af.td_sql_d4)],
+        wow_leads_eb:       [toInt(eb.wow_leads_w0), toInt(eb.wow_leads_w1), toInt(eb.wow_leads_w2), toInt(eb.wow_leads_w3), toInt(eb.wow_leads_w4)],
+        wow_leads_af:       [toInt(af.wow_leads_w0), toInt(af.wow_leads_w1), toInt(af.wow_leads_w2), toInt(af.wow_leads_w3), toInt(af.wow_leads_w4)],
+        wow_sql_eb:         [toInt(eb.wow_sql_w0),   toInt(eb.wow_sql_w1),   toInt(eb.wow_sql_w2),   toInt(eb.wow_sql_w3),   toInt(eb.wow_sql_w4)],
+        wow_sql_af:         [toInt(af.wow_sql_w0),   toInt(af.wow_sql_w1),   toInt(af.wow_sql_w2),   toInt(af.wow_sql_w3),   toInt(af.wow_sql_w4)],
+        mom_sql_eb:         [toInt(eb.mom_sql_m0),   toInt(eb.mom_sql_m1),   toInt(eb.mom_sql_m2),   toInt(eb.mom_sql_m3),   toInt(eb.mom_sql_m4)],
+        mom_sql_af:         [toInt(af.mom_sql_m0),   toInt(af.mom_sql_m1),   toInt(af.mom_sql_m2),   toInt(af.mom_sql_m3),   toInt(af.mom_sql_m4)],
+        // ── Aimfox daily volume / acceptance / capacity (summed across profiles) ─────────────
+        aimfox_daily_sent:  [toInt(ax.af_sent_d0),   toInt(ax.af_sent_d1),   toInt(ax.af_sent_d2),   toInt(ax.af_sent_d3),   toInt(ax.af_sent_d4)],
+        aimfox_schedule_today:     toInt(ax.af_sched_today),
+        aimfox_schedule_tomorrow:  toInt(ax.af_sched_tomorrow),
+        aimfox_schedule_day_after: toInt(ax.af_sched_day_after),
+        aimfox_wow_sent:    [toInt(ax.af_sent_w0),   toInt(ax.af_sent_w1),   toInt(ax.af_sent_w2),   toInt(ax.af_sent_w3),   toInt(ax.af_sent_w4)],
+        aimfox_wow_accepted: [toIntOrNull(ax.af_acc_w0), toIntOrNull(ax.af_acc_w1), toIntOrNull(ax.af_acc_w2), toIntOrNull(ax.af_acc_w3), toIntOrNull(ax.af_acc_w4)],
+        aimfox_invite_limit:            toIntOrNull(ax.af_invite_limit),
+        aimfox_invite_limit_remaining:  toIntOrNull(ax.af_invite_limit_remaining),
+        aimfox_remaining_database_size: toIntOrNull(ax.af_remaining_db),
       };
     });
 
@@ -1940,7 +2078,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       won: Boolean(r.won),
       external_blacklist_id: r.external_blacklist_id != null ? Number(r.external_blacklist_id) : null,
       external_domain_blacklist_id: r.external_domain_blacklist_id != null ? Number(r.external_domain_blacklist_id) : null,
-      source: r.source ? String(r.source) : "smartlead",
+      source: r.source ? String(r.source) : "cold_email",
       reply_text: r.reply_text ? String(r.reply_text) : null,
       client_note: r.client_note ? String(r.client_note) : null,
       coldunicorn_note: r.coldunicorn_note ? String(r.coldunicorn_note) : null,
@@ -2256,7 +2394,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       won: Boolean(r.won),
       external_blacklist_id: num(r.external_blacklist_id),
       external_domain_blacklist_id: num(r.external_domain_blacklist_id),
-      source: r.source ? String(r.source) : "smartlead",
+      source: r.source ? String(r.source) : "cold_email",
       reply_text: str(r.reply_text),
       client_note: str(r.client_note),
       coldunicorn_note: isClient ? null : str(r.coldunicorn_note),

@@ -8,7 +8,7 @@
 
 ### 1.1 About
 
-ColdUnicorn is a B2B cold email lead generation agency. They run email campaigns for clients through platforms like Smartlead and Bison. The current system is built entirely on Google Sheets: each client gets a separate spreadsheet with their leads, campaigns, statistics, and a dashboard. The internal team operates from a 20-sheet master workbook (PDCA) with a 127-column "CS PDCA" sheet tracking day-over-day, week-over-week, and month-over-month metrics.
+ColdUnicorn is a B2B cold email lead generation agency. They run email campaigns for clients through platforms like Bison. The current system is built entirely on Google Sheets: each client gets a separate spreadsheet with their leads, campaigns, statistics, and a dashboard. The internal team operates from a 20-sheet master workbook (PDCA) with a 127-column "CS PDCA" sheet tracking day-over-day, week-over-week, and month-over-month metrics.
 
 ### 1.2 Problem
 
@@ -49,8 +49,8 @@ A custom platform built with **React** (frontend) + **Supabase** (backend, datab
          |                          |
   +------v------+          +-------v-------+
   | Manual      |          | API (Phase 2) |
-  | CSV/Excel   |          | Smartlead     |
-  | Import      |          | Bison         |
+  | CSV/Excel   |          | Bison         |
+  | Import      |          |               |
   +-------------+          +---------------+
 ```
 
@@ -136,10 +136,9 @@ CREATE TABLE clients (
   organization_id         UUID REFERENCES organizations(id),
   name                    TEXT NOT NULL,
   status                  TEXT NOT NULL CHECK (status IN ('active', 'onboarding', 'paused', 'churned', 'lost')),
-  smartlead_id            TEXT,
   bison_workspace_id      TEXT,
   bison_api_key           TEXT,
-  sequencer               TEXT CHECK (sequencer IN ('smartlead', 'bison', 'woodpecker', 'snovio')),
+  sequencer               TEXT CHECK (sequencer IN ('bison', 'woodpecker', 'snovio')),
   cs_manager_id           UUID REFERENCES users(id),
   report_link             TEXT,
   folder_link             TEXT,
@@ -323,7 +322,7 @@ CREATE TABLE client_daily_snapshots (
   snapshot_date           DATE NOT NULL,
   sequencer               TEXT,
 
-  -- Accumulated totals (from Smartlead/Bison)
+  -- Accumulated totals (from Bison)
   emails_sent_total       INTEGER DEFAULT 0,
   prospects_in_base       INTEGER DEFAULT 0,
   mql_total               INTEGER DEFAULT 0,
@@ -813,7 +812,7 @@ qualification = 'unqualified' (default)
 3. Stats are stored in `campaign_daily_stats` (one row per campaign per day)
 4. Dashboard views aggregate from time-series tables automatically
 5. When leads respond, they are imported and linked to the campaign
-6. Future (Phase 2): Smartlead/Bison API auto-syncs stats and leads daily
+6. Future (Phase 2): Bison API auto-syncs stats and leads daily
 
 ### 7.3 PDCA Metric Computation
 
@@ -840,7 +839,7 @@ The 127-column CS PDCA sheet is replaced by SQL queries over time-series data:
 For the first phase, data enters the system via manual import:
 
 **CSV/Excel Import for:**
-- Leads (bulk upload from Smartlead/Bison export)
+- Leads (bulk upload from Bison export)
 - Campaign daily stats (from sequencer analytics export)
 - Client daily snapshots (from daily stats export)
 - Domains (bulk domain list import)
@@ -872,7 +871,7 @@ When a lead is qualified to MQL+ and client has CRM integration enabled:
 
 ## 8. API Integrations (Phase 2 - Future)
 
-### 8.1 Smartlead Integration
+### 8.1 Sequencer Integration
 
 ```
 Endpoints needed:
@@ -882,9 +881,9 @@ Endpoints needed:
   GET /api/v1/email-accounts         -- Inbox health, count
 
 Webhook (incoming):
-  POST /webhooks/smartlead/lead      -- New lead notification
+  POST /webhooks/sequencer/lead      -- New lead notification
 
-Auth: API key per Smartlead account (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
+Auth: API key per sequencer account (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
 ```
 
 ### 8.2 Bison Integration
@@ -911,9 +910,9 @@ Auth: Workspace ID + API Key per client
 
 ```
 supabase/functions/
-  sync-daily-stats/       -- Cron: Daily stats from Smartlead/Bison
+  sync-daily-stats/       -- Cron: Daily stats from Bison
   sync-leads/             -- Cron: Fetch new lead responses
-  webhook-smartlead/      -- Webhook: Receive lead notifications
+  webhook-bison/          -- Webhook: Receive lead notifications
   push-to-crm/            -- Triggered: Push lead to client CRM
   generate-weekly-report/ -- Cron: Weekly aggregation
   health-check/           -- Cron: Check domain/server health
@@ -926,7 +925,7 @@ supabase/functions/
 ### 9.1 Lead Lifecycle
 
 ```
-[Manual CSV/Excel Import]  -->  (Future: Smartlead/Bison webhook)
+[Manual CSV/Excel Import]  -->  (Future: Bison webhook)
          |
          v
   [leads table]
@@ -947,7 +946,7 @@ supabase/functions/
 ### 9.2 Stats Collection
 
 ```
-[Manual CSV/Excel Import]  -->  (Future: Smartlead/Bison API daily sync)
+[Manual CSV/Excel Import]  -->  (Future: Bison API daily sync)
          |
          v
   [campaign_daily_stats]  +  [client_daily_snapshots]
@@ -1020,8 +1019,7 @@ Charts & summaries  DoD/WoW/MoM   Weekly/Monthly
 - User management (invites, roles)
 
 ### Phase 6: API Integration (Weeks 16-19)
-- Smartlead API sync (daily stats + leads)
-- Bison API sync
+- Bison API sync (daily stats + leads)
 - Webhook receivers for real-time lead notifications
 - CRM push integration
 - Automated daily/weekly cron jobs
@@ -1096,7 +1094,7 @@ Views:
 
 ### Ignored sheets (per scope decision):
 - E5M CS
-- Smartlead Accounts
+- Sequencer Accounts
 - Monthly
 - Prospect Base
 - Arkusz18 (empty)

@@ -93,7 +93,10 @@ transition:
     promote_contact_to_lead. No Lusha/Snov.io duplication — phone_number stays NULL (not measured).
   reconciliation: >-
     One `leads` row per qualifying reply, matched on (client, Aimfox contact id), leads.sequencer_id =
-    aimfox. Compare against branch L's sheet appends per client per day.
+    aimfox. Compare against branch L's sheet appends per client per day. Qualification is synced as of
+    2026-07-23: branch S passes qualificationFromLabels(lead.labels) (mql|interested -> MQL,
+    premql|pre-mql -> preMQL) into promote_contact_to_lead, matching the sheet's Qualification column;
+    upgrade-only. Compare on qualification too.
   parityEvidence: null
 
 idempotency:

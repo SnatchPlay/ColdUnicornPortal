@@ -20,6 +20,8 @@ Every metric shown anywhere in the portal, with its formula, source columns, fil
 14. [Supporting helpers](#14-supporting-helpers)
 15. [Condition-rule context metrics](#15-condition-rule-context-metrics)
 16. [Public marketing counters](#16-public-marketing-counters)
+17. [OOO counters](#17-ooo-counters--what-exists-and-what-does-not-adr-0015)
+18. [Per-channel & Aimfox split (manager mega-table)](#18-per-channel--aimfox-split-manager-mega-table)
 
 ---
 
@@ -738,6 +740,66 @@ now, accumulated over weeks — so "OOO replies today = 12" and "47 open episode
 
 Should a dashboard ever be wanted, note that these are recomputable by `GROUP BY` over raw
 `replies` / `ooo_followups` rows — no stored counter is involved, so spec §16 holds by construction.
+
+---
+
+## 18. Per-channel & Aimfox split (manager mega-table)
+
+The manager Clients **mega-table** ([`mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx))
+splits the lead-count metrics of §§8–11 by outbound channel and adds a set of Aimfox (LinkedIn)
+volume / acceptance / capacity columns. All of it is pre-aggregated **server-side** in the
+`loadClientsMetricsSummary` handler of [`orm-gateway/index.ts`](../../../supabase/functions/orm-gateway/index.ts)
+and mapped to rows by `createClientMetricsFromSummary` ([`client-metrics.ts`](../../../src/app/lib/client-metrics.ts));
+the raw `createClientMetrics()` path has no sequencer dimension and leaves these fields undefined
+(rendered as "—"). Bucket depth is the same 5 elements `[0, -1, -2, -3, -4]` as the blended columns.
+
+**Channel identity** is `leads.sequencer_id` (ADR-0012): EmailBison = `…0002`, Aimfox = `…0003`.
+Every existing blended column is unchanged and is now read as the **Total** series; the split adds
+an **EmailBison-only** (`…_eb`) and **Aimfox-only** (`…_af`) column beside it.
+
+### 18.1 Per-channel lead counts
+
+- **Where:** 3-DoD (TOTAL + SQL), WoW (Total + SQL) each gain `· EB` and `· AF` sub-bands; MoM
+  gains `SQL · EB` / `SQL · AF` only (MoM Total/Meetings/Won stay blended — only SQL was requested).
+- **Formula:** identical `COUNT(*) FILTER (…)` windows as the blended metric, with an added
+  `sequencer_id = <channel>` predicate (gateway query `leadChannelRows`, `GROUP BY client_id, sequencer_id`).
+- **Note:** `Total` is a bare count over **all** sequencers. Today the only sequencers are EmailBison
+  and Aimfox, so `Total = EB + AF` exactly; the split query only becomes `Total ≥ EB + AF` if a future
+  sequencer is added. EB and AF are strict per-sequencer counts, never `Total − other`.
+
+### 18.2 Aimfox daily volume & schedule
+
+- **Source:** `sequencer_daily_stats` (ingestion-only, n8n service-role writes; ADR-0012), summed
+  across the client's enabled LinkedIn profiles. The `'__workspace_total__'` sentinel row is
+  **excluded** so a Sheets-backfill workspace row never double-counts per-profile rows (20260722h).
+- **Daily sent (Aimfox)** bucket `0..-4`: `SUM(invites_sent)` per day, fixed `CURRENT_DATE` offsets
+  to line up cell-for-cell with the Bison "Daily sent" band.
+- **Schedule (Aimfox)** bucket `+2/+1/0`: `SUM(schedule_day_after / schedule_tomorrow / schedule_today)`
+  from each client's **latest** report_date (the 2-hourly snapshot).
+
+### 18.3 WoW invitation acceptance rate
+
+- **Where:** new `WoW Accept` sub-band, rendered like the other WoW rates.
+- **Formula:** `SUM(invites_accepted) / SUM(invites_sent)` per ISO week (same Monday-anchored windows
+  as the other WoW columns). **null (—), never 0%,** when the week had no sends or acceptances were
+  unmeasured — `invites_accepted` is nullable and a real 0 must stay distinct from "not reported".
+
+### 18.4 Aimfox capacity (sheet columns R / S)
+
+- **Rem DB** = `remaining_database_size`, latest day, summed across profiles (PDCA sheet column R
+  "Remaining database").
+- **Inv left** = `invite_limit_remaining`, latest day, summed across profiles — invites still
+  available today. This is what the PDCA sheet's **column S "Invitations limit"** actually shows: its
+  cached values (e.g. 8 / 20 / 8) reconcile with `invite_limit_remaining`, **not** the ~195 weekly
+  cap. n8n writes that column directly (`remaining_limit = daily_limit − sent`), and the
+  `20260705` migration documents the same ("the 'Invitations limit' cell is the REMAINING limit for
+  today, not the weekly cap"). The cap (`invite_limit`, ~195) is still fetched into
+  `ClientMetricsSummary.aimfox_invite_limit` for future use but is not rendered.
+- Both are `null` (—) for a client with no Aimfox `client_sequencers` row.
+
+**Update cadence:** every 2 hours, driven by the `aimfox-daily-metrics` n8n workflow — no portal-side
+freshness change beyond the mega-table's existing refetch. **Conditions:** the per-channel/Aimfox
+columns are display-only; the condition engine still tints only the blended (Total) cells.
 
 ---
 

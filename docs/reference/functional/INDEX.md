@@ -25,7 +25,7 @@ This reference documents the PdcaFigmaTest portal (ColdUnicorn PDCA) end-to-end:
 | 08 | [08-charts-catalog.md](./08-charts-catalog.md) | Every chart (recharts + custom SVG/HTML) with series, colors, hooks, interactions |
 | 09 | [09-mutations-rls.md](./09-mutations-rls.md) | Every write path; role matrix; edge functions; optimistic updates; error taxonomy |
 | 10 | [10-nfr.md](./10-nfr.md) | Non-functional: snapshot loading, auth flow, RLS performance, UI states, responsiveness, testing, deploy |
-| 11 | [11-integrations.md](./11-integrations.md) | n8n / Smartlead / Bison topology; ingestion-only tables; notification + OOO routing |
+| 11 | [11-integrations.md](./11-integrations.md) | n8n / Bison topology; ingestion-only tables; notification + OOO routing |
 | 12 | [12-hidden-rules.md](./12-hidden-rules.md) | Magic numbers, implicit branches, naming traps, mutation semantics, auth error codes |
 | 13 | [13-out-of-scope.md](./13-out-of-scope.md) | Explicit legacy: features that will not be built. Mirror of BUSINESS_LOGIC §10. |
 | 14 | [14-condition-rules.md](./14-condition-rules.md) | Dynamic condition rules engine, DSL, seeded CS PDCA rules, UI surfaces, and legacy quirks |

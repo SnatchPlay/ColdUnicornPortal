@@ -98,10 +98,14 @@ transition:
       from public.leads l
       join public.sequencer_contacts sc on sc.id = l.source_sequencer_contact_id
       where l.created_at > now() - interval '1 day';
-    EXPECTED DIVERGENCE, not a defect: promote_contact_to_lead always creates at qualification
-    'preMQL' because promotion to MQL is a human decision (ADR-0004). Branch L writes MQL or preMQL
-    into the sheet based on the tag. Compare on existence and identity, never on qualification.
-  parityEvidence: null
+    Qualification now MATCHES the sheet (fixed 2026-07-23). Branch S passes qualification =
+    (tag_name == 'interested' ? 'MQL' : 'preMQL') — the same rule branch L writes into the sheet's
+    Qualification column — into promote_contact_to_lead, which applies it and upgrades preMQL -> MQL
+    on a later MQL-tag run (upgrade-only, never downgrades a human-curated MQL). Migration
+    20260723_promote_contact_qualification_sync.sql. So compare on existence AND qualification; a
+    preMQL-in-Supabase / MQL-in-sheet split is now a defect, not expected divergence. ADR-0004 governs
+    what the PORTAL may edit, not whether n8n may set qualification from the tag.
+  parityEvidence: "2026-07-23: 54 historical preMQL leads with MQL signals reconciled; flow deployed."
 
 idempotency:
   key: "uq_leads_source_sequencer_contact + leads.origin_reply_id + replies UNIQUE (external_id)"

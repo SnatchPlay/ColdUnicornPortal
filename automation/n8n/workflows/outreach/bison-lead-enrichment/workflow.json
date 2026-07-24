@@ -85,7 +85,7 @@
           "value": "gpt-5.4-mini"
         },
         "options": {
-          "instructions": "Analyze email text, Smartlead info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
+          "instructions": "Analyze email text, Bison info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
           "store": true,
           "textFormat": {
             "textOptions": {
@@ -1346,7 +1346,7 @@
           "value": "gpt-5.4-mini"
         },
         "options": {
-          "instructions": "Analyze email text, Smartlead info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
+          "instructions": "Analyze email text, Bison info and Snov.io info to determine lead information. Always return the answer only in JSON format without any additional information.",
           "store": true,
           "textFormat": {
             "textOptions": {
@@ -1440,9 +1440,9 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps) ]; })() }}"
+          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps), (String($('When Called by HUB').first().json.data?.tag_name || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL') ]; })() }}"
         },
-        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, '')\n         ))) as result;"
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, ''),\n           'qualification', nullif($12, '')\n         ))) as result;"
       }
     },
     {

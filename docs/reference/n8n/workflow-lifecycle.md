@@ -46,14 +46,17 @@ separate, reviewable change. An import diff that also alters logic cannot be rev
 2. Re-read the process document and the manifest.
 3. `pnpm n8n:check-drift --id <logical-id>` — reconcile before you change anything. Editing on top of
    unreconciled drift silently discards someone's change.
-4. Make the change in the repository artifact.
-5. Apply it to the **development** instance and re-export.
-6. `pnpm n8n:validate`, then re-run drift.
-7. **Do not publish.** Activation is a separate, explicit decision.
+4. Make the change in the repository artifact, then `pnpm n8n:validate` (normalises + gates it).
+5. Deploy it with `pnpm n8n:deploy` (see "Deploying a surgical change over REST" below) — dry-run,
+   review the diff, then `--apply` with `N8N_APPROVED_PRODUCTION_WRITE` set.
+6. `pnpm n8n:check-drift --id <logical-id>` (must be `0 drifted`), then `pnpm n8n:export`.
+7. Activation is a separate, explicit decision — `n8n:deploy` never changes the active flag.
 8. Update the manifest, the process doc and the traceability matrix in the same change.
 
-> Blocked today: there is no development instance, so steps 5–7 cannot be performed without touching
-> production. See [environments.md](environments.md).
+> There is still no development instance, so a deploy touches production directly — hence the
+> per-operation `N8N_APPROVED_PRODUCTION_WRITE` gate and the dry-run-first discipline. See
+> [environments.md](environments.md). For **building a new** workflow (not editing one), the SDK path
+> still applies and cannot be exercised without a dev instance.
 
 ---
 
@@ -74,11 +77,51 @@ separate, reviewable change. An import diff that also alters logic cannot be rev
 
 ---
 
+## Deploying a surgical change over REST — `pnpm n8n:deploy`
+
+For an incremental change to a **managed** workflow — edit one node's parameters, or add a small
+branch — prefer the public REST API over the SDK path below. `update_workflow` re-authors the whole
+graph in a DSL with no decompiler (next section), which is far too much blast radius for a two-field
+edit to a live flow. The REST `PUT /workflows/{id}` takes raw workflow JSON, so the change can be
+applied onto the exact live graph, node by node.
+
+```bash
+pnpm n8n:deploy --id <logical-id> --nodes "Node A"              # dry-run: show the param diff
+pnpm n8n:deploy --id <logical-id> --add  "New Trigger,New Code"  # dry-run: show nodes/edges to add
+N8N_APPROVED_PRODUCTION_WRITE="<what + why>" \
+  pnpm n8n:deploy --id <logical-id> --nodes "Node A" --apply     # write (production is gated)
+```
+
+How it stays safe (`scripts/n8n/deploy.mjs`, over `scripts/n8n/lib/rest.mjs`):
+
+- It **GETs the live graph** (credentials intact) and mutates only what you name. `--nodes` copies a
+  node's `parameters`/`typeVersion` from the committed artifact onto the live node; `--add` appends a
+  brand-new node plus its outgoing edges. Everything else — every credential, `webhookId`, position,
+  and untouched node/edge — is taken verbatim from live.
+- It **never PUTs the committed artifact wholesale**: the artifact is credential-sanitised, so a full
+  push would strip auth from every node. The allowlist is mandatory; there is no "sync everything".
+- Dry-run by default; the actual PUT needs **both** `--apply` and `N8N_APPROVED_PRODUCTION_WRITE`
+  (the same escape hatch as `lib/mcp.mjs`). After writing it re-fetches and proves the targeted nodes
+  landed, no untouched node changed, and no pre-existing edge moved.
+- **`settings` gotcha.** PUT's settings schema is `additionalProperties:false` and stricter than GET.
+  `binaryMode`/`callerPolicy`/`timeSavedMode` are rejected but default back to their live values (a
+  no-op), so they are filtered out and reported. **`availableInMCP` IS accepted and is preserved on
+  purpose** — it is what lets the MCP tooling (`inventory`/`check-drift`/`export`) read the workflow;
+  its default is `false`, so dropping it silently blinds every MCP script and can only be restored in
+  the n8n UI. The tool refuses to reset it without `--allow-mcp-reset`.
+- New `scheduleTrigger` branch on an already-active workflow: n8n re-registers triggers on save, but
+  if you need certainty the cron is armed, toggle the workflow off/on once in the UI.
+
+Always finish with `pnpm n8n:check-drift --id <logical-id>` (must be `0 drifted`) and `pnpm n8n:export`
+to re-canonicalise. Measured against the production instance on 2026-07-23.
+
 ## The SDK authoring contract
 
-`update_workflow` and `create_workflow_from_code` take **SDK code**, not workflow JSON, and there is
-no decompiler. Every change therefore means re-authoring the whole graph, so the exact shape matters:
-a wrong one is accepted, reports the right `nodeCount`, and produces a **different workflow**.
+The MCP path — `update_workflow` and `create_workflow_from_code` — takes **SDK code**, not workflow
+JSON, and there is no decompiler. It is still the right tool for **building a new workflow** (Option
+C), but for an edit to an existing one prefer `pnpm n8n:deploy` above. Every change here means
+re-authoring the whole graph, so the exact shape matters: a wrong one is accepted, reports the right
+`nodeCount`, and produces a **different workflow**.
 
 Measured against the production instance on 2026-07-22 by creating throwaway workflows and reading
 them back. Each rule below is a shape that validated cleanly and was still wrong.

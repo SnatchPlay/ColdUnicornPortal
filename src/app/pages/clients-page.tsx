@@ -38,8 +38,10 @@ import {
 } from "./clients-page/client-drawer";
 import {
   ClientsMegaTable,
+  CHANNEL_VIEWS,
   MEGA_COLUMNS,
   statusBadgeClass,
+  type ChannelView,
   type ClientMegaRow,
   type MegaSortState,
 } from "./clients-page/mega-table";
@@ -70,6 +72,8 @@ interface ClientsTablePreferences extends Record<string, unknown> {
   satisfactionFilter: string;
   statusFilter: string[];
   managerFilter: string;
+  /** Clients-tab channel view switch: "both" | "email" | "aimfox". */
+  channelView: ChannelView;
   sort: MegaSortState;
 }
 
@@ -175,6 +179,25 @@ const EMPTY_METRICS_SUMMARY: ClientMetricsSummary = {
   threedod_total:      [0, 0, 0, 0, 0],
   threedod_sql:        [0, 0, 0, 0, 0],
   latest_prospects_count: 0,
+  threedod_total_eb:   [0, 0, 0, 0, 0],
+  threedod_total_af:   [0, 0, 0, 0, 0],
+  threedod_sql_eb:     [0, 0, 0, 0, 0],
+  threedod_sql_af:     [0, 0, 0, 0, 0],
+  wow_leads_eb:        [0, 0, 0, 0, 0],
+  wow_leads_af:        [0, 0, 0, 0, 0],
+  wow_sql_eb:          [0, 0, 0, 0, 0],
+  wow_sql_af:          [0, 0, 0, 0, 0],
+  mom_sql_eb:          [0, 0, 0, 0, 0],
+  mom_sql_af:          [0, 0, 0, 0, 0],
+  aimfox_daily_sent:   [0, 0, 0, 0, 0],
+  aimfox_schedule_today:     0,
+  aimfox_schedule_tomorrow:  0,
+  aimfox_schedule_day_after: 0,
+  aimfox_wow_sent:     [0, 0, 0, 0, 0],
+  aimfox_wow_accepted: [null, null, null, null, null],
+  aimfox_invite_limit: null,
+  aimfox_invite_limit_remaining: null,
+  aimfox_remaining_database_size: null,
 };
 
 function useClientsOverview() {
@@ -882,6 +905,7 @@ export function ClientsPage() {
   const [nameSearch, setNameSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["Active"]));
   const [managerFilter, setManagerFilter] = useState("all");
+  const [channelView, setChannelView] = useState<ChannelView>("both");
   // Was `{ key: "health" }`, which no column ever defined — `compareMega` found no match and
   // returned 0, so the documented "worst first" default silently did nothing. Triage now lives in
   // the satisfaction filter chips, so the default sort is simply the Client column.
@@ -912,6 +936,9 @@ export function ClientsPage() {
     }
     if (typeof tablePrefs.managerFilter === "string") {
       setManagerFilter(tablePrefs.managerFilter);
+    }
+    if (CHANNEL_VIEWS.includes(tablePrefs.channelView as ChannelView)) {
+      setChannelView(tablePrefs.channelView as ChannelView);
     }
     // A stored sort key must still name a real column. Anyone who used the grid before the health
     // rollup was removed has `"health"` saved here — restoring it would sort by nothing at all.
@@ -962,6 +989,14 @@ export function ClientsPage() {
     (next: string) => {
       setManagerFilter(next);
       updateTablePrefs({ managerFilter: next });
+    },
+    [updateTablePrefs],
+  );
+
+  const handleChannelViewChange = useCallback(
+    (next: ChannelView) => {
+      setChannelView(next);
+      updateTablePrefs({ channelView: next });
     },
     [updateTablePrefs],
   );
@@ -1392,6 +1427,31 @@ export function ClientsPage() {
                 })}
               </ToggleGroup>
 
+              {/* Channel view switch: show both channels' columns, or narrow to EmailBison / Aimfox. */}
+              <ToggleGroup
+                type="single"
+                value={channelView}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  handleChannelViewChange(value as ChannelView);
+                }}
+                variant="outline"
+                className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
+                aria-label="Channel view"
+              >
+                {/* flex-none so each item sizes to its own label — the base ToggleGroupItem uses
+                    flex-1 (equal widths), which squeezes the long "EmailBison" past its cell. */}
+                <ToggleGroupItem value="both" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Both channels">
+                  Both
+                </ToggleGroupItem>
+                <ToggleGroupItem value="email" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="EmailBison columns only">
+                  EmailBison
+                </ToggleGroupItem>
+                <ToggleGroupItem value="aimfox" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Aimfox columns only">
+                  Aimfox
+                </ToggleGroupItem>
+              </ToggleGroup>
+
               {canEditAssignments && managerUsers.length > 0 && (
                 <Select value={managerFilter} onValueChange={handleManagerFilterChange}>
                   <SelectTrigger className="h-8 w-[136px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
@@ -1429,6 +1489,7 @@ export function ClientsPage() {
               onHighlight={handleCellHighlight}
               selectionStore={selectionStore}
               colsRef={tableColsRef}
+              channelView={channelView}
               savedWidths={(tablePrefs.widths as Record<string, number> | undefined) ?? null}
               onWidthsChange={handleWidthsChange}
               columnOverrides={columnOverrides}

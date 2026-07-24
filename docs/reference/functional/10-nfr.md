@@ -79,11 +79,11 @@ Re-fetching is explicit: per-page `refresh()`, error-state retry buttons, or bro
 
 ### 1.7 Three-system topology
 
-The portal is one of three cooperating systems. Smartlead/Bison send and receive; **n8n** ingests counters/replies and dispatches notifications + OOO routing; the portal is a thin read+config surface. The portal **never**:
+The portal is one of three cooperating systems. Bison sends and receives; **n8n** ingests counters/replies and dispatches notifications + OOO routing; the portal is a thin read+config surface. The portal **never**:
 
 - writes to `replies`, `campaign_daily_stats`, or `daily_stats` (those are n8n's),
 - sends emails or SMS (n8n does, using `clients.notification_emails` + `sms_phone_numbers`),
-- calls Smartlead/Bison APIs directly,
+- calls Bison APIs directly,
 - classifies replies (n8n does).
 
 Full topology and table ownership: [11-integrations.md](./11-integrations.md). Product-level statement of the boundaries: [BUSINESS_LOGIC.md §2](../../BUSINESS_LOGIC.md#2-system-boundaries).

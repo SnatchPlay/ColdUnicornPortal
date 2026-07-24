@@ -107,6 +107,26 @@
       }
     },
     {
+      "id": "1f111111-0000-4000-8000-000000000001",
+      "name": "Finalize Prev Day (Schedule)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2272,
+        -296
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 15 5 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "a9355f54-ea89-4bea-909d-bec6fdf8c186",
       "name": "Get Active Clients1",
       "type": "n8n-nodes-base.postgres",
@@ -155,6 +175,19 @@
       }
     },
     {
+      "id": "1f111111-0000-4000-8000-000000000002",
+      "name": "Set Yesterday Target",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2048,
+        -296
+      ],
+      "parameters": {
+        "jsCode": "const dt = new Date();\ndt.setUTCDate(dt.getUTCDate() - 1);\nconst pad = n => String(n).padStart(2, '0');\nconst targetDate = dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate());\n// Feeds the existing Set Report Date1 backfill path (isBackfill=true, reportDate=yesterday).\nreturn [{ json: { targetDate } }];"
+      }
+    },
+    {
       "id": "de74f482-f3c6-4979-bc54-ef8249059596",
       "name": "Split in Batches1",
       "type": "n8n-nodes-base.splitInBatches",
@@ -191,6 +224,17 @@
         ]
       ]
     },
+    "Finalize Prev Day (Schedule)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Yesterday Target",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "Get Active Clients1": {
       "main": [
         [
@@ -219,6 +263,17 @@
           {
             "index": 0,
             "node": "Get Active Clients1",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Set Yesterday Target": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Set Report Date1",
             "type": "main"
           }
         ]

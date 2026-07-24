@@ -17,7 +17,13 @@ architectureDecisions:
 
 triggers:
   - type: schedule
-    detail: "every 2 hours at :26 (cron 0 26 */2 * * *)"
+    detail: "every 2 hours at :26 (cron 0 26 */2 * * *) — writes TODAY (in-progress) counts"
+  - type: schedule
+    detail: >-
+      Finalize Prev Day — daily 05:15 UTC (cron 0 15 5 * * *). Feeds Set Yesterday Target ->
+      Set Report Date1 with targetDate = yesterday (isBackfill=true), re-ingesting the COMPLETED
+      previous day through the backfill path. Added 2026-07-23: without it a partial same-day
+      snapshot sticks permanently once the date rolls over (the 2026-07-20 undercount incident).
   - type: webhook
     detail: "GET /webhook/backfill-daily-stats?targetDate=YYYY-MM-DD — no authentication"
 

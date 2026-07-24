@@ -21,7 +21,8 @@
     "n8n:inventory": "node scripts/n8n/inventory.mjs",
     "n8n:export": "node scripts/n8n/export.mjs",
     "n8n:validate": "node scripts/n8n/validate.mjs",
-    "n8n:check-drift": "node scripts/n8n/check-drift.mjs"
+    "n8n:check-drift": "node scripts/n8n/check-drift.mjs",
+    "n8n:deploy": "node scripts/n8n/deploy.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

@@ -140,7 +140,7 @@ export interface ClientUserRecord {
 }
 
 // ── Sequencers (ADR-0012) ─────────────────────────────────────────────────────
-// External sending tools (Smartlead / EmailBison / Aimfox). Catalog rows carry
+// External sending tools (EmailBison / Aimfox). Catalog rows carry
 // fixed load-bearing UUIDs (column defaults + n8n constants); per-client
 // credentials live in client_sequencers (replaced clients.external_api_key /
 // external_workspace_id / linkedin_api_key).
@@ -149,7 +149,7 @@ export type SequencerChannel = "email" | "linkedin";
 
 export interface SequencerRecord {
   id: string;
-  /** Stable machine key: 'smartlead' | 'emailbison' | 'aimfox' | future additions. */
+  /** Stable machine key: 'emailbison' | 'aimfox' | future additions. */
   key: string;
   name: string;
   channel: SequencerChannel;

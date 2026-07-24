@@ -25,6 +25,10 @@ import type {
 
 export type SortDirection = "asc" | "desc";
 
+/** Channel view switch for the clients tab: show both channels, or filter to one. */
+export type ChannelView = "both" | "email" | "aimfox";
+export const CHANNEL_VIEWS: ChannelView[] = ["both", "email", "aimfox"];
+
 export interface ClientMegaRow {
   client: ClientRecord;
   managerName: string;
@@ -38,7 +42,18 @@ export interface MegaSortState {
 }
 
 type Align = "left" | "center" | "right";
-type Group = "cs" | "basic" | "dodSched" | "dodSent" | "td3" | "wow" | "mom" | "custom";
+type Group =
+  | "cs"
+  | "basic"
+  | "dodSched"
+  | "dodSent"
+  | "dodSchedAf"
+  | "dodSentAf"
+  | "aimfoxCap"
+  | "td3"
+  | "wow"
+  | "mom"
+  | "custom";
 
 interface MegaColumn {
   id: string;
@@ -49,6 +64,11 @@ interface MegaColumn {
   minWidth: number;
   align: Align;
   sticky?: boolean;
+  /**
+   * Channel affinity for the clients-tab view switch. "email" = EmailBison-specific column,
+   * "aimfox" = Aimfox-specific column, undefined = shared (identity, blended Total, always shown).
+   */
+  channel?: "email" | "aimfox";
   /** Render the cell content (without condition wrapper). */
   render: (row: ClientMegaRow) => ReactNode;
   /** Sort comparator key — string or number. */
@@ -302,6 +322,7 @@ function buildColumns(): MegaColumn[] {
       id: `dod-sched-${b}`,
       group: "dodSched",
       sub: "Schedule",
+      channel: "email",
       label: b,
       width: 38,
       minWidth: 32,
@@ -314,12 +335,32 @@ function buildColumns(): MegaColumn[] {
     });
   }
 
+  // --- DoD Schedule (Aimfox) ---------------------------------------------
+  // LinkedIn invite schedule mirror of the Bison band. No condition keys — the condition engine
+  // only knows the blended (email) DoD cells; these are display-only. Missing Aimfox data → "—".
+  for (const b of DOD_SCHED_BUCKETS) {
+    out.push({
+      id: `dod-sched-af-${b}`,
+      group: "dodSchedAf",
+      sub: "Schedule (Aimfox)",
+      channel: "aimfox",
+      label: b,
+      width: 38,
+      minWidth: 32,
+      align: "center",
+      defaultDirection: "desc",
+      render: (row) => formatNum(dodLookup(row, b)?.aimfoxSchedule ?? null),
+      sortValue: (row) => dodLookup(row, b)?.aimfoxSchedule ?? null,
+    });
+  }
+
   // --- DoD Daily sent -----------------------------------------------------
   for (const b of DOD_SENT_BUCKETS) {
     out.push({
       id: `dod-sent-${b}`,
       group: "dodSent",
       sub: "Daily sent",
+      channel: "email",
       label: b,
       width: 38,
       minWidth: 32,
@@ -332,90 +373,132 @@ function buildColumns(): MegaColumn[] {
     });
   }
 
-  // --- 3-DoD --------------------------------------------------------------
-  for (const b of TD3_TOTAL_BUCKETS) {
+  // --- DoD Daily sent (Aimfox) -------------------------------------------
+  for (const b of DOD_SENT_BUCKETS) {
     out.push({
-      id: `td3-total-${b}`,
-      group: "td3",
-      sub: "3-DoD TOTAL leads",
+      id: `dod-sent-af-${b}`,
+      group: "dodSentAf",
+      sub: "Daily sent (Aimfox)",
+      channel: "aimfox",
       label: b,
-      width: 32,
-      minWidth: 28,
+      width: 38,
+      minWidth: 32,
       align: "center",
-      td3Bucket: b,
-      td3MetricKey: "three_dod_total",
       defaultDirection: "desc",
-      render: (row) => formatNum(td3Lookup(row, b)?.totalLeads ?? null),
-      sortValue: (row) => td3Lookup(row, b)?.totalLeads ?? null,
-    });
-  }
-  for (const b of TD3_SQL_BUCKETS) {
-    out.push({
-      id: `td3-sql-${b}`,
-      group: "td3",
-      sub: "3-DoD SQL leads",
-      label: b,
-      width: 32,
-      minWidth: 28,
-      align: "center",
-      td3Bucket: b,
-      td3MetricKey: "three_dod_sql",
-      defaultDirection: "desc",
-      render: (row) => formatNum(td3Lookup(row, b)?.sqlLeads ?? null),
-      sortValue: (row) => td3Lookup(row, b)?.sqlLeads ?? null,
+      render: (row) => formatNum(dodLookup(row, b)?.aimfoxSent ?? null),
+      sortValue: (row) => dodLookup(row, b)?.aimfoxSent ?? null,
     });
   }
 
-  // --- WoW (Response / Human / Bounce / OOO rates, plus SQL counts) ------
+  // --- Aimfox capacity (sheet columns R / S) -----------------------------
+  // Remaining database size and the weekly connect-cap snapshot ("~195 per account"), latest day,
+  // summed across the client's LinkedIn profiles. null (unmeasured / no Aimfox) renders as "—".
+  out.push({
+    id: "af-remaining-db",
+    group: "aimfoxCap",
+    sub: "Aimfox capacity",
+    channel: "aimfox",
+    label: "Rem DB",
+    width: 56,
+    minWidth: 44,
+    align: "center",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.metrics.overview.aimfoxRemainingDb ?? null),
+    sortValue: (row) => row.metrics.overview.aimfoxRemainingDb ?? null,
+  });
+  out.push({
+    // "Invitations limit" = the PDCA sheet's column S: invites still available today
+    // (invite_limit_remaining), NOT the ~195 weekly cap. Sheet column S values (8/20/8) reconcile
+    // with this field. See 04-metrics §18.4.
+    id: "af-invite-limit",
+    group: "aimfoxCap",
+    sub: "Aimfox capacity",
+    channel: "aimfox",
+    label: "Inv left",
+    width: 52,
+    minWidth: 40,
+    align: "center",
+    defaultDirection: "desc",
+    render: (row) => formatNum(row.metrics.overview.aimfoxInviteLimitRemaining ?? null),
+    sortValue: (row) => row.metrics.overview.aimfoxInviteLimitRemaining ?? null,
+  });
+
+  // --- 3-DoD (per channel: Total / EmailBison / Aimfox) -------------------
+  // Each metric splits into three sub-bands. The Total channel keeps its original column id and
+  // condition keys (so persisted widths / master-admin overrides / condition rules stay bound);
+  // the EB and AF channels are display-only additions with no condition tint.
+  const td3Bands: Array<{
+    metric: string;
+    metricLabel: string;
+    conditionKey: string;
+    channels: Array<{ key: string; label: string; pick: (r: ThreeDodRow) => number | null | undefined }>;
+  }> = [
+    {
+      metric: "total",
+      metricLabel: "TOTAL",
+      conditionKey: "three_dod_total",
+      channels: [
+        { key: "total", label: "leads", pick: (r) => r.totalLeads },
+        { key: "eb", label: "EB", pick: (r) => r.totalLeadsEb },
+        { key: "af", label: "AF", pick: (r) => r.totalLeadsAf },
+      ],
+    },
+    {
+      metric: "sql",
+      metricLabel: "SQL",
+      conditionKey: "three_dod_sql",
+      channels: [
+        { key: "total", label: "leads", pick: (r) => r.sqlLeads },
+        { key: "eb", label: "EB", pick: (r) => r.sqlLeadsEb },
+        { key: "af", label: "AF", pick: (r) => r.sqlLeadsAf },
+      ],
+    },
+  ];
+  for (const band of td3Bands) {
+    for (const ch of band.channels) {
+      const isTotal = ch.key === "total";
+      const sub = isTotal ? `3-DoD ${band.metricLabel} leads` : `3-DoD ${band.metricLabel} · ${ch.label}`;
+      for (const b of TD3_TOTAL_BUCKETS) {
+        out.push({
+          id: isTotal ? `td3-${band.metric}-${b}` : `td3-${band.metric}-${ch.key}-${b}`,
+          group: "td3",
+          sub,
+          channel: ch.key === "eb" ? "email" : ch.key === "af" ? "aimfox" : undefined,
+          label: b,
+          width: 32,
+          minWidth: 28,
+          align: "center",
+          ...(isTotal ? { td3Bucket: b, td3MetricKey: band.conditionKey } : {}),
+          defaultDirection: "desc",
+          render: (row) => formatNum(ch.pick(td3Lookup(row, b) as ThreeDodRow) ?? null),
+          sortValue: (row) => ch.pick(td3Lookup(row, b) as ThreeDodRow) ?? null,
+        });
+      }
+    }
+  }
+
+  // --- WoW (lead counts per channel, rates, plus Aimfox acceptance) ------
+  // Total & SQL lead counts split into Total / EmailBison / Aimfox; the Total channel keeps its
+  // original id + condition key. Rate columns are unchanged. "Accept" is the new Aimfox invitation
+  // acceptance rate (accepted/sent), rendered like the other rates and shown as "—" when unmeasured.
   const wowMetrics: Array<{
     key: string;
     label: string;
-    conditionKey: string;
+    conditionKey?: string;
     format: "rate" | "num";
-    pick: (row: WowRow) => number | null;
+    pick: (row: WowRow) => number | null | undefined;
   }> = [
-    {
-      key: "total",
-      label: "Total",
-      conditionKey: "wow_total_leads",
-      format: "num",
-      pick: (r) => r.totalLeads,
-    },
-    {
-      key: "sql",
-      label: "SQL",
-      conditionKey: "wow_sql",
-      format: "num",
-      pick: (r) => r.sqlLeads,
-    },
-    {
-      key: "resp",
-      label: "Resp",
-      conditionKey: "wow_total_response_rate",
-      format: "rate",
-      pick: (r) => r.responseRate,
-    },
-    {
-      key: "human",
-      label: "Human",
-      conditionKey: "wow_human_response_rate",
-      format: "rate",
-      pick: (r) => r.humanRate,
-    },
-    {
-      key: "bnc",
-      label: "Bnc",
-      conditionKey: "wow_bounce_rate",
-      format: "rate",
-      pick: (r) => r.bounceRate,
-    },
-    {
-      key: "ooo",
-      label: "OOO",
-      conditionKey: "wow_ooo_rate",
-      format: "rate",
-      pick: (r) => r.oooRate,
-    },
+    { key: "total",    label: "Total",      conditionKey: "wow_total_leads",         format: "num",  pick: (r) => r.totalLeads },
+    { key: "total-eb", label: "Total · EB", format: "num",  pick: (r) => r.totalLeadsEb },
+    { key: "total-af", label: "Total · AF", format: "num",  pick: (r) => r.totalLeadsAf },
+    { key: "sql",      label: "SQL",        conditionKey: "wow_sql",                 format: "num",  pick: (r) => r.sqlLeads },
+    { key: "sql-eb",   label: "SQL · EB",   format: "num",  pick: (r) => r.sqlLeadsEb },
+    { key: "sql-af",   label: "SQL · AF",   format: "num",  pick: (r) => r.sqlLeadsAf },
+    { key: "resp",     label: "Resp",       conditionKey: "wow_total_response_rate", format: "rate", pick: (r) => r.responseRate },
+    { key: "human",    label: "Human",      conditionKey: "wow_human_response_rate", format: "rate", pick: (r) => r.humanRate },
+    { key: "bnc",      label: "Bnc",        conditionKey: "wow_bounce_rate",         format: "rate", pick: (r) => r.bounceRate },
+    { key: "ooo",      label: "OOO",        conditionKey: "wow_ooo_rate",            format: "rate", pick: (r) => r.oooRate },
+    { key: "accept",   label: "Accept",     format: "rate", pick: (r) => r.acceptRate },
   ];
 
   for (const m of wowMetrics) {
@@ -424,12 +507,17 @@ function buildColumns(): MegaColumn[] {
         id: `wow-${m.key}-${b}`,
         group: "wow",
         sub: `WoW ${m.label}`,
+        // Email-reply rates + "· EB" are EmailBison; acceptance + "· AF" are Aimfox; Total/SQL shared.
+        channel: m.key.endsWith("-eb") || ["resp", "human", "bnc", "ooo"].includes(m.key)
+          ? "email"
+          : m.key.endsWith("-af") || m.key === "accept"
+          ? "aimfox"
+          : undefined,
         label: b,
         width: m.format === "rate" ? 40 : 32,
         minWidth: 28,
         align: "center",
-        wowBucket: b,
-        wowMetricKey: m.conditionKey,
+        ...(m.conditionKey ? { wowBucket: b, wowMetricKey: m.conditionKey } : {}),
         defaultDirection: "desc",
         render: (row) => {
           const v = m.pick(wowLookup(row, b) as WowRow);
@@ -441,16 +529,20 @@ function buildColumns(): MegaColumn[] {
   }
 
   // --- MoM ----------------------------------------------------------------
+  // Only SQL splits per channel (per the team's request); Total / Meetings / Won stay blended.
+  // Existing ids + condition keys preserved; the EB/AF SQL columns are display-only.
   const momMetrics: Array<{
     key: string;
     label: string;
-    conditionKey: string;
-    pick: (row: MomRow) => number | null;
+    conditionKey?: string;
+    pick: (row: MomRow) => number | null | undefined;
   }> = [
-    { key: "total", label: "Total", conditionKey: "mom_total_leads", pick: (r) => r.totalLeads },
-    { key: "sql", label: "SQL", conditionKey: "mom_sql", pick: (r) => r.sqlLeads },
-    { key: "mtg", label: "Mtg", conditionKey: "mom_meetings", pick: (r) => r.meetings },
-    { key: "won", label: "Won", conditionKey: "mom_won", pick: (r) => r.won },
+    { key: "total",  label: "Total",    conditionKey: "mom_total_leads", pick: (r) => r.totalLeads },
+    { key: "sql",    label: "SQL",      conditionKey: "mom_sql",         pick: (r) => r.sqlLeads },
+    { key: "sql-eb", label: "SQL · EB", pick: (r) => r.sqlLeadsEb },
+    { key: "sql-af", label: "SQL · AF", pick: (r) => r.sqlLeadsAf },
+    { key: "mtg",    label: "Mtg",      conditionKey: "mom_meetings",    pick: (r) => r.meetings },
+    { key: "won",    label: "Won",      conditionKey: "mom_won",         pick: (r) => r.won },
   ];
   for (const m of momMetrics) {
     for (const b of MOM_BUCKETS) {
@@ -458,12 +550,12 @@ function buildColumns(): MegaColumn[] {
         id: `mom-${m.key}-${b}`,
         group: "mom",
         sub: `MoM ${m.label}`,
+        channel: m.key === "sql-eb" ? "email" : m.key === "sql-af" ? "aimfox" : undefined,
         label: b,
         width: 32,
         minWidth: 28,
         align: "center",
-        momBucket: b,
-        momMetricKey: m.conditionKey,
+        ...(m.conditionKey ? { momBucket: b, momMetricKey: m.conditionKey } : {}),
         defaultDirection: "desc",
         render: (row) => formatNum(m.pick(momLookup(row, b) as MomRow) ?? null),
         sortValue: (row) => m.pick(momLookup(row, b) as MomRow) ?? null,
@@ -630,6 +722,11 @@ export interface ClientsMegaTableProps {
   onStatusChange?: (clientId: string, status: ClientStatus) => void;
   /** Called when the satisfaction hearts in the Client cell are clicked. Read-only when omitted. */
   onSatisfactionChange?: (clientId: string, next: SatisfactionLevel | null) => void;
+  /**
+   * Channel view switch. "both" (default) shows every column; "email"/"aimfox" hide the columns
+   * tagged for the other channel. Identity and blended-Total columns (channel undefined) always show.
+   */
+  channelView?: ChannelView;
 }
 
 function parseSafeHref(raw: string | null | undefined): string | null {
@@ -1035,6 +1132,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     onStatusChange,
     onSatisfactionChange,
     colsRef,
+    channelView = "both",
   } = props;
   useWhyDidYouRender("ClientsMegaTable", props as Record<string, unknown>);
   useDevRenderCount("ClientsMegaTable", () => `rows=${rows.length}`);
@@ -1049,6 +1147,9 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
+      // Channel view switch: drop the other channel's columns. Shared columns (channel undefined)
+      // — identity, Basic, blended Total metrics — always stay visible.
+      if (channelView !== "both" && col.channel && col.channel !== channelView) return [];
       const withNotes = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
       const withHearts =
         withNotes.id === "name" && onSatisfactionChange
@@ -1076,15 +1177,22 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       };
     });
 
-    // Unified sort: explicit position first (ascending), then natural order.
-    const ordered = [...builtInEntries, ...customEntries]
-      .sort((a, b) => {
-        const ap = a.position, bp = b.position;
-        if (ap !== null && bp !== null) return ap - bp;
-        if (ap !== null) return -1;
-        if (bp !== null) return 1;
-        return a.naturalOrder - b.naturalOrder;
-      })
+    // Ordering. Explicit column_overrides positions still drive the layout, but a column WITHOUT an
+    // explicit position must NOT sink to the end of the table — otherwise every column added after
+    // the saved layout (the Aimfox / per-channel columns, a fresh custom field) piles up at the far
+    // right. Instead each such column inherits the position of its nearest natural-order predecessor
+    // that DOES have one, so it slots right after the sibling it was declared beside in MEGA_COLUMNS:
+    // Aimfox Schedule after Bison Schedule, a "· EB"/"· AF" split after its blended Total, etc. This
+    // also makes the channel switch place the Aimfox band exactly where the (now-hidden) Bison band
+    // sat. Ties break by natural order. Sentinel -1 sorts leading position-less columns to the front.
+    const naturalEntries = [...builtInEntries, ...customEntries].sort((a, b) => a.naturalOrder - b.naturalOrder);
+    let lastExplicit = -1;
+    const withEffPos = naturalEntries.map((e) => {
+      if (e.position !== null) lastExplicit = e.position;
+      return { ...e, effPos: e.position !== null ? e.position : lastExplicit };
+    });
+    const ordered = withEffPos
+      .sort((a, b) => a.effPos - b.effPos || a.naturalOrder - b.naturalOrder)
       .map((e) => e.col);
 
     // Apply section (sub-band) name overrides. Stored under the synthetic key
@@ -1094,7 +1202,7 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
       const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
       return sectionLabel ? { ...col, sub: sectionLabel } : col;
     });
-  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange, onSatisfactionChange]);
+  }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange, onSatisfactionChange, channelView]);
 
   const defaultWidths = useMemo(() => cols.map((c) => c.width), [cols]);
   const minWidths = useMemo(() => cols.map((c) => c.minWidth), [cols]);

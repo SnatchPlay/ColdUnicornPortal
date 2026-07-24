@@ -97,7 +97,7 @@ This is not a simple "move data from sheets to a database" project. It is a **bu
 
 ## 2.3 ColdUnicorn _ PDCA (1).xlsx (PDCA Master Workbook)
 
-- **Contains:** 20 sheets including the critical 127-column CS PDCA (962 rows), CRM (116 rows), CF/Cash Flow (40 rows), GH cost (13 rows), AUTH (75 rows), Daily stats (4,294 rows, 27 columns), Emails Exclude List (162 rows), Client CRM Details (1,002 rows), ABM LOSTS (1,000 rows), E5M CS (50 rows, 57 columns), LG PDCA (100 rows), Prospect Base (23 rows), Monthly (46 rows), DomainsPerformance (1,001 rows), Weekly (47 rows), Smartlead Accounts (5 rows), Dashboards (chart-only), RR & BR generator (25 rows).
+- **Contains:** 20 sheets including the critical 127-column CS PDCA (962 rows), CRM (116 rows), CF/Cash Flow (40 rows), GH cost (13 rows), AUTH (75 rows), Daily stats (4,294 rows, 27 columns), Emails Exclude List (162 rows), Client CRM Details (1,002 rows), ABM LOSTS (1,000 rows), E5M CS (50 rows, 57 columns), LG PDCA (100 rows), Prospect Base (23 rows), Monthly (46 rows), DomainsPerformance (1,001 rows), Weekly (47 rows), Sequencer Accounts (5 rows), Dashboards (chart-only), RR & BR generator (25 rows).
 - **Reveals:** The complete internal operating system of the agency. CS PDCA has sections: Customer info (A-G), Basic setup (H-Q), Issues (R), DoD schedule & daily sent (S-Z with 5-day windows), 3DoD leads (AA-AJ), WoW metrics (AK-BL with 4-week windows), 2Wo2W health (BM-BR), MoM totals (BS-CS with 4-month windows), Ecosystem integration (CT-DF), MoM invoices (DG-DN), MoM partnerships (DO-DR), Account Based Selling (DS-DW).
 - **Reliability:** Very high -- this is the live operational data.
 - **Role in future system:** Defines the entire admin portal data model and views.
@@ -197,7 +197,7 @@ A single master workbook shared internally with 20 sheets:
 | Monthly | Monthly TMQL/WON per client | Rolling 12 months |
 | RR & BR generator | Manual RR/BR calculation tool | Per team member |
 | E5M CS | Sub-brand (E5M) operational view | Subset of CS PDCA |
-| Smartlead Accounts | API credentials | 4 accounts |
+| Sequencer Accounts | API credentials | 4 accounts |
 | AUTH | Spreadsheet ID ↔ client mapping | Auth config |
 
 ## 3.3 Automation Layer (Make.com)
@@ -216,7 +216,6 @@ Four automations running in production:
 | Platform | Role | Integration Type |
 |----------|------|-----------------|
 | Bison (go.coldunicorn.com) | Email outreach execution | API + webhooks |
-| Smartlead | Email outreach execution (legacy/parallel) | API keys |
 | Snov.io | Lead enrichment (company, position, LinkedIn) | API |
 | Lusha | Phone number discovery | API |
 | Unitalk | SMS notifications | API |
@@ -246,7 +245,7 @@ Four automations running in production:
                             |
            +----------------+-------------------+
            |                |                   |
-     Make.com/Edge    Bison/Smartlead      Enrichment
+     Make.com/Edge    Bison                Enrichment
      Functions        Webhooks + API       (Snov.io, Lusha)
 ```
 
@@ -263,7 +262,7 @@ Four automations running in production:
 ## 4.3 Data Flow Model
 
 ```
-External Platforms (Bison, Smartlead)
+External Platforms (Bison)
     |
     | Webhooks + Scheduled Sync
     v
@@ -1042,7 +1041,7 @@ The 360 Panel is a ~740px slide-over with tabbed content:
 - OOO routing configuration (gender → campaign mapping)
 - Notification config (email addresses, SMS phones)
 - Look4Lead API key
-- External IDs (Smartlead ID, Bison Workspace ID)
+- External IDs (Bison Workspace ID)
 
 **Tab 8: Issues** (NEW -- not in demo)
 - Issue list with priority, status, description, reported by, timestamps
@@ -1289,7 +1288,7 @@ Two-step wizard:
   1. Period selector (last week default)
   2. Per-team-member blocks: Sent, Replied, Bounced for each day
   3. Computed RR% and BR% with indicators
-  4. Instructions per sequencer (Smartlead, Woodpecker, Snov.io) for manual data entry (Phase 1)
+  4. Instructions per sequencer (Woodpecker, Snov.io) for manual data entry (Phase 1)
 - **Notes:** **Status: Missing from demo.** Maps to "RR & BR generator" sheet. In Phase 1, this may involve manual data entry.
 
 ## 9.9 Admin Settings
@@ -1323,10 +1322,10 @@ Two-step wizard:
 
 - **Route:** `/admin/settings/integrations`
 - **Primary roles:** super_admin, admin
-- **Primary purpose:** API keys, Smartlead accounts, Bison workspace management, global config.
-- **Key datasets:** Smartlead Accounts data, client configs
+- **Primary purpose:** API keys, sequencer accounts, Bison workspace management, global config.
+- **Key datasets:** Sequencer Accounts data, client configs
 - **Main UI sections:**
-  1. Smartlead Accounts: account name + API key (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
+  1. Sequencer Accounts: account name + API key (4 accounts: RevGen, ConvertAI, E5M, ColdUnicorn)
   2. Global Bison webhook URL configuration
   3. OpenAI API key for classification
   4. Snov.io credentials
@@ -1775,7 +1774,7 @@ CREATE POLICY "internal_pdca" ON client_pdca_phases FOR ALL USING (
 | Partnerships | Low priority |
 | ABS | Low priority |
 | Automation logs | Nice-to-have |
-| API integrations (Smartlead, Bison sync) | Phase 2 per spec |
+| API integrations (Bison sync) | Phase 2 per spec |
 | Mobile optimization | Responsive web is sufficient |
 | In-app notifications | Email notifications are sufficient |
 | Audit trail | Important but not blocking |
@@ -1816,7 +1815,6 @@ Based on the spec's Phase structure and the existing demo code:
 | Item | Priority |
 |------|----------|
 | Bison webhook receiver (replace Make.com) | High |
-| Smartlead API daily sync | High |
 | Bison API daily sync | High |
 | CRM push (qualified leads → client CRM) | Medium |
 | Automation status dashboard | Medium |
@@ -1970,7 +1968,7 @@ Based on the spec's Phase structure and the existing demo code:
 - [ ] Build Edge Function: receive Bison webhook (tag attached → lead logging)
 - [ ] Build Edge Function: scheduled OOO lead campaign attachment
 - [ ] Build Edge Function: scheduled Look4Lead import
-- [ ] Build Edge Function: daily stats sync (Smartlead + Bison)
+- [ ] Build Edge Function: daily stats sync (Bison)
 - [ ] Test automation parity with Make.com
 - [ ] Cut over from Make.com to Edge Functions
 

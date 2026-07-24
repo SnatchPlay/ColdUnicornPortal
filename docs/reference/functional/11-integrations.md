@@ -1,6 +1,6 @@
 # 11 · Integrations & Ingestion Topology
 
-Where the portal ends and n8n / Smartlead / Bison begin. This file is the implementation pair to [BUSINESS_LOGIC.md §2 System boundaries](../../BUSINESS_LOGIC.md#2-system-boundaries) and [§9 Notifications](../../BUSINESS_LOGIC.md#9-notifications).
+Where the portal ends and n8n / Bison begin. This file is the implementation pair to [BUSINESS_LOGIC.md §2 System boundaries](../../BUSINESS_LOGIC.md#2-system-boundaries) and [§9 Notifications](../../BUSINESS_LOGIC.md#9-notifications).
 
 ## Contents
 
@@ -18,7 +18,7 @@ Where the portal ends and n8n / Smartlead / Bison begin. This file is the implem
 ## 1. Topology
 
 ```
-Smartlead / Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
+             Bison / Aimfox ──daily pull──▶  n8n  ──UPSERT──▶  Supabase
                                     │                    │
                                     │ webhooks           │
                                     ▼                    ▼
@@ -41,7 +41,7 @@ Four actors that touch Supabase:
   [03-data-model §4a](03-data-model.md#4a-public-functions-anon-callable), formula in
   [04-metrics-catalog §16](04-metrics-catalog.md#16-public-marketing-counters)).
 
-The portal **never** reaches Smartlead/Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
+The portal **never** reaches Bison/Aimfox directly. n8n is the only system that talks to those vendors. Per-client vendor credentials live in `client_sequencers` (ADR-0008), written by the portal, read by n8n.
 
 ---
 
@@ -82,7 +82,7 @@ These exist primarily so the portal can write configuration that downstream syst
 | `clients.sms_phone_numbers` (text[]) | Where n8n sends SMS alerts | n8n |
 | `clients.auto_ooo_enabled` (bool) | Is OOO auto-routing on? | n8n (gate) |
 | `client_ooo_routing` (table) | Mapping of `(client, gender?)` → follow-up `campaign_id` | n8n (rule source) |
-| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (smartlead / emailbison / aimfox — fixed UUIDs `…0001`/`…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
+| `client_sequencers` (table) | Per-client sequencer credentials: `api_key` + `external_workspace_id` (text) per `sequencers` row (emailbison / aimfox — fixed UUIDs `…0002`/`…0003`). Replaced `clients.external_api_key` / `external_workspace_id` / `linkedin_api_key` (ADR-0008) | n8n (join `sequencers` on `key`) |
 | `email_exclude_list` | Agency-wide domain blacklist | n8n (pre-send filter) |
 
 Editing these in the portal does not produce immediate side-effects. n8n picks up changes on its next run (timing depends on n8n flow schedule).

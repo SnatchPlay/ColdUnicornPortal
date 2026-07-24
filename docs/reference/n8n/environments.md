@@ -32,13 +32,19 @@ Explicitly forbidden without a per-operation instruction from the user:
 
 ## How this is enforced
 
-`scripts/n8n/lib/mcp.mjs` splits the tool surface in two:
+`scripts/n8n/lib/mcp.mjs` splits the MCP tool surface in two:
 
 - `callTool()` **throws** if asked for any of the six write tools.
 - `callWriteTool()` **refuses** unless `N8N_ENV=development`.
 
 No tracked script calls `callWriteTool()` today. The guard exists so that when a development
 instance appears, the safe default is already in place rather than being retrofitted.
+
+**One write path exists: `pnpm n8n:deploy`** (`scripts/n8n/deploy.mjs`, over the REST API in
+`scripts/n8n/lib/rest.mjs`, using `N8N_REST_API_KEY`). It applies a surgical, artifact-sourced change
+to a managed workflow — see [workflow-lifecycle.md](workflow-lifecycle.md). It is dry-run by default
+and its `--apply` refuses unless `N8N_APPROVED_PRODUCTION_WRITE` is set for that one invocation, so a
+production write is still an explicit per-operation human decision, never ambient.
 
 `pnpm n8n:smoke` prints a warning whenever a write-capable token is aimed at a non-development
 instance. Expected today; do not silence it.
