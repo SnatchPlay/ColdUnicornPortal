@@ -1653,8 +1653,18 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         COALESCE(SUM(bounce_count)          FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_bounce_w4,
         COALESCE(SUM(ooo_count)             FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_ooo_w4,
         COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_neg_w4,
-        -- Latest non-zero prospects_count (approximation: MAX over 180-day window)
-        COALESCE(MAX(prospects_count) FILTER (WHERE prospects_count > 0), 0)::int                      AS latest_prospects
+        -- Prospects added: the month-to-date cumulative on the most recent day we have.
+        --
+        -- NOT MAX(prospects_count). `prospects_count` is a DERIVED day-delta of this cumulative, so a
+        -- single failed Bison `leads` fetch — which writes 0 rather than erroring — makes the next day's
+        -- delta equal the whole month, and MAX() then pinned that spike for 180 days. UniTalk rendered
+        -- 5388 from one such row on 2026-06-08 while the true figure was 3195; ColdUnicorn PL 8905 vs
+        -- 1331. `prospects_total` is the raw counter and carries no delta arithmetic, so it cannot be
+        -- poisoned that way. This reproduces CS PDCA column P (`SUMIFS(K:K, …, I:I = TODAY())`) exactly
+        -- on all 15 active clients, zeros included.
+        -- → automation/sheets/pdca/FORMULAS.md §4, defects 5-6
+        COALESCE((array_agg(prospects_total ORDER BY report_date DESC)
+                  FILTER (WHERE prospects_total IS NOT NULL))[1], 0)::int                              AS latest_prospects
       FROM daily_stats
       WHERE report_date >= CURRENT_DATE - 180
       GROUP BY client_id

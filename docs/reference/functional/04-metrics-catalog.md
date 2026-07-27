@@ -407,7 +407,6 @@ const start = addDays(currentWeekStart, -7 * offset);
 const end   = addDays(start, 6);
 
 const sent     = sumInRange(dailyByDate.values(), start, end, i => i.emailsSent);
-const response = sumInRange(dailyByDate.values(), start, end, i => i.responseCount);
 const human    = sumInRange(dailyByDate.values(), start, end, i => i.humanRepliesCount);
 const bounce   = sumInRange(dailyByDate.values(), start, end, i => i.bounceCount);
 const ooo      = sumInRange(dailyByDate.values(), start, end, i => i.oooCount);
@@ -417,8 +416,8 @@ return {
   bucket,
   totalLeads:   sumInRange(leadByDate.values(), start, end, i => i.all),
   sqlLeads:     sumInRange(leadByDate.values(), start, end, i => i.sql),
-  responseRate: toRate(response, sent),
-  humanRate:    toRate(human,    sent),
+  responseRate: toRate(human + ooo, sent),
+  humanRate:    toRate(human,       sent),
   bounceRate:   toRate(bounce,   sent),
   oooRate:      toRate(ooo,      sent),
   negativeRate: toRate(negative, sent),
@@ -427,10 +426,22 @@ return {
 
 `toRate(numerator, denominator)` at [client-metrics.ts:230-233](../../../src/app/lib/client-metrics.ts#L230-L233) returns `null` when `denominator <= 0`.
 
+> **The block above is the raw path, which nothing renders.** `ClientsPage` loads a pre-bucketed
+> server summary and builds its rows in `createClientMetricsFromSummary()`
+> ([client-metrics.ts:436-462](../../../src/app/lib/client-metrics.ts#L436-L462)); the condition
+> context reads that same pack. `createClientMetrics()` has no production caller and survives for
+> tests. Both paths compute `responseRate` the same way — `response_count` is read by neither.
+
 ### 10.1 WoW Total Leads
 
 - **Formula:** `count(leads created in week)`.
 - **Source:** `leads.created_at`, `leads.qualification` (LeadAggregate.all counts every lead regardless of qualification).
+- **What `created_at` means:** since
+  [20260727](../../../supabase/migrations/20260727_promote_contact_lead_cast_and_date.sql) it is the
+  originating **reply's `received_at`** — the day the prospect answered. Before that it defaulted to
+  `now()`, i.e. the moment n8n happened to run, so a delayed or replayed run moved leads between
+  weeks. Rows created before that migration keep the old semantics and are not comparable
+  bucket-for-bucket with CS PDCA, which counts by the client sheet's LEAD RECEIVED date.
 
 ### 10.2 WoW SQL Leads
 
@@ -438,15 +449,24 @@ return {
 
 ### 10.3 WoW Response Rate
 
-- **Formula:** `sum(response_count) / sum(emails_sent)` or null.
-- **Source:** `daily_stats.response_count`, `daily_stats.emails_sent`.
-- **Edge cases:** the numerator `response_count` is total replies; contrast with `human_replies_count`. Also null when zero sends.
+- **Formula:** `(sum(human_replies_count) + sum(ooo_count)) / sum(emails_sent)`, or null when zero sends.
+- **Source:** `daily_stats.human_replies_count`, `daily_stats.ooo_count`, `daily_stats.emails_sent`.
+- **Why not `response_count`:** this matches the CS PDCA sheet, where `AQ = AU + AY` — the human
+  rate plus the OOO rate. Sheet column `F` (`Response Count`, the true per-day replied figure) is
+  only the numerator for a **SmartLead** row. → [PDCA FORMULAS §3](../../../automation/sheets/pdca/FORMULAS.md#3-cs-pdca--the-metric-columns)
+- **Edge case, and it is not small:** the numerator is a pair of run-time deltas of an *undated*
+  lifetime total while the denominator is a true per-day value. `human + ooo` therefore routinely
+  **exceeds** `response_count` — on UniTalk, every day since 2026-06-01.
+  → [PDCA FORMULAS §4](../../../automation/sheets/pdca/FORMULAS.md#4-defect-table)
 
 ### 10.4 WoW Human Reply Rate
 
 - **Formula:** `sum(human_replies_count) / sum(emails_sent)`.
 - **Source:** `daily_stats.human_replies_count`.
 - **Use:** excludes automated/OOO/bounce replies вЂ” the "quality" signal.
+- **Caveat:** `human_replies_count` is `max(lifetimeInboxTotal - yesterday's stored total, 0)`, not
+  a count of replies received that day. Archiving a reply lowers the lifetime total and the clamp
+  silently discards the drop.
 
 ### 10.5 WoW Bounce Rate
 
@@ -455,6 +475,17 @@ return {
 ### 10.6 WoW OOO Rate
 
 - **Formula:** `sum(ooo_count) / sum(emails_sent)`.
+- **`ooo_count` is not OOO.** It is an automated-replies delta, in Supabase *and* in the sheet
+  (column `X`, mislabelled "Out of Office"). Measured on UniTalk it overstates real OOO episodes
+  from `ooo_followups` by ~3×.
+  → [reconciliation · Problem 2](../processes/outreach/sheets-supabase-reconciliation.md#problem-2--ooo_count-is-a-mislabelled-copy)
+- **Accepted deviation, decided 2026-07-27 (review by 2026-10-31):** kept aligned with CS PDCA
+  rather than corrected, because the two surfaces are compared by eye daily and fixing one side
+  alone would make them disagree — wrong-but-identical beats wrong-and-divergent while the sheet is
+  still the operational surface. The correction is scheduled for a branch and lands when the team
+  moves onto the portal. Real OOO comes from `replies.classification` (or `ooo_followups`), never
+  from `replies.is_automated_reply`, which is unpopulated. Nothing new may be built on `ooo_count`.
+  → [bison-daily-stats-process · Accepted deviation](../../../automation/n8n/workflows/ingestion/bison-daily-stats-process/README.md#accepted-deviation--ooo_count-decided-2026-07-27-review-by-2026-10-31)
 
 ### 10.7 WoW Negative Rate
 
@@ -641,7 +672,7 @@ Runtime mapping for dynamic condition rules is built in `buildClientConditionCon
 
 | Context key | Source |
 |------------|--------|
-| `prospects_added` | `clients.prospects_added` |
+| `prospects_added` | `latestProspectsCount \|\| clients.prospects_added` ([client-condition-context.ts:170](../../../src/app/lib/conditions/client-condition-context.ts#L170)) — see the warning below |
 | `prospects_signed` | `clients.prospects_signed` |
 | `inboxes` | `clients.inboxes_count` |
 | `min_sent` | `clients.min_daily_sent` |
@@ -657,6 +688,24 @@ Runtime mapping for dynamic condition rules is built in `buildClientConditionCon
 | `auto_li_api_key` | aimfox `client_sequencers.api_key` (via `ClientsOverviewPayload.clientSequencers`; was `clients.linkedin_api_key` — ADR-0012) |
 | `bi_setup` | `clients.bi_setup_done` (context key only — the Bi column was removed from the grid and the drawer) |
 | `cell.total_leads`, `cell.sql_leads`, `cell.bucket` | the 3-DoD row of the bucket being coloured (per-cell evaluation only) |
+
+> **`latestProspectsCount` = `prospects_total` on the most recent day** — Bison's month-to-date lead
+> count, the same fact CS PDCA shows as "Prospects Added"
+> ([orm-gateway/index.ts:1655](../../../supabase/functions/orm-gateway/index.ts#L1655)).
+>
+> Until 2026-07-27 it was `MAX(prospects_count) FILTER (prospects_count > 0)` over 180 days. Because
+> `prospects_count` is a *derived day-delta* of that cumulative, a single failed Bison fetch — which
+> writes 0 instead of erroring — made the next day's delta equal a whole month, and `MAX()` pinned
+> the spike for 180 days: UniTalk rendered **5388** (a 2026-06-08 artifact) against a true **3195**,
+> ColdUnicorn PL **8905** vs **1331**, Audytel **4722** vs **1041**. The sheet was never affected —
+> it reads the cumulative directly and derives no delta from it.
+>
+> The raw JS path still carries its own older definition
+> ([client-metrics.ts:373](../../../src/app/lib/client-metrics.ts#L373)), newest non-zero
+> `prospects_count` by `report_date`. It has no production caller, and `DailyStatRecord` does not
+> carry `prospects_total`, so aligning it means widening the wire format for a test-only path — left
+> alone deliberately, and noted here so the next reader does not mistake it for the live rule.
+> → [PDCA FORMULAS §4, defects 5–6](../../../automation/sheets/pdca/FORMULAS.md#4-defect-table)
 
 ### 15.2 DoD dynamic bucket evaluation
 
