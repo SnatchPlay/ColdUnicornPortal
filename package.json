@@ -17,6 +17,8 @@
     "db:migrate": "node scripts/db-apply-migrations.mjs",
     "db:migrate:local": "SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres node scripts/db-apply-migrations.mjs",
     "db:diagnose": "node scripts/db-diagnose.mjs",
+    "sheets:extract": "node scripts/sheets/extract-pdca.mjs",
+    "sheets:compare": "node scripts/sheets/compare-pdca-supabase.mjs",
     "n8n:smoke": "node scripts/n8n/smoke.mjs",
     "n8n:inventory": "node scripts/n8n/inventory.mjs",
     "n8n:export": "node scripts/n8n/export.mjs",
