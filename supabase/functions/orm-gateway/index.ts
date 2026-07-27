@@ -1655,13 +1655,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         COALESCE(SUM(negative_count)        FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS wow_neg_w4,
         -- Prospects added: the month-to-date cumulative on the most recent day we have.
         --
-        -- NOT MAX(prospects_count). `prospects_count` is a DERIVED day-delta of this cumulative, so a
-        -- single failed Bison `leads` fetch — which writes 0 rather than erroring — makes the next day's
+        -- NOT MAX(prospects_count): prospects_count is a DERIVED day-delta of this cumulative, so a
+        -- single failed Bison leads fetch — which writes 0 rather than erroring — makes the next day's
         -- delta equal the whole month, and MAX() then pinned that spike for 180 days. UniTalk rendered
         -- 5388 from one such row on 2026-06-08 while the true figure was 3195; ColdUnicorn PL 8905 vs
-        -- 1331. `prospects_total` is the raw counter and carries no delta arithmetic, so it cannot be
-        -- poisoned that way. This reproduces CS PDCA column P (`SUMIFS(K:K, …, I:I = TODAY())`) exactly
+        -- 1331. prospects_total is the raw counter and carries no delta arithmetic, so it cannot be
+        -- poisoned that way. This reproduces CS PDCA column P (SUMIFS over K for TODAY()) exactly
         -- on all 15 active clients, zeros included.
+        -- NOTE: no backticks in this comment — it lives inside a JS template literal.
         -- → automation/sheets/pdca/FORMULAS.md §4, defects 5-6
         COALESCE((array_agg(prospects_total ORDER BY report_date DESC)
                   FILTER (WHERE prospects_total IS NOT NULL))[1], 0)::int                              AS latest_prospects

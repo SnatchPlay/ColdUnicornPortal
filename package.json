@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "node scripts/dev-local.mjs",
     "dev:web": "vite",
-    "lint": "eslint src",
+    "lint": "eslint src && node scripts/check-edge-functions.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
