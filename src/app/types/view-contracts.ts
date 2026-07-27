@@ -344,7 +344,11 @@ export interface ClientMetricsSummary {
   threedod_total: number[];
   /** COUNT(*) MQL leads by day */
   threedod_sql: number[];
-  /** MAX(prospects_count) filtered to rows where prospects_count > 0 */
+  /**
+   * `prospects_total` (Bison's month-to-date lead count) on the most recent day in the window —
+   * the same fact CS PDCA shows as "Prospects Added". Not derived from `prospects_count`, which is
+   * a day-delta a single failed fetch can inflate to a whole month.
+   */
   latest_prospects_count: number;
 
   // ── Per-channel lead splits (leads.sequencer_id, ADR-0012) ─────────────────────────────────

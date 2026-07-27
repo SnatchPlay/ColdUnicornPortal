@@ -171,6 +171,50 @@ attach. Either the backfill synthesises a `sequencer_contacts` + `replies` pair 
 gains an explicit exception for imported history. **That is a decision, not an implementation
 detail** — it is why nothing was written.
 
+## Per-cell reconciliation, 2026-07-27
+
+The measurement above compared *counts of disagreeing cells*. The sheet's formulas and its raw
+`🤖Daily stats` rows are now tracked — [`automation/sheets/`](../../../../automation/sheets/README.md) —
+so the comparison is reproducible per (workspace, date, field):
+
+```bash
+pnpm sheets:extract "~/Downloads/GHEADS _ PDCA.xlsx" --snapshot 2026-07-27
+pnpm sheets:compare --client UniTalk --from 2026-07-01 --to 2026-07-27
+```
+
+UniTalk, 27 overlapping days in July — **47 disagreements, and they sort by column semantics, not
+by client**:
+
+| Field | Days disagreeing | Kind of column |
+|---|---|---|
+| `emails_sent` | 1 / 27 | true per-day value |
+| `response_count` | 3 / 27 | true per-day value |
+| `prospects_total` | 1 / 27 | month-to-date cumulative |
+| `human_replies_total` | 8 / 27 | **undated lifetime snapshot** |
+| `automated_replies_total` | 9 / 27 | **undated lifetime snapshot** |
+| `human_replies_count` | 12 / 27 | delta of a lifetime snapshot |
+| `ooo_count` | 13 / 27 | delta of a lifetime snapshot |
+
+**The per-day columns agree; the snapshot columns don't.** That is the finding. The two pollers hit
+the same undated `replies?…&folder=inbox` endpoint at different moments, so they see different
+lifetime totals and manufacture different "day" counts from them. On 2026-07-20 the sheet read
+`2150 / 3322` and Supabase read `2171 / 3381`; on 07-21 Supabase read `2155` — **lower than the day
+before**, because the endpoint counts an inbox, and an inbox shrinks when replies are archived. The
+`max(delta, 0)` clamp in both writers discards the drop without resetting the baseline.
+
+That one skew is the entire visible discrepancy. Reconstructing WoW week `-1` (20–26.07) from each
+store, denominators identical at 3457 sends:
+
+| | human | OOO | Human RR | Total resp |
+|---|---|---|---|---|
+| Sheet → CS PDCA | 60 | 114 | 1.7% | 5.0% |
+| Supabase → portal | 92 | 183 | 2.7% | 8.0% |
+
+Both reproduce their own UI exactly, and weeks `-2`/`-3` agree between the stores. **Neither number
+is trustworthy** — they are two samples of a counter that was never a daily metric. Fixing this
+means giving `human_replies_count` and `ooo_count` a real date filter, not reconciling the two
+stores against each other.
+
 ## Related
 
 [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) ·
