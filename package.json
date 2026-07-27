@@ -75,10 +75,11 @@
     "@typescript-eslint/parser": "^8.58.2",
     "@vitejs/plugin-react": "4.7.0",
     "drizzle-kit": "^0.31.10",
+    "esbuild": "0.25.12",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "jsdom": "26.1.0",
     "js-yaml": "^4.1.0",
+    "jsdom": "26.1.0",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
     "vitest": "2.1.9"
