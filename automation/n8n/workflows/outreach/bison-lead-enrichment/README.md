@@ -55,6 +55,41 @@ the other.**
 Verified before publishing: the whole RPC chain was executed against production inside a transaction
 that was rolled back, and returned `created: true` with a real `lead_id`.
 
+### Incident 2026-07-23 — branch S wrote nothing for four days, silently
+
+Branch S went live on 2026-07-22 and worked. The next day
+[`20260723_promote_contact_qualification_sync`](../../../../../supabase/migrations/20260723_promote_contact_qualification_sync.sql)
+replaced the INSERT's literal `'preMQL'` with `coalesce(v_qualification, 'preMQL')`. The literal was
+an untyped constant Postgres coerced into `public.lead_qualification`; the coalesce resolves to
+`text`, and under `set search_path = ''` there is no implicit assignment cast. **Every insert
+raised.** The two idempotency branches assign the *literal* `'MQL'` and kept working, so
+re-promotions still succeeded — which is why the failure looked partial on the first day and total
+afterwards.
+
+Nothing surfaced it. All five branch-S Postgres nodes run `onError: continueRegularOutput`, which
+[ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md) requires so a
+Supabase failure cannot stop the sheet or the CRM. Non-fatal became invisible: n8n reported success,
+the sheet filled normally, and **50 `Interested` replies across 20 clients were left with
+`lead_id is null`** between 2026-07-23 and 2026-07-27. It was found by comparing the portal against
+CS PDCA, not by any alarm.
+
+Repaired by [`20260727_promote_contact_lead_cast_and_date`](../../../../../supabase/migrations/20260727_promote_contact_lead_cast_and_date.sql)
+(explicit cast, plus `created_at` from `replies.received_at` so a backfill cannot pile a week of
+leads onto one day) and backfilled by
+[`20260727b`](../../../../../supabase/migrations/20260727b_backfill_orphaned_interested_replies.sql).
+
+**The lesson is not the cast.** A migration changed an RPC that only n8n calls, and no caller was
+exercised against it — the local-stack gate in [CLAUDE.md §2](../../../../../CLAUDE.md) exists for
+exactly this.
+
+The standing assertion now lives in the database as `positive_reply_without_lead`, one of
+[`public.data_invariants()`](../../../../../supabase/migrations/20260727c_data_invariants.sql), and
+is read by `pnpm db:invariants`. It asserts the **outcome** rather than the absence of an exception,
+which is the only thing that works here: an Error Trigger fires when an execution *fails*, and
+`continueRegularOutput` is exactly the setting that stops it failing. Binding this workflow to
+[automation-failure-recorder](../../ops/automation-failure-recorder/README.md) — it already is —
+could never have caught this.
+
 ## The Sheets dependency, and how it was cut (2026-07-22)
 
 `workspace_id` does come from the webhook, so `[S] Resolve client sequencer` was always independent.

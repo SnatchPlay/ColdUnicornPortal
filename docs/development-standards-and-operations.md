@@ -17,6 +17,7 @@ pnpm db:migrate       # apply pending migrations — needs SUPABASE_DB_URL (no h
 pnpm db:migrate:local # same, pre-pointed at the local stack (127.0.0.1:54322)
 pnpm db:introspect    # drizzle-kit introspect → supabase/drizzle/schema.ts
 pnpm db:diagnose      # connectivity / schema sanity (needs SUPABASE_DB_URL)
+pnpm db:invariants    # assert the pipeline invariants; exit 1 = critical, 2 = warning, 3 = not checked
 ```
 
 **Local Supabase + auto-deploy:** develop against a full local stack (Postgres + Auth + Edge
