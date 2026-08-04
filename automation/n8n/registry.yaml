@@ -319,6 +319,26 @@ workflows:
         remoteWorkflowId: 1hHbU2hYYcsktLUP
     lastRepositorySync: 2026-07-21
 
+  # A repeatable repair, not a one-off: it reconciles leads.created_at with the client sheet's
+  # LEAD RECEIVED after a write path is fixed forward. Converges — a run with nothing to fix moves
+  # nothing. Manual on purpose; a scheduled date rewrite would re-assert the sheet over later fixes.
+  - id: sheets-lead-date-backfill
+    name: "[BACKFILL] Client Leads sheets → Supabase · lead dates"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-lead-date-backfill
+    businessProcess: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: manual
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: UMRS1YJFIcwl6VRK
+    lastRepositorySync: 2026-08-03
+
   # One-off Sheets → Supabase migrations. Ran once on 2026-07-22, then deactivated.
   # Kept under repository control because they are the only record of how the rows got there.
   # docs/reference/processes/outreach/sheets-supabase-reconciliation.md
@@ -372,3 +392,25 @@ workflows:
       production:
         remoteWorkflowId: Hzar4pwdAXrDHAwn
     lastRepositorySync: 2026-07-22
+
+  # The edit-driven half of the credential pair. The 6-hourly sweep above can CREATE a Bison row
+  # (it reads the client name from the sheet); this one reacts in seconds to a manual edit but only
+  # ever resolves a client through the emailbison row that already exists. It is also the only
+  # thing that syncs Aimfox keys at all.
+  - id: sheets-credential-sync-on-edit
+    name: "[CRED] CS PDCA edit → client_sequencers · Bison + Aimfox keys"
+    domain: ops
+    path: automation/n8n/workflows/ops/sheets-credential-sync-on-edit
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: ATPnIVnO0sAB9GQx
+    lastRepositorySync: 2026-07-29
+    lastValidation: 2026-07-29 statement proven in a rolled-back transaction; webhook unauthenticated (security.md #9)

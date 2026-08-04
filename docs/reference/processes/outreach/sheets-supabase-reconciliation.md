@@ -215,6 +215,59 @@ is trustworthy** — they are two samples of a counter that was never a daily me
 means giving `human_replies_count` and `ooo_count` a real date filter, not reconciling the two
 stores against each other.
 
+## Per-lead reconciliation, 2026-08-03 — Bent Iron PL
+
+The first row-by-row diff of a client's `Leads` tab against `leads`: 194 sheet rows, January–August
+2026. Six rows disagree, and each disagreement has a named cause — none of them is the portal, which
+reproduces `leads` exactly, per-sequencer split included.
+
+| Kind | Rows | What it is |
+|---|---|---|
+| Duplicate in Supabase | 1 | ZPOW Dwikozy S.A. / Paweł Styczeń, 09.07 — the 2026-07-22 import re-inserted a lead the live Aimfox flow had already written. The `NOT EXISTS` guard matches on `(client_id, company_name, first_name)` when the sheet row has no email, and the live row's identity fields were still different at import time (it was edited on 29.07). Both rows are `MQL`, so July gained +1 Total and +1 SQL |
+| Missing from Supabase | 1 | Mieszko S.A. / Juozas Daunys, 31.03, `MQL` — in the sheet, no `leads` row at all |
+| `MQL` here, `preMQL` in the sheet | 4 | Coro-Tech (10.03), MARCOR (18.04), Zaklad Drobiarski w Stasinie (07.06), VisGrana (01.07). All four share one `updated_at` — `2026-07-23 19:16:07.155615` — and they are the only rows of this client that write touched, out of ~200. No migration in this repository writes `qualification` outside `promote_contact_to_lead`, so what produced it is not recorded anywhere |
+| Date drift | 7 | Aimfox leads, 1–7 days late — the branch-S/branch-L split described below |
+
+Reproduce the first three with a `Leads`-tab export and the `leads` table; the last one with
+`pnpm sheets:backfill-aimfox-dates` (dry-run by default).
+
+### Aimfox lead dates — one fact, two sources
+
+`aimfox-premql-to-pdca` dated the sheet row from the prospect's own conversation message and dated
+the Supabase reply from `body.event.timestamp` — when Aimfox delivered the webhook, i.e. when the
+label was applied. `leads.created_at` is cut from `replies.received_at`, so the drift reached every
+DoD / WoW / MoM bucket. Label events arrive in batches, which is why the wrong value is visibly
+synthetic: five different contacts share `received_at = 2026-07-28 08:01`, three share `07-28 07:54`.
+
+Scope, measured 2026-08-03: **52 Aimfox leads carry a reply, 26 of them sit in such a batch minute**,
+across four clients — Kaizen rent (22 leads / 15 batched), Runmageddon (17 / 9), Bent Iron PL (12 / 2),
+ColdUnicorn PL (1 / 0). Bison leads are not affected: `bison-lead-enrichment` puts
+`last_reply.date_received` into both stores.
+
+The workflow now takes the message date on both branches (deployed 2026-08-03). History is repaired
+from the sheet — the decision was to converge on what the workbooks already hold rather than
+re-derive dates from Aimfox. Two tools do the same job at different scales, with the same rules:
+`leads.created_at` and `replies.received_at` move together, and a lead that cannot be matched to a
+sheet row, or whose sheet row has no readable date, is reported and skipped rather than guessed.
+
+| | Reads | Use when |
+|---|---|---|
+| [`sheets-lead-date-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md) (n8n) | all 42 client workbooks over Google, via CS PDCA `col_4` | the real run — n8n holds the Sheets credentials |
+| [`pnpm sheets:backfill-aimfox-dates`](../../../../scripts/sheets/backfill-aimfox-lead-dates.mjs) | workbook exports on disk | one client, or a check without n8n |
+
+Both are dry-run by default and convergent: a second pass over unchanged data moves nothing.
+
+**Applied 2026-08-03** (execution 61622): 18 leads and their replies re-dated across Bent Iron PL,
+Runmageddon and Kaizen rent. After the write, 0 of 52 Aimfox leads disagree with their originating
+reply. MoM buckets did not move — every correction stayed inside its month; WoW did, which was the
+point. Four dry runs preceded it and two of them caught false positives that would otherwise have
+been written: an undecidable two-row tab (EvidencePrime) and a tab where ISO rows outvoted slash
+rows on the date format (TouchlessFreaks v2, 28 proposed day↔month swaps).
+
+That second flaw still exists in [`sheets-lead-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-backfill/README.md)'s
+`Build Rows`, which used the same detector on 2026-07-22. Any workbook mixing ISO and slash dates
+may have been imported with day and month swapped — unchecked, and worth a pass of its own.
+
 ## Related
 
 [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) ·

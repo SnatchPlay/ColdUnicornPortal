@@ -36,6 +36,7 @@ Webhook /preMQL-Aimfox
 | 4 | no contact identity is stored | the Aimfox lead id lives only inside the execution; a repeat contact cannot be recognised — process invariant 2 |
 | 5 | no retry, no error branch | a failure between enrichment and the sheet write leaves the lead half-created and the notification unsent |
 | 6 | client resolution goes through CS PDCA `col_4` | the client's *spreadsheet id* is the join key, so a client with no sheet cannot receive a lead at all |
+| 7 | ~~branch S dated the reply from `body.event.timestamp` while branch L dated it from the conversation~~ | **fixed 2026-08-03** — the two branches wrote two different facts, so a lead could sit days from where the sheet put it; every DoD/WoW/MoM bucket inherited it. See the history entry below |
 
 ## What phase A adds — branch S, live 2026-07-22
 
@@ -50,7 +51,7 @@ Get Workspace Api Key ─┬─ [2] Find workspace in CS PDCA → … (branch L,
                              └─ [S] Search Conversations
                                   └─ [S] Get Conversation
                                        └─ [S] upsert_sequencer_contact(client_sequencer_id, lead.id, lead.email, lead.first_name, lead.last_name)
-                                            └─ [S] upsert_reply(webhook delivery id, event.timestamp, …, 'Interested', latest lead message body)
+                                            └─ [S] upsert_reply(webhook delivery id, latest lead message created_at, …, 'Interested', latest lead message body)
                                                  └─ [S] Resolve campaign(lead.origins[0].id)
                                                       └─ [S] promote_contact_to_lead(…) → leads.sequencer_id = …0003 (aimfox)
 ```
@@ -87,6 +88,30 @@ Do **not** `execute_workflow` against this on production: it appends to a live c
 sends a notification. Real verification is the first live production execution after this change —
 watch `GET /api/v1/executions?workflowId=s0GqDtCzyLAvVnm1` and confirm a new `sequencer_contacts` /
 `replies` / `leads` row.
+
+## History · 2026-08-03 — the two branches now date a lead from the same fact
+
+Branch L has always written `LEAD RECEIVED` from the prospect's own conversation message
+(`Edit Fields.leadReceived` — newest message whose sender is not the account). Branch S passed
+`body.event.timestamp` to `upsert_reply`, which is when Aimfox **delivered the webhook**, i.e. when
+the label was applied. Since [20260727](../../../../../supabase/migrations/20260727_promote_contact_lead_cast_and_date.sql)
+`leads.created_at = replies.received_at`, so every DoD / WoW / MoM bucket was cut on the wrong day.
+
+It is not a rounding difference. Label events arrive in batches, and the batch minute is what got
+stored — five different contacts share `received_at = 2026-07-28 08:01`, three share `07-28 07:54`.
+Measured on Bent Iron PL: 7 of 12 Aimfox leads sat 1–7 days from where the sheet put them
+(OLEOFARM and SOPEM: sheet 20.07, Supabase 27.07).
+
+`[S] upsert_reply` now derives the timestamp from `[S] Get Conversation` with branch L's predicate,
+at full precision, and falls back to `body.event.timestamp` only when the conversation carries no
+lead message (branch L writes an empty cell in that case; a NULL `received_at` is not an option).
+Parity was proved against the committed artifact — both expressions read out of `workflow.json` and
+run over the same payloads, including the batch shape and the no-message fallback.
+
+Rows written before this keep the old value: `upsert_reply`'s `on conflict` deliberately does not
+touch `received_at`, so a replay does not repair them. That is what
+[`sheets:backfill-aimfox-dates`](../../../../../scripts/sheets/backfill-aimfox-lead-dates.mjs) is
+for — it re-dates from the client workbook, dry-run by default.
 
 ## History
 

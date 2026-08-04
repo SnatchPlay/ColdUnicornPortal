@@ -175,6 +175,35 @@ instance was then audited — only the throwaway copies were affected. The rule 
 targeted node change**; re-author through the SDK only when the graph itself changes, and always pass
 credentials explicitly.
 
+### 10. The credential-sync webhook is unauthenticated — **high, open**
+
+Found 2026-07-29 while finishing
+[`sheets-credential-sync-on-edit`](../../../automation/n8n/workflows/ops/sheets-credential-sync-on-edit/README.md).
+
+`POST https://n8n.coldunicorn.com/webhook/credential-sync` has no authentication. It is worse than
+findings 3's shape: those webhooks drive lead creation and blacklisting, this one **writes
+`client_sequencers.api_key`**. Anyone holding the path can point a client's Bison or Aimfox
+credential at a key they control, or simply break every Bison call for that client. The path is the
+whole secret, and it travels in a Google Apps Script that anyone with edit access to `GHEADS | PDCA`
+can read.
+
+Accepted deliberately for now (owner's call, 2026-07-29) rather than overlooked. The fix is two
+steps, neither of which an agent can do: an `httpHeaderAuth` credential on the webhook node (the MCP
+exposes no credential tools — same constraint as the `Aimfox Master` credential in finding 7), and
+the same header added to `PDCA_CONFIG` in the Apps Script.
+
+Two related facts about the same workflow, both from the same session:
+
+- **Its `pinData` held a live Bison API key and a live Aimfox token** (workspace 11 / Runmageddon),
+  pinned from a real webhook delivery while the workflow was being built. Removed as part of this
+  change; treat both values as exposed for as long as anyone outside the owner had n8n access.
+- **Every execution stores raw API keys in n8n's execution data**, because the keys arrive in the
+  request body. That is inherent to a sheet-edit trigger and is not fixable in the graph — trim
+  execution retention instead.
+
+`pnpm n8n:validate` raises `unauthenticated-webhook` as a warning on the artifact. That warning is
+the reminder; do not silence it.
+
 ## Reviewing a workflow
 
 - [ ] `pnpm n8n:validate` passes

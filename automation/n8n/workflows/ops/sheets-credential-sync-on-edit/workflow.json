@@ -1,0 +1,118 @@
+{
+  "name": "[CRED] CS PDCA edit → client_sequencers · Bison + Aimfox keys",
+  "nodes": [
+    {
+      "id": "af-resolve-workspace",
+      "name": "[AF] Resolve workspace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        944,
+        576
+      ],
+      "notes": "GET /accounts returns accounts[].workspace_id for the token that asked. No key -> 401 -> continues with an error item, and the SQL simply gets an empty workspace.",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.aimfox_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/accounts"
+      }
+    },
+    {
+      "id": "3cbe4184-484e-4d11-8ac9-31d0c57dbb51",
+      "name": "Collect credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        576
+      ],
+      "parameters": {
+        "jsCode": "// CS PDCA credential edit -> a flat {ws, bison_key, aimfox_key} payload.\n//\n// Column semantics (docs/reference/n8n/aimfox-phase-a.md, ops/sheets-bison-credential-sync):\n//   E  = col_5   Bison workspace id  -- the ONLY client identity this payload carries\n//   F  = col_6   Bison API key\n//   DA = col_105 Aimfox token\n//\n// Keys never leave n8n: this payload goes straight into the Postgres node next to it and nothing\n// here is logged. The Apps Script sends one request per edited sheet row and always sends all\n// three values, so re-syncing every column on every edit is self-healing rather than dependent on\n// which cell happened to be touched.\nconst out = [];\n\nfor (const item of $input.all()) {\n  const body = item.json?.body ?? {};\n\n  if (body.event !== 'pdca_credentials_updated') {\n    throw new Error(`Unexpected event \"${body.event}\" - refusing to touch credentials.`);\n  }\n  if (body.sheetName !== 'CS PDCA') {\n    throw new Error(`Unexpected sheet \"${body.sheetName}\" - refusing to touch credentials.`);\n  }\n\n  const byColumn = Object.fromEntries((body.fields ?? []).map((f) => [f.column, f.value]));\n  const pick = (column) => String(body.values?.[column] ?? byColumn[column] ?? '').trim();\n\n  const ws = pick('E');\n  const sheetRow = body.row ?? null;\n\n  // No workspace id -> no way to resolve the client. Report it, never guess.\n  if (!/^\\d+$/.test(ws)) {\n    out.push({ json: { sheet_row: sheetRow, skipped: 'no-workspace-id', aimfox_key: null, payload: '[]' } });\n    continue;\n  }\n\n  const aimfoxKey = pick('DA') || null;\n\n  out.push({\n    json: {\n      sheet_row: sheetRow,\n      edited_columns: (body.editedColumns ?? []).join(','),\n      // Surfaced for the Authorization header of \"[AF] Resolve workspace\" only. It stays inside\n      // n8n exactly as the payload does, and nothing downstream logs either.\n      aimfox_key: aimfoxKey,\n      payload: JSON.stringify([\n        { ws, bison_key: pick('F') || null, aimfox_key: aimfoxKey },\n      ]),\n    },\n  });\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "d9608449-c0c9-43d7-abe5-2e84f1d23e59",
+      "name": "CS PDCA edit",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        608,
+        576
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "credential-sync",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "2e8c613a-c1ab-4f40-82c6-3c72cdb415ad",
+      "name": "Sync client_sequencers",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1136,
+        576
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('Collect credentials').item.json.payload, (() => { const a = Array.isArray($json.accounts) ? $json.accounts : []; const ids = [...new Set(a.map(x => x && x.workspace_id).filter(Boolean))]; return ids.length === 1 ? ids[0] : ''; })() ] }}"
+        },
+        "query": "-- CS PDCA credential edit -> client_sequencers.\n-- $1 is a JSON array of {ws, bison_key, aimfox_key} built by the Code node above.\nwith p as (select $1::text::jsonb as j, nullif(btrim($2), '') as aimfox_ws),\nsrc as (\n  select nullif(btrim(r->>'ws'),'')         as ws,\n         nullif(btrim(r->>'bison_key'),'')  as bison_key,\n         nullif(btrim(r->>'aimfox_key'),'') as aimfox_key\n    from p, jsonb_array_elements(p.j) r\n),\nbison  as (select id from public.sequencers where key = 'emailbison'),\naimfox as (select id from public.sequencers where key = 'aimfox'),\n-- The payload's only client identity is the Bison workspace id (CS PDCA col_5), so every write\n-- below hangs off the emailbison row that already carries it. No such row -> reported, never\n-- guessed: creating one needs the client name, which this payload does not carry. The 6-hourly\n-- sheets-bison-credential-sync owns that case.\ntarget as (\n  select cs.client_id, src.ws, src.bison_key, src.aimfox_key\n    from src\n    join bison on true\n    join public.client_sequencers cs\n      on cs.external_workspace_id = src.ws\n     and cs.sequencer_id = bison.id\n   where src.ws is not null\n),\n-- 1. Bison: refresh in place, matched on the workspace id (never on a name), only when it differs.\nupd_bison as (\n  update public.client_sequencers cs\n     set api_key = t.bison_key, enabled = true, updated_at = now()\n    from target t, bison\n   where cs.external_workspace_id = t.ws\n     and cs.sequencer_id = bison.id\n     and t.bison_key is not null\n     and cs.api_key is distinct from t.bison_key\n  returning cs.id\n),\n-- 2. Aimfox: upsert on (client_id, sequencer_id), key AND workspace id.\n--    The workspace id used to be left NULL because CS PDCA does not carry it (DA is the token and\n--    there is no other column), and a row without it authenticates API calls but CANNOT resolve an\n--    inbound webhook -- Get Workspace Api Key matches on external_workspace_id, so a NULL row makes\n--    every event for that client vanish silently, in Supabase AND in the client sheet, with the\n--    execution still green. \"[AF] Resolve workspace\" now reads it from the token's own GET\n--    /accounts. Still nullable: an unresolvable token must not block the key from being stored.\naimfox_src as (\n  select distinct on (t.client_id) t.client_id, t.aimfox_key, (select aimfox_ws from p) as aimfox_ws\n    from target t\n   where t.aimfox_key is not null\n   order by t.client_id\n),\nups_aimfox as (\n  insert into public.client_sequencers (client_id, sequencer_id, api_key, external_workspace_id, enabled)\n  select a.client_id, (select id from aimfox), a.aimfox_key, a.aimfox_ws, true from aimfox_src a\n  on conflict (client_id, sequencer_id) do update\n     set api_key = excluded.api_key,\n         -- never blank a known workspace with an unresolved one\n         external_workspace_id = coalesce(excluded.external_workspace_id,\n                                          public.client_sequencers.external_workspace_id),\n         enabled = true, updated_at = now()\n   -- the old guard was api_key only, so a row whose key was already current could never acquire its\n   -- missing workspace id -- exactly how FitMech kept a valid key and a NULL workspace\n   where public.client_sequencers.api_key is distinct from excluded.api_key\n      or (excluded.external_workspace_id is not null\n          and public.client_sequencers.external_workspace_id is distinct from excluded.external_workspace_id)\n  returning (xmax = 0) as inserted, external_workspace_id\n)\nselect (select count(*) from src)                            as rows_in,\n       (select count(*) from target)                         as clients_resolved,\n       (select count(*) from upd_bison)                      as bison_keys_refreshed,\n       (select count(*) from ups_aimfox where inserted)      as aimfox_rows_created,\n       (select count(*) from ups_aimfox where not inserted)  as aimfox_keys_refreshed,\n       (select aimfox_ws from p)                             as aimfox_workspace_resolved,\n       (select count(*) from ups_aimfox\n         where external_workspace_id is not null)            as aimfox_rows_with_workspace,\n       (select string_agg(s.ws, ', ' order by s.ws)\n          from src s\n         where s.ws is not null\n           and not exists (select 1 from target t where t.ws = s.ws)) as unmatched_workspaces;\n"
+      }
+    }
+  ],
+  "connections": {
+    "CS PDCA edit": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Collect credentials",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collect credentials": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[AF] Resolve workspace",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[AF] Resolve workspace": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Sync client_sequencers",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed"
+  }
+}

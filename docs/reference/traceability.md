@@ -79,12 +79,40 @@ Four of five workflows write Supabase as of 2026-07-22 (branch S, phase A); only
 | 6 | Snapshots are overwritten, per-day facts are keyed | `sequencer_daily_stats` | unique `(client, sequencer, profile, date)` | — | — | — | `aimfox-daily-metrics` branch S UPSERTs on that key | — | ✅ |
 | 7 | Blacklisting follows an explicit classification only | `replies` | `upsert_reply` | — | — | — | `aimfox-classification` branch S now records every classification as a `replies` row (execution 50518 — real reply, `classification='other'`) | — | ✅ |
 | 8 | Audience loading is a live send; no blind second branch | — | — | — | — | — | `aimfox-import-to-connection` — A1 shadow required at cutover | — | ⛔ |
+| 9 | A lead is dated by when the prospect answered, not by when the event was delivered | `leads.created_at`, `replies.received_at` | `upsert_reply` → `promote_contact_to_lead` | — (ingestion) | CRM view, Clients grid | every DoD / WoW / MoM lead bucket | `aimfox-premql-to-pdca` ✅ fixed 2026-08-03 (branch S took `body.event.timestamp`, a batched label-event time, while the sheet took the conversation message); history repaired by `sheets-lead-date-backfill` ✅ applied 2026-08-03, 18 leads in 3 clients | branch-parity harness over the committed artifact; SQL exercised in `begin … rollback`; post-write check — 0 of 52 Aimfox leads disagree with their reply | ✅ |
 
-**What's left.** Only row 8 (`aimfox-import-to-connection`) remains — it queues real LinkedIn invites,
+**What's left.** Row 9 is closed on both arms — forward fix deployed and history repaired
+(18 leads, verified after the write). Row 8 (`aimfox-import-to-connection`)
+remains — it queues real LinkedIn invites,
 so a second branch cannot simply be duplicated the way rows 1–7 were; it needs the A1 shadow treatment
 (build the intended action, compare, only then wire a real send). Rows 1 and 3 are unproven under real
 traffic — both lead-flow branch S builds shipped 2026-07-22 but have not yet processed a live event;
 watch the first execution of each before treating them as more than wired-correctly.
+
+---
+
+## Process: per-client sequencer credentials
+
+[Process doc](processes/outreach/bison-ingestion.md) · [ADR-0012](../adr/0012-multi-sequencer-model.md) ·
+[ADR-0017](../adr/0017-sheets-to-supabase-dual-write-transition.md)
+
+Per-client vendor API keys are a **credential** move, not a data migration — they leave the CS PDCA
+sheet sooner and independently of everything else
+([migration-backlog cross-cutting §2](n8n/migration-backlog.md)). Two workflows own it: a 6-hourly
+sweep and an edit-driven webhook.
+
+| # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | A vendor key lives in `client_sequencers.api_key`, not in a spreadsheet | `client_sequencers` | — | — | — | — | `sheets-bison-credential-sync` (sweep) + `sheets-credential-sync-on-edit` (webhook) ✅ | reconciliation query in each README | ⚠️ sheet is still where a human types it (phase A) |
+| 2 | A client is matched on the workspace id, never on a name | `client_sequencers` | — | — | — | — | both workflows match `external_workspace_id`; the sweep uses an exact case-insensitive name match **only** to create a row that does not exist | rolled-back dry runs, both READMEs | ✅ |
+| 3 | An unresolvable workspace is reported, never guessed | `client_sequencers` | — | — | — | — | `unmatched` / `unmatched_workspaces` in each statement's result | dry run 2026-07-29 returned `999999` | ✅ |
+| 4 | A key is written only when it actually differs | `client_sequencers` | — | — | — | — | `api_key IS DISTINCT FROM` in both | `keys_refreshed=0` on the sweep's first live run (execution 50229) | ✅ |
+| 5 | Aimfox keys reach Supabase without a manual seed | `client_sequencers` | — | — | — | — | `sheets-credential-sync-on-edit` upserts on `(client_id, sequencer_id)` ✅ (2026-07-29) | dry run: `aimfox_rows_created=1` | ✅ |
+| 6 | A new Aimfox row's `external_workspace_id` is left NULL, not invented | `client_sequencers` | — | — | — | — | insert omits the column; only that token's `GET /accounts` knows it | — | ⚠️ must be filled by hand |
+| 7 | The credential write path is authenticated | — | — | — | — | — | ⛔ `POST /webhook/credential-sync` is open — [security finding 10](n8n/security.md) | — | ⛔ |
+
+**What's left.** Row 7. Everything else is wired and proven; row 7 is the reason this section is not
+green, and it is an instance-config plus Apps-Script change, not a graph change.
 
 ---
 

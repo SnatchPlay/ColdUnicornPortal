@@ -7,8 +7,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        700,
-        300
+        704,
+        304
       ],
       "parameters": {
         "documentId": {
@@ -42,8 +42,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1100,
-        300
+        1104,
+        304
       ],
       "alwaysOutputData": true,
       "parameters": {
@@ -74,8 +74,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1300,
-        700
+        1312,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -98,8 +98,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        900,
-        700
+        912,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -122,8 +122,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2100,
-        700
+        2112,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -140,8 +140,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1900,
-        700
+        1904,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -158,8 +158,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1100,
-        700
+        1104,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -182,14 +182,14 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1700,
-        700
+        1712,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => { const root = $('[S] Get Conversation').first().json; const messages = Array.isArray(root.messages) ? root.messages : []; const leadMessages = messages.filter(msg => msg?.sender?.id && msg?.account_id && String(msg.sender.id) !== String(msg.account_id) && msg?.body).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)); const messageText = leadMessages[0]?.body || null; return [ $('Webhook').item.json.body.id, $('Webhook').item.json.body.event.timestamp, $json.sequencer_contact_id, messageText, $('Webhook').item.json.body.event.lead.email || null ]; })() }}"
+          "queryReplacement": "={{ (() => { const root = $('[S] Get Conversation').first().json; const messages = Array.isArray(root.messages) ? root.messages : []; const fromLead = (msg) => msg?.sender?.id && msg?.account_id && String(msg.sender.id) !== String(msg.account_id); const byNewest = (a, b) => Number(b.created_at || 0) - Number(a.created_at || 0); const messageText = messages.filter(msg => fromLead(msg) && msg?.body).sort(byNewest)[0]?.body || null; const latestDated = messages.filter(msg => fromLead(msg) && msg?.created_at).sort(byNewest)[0]; const receivedAt = latestDated ? new Date(Number(latestDated.created_at)).toISOString() : $('Webhook').item.json.body.event.timestamp; return [ $('Webhook').item.json.body.id, receivedAt, $json.sequencer_contact_id, messageText, $('Webhook').item.json.body.event.lead.email || null ]; })() }}"
         },
         "query": "select public.upsert_reply($1, $2::timestamptz, $3::uuid, null, 'Interested', null, $4, false, $5, null)::text as reply_id;"
       }
@@ -200,8 +200,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1500,
-        700
+        1504,
+        704
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -218,8 +218,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2500,
-        450
+        2512,
+        464
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
@@ -238,8 +238,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2100,
-        450
+        2112,
+        464
       ],
       "parameters": {
         "assignments": {
@@ -387,8 +387,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2700,
-        450
+        2704,
+        464
       ],
       "parameters": {
         "assignments": {
@@ -410,8 +410,8 @@
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.3,
       "position": [
-        1500,
-        300
+        1504,
+        304
       ],
       "parameters": {
         "conditions": {
@@ -443,8 +443,8 @@
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.3,
       "position": [
-        300,
-        300
+        304,
+        304
       ],
       "parameters": {
         "conditions": {
@@ -476,8 +476,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1900,
-        450
+        1904,
+        464
       ],
       "parameters": {
         "headerParameters": {
@@ -499,8 +499,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        900,
-        300
+        912,
+        304
       ],
       "parameters": {
         "headerParameters": {
@@ -522,8 +522,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2300,
-        450
+        2304,
+        464
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
@@ -538,8 +538,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        500,
-        300
+        512,
+        304
       ],
       "parameters": {
         "operation": "executeQuery",
@@ -555,8 +555,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3100,
-        450
+        3104,
+        464
       ],
       "parameters": {
         "authentication": "genericCredentialType",
@@ -589,8 +589,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1300,
-        300
+        1312,
+        304
       ],
       "parameters": {
         "conditions": {
@@ -623,8 +623,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1500,
-        450
+        1504,
+        464
       ],
       "parameters": {
         "authentication": "genericCredentialType",
@@ -647,8 +647,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1700,
-        450
+        1712,
+        464
       ],
       "parameters": {
         "headerParameters": {
@@ -670,8 +670,8 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        2900,
-        450
+        2912,
+        464
       ],
       "parameters": {
         "fieldToSplitOut": "phones",
@@ -684,8 +684,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1700,
-        300
+        1712,
+        304
       ],
       "parameters": {
         "columns": {
@@ -994,8 +994,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        100,
-        300
+        112,
+        304
       ],
       "parameters": {
         "httpMethod": "POST",

@@ -26,7 +26,7 @@ The state of the migration in one table. Everything here is measured against pro
 | Aimfox metrics (§5) | **A, live** — branch S writes `sequencer_daily_stats` per account, every 2h | execution 50246; runs verified successful through 17:00 on 2026-07-22. **Completeness verified 2026-07-22**: backfill captured all 118 sheet candidates (117 written, UniTalk's 1 day accepted-as-lost); 3 garbage `__workspace_total__` overlap rows for 07-22 deleted; date gaps confirmed as zero-activity days by the backfill's own filter. Residual: a live sheet↔Supabase Aimfox diff can't be run from a headless session (public n8n REST can't execute a workflow) — only needed if paranoid about the zero-activity gaps before the sheet is deleted |
 | Aimfox classification (§5) | **A, live** — branch S writes `sequencer_contacts` + `replies` | shipped 2026-07-22, execution 50518 — real inbound reply, verified end to end |
 | Aimfox lead flows (§5) | **A, live** on both — `aimfox-premql-to-pdca` and `aimfox-leads-processing` write `leads` via `promote_contact_to_lead` | shipped 2026-07-22; campaign attribution resolved for both (see item 2 below), not yet exercised by a real production execution |
-| Bison credentials (§8) | **A, live** — synced every 6 hours | 39 of 42 workspaces keyed |
+| Bison credentials (§8) | **A, live** — 6-hourly sweep **plus** an edit-driven webhook since 2026-07-29 | 44 `emailbison` rows, all keyed (2026-07-29); the webhook also covers Aimfox, which had no sync at all |
 | Historical import (§9) | **done** | 184 leads, 117 Aimfox client-days |
 
 **The three things most worth doing next**, in order:
@@ -392,11 +392,22 @@ read only `col_6` again; branch S has its own 5, reading only `[S0]`, no fallbac
    `client_sequencers.api_key` via its own `[S] Resolve client sequencer` node; branch L's `col_6`
    reads are unchanged, sheet-authenticated, exactly as intended. Verified against a fresh production
    `GET` 2026-07-22, not assumed.
-4. ~~Aimfox keys have no sync~~ — **decided 2026-07-22: not pursuing.** Seeded once by hand for five
-   clients; there are only five (vs. Bison's ~42 workspaces), Aimfox onboarding is far slower than
-   Bison's, and a scheduled sync workflow is real ongoing maintenance for a credential set that changes
-   rarely. Re-seed by hand when a client is added or a key rotates. **Do not re-raise unless Aimfox
-   client count grows enough that manual seeding becomes the actual bottleneck.**
+4. ~~Aimfox keys have no sync~~ — **superseded 2026-07-29.** The 2026-07-22 decision ("not pursuing")
+   was about a *scheduled* sync, and its reasoning still holds: five clients, slow onboarding, keys
+   that rarely rotate — a 6-hourly sweep is ongoing maintenance for nothing. What changed is that the
+   trigger stopped being a schedule. A Google Apps Script `onEdit` handler on CS PDCA now POSTs the
+   edited row to
+   [`sheets-credential-sync-on-edit`](../../../automation/n8n/workflows/ops/sheets-credential-sync-on-edit/README.md)
+   (`ATPnIVnO0sAB9GQx`), which upserts the Aimfox key on `(client_id, sequencer_id)` — so the key is
+   in `client_sequencers` seconds after someone types it, at zero standing cost. Manual re-seeding
+   is no longer the mechanism. **Still true and still manual:** a new Aimfox row gets a NULL
+   `external_workspace_id`, because only that token's own `GET /accounts` knows the value.
+
+5. **Authenticate `POST /webhook/credential-sync`** — open, and the highest-value remaining item in
+   this section. The webhook that now writes `client_sequencers.api_key` has no authentication;
+   [security finding 10](security.md#10-the-credential-sync-webhook-is-unauthenticated--high-open)
+   has the detail and the two-step fix. Deliberately accepted at ship time (2026-07-29), not
+   overlooked.
 
 ---
 

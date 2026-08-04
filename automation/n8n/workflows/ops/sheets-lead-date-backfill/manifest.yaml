@@ -1,0 +1,113 @@
+schemaVersion: 1
+
+id: sheets-lead-date-backfill
+name: "[BACKFILL] Client Leads sheets → Supabase · lead dates"
+domain: ops
+owner: automation
+lifecycle: managed
+status: active            # a repeatable repair, not a one-off: it may be re-run whenever a date
+                          # defect is fixed forward and history has to catch up. It converges — a
+                          # second run with nothing to fix moves zero rows.
+criticality: medium
+
+businessProcess:
+  - docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+
+architectureDecisions:
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+
+triggers:
+  - type: manual
+    detail: >-
+      Manual only, and deliberately so. It rewrites historical dates, which is never something that
+      should happen on a timer — a scheduled repair would silently re-assert the sheet over any
+      later correction made in Supabase.
+
+reads:
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+    - leads
+    - replies
+  external:
+    - "Google Sheets · CS PDCA (client list: col_4 Leads spreadsheet id, col_5 Bison workspace id)"
+    - "Google Sheets · <client>/Leads — one tab per client, LEAD RECEIVED + identity columns"
+
+writes:
+  tables: []
+  tablesWritten:
+    - leads               # created_at only — see knownViolations
+    - replies             # received_at only — see knownViolations
+  rpcs: []
+  external: []
+
+credentials:
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "Read CS PDCA, Read Client Leads"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve Client, Re-date Leads"
+
+transition:
+  phase: A
+  phaseState: active
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · the client's own Leads tab"
+  targetStore: "Supabase · public.leads.created_at, public.replies.received_at"
+  design: docs/reference/processes/outreach/sheets-supabase-reconciliation.md
+  notes: >-
+    Phase A says the sheet is authoritative, so where the two stores disagree on WHEN a lead
+    arrived, the sheet wins. This is the repair arm of that rule: the write paths were fixed
+    forward (aimfox-premql-to-pdca, 2026-08-03) and this brings the rows written before the fix
+    into line. It is NOT a sync — it reconciles one field, on demand, and must not become periodic.
+  reconciliation: >-
+    Self-measuring: every run reports, per client, sheet_rows, matched_leads, ambiguous_leads,
+    to_move and (when applied) leads_moved / replies_moved. A dry run (Config.apply=false) plans
+    the same moves and writes nothing, so the plan is reviewable before it is taken. Re-running
+    after an applied run must report to_move=0 — that is the convergence check.
+  parityEvidence: >-
+    SQL exercised against production inside begin … rollback on 2026-08-03 with the Bent Iron PL
+    workbook: matched_leads=184, ambiguous_leads=9, to_move=7, and after apply leads_moved=7,
+    replies_moved=7, a re-run to_move=0, and zero leads whose created_at disagreed with their
+    reply's received_at. The same 7 rows had been identified independently from a local xlsx diff.
+
+idempotency:
+  key: "(client_id, lower(email)) or (client_id, normalised full name, normalised company)"
+  notes: >-
+    Convergent rather than merely repeatable: a row is only written when its calendar day differs
+    from the sheet's, so a second run over unchanged data writes nothing. Ambiguous identities — a
+    sheet row matching several leads, or a lead matching several sheet rows — are counted and
+    skipped, never resolved by picking one.
+
+retryPolicy:
+  notes: >-
+    Resolve Client, Read Client Leads, Build Date Rows and Re-date Leads are alwaysOutputData, so a
+    client that resolves to nothing cannot end the splitInBatches loop early — the defect that made
+    an earlier backfill stop at client 15 of 42 while reporting success. No node retries: each
+    client is one statement, and a failed client is reported by Summarise as clients_failed.
+
+knownViolations:
+  - rule: business/direct-table-write
+    node: "Re-date Leads"
+    reason: >-
+      Updates public.leads.created_at directly. No RPC can express this: promote_contact_to_lead
+      CREATES a lead from a positive reply and deliberately never rewrites one, and upsert_reply's
+      on-conflict branch deliberately leaves received_at alone so a replay cannot move history. That
+      immutability is correct for ingestion and is exactly why a repair needs a separate, declared
+      path. Blast radius is one column, gated on a dry run, and every move is reported before and
+      after.
+    trackedIn: automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md
+    expires: 2026-11-30
+  - rule: business/direct-table-write
+    node: "Re-date Leads"
+    reason: >-
+      Updates public.replies.received_at in the same statement. leads.created_at is derived from it
+      (20260727_promote_contact_lead_cast_and_date.sql), so moving one without the other would leave
+      the two stores internally inconsistent and let the next derivation reintroduce the drift.
+      Same gating, same reporting; the two updates share one transaction per client.
+    trackedIn: automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md
+    expires: 2026-11-30
