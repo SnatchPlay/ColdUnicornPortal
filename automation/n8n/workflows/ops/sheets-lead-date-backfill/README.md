@@ -151,6 +151,34 @@ intermittently empty read is a coverage hole, not noise: `Read Client Leads` has
 so a Google quota blip is indistinguishable from an empty sheet apart from this counter. Add the
 retry before the next campaign of re-dating.
 
+### The company comparison hid almost every candidate — fixed 2026-08-05
+
+A later reconciliation counted **19** Aimfox leads whose `created_at` disagreed with the sheet. This
+workflow proposed **2** of them, and had done since it was written.
+
+`matched` pairs a sheet row to a lead on e-mail, or on full name **and company**, comparing
+`company_name` as a whole string. An Aimfox sheet row joins *every* current employer with commas —
+`"Eco Fix sp z o o, Ecofix Group"` — while `leads.company_name` keeps the first. The two never
+matched, and since every lead this workflow exists to repair comes from Aimfox, it was blind to
+nearly all of its own job. Both sides of the comparison now take `split_part(…, ',', 1)`.
+
+After the change the plan came to exactly **19**, name-for-name identical to the list the
+reconciliation had derived by a completely different route. Two independent code paths agreeing is
+what made it safe to apply.
+
+**Applied 2026-08-05: 19 leads and 19 replies re-dated** — Kaizen rent 14, Runmageddon 3,
+EvidencePrime 1, ColdUnicorn PL 1. Date disagreements where both stores hold a date afterwards: 0.
+
+`ambiguous_leads` rose 101 → 174: trimming the company makes more rows share a key, and those are
+skipped rather than guessed — `plan` still demands a strictly unique pairing on both sides.
+
+**Still open:** this workflow reads the tab through the Google Sheets node, by header name. RevOpsi
+and Spiree have a header row shifted two columns left of their data, so it reads `INDUSTRY` where it
+expects a date. That cannot mis-date anyone — industry text parses to `null` and the row drops out as
+`sheet_rows_no_date` — but those two clients are under-covered until this reads raw values by
+position, the way `COUNTIFS` does.
+→ [reconciliation](../../../../../docs/reference/processes/outreach/sheets-supabase-reconciliation.md)
+
 ## Known violations
 
 `Re-date Leads` writes `public.leads` and `public.replies` with raw SQL, which
