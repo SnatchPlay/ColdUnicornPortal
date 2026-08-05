@@ -364,7 +364,7 @@ After the run, `preMQL ⇄ MQL` disagreements across all 31 comparable clients: 
 | | Rows | |
 |---|---|---|
 | Append the lead to the client's sheet | 26 | plain addition; the portal counts them, PDCA does not |
-| Lead in the sheet, absent from Supabase | 14 | **blocked** — ADR-0015 has no path: a historical row has no reply to attach. Same decision that stopped the 192-row backfill above |
+| Lead in the sheet, absent from Supabase | 14 | **created 2026-08-05** with placeholder replies — see below |
 | Dates | 19 | all Aimfox, 1–3 days late. **Re-dated 2026-08-05** — see below |
 
 The remaining 12 date rows carry no readable `LEAD RECEIVED`, so `COUNTIFS` never counted them and
@@ -396,6 +396,44 @@ header name, so on the two shifted tabs it reads `INDUSTRY` where it expects a d
 mis-date anyone — industry text parses to `null` and the row is dropped as `sheet_rows_no_date` — it
 only means RevOpsi and Spiree are under-covered here. Switching it to the positional raw read is a
 separate change.
+
+### Placeholder replies for the sheet-only leads — 2026-08-05
+
+The one class that had no path. ADR-0015 creates a lead from a positive reply, at most one per
+contact; a historical sheet row has no reply to attach, which is why the 192-row backfill was stopped
+in July and why these rows sat unresolved.
+
+**Decided 2026-08-05: place a placeholder reply now, pull the real one later.** The invariant holds —
+the lead still comes from a reply, through `promote_contact_to_lead`, one per contact. What is
+relaxed is the claim that the reply was *ingested*, and that is recorded as a declared exception in
+[ADR-0015 · Consequences](../../../adr/0015-sequencer-contacts-and-ooo-followups.md#consequences).
+
+**10 leads created**, by [`import-sheet-only-leads`](../../../../scripts/sheets/import-sheet-only-leads.mjs):
+Runmageddon 3, IzoDom 2, and one each for ColdUnicorn PL, Konrad, Maasck, RevOpsi, Spiree.
+Each `created_at` landed exactly on the sheet's `LEAD RECEIVED`.
+
+Everything synthetic is marked, never blended in — both `sequencer_contacts.external_contact_id` and
+`replies.external_id` carry a `sheet-import:` prefix and the body says what it is, so one predicate
+finds all of them:
+
+```sql
+select * from public.replies where external_id like 'sheet-import:%';
+```
+
+Three details that make it safe to re-run and safe to reason about:
+
+- **Deterministic ids** — e-mail when there is one, otherwise a slug of name and company. The RPCs'
+  upsert semantics turn a second run into a no-op; verified by re-running immediately after the
+  write, which reported 10 already present and created nothing.
+- **Noon, not midnight** — `received_at` is the sheet date at 12:00 UTC, so no timezone rounding can
+  move `leads.created_at` into the adjacent day and land the lead in the wrong DoD or WoW bucket.
+- **Channel is inferred, and that is the weak part.** The sheet carries no channel marker. A Bison
+  lead always has an e-mail and an Aimfox lead usually has none, so a missing e-mail picks Aimfox
+  where the client runs it — one row, Runmageddon / Kateryna Horbenko. Every choice is printed per
+  row. If the real reply later says otherwise, the sequencer attribution is what to correct.
+
+**These rows are not evidence until the real replies land.** No analysis of reply timing,
+classification or content may include them.
 
 ## Related
 

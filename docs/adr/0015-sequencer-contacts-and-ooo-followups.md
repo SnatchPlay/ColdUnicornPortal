@@ -156,6 +156,31 @@ over raw `replies` / `ooo_followups` rows, so §16 holds even though nothing ren
 
 ## Consequences
 
+- **Declared exception: placeholder replies for historical sheet rows (2026-08-05).** "A lead is
+  created by a positive reply" has no answer for a lead that already exists in a client's `Leads`
+  tab and predates this ADR — there is no reply to attach, and the reconciliation left 10 such rows
+  unresolved for weeks rather than invent one. The decision taken was to **synthesise a placeholder**
+  `sequencer_contacts` + `replies` pair per row, create the lead through `promote_contact_to_lead`
+  as normal, and pull the real message from the sequencer later.
+
+  The invariant itself is unchanged: the lead still comes from a reply, through the RPC, one per
+  contact. What is relaxed is the claim that the reply was *ingested*. That is why every synthetic
+  record is marked rather than blended in — `sequencer_contacts.external_contact_id` and
+  `replies.external_id` both carry a `sheet-import:` prefix, and the reply body says in plain words
+  what it is, so a single predicate finds all of them:
+
+  ```sql
+  select * from public.replies where external_id like 'sheet-import:%';
+  ```
+
+  The prefix is deterministic (e-mail, or a slug of name and company), so the RPCs' upsert semantics
+  make a re-run a no-op instead of a second lead. Written by
+  [`import-sheet-only-leads`](../../scripts/sheets/import-sheet-only-leads.mjs); scope and the
+  channel-inference caveat are in
+  [the reconciliation](../reference/processes/outreach/sheets-supabase-reconciliation.md).
+  **These rows are not evidence of anything until the real replies land** — no analysis of reply
+  timing, classification or content may include them.
+
 - **The spec's §13 operational view and §15 outreach dashboard were built, verified and then removed
   before release (2026-07-22).** OOO is driven end-to-end by n8n and the agency does not work the
   episode queue by hand, so the screens had no operator. The data model is unchanged and records
