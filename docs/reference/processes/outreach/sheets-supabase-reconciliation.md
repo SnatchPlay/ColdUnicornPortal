@@ -312,6 +312,40 @@ The `Referral` rows are all **June–July 2025**: ColdUnicorn PL ×7 (05.06, 12.
 than the four months MoM reaches back, so none moves a metric the portal renders today — which is
 why this is a naming decision to take calmly rather than a gap to plug.
 
+#### Accepted deviation — the 26 NULL rows, decided 2026-08-05, review by 2026-11-30
+
+Left as they are. What that costs, measured rather than assumed:
+
+A NULL `qualification` is counted by WoW and MoM **Total** (`COUNT(*)`) but is invisible to 3-DoD
+Total and to every SQL figure, both of which filter on the label. So these rows inflate one number
+and not the others — internally inconsistent, but only where they land in a visible window.
+
+**16 of the 26 land in no window at all** (June 2025 – February 2026) and move nothing. The other
+**10 all share `created_at` = 2026-07-22**, so they sit in WoW −2 and MoM July and nowhere else:
+
+| Client | Status | WoW −2 Total | of which NULL | MoM Jul Total | of which NULL |
+|---|---|---|---|---|---|
+| TF v1 | Inactive | 6 | **6** | 6 | **6** |
+| Spiree | Inactive | 3 | **3** | 3 | **3** |
+| TouchlessFreaks | **Active** | 4 | 1 | 30 | 1 |
+
+Nine of the ten are on **Inactive** clients, whose CS PDCA cells are blank anyway — the sheet's
+formulas gate on `G="Active"`. The entire cost on an active client is **one row**: TouchlessFreaks /
+Agnieszka Strachowska, +1 in two cells.
+
+They are also not "unfilled leads" but import residue: every one carries `origin_reply_id IS NULL`,
+`campaign_id IS NULL` and `updated_at = 2026-07-22`, the
+[`sheets-lead-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-backfill/README.md)
+run. TF v1's set includes the workbook's **header row** imported as a lead (`FULL NAME` / `E-MAIL` /
+`COMPANY NAME`) and a column placeholder (`Column 2`); two more read `Pan Rafal` / `Pani Agnieszka`
+with a pasted e-mail signature in `company_name`.
+
+**So the fix is deletion, not a backfill** — filling `qualification` would promote this residue into
+3-DoD and SQL instead of removing it from Total. Deferred because the benefit is one cell on one
+active client and the deletion needs care: `replies.lead_id` is `ON DELETE NO ACTION`, while
+`lead_meetings`, `lead_offers`, `lead_tasks`, `lead_custom_field_values` and `lead_value_deliveries`
+cascade silently.
+
 A NULL `qualification` is not a harmless gap: the lead still counts in WoW and MoM Total (both are
 `COUNT(*)`) but vanishes from 3-DoD Total, which requires `MQL` or `preMQL`, and can never be SQL.
 **94 filled 2026-08-05** by [`backfill-lead-qualification`](../../../../scripts/sheets/backfill-lead-qualification.mjs)
