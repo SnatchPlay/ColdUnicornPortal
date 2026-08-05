@@ -1,7 +1,7 @@
 schemaVersion: 1
 
 id: aimfox-premql-to-pdca
-name: "preMGL tag added (Aimfox) -> Add lead to PDCA"
+name: "preMQL tag added (Aimfox) -> Add lead to PDCA"
 domain: outreach
 owner: automation
 lifecycle: managed
@@ -31,11 +31,14 @@ reads:
     - "Google Sheets · CS PDCA — client row: sheet id (col_4)"
     - "Google Sheets · <client>/Leads — does this lead already exist?"
     - "Lusha · POST /v3/contacts/search-and-enrich"
+    - "OpenAI · POST /v1/responses (gpt-5-mini) — which current-experience company does the reply mention?"
 
 writes:
   external:
     - "Google Sheets · <client>/Leads — appends a lead row (sheets batchUpdate), or updates the existing one"
     - "UniTalk · POST /api/message/send — notification"
+    - "Aimfox · POST /v2/blacklist/{lead.urn} — the converted contact is removed from further outreach"
+    - "Aimfox · POST /v2/blacklist-companies — the contact's company is removed from further outreach"
   tables:
     - sequencer_contacts     # via upsert_sequencer_contact RPC
     - replies                # via upsert_reply RPC
@@ -62,6 +65,9 @@ credentials:
   - alias: "UniTalk"
     type: httpHeaderAuth
     usedBy: "HTTP Request (notification)"
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "OpenAI - Search for the company name"   # predefinedCredentialType — no literal key (security.md §8)
 
 transition:
   phase: A
@@ -81,6 +87,12 @@ transition:
     both), so campaign_id is populated, not NULL. No Lusha/phone duplication in branch S — phone_number
     stays NULL (not measured) rather than doubling vendor cost for a field this workflow doesn't need
     to attribute a lead.
+    2026-08-05: branch S now also sends what the run already fetched and was dropping — linkedin_url
+    and country to promote_contact_to_lead, message_subject and sequence_step to upsert_reply, and the
+    contact's identity taken from the Aimfox profile instead of the webhook body (whose email is always
+    null). No migration, no new vendor call. The email expression is shared by the contact node and the
+    lead payload on purpose: promote_contact_to_lead check (7) raises when the two disagree. INSERT-only
+    — the 60 leads written before this keep their NULLs.
   reconciliation: >-
     At phase A: one `leads` row per appended sheet row, matched on (client, Aimfox lead id), with
     leads.sequencer_id = the aimfox sequencer. Compare row counts per client per day. Qualification is
@@ -98,7 +110,12 @@ idempotency:
 
 retryPolicy:
   notes: >-
-    None. No retry and no error branch on the Aimfox, Lusha, Sheets or UniTalk calls; a failure part
-    way through leaves the lead half-written and the notification unsent.
+    Mostly none. No retry and no error branch on the Aimfox, Lusha, Sheets or UniTalk calls; a failure
+    part way through leaves the lead half-written and the notification unsent. The 2026-08-05
+    blacklist chain sets retryOnFail on `Add company to blacklist` / `Add company to blacklist1` /
+    `OpenAI - Search for the company name`, but NOT on `Add Lead to Blacklist` — and none of the four
+    has an error output, so a 4xx there fails the whole execution. It runs last (branch L is first in
+    the connection order and completes before it), so the sheet write and the notification are already
+    done when it fails: ADR-0017 §1 ordering holds.
 
 knownViolations: []

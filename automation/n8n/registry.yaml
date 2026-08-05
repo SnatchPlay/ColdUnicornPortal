@@ -156,7 +156,7 @@ workflows:
     lastValidation: 2026-07-22 literal OpenAI key replaced by the OpenAi account credential
 
   - id: aimfox-premql-to-pdca
-    name: "preMGL tag added (Aimfox) -> Add lead to PDCA"
+    name: "preMQL tag added (Aimfox) -> Add lead to PDCA"
     domain: outreach
     path: automation/n8n/workflows/outreach/aimfox-premql-to-pdca
     businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
@@ -170,8 +170,8 @@ workflows:
         remoteWorkflowId: null
       production:
         remoteWorkflowId: s0GqDtCzyLAvVnm1
-    lastRepositorySync: 2026-07-22
-    lastValidation: 2026-07-22 literal Aimfox token replaced by the Aimfox Master credential
+    lastRepositorySync: 2026-08-05
+    lastValidation: 2026-08-05 exported the post-promotion blacklist chain added on the instance
 
   - id: aimfox-leads-processing
     name: "AimFox Leads Processing"

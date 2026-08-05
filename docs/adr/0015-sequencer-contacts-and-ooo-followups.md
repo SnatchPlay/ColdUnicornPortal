@@ -79,9 +79,20 @@ that can be edited without review. So ingestion goes through `SECURITY DEFINER` 
 worker transitions), all `service_role`-only, all `set search_path = ''` with fully qualified names.
 
 `promote_contact_to_lead` takes a **strict whitelist** payload. `client_id`, `sequencer_id`,
-`external_id`, `qualification` and every CRM flag are derived inside the function, never accepted
-from the caller, so ingestion cannot create a lead in another client or pre-set `won`. A repeated
-webhook returns `{lead_id, created: false}` rather than raising — retries are normal, not errors.
+`external_id` and every CRM flag are derived inside the function, never accepted from the caller, so
+ingestion cannot create a lead in another client or pre-set `won`. A repeated webhook returns
+`{lead_id, created: false}` rather than raising — retries are normal, not errors.
+
+`qualification` is the one exception, and it is deliberate: it comes from the caller, validated
+against `MQL | preMQL`, because only the sequencer knows which tag the lead now carries. Since
+[20260805](../../supabase/migrations/20260805_promote_contact_lead_two_way_qualification.sql) a
+repeat call syncs it **both ways** rather than promoting only. Upgrade-only left the client sheet —
+which rewrites the column on every tag event, in both directions — permanently ahead of this table
+on 102 leads across 15 clients. Two guards keep that safe: the caller must send the label derived
+from the lead's whole tag set rather than from the event that fired, and the sync moves a lead only
+between `MQL` and `preMQL`, so a stage that has advanced to `meeting_scheduled`, `won` or `rejected`
+is never touched by an inbound tag.
+→ [reconciliation](../reference/processes/outreach/sheets-supabase-reconciliation.md#qualification-2026-08-05)
 
 ### 6. The state machine has one definition and no portal door
 

@@ -214,9 +214,32 @@ is gone, and `knownViolations` is empty.
 | 2 | the Snov.io result is fetched after a fixed `Wait`, not polled | a slow enrichment silently yields nothing |
 | 3 | no retry, no error branch on any vendor call | a partial failure leaves a half-written lead, possibly already in the customer's CRM |
 | 4 | a hardcoded token in `[69] … sequence-steps` (per the node's own name) | not caught by the scanner if it is an expression; worth checking |
+| 5 | ~~qualification was read from `data.tag_name`, the event that fired~~ | **fixed 2026-08-05** — both `[96] Update Qualification col` and `[S] promote_contact_to_lead` now derive it from the lead's whole `tags` set. See below |
 
 Branch S already fixes defect 1 on its own side: `uq_leads_source_sequencer_contact` makes
 one-lead-per-contact a database fact.
+
+### Qualification comes from the tag set, not the event — 2026-08-05
+
+Both writers used to compute `tag_name === 'interested' ? 'MQL' : 'preMQL'` from the single
+`TAG_ATTACHED` event that woke the run. The same expression on both sides, so they never disagreed
+*within* a run — and disagreed permanently *across* runs. The sheet rewrites `QUALIFICATION` on
+every event, in both directions; `promote_contact_to_lead` was upgrade-only and ignored a demotion.
+A lead tagged `Interested` and later re-tagged `preMQL` therefore read `preMQL` in the sheet and
+`MQL` in Supabase, forever. Measured 2026-08-05: **102 leads across 15 clients**, always that way
+round.
+
+The tag set settles which side was right. Execution `62560` (Bent Iron PL, Damian Gorniak) carried
+`tags = [Custom Mail Server, preMQL]` — no `Interested` tag at all — so the lead really was `preMQL`
+and the sheet was correct. `data.tag_name` is only what changed just now; `[40] Bison: GET
+/leads/{taggable_id}` already returns the whole set, and now both writers read it.
+
+The fallback to the old expression is deliberate: a lead carrying no qualifying tag at all keeps the
+previous behaviour rather than resolving to an empty string.
+
+**This ships with [20260805_promote_contact_lead_two_way_qualification](../../../../../supabase/migrations/20260805_promote_contact_lead_two_way_qualification.sql), and the order matters** — the
+migration makes the RPC sync qualification both ways, which is only safe once the caller sends the
+tag-set value. Applied first, one `preMQL` event would demote a lead that still holds `Interested`.
 
 ## Verification
 
