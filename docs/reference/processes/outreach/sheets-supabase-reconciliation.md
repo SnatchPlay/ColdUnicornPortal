@@ -275,15 +275,38 @@ that walks each client's own `Leads` tab and diffs it against `leads` using the 
 `orm-gateway`'s `loadClientsPage` uses, so the Supabase side of every bucket is the number the
 portal renders. Every bucket delta reconciled to named rows — residual **0**.
 
-Coverage is the first finding, and it is not full: **31 clients compared, 2 excluded, 9 unread.**
-
-| Excluded | Why |
-|---|---|
-| RevOpsi, Spiree | column `I` of the tab is not `LEAD RECEIVED`. CS PDCA reads `Leads!I:I` **positionally** and never looks at a header, so for these two clients the sheet's own numbers come from the wrong field. Not comparable until the layout is aligned |
+Coverage is the first finding, and it is not full: **33 clients compared, 9 unread.**
 
 `oLIVEmedia TTS` returns **Forbidden** and `Komandor` **not found** — both already recorded above on
 2026-07-22 and still unfixed. Seven more tabs return no rows. For those nine, drift is *unmeasured*,
 not zero.
+
+#### Read the tab by position, never by header — corrected 2026-08-05
+
+The first sweep excluded RevOpsi and Spiree, reporting that column `I` of their tabs "is not
+`LEAD RECEIVED`, so the sheet's own numbers come from the wrong field". **That was wrong, and the
+reasoning was backwards.**
+
+Their DATA sits in the standard positions: column `I` holds real date serials, column `N` holds
+`MQL` / `preMQL`. What is shifted is the **header row** — it is missing `Phone Number` and
+`Phone Source`, so every label sits two columns left of the values it names. (Spiree's column `A` is
+also headed `f` rather than `FULL NAME`.) `COUNTIFS` never reads a header, so CS PDCA was right all
+along; the probe was reading by header name and taking `INDUSTRY` as the date and a free-text code
+as the qualification.
+
+That artefact accounted for **638 of the findings** first reported — 343 for RevOpsi and 295 for
+Spiree. Read positionally, the real figures are **14** and **44**.
+
+So the rule for anything comparing against these tabs: **read raw values by absolute column index**
+(`I` = 8, `N` = 13), the way `COUNTIFS` does. For the other 31 tabs both readings agree, which is how
+the mistake survived a full sweep. The header label is worth reporting as a diagnostic — a shifted
+header is real disorder, and the two tabs should be repaired — but it must never gate whether a
+client is measured.
+
+One practical trap: n8n's Google Sheets node prepends a `row_number` key of its own, so indexing its
+output positionally is off by one. Reading `spreadsheets.values` over HTTP with
+`valueRenderOption=UNFORMATTED_VALUE` avoids both problems at once — no header keys, and a date cell
+comes back as a serial instead of a display string that hides whether it is a date at all.
 
 ### Duplicates, and where they actually live
 
@@ -367,7 +390,14 @@ Supabase for the 115 rows, guarded to `MQL ⇄ preMQL` — a lead that reached `
 `offer_sent`, `won` or `rejected` is never demoted by a sheet value, the same guard the RPC now
 carries. Nothing was held back: no disagreeing lead had advanced past those two stages.
 
-After the run, `preMQL ⇄ MQL` disagreements across all 31 comparable clients: **0**.
+After the run, `preMQL ⇄ MQL` disagreements across the 31 clients then in scope: **0**.
+
+A second pass followed on the same day, once the positional read brought RevOpsi and Spiree into
+scope for the first time: **48 more rows** aligned (RevOpsi 13, Spiree 35), same guards, 0 stale.
+Across all **33** comparable clients, `preMQL ⇄ MQL` disagreements are now **0**.
+
+What still disagrees is only what the enum has no label for — 11 `Referral`, 5 rows where Spiree's
+QUALIFICATION column literally holds `false`, and TF v1's header row imported as a lead.
 
 ### What is left, by the action it needs
 

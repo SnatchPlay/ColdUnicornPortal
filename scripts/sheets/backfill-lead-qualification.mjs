@@ -60,16 +60,24 @@ function parseArgs(argv) {
 }
 
 /**
- * A tab whose column I is not LEAD RECEIVED has a different layout, and CS PDCA reads that column
- * positionally — so for those clients the sheet's own numbers come from the wrong field. Their
- * QUALIFICATION column cannot be trusted either, and they are skipped rather than written from.
+ * Which clients may be written from.
+ *
+ * This used to skip any tab whose column I was not headed `LEAD RECEIVED`, on the theory that such
+ * a tab held its data somewhere else. That was wrong, and it excluded RevOpsi and Spiree from every
+ * repair for no reason. Their DATA sits in the standard positions — column I really is the date,
+ * column N really is the qualification — but their HEADER row is missing `Phone Number` and
+ * `Phone Source`, so every label is two columns left of what it names. The probe reads raw values
+ * by position now, exactly as `COUNTIFS` does, so the header label is a diagnostic and never a gate.
+ *
+ * What does disqualify a client is having produced no rows at all — an unreadable tab must not be
+ * read as "this client has nothing", and the probe reports those separately.
  */
 function comparableClients(report) {
   const skipped = [];
   const usable = [];
   for (const c of report.per_client) {
-    if (c.col_i === "LEAD RECEIVED" && c.col_n === "QUALIFICATION") usable.push(c);
-    else skipped.push(c.client);
+    if (c.read_error) skipped.push(`${c.client} (${c.read_error})`);
+    else usable.push(c);
   }
   return { usable, skipped };
 }
