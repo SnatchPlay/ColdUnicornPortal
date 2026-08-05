@@ -57,7 +57,7 @@ Collapsing them makes capacity planning read a cap as a balance.
 |---|---|---|
 | Every 2 hours | schedule | recompute capacity + volumes per client, write the PDCA and Daily stats sheets |
 | Daily 19:00 | schedule | push yesterday's leads' LinkedIn URLs into the client's `AutoConnect` audience |
-| `preMQL` tag added | Aimfox webhook `preMQL-Aimfox` | enrich the contact, append a lead row to the client's Leads sheet, notify |
+| `preMQL` tag added | Aimfox webhook `preMQL-Aimfox` | enrich the contact, append a lead row to the client's Leads sheet, notify, and (since 2026-08-05) blacklist the converted contact and their company |
 | Reply received | Aimfox webhook `aimfox-classifier` | classify with an LLM; blacklist the company or the contact when it is not a prospect |
 | Tag added (Bison HUB) | `[HUB] Bison Replies Dispatcher` | `AimFox Leads Processing` enriches and writes the lead + dispatches to the CRMs |
 
@@ -123,6 +123,12 @@ preMQL tag  ─ mint workspace token ─ resolve client via CS PDCA
 7. **Blacklisting is irreversible in effect.** Adding a company or contact to a workspace blacklist
    permanently removes it from that client's reach. It must be driven by an explicit classification,
    never by an enrichment failure or a missing field.
+   Two workflows blacklist today, and both are classification-driven: `aimfox-classification` when a
+   reply says "not a prospect", and — since 2026-08-05 — `aimfox-premql-to-pdca` once a `preMQL`/`MQL`
+   tag has produced a lead (a converted contact should not keep receiving outreach). Where the
+   contact's current company is ambiguous, an LLM picks it, but only from a closed `enum` of that
+   lead's own current-experience companies, and "no company named" means **do nothing** — an empty
+   answer must never widen into a blanket blacklist.
 8. **Audience loading is a write to a live sending system.** Adding a profile URL to a campaign
    audience causes LinkedIn invites to be sent. It is subject to the same rule as OOO re-enrolment
    ([ADR-0017 §1b](../../../adr/0017-sheets-to-supabase-dual-write-transition.md)): a second branch
@@ -185,7 +191,7 @@ we do not control ([migration-backlog cross-cutting §2](../../n8n/migration-bac
 | [`aimfox-import-to-connection`](../../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md) | `nG6Q4KEGeXk7tBHm` | audience loading, daily 19:00 | **imported** |
 | [`aimfox-classification`](../../../../automation/n8n/workflows/outreach/aimfox-classification/README.md) | `JnvRBXtRNar7ejeM` | LLM reply classification + blacklisting | **imported** |
 | [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md) | `4OjNRWLaG2IWK6kd` | enrich + create lead + CRM dispatch | **branch S live 2026-07-22** — called by `aimfox-classification`, not the Bison HUB (corrected) |
-| [`aimfox-premql-to-pdca`](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification | **branch S live 2026-07-22** |
+| [`aimfox-premql-to-pdca`](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md) | `s0GqDtCzyLAvVnm1` | preMQL → lead row + notification + blacklist | **branch S live 2026-07-22**; blacklist chain exported 2026-08-05 |
 
 All five entered the repository on 2026-07-22. The last three had been unreachable: `pnpm n8n:export`
 refuses a file the scanner rejects ([security.md](../../n8n/security.md) layer 4), and each carried a
@@ -204,6 +210,7 @@ state as though it were live is worse than none".
 | 4 | a lead carries its channel (invariant 3) | leads are appended to a spreadsheet, so `sequencer_id` does not exist to be set |
 | 5 | tokens come from `client_sequencers` | branch L still reads CS PDCA `col_105` — [security finding 1](../../n8n/security.md). The table itself is now seeded (2026-07-22, five clients), so branch S no longer depends on the sheet |
 | 6 | invite capacity is per account | `Summarize` **averages** `account_id` across a batch; the numbers are a client rollup wearing an account id |
+| 7 | the Supabase lead carries what the run knows about the person | it carries seven fields. `linkedin_url`, `country`, the reply's subject and step, and the whole Aimfox profile are fetched by branch S and dropped — measured 2026-08-05: `linkedin_url` 0 of 60 branch-S leads, against 30 of 30 for the Aimfox leads that came in from Sheets. Gap table in [`aimfox-premql-to-pdca` README](../../../../automation/n8n/workflows/outreach/aimfox-premql-to-pdca/README.md#what-branch-s-still-throws-away) |
 
 ## Failure handling
 

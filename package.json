@@ -21,6 +21,7 @@
     "sheets:extract": "node scripts/sheets/extract-pdca.mjs",
     "sheets:compare": "node scripts/sheets/compare-pdca-supabase.mjs",
     "sheets:backfill-aimfox-dates": "node scripts/sheets/backfill-aimfox-lead-dates.mjs",
+    "aimfox:backfill-profile-fields": "node scripts/aimfox/backfill-lead-profile-fields.mjs",
     "n8n:smoke": "node scripts/n8n/smoke.mjs",
     "n8n:inventory": "node scripts/n8n/inventory.mjs",
     "n8n:export": "node scripts/n8n/export.mjs",

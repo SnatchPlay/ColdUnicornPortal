@@ -53,6 +53,7 @@ Pipedrive, Salesforce or Zoho ([ADR-0010](../../../../../docs/adr/0010-legacy-cr
 | 4 | the lead has no channel marker and no stored contact identity | process invariants 2 and 3 |
 | 5 | no retry, no error branch anywhere | a failure part way through leaves a partially written lead, and the CRM may already hold it |
 | 6 | the derived-values code itself flags an ambiguity | when two message templates share an `original_id`, the sequence step cannot be determined; the code detects this (`isTemplateMatchAmbiguous`) and carries on |
+| 7 | ~~`Create Record` hardcoded `const qualification = 'MQL'` into the sheet row~~ | **fixed 2026-08-05** — `normalizeAimfoxLead()` already derived the value from the lead's label set and nothing read it, so every Aimfox sheet row claimed `MQL` regardless of its labels while branch S wrote the label-derived value to Supabase. One run, two different facts. See [the reconciliation](../../../../../docs/reference/processes/outreach/sheets-supabase-reconciliation.md#qualification-2026-08-05) |
 
 ## Why this one was flagged to migrate last — and why branch S shipped anyway
 

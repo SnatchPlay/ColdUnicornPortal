@@ -268,6 +268,73 @@ That second flaw still exists in [`sheets-lead-backfill`](../../../../automation
 `Build Rows`, which used the same detector on 2026-07-22. Any workbook mixing ISO and slash dates
 may have been imported with day and month swapped — unchecked, and worth a pass of its own.
 
+## Agency-wide per-lead reconciliation, 2026-08-05
+
+The first sweep across **all 42 clients** in CS PDCA, not a sample. Read by a read-only n8n probe
+that walks each client's own `Leads` tab and diffs it against `leads` using the windows
+`orm-gateway`'s `loadClientsPage` uses, so the Supabase side of every bucket is the number the
+portal renders. Every bucket delta reconciled to named rows — residual **0**.
+
+Coverage is the first finding, and it is not full: **31 clients compared, 2 excluded, 9 unread.**
+
+| Excluded | Why |
+|---|---|
+| RevOpsi, Spiree | column `I` of the tab is not `LEAD RECEIVED`. CS PDCA reads `Leads!I:I` **positionally** and never looks at a header, so for these two clients the sheet's own numbers come from the wrong field. Not comparable until the layout is aligned |
+
+`oLIVEmedia TTS` returns **Forbidden** and `Komandor` **not found** — both already recorded above on
+2026-07-22 and still unfixed. Seven more tabs return no rows. For those nine, drift is *unmeasured*,
+not zero.
+
+### Duplicates, and where they actually live
+
+103 duplicate rows across 20 clients' sheets against **5** in Supabase. 99 of the 103 sit in
+*adjacent* rows — same e-mail, same date, same status, one row apart. That is not a human entering a
+lead twice; it is a write that fired twice. Duplicate protection on the sheet branch is a read-then-
+write lookup, while Supabase has `uq_leads_origin_reply` and `uq_leads_source_sequencer_contact` —
+an index, not a check. The asymmetry is the whole explanation.
+
+Two guards earned their place when the list was built, and both must survive any re-run:
+a placeholder name is not an identity (`x x` appears 14× for OmniOxy and 7× for IzoDom, a different
+e-mail each time — grouping on it would have proposed deleting 19 live leads), and two different
+e-mails are two contacts.
+
+### `qualification` {#qualification-2026-08-05}
+
+| Sheet → Supabase | Rows | Cause |
+|---|---|---|
+| `preMQL` → `MQL` | 102 | the RPC was upgrade-only, the sheet rewrites in both directions — see below |
+| `PreMQL` → *(empty)* | 92 | the enum accepts `preMQL`; the workbooks write a capital **P**. The 2026-07-22 import could not cast it, wrote NULL and said nothing |
+| `MQL` → `preMQL` | 13 | 12 of them are the Aimfox `Create Record` hardcode; 1 predates branch S |
+| `Referral` → *(empty)* | 11 | no such enum label. Still open — needs a mapping decision, not a backfill |
+
+A NULL `qualification` is not a harmless gap: the lead still counts in WoW and MoM Total (both are
+`COUNT(*)`) but vanishes from 3-DoD Total, which requires `MQL` or `preMQL`, and can never be SQL.
+**94 filled 2026-08-05** by [`backfill-lead-qualification`](../../../../scripts/sheets/backfill-lead-qualification.mjs)
+— dry-run first, `NULL`-guarded per row so it is idempotent and cannot overwrite a value set since
+the probe ran.
+
+**The 102 are the important ones, and neither store was corrupt.** Both writers computed the label
+from `data.tag_name` — the event that woke the run — while the tag *set* is the state. Fixed in
+[`bison-lead-enrichment`](../../../../automation/n8n/workflows/outreach/bison-lead-enrichment/README.md#qualification-comes-from-the-tag-set-not-the-event--2026-08-05)
+and [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/aimfox-leads-processing/README.md),
+with [20260805](../../../../supabase/migrations/20260805_promote_contact_lead_two_way_qualification.sql)
+making the RPC sync both ways. **Order matters: callers first, migration second.**
+
+This repairs the mechanism, not the history. Re-aligning the existing 102 needs the current Bison
+tag set per lead, which needs the per-client API keys the extract deliberately never emits — so it
+is a separate pass with its own access decision.
+
+### What is left, by the action it needs
+
+| | Rows | |
+|---|---|---|
+| Append the lead to the client's sheet | 26 | plain addition; the portal counts them, PDCA does not |
+| Lead in the sheet, absent from Supabase | 14 | **blocked** — ADR-0015 has no path: a historical row has no reply to attach. Same decision that stopped the 192-row backfill above |
+| Dates | 19 | all Aimfox, 1–3 days late. [`sheets-lead-date-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md) matches only 2 of them: it compares `company_name` whole, and the Aimfox sheet row joins every employer with commas while the column holds the first. Needs a comma-trim in its `matched` CTE |
+
+The remaining 12 date rows carry no readable `LEAD RECEIVED`, so `COUNTIFS` never counted them and
+there is nothing in the sheet to converge on — the fix is a date in the sheet, not a write here.
+
 ## Related
 
 [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) ·
