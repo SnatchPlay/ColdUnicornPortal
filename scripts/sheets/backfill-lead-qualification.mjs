@@ -49,12 +49,14 @@ function loadEnv() {
 function parseArgs(argv) {
   let plan = null;
   let apply = false;
+  let align = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--apply") apply = true;
+    else if (argv[i] === "--align") align = true;
     else if (argv[i] === "--plan") plan = argv[i + 1], (i += 1);
   }
   if (!plan) throw new Error("Pass --plan <report.json> from the reconciliation probe.");
-  return { plan, apply };
+  return { plan, apply, align };
 }
 
 /**
@@ -72,66 +74,105 @@ function comparableClients(report) {
   return { usable, skipped };
 }
 
-function buildPlan(report) {
+/**
+ * Two kinds of row, and they are not the same decision.
+ *
+ * `fill` — Supabase holds NULL, the sheet holds a value. Nothing is being overruled; a value that
+ * was always meant to be there is being restored.
+ *
+ * `align` — both sides hold a value and they differ. Writing one over the other says the sheet is
+ * the source of truth for a lead's stage, which is a business call (ADR-0017 phase A: the agency
+ * still runs on the workbooks). It is opt-in behind --align for that reason.
+ *
+ * Only MQL <-> preMQL is ever aligned. A lead that reached meeting_scheduled, offer_sent, won or
+ * rejected is left alone: those stages come from the portal, not from a sequencer tag, and the
+ * sheet has no business demoting them. Same guard the 20260805 migration puts in the RPC.
+ */
+const ALIGNABLE = new Set(["MQL", "preMQL"]);
+
+function buildPlan(report, align) {
   const { usable, skipped } = comparableClients(report);
   const write = [];
   const blocked = [];
+  const heldBack = [];
   for (const client of usable) {
     for (const row of client.qual_differs ?? []) {
-      if (row.db_q !== null) continue; // a disagreement, not an empty field — out of scope here
       if (!row.lead_id) continue;
       const label = ENUM.get(String(row.sheet_q ?? "").trim().toLowerCase());
-      const target = { client: client.client, ...row, set: label ?? null };
-      if (label) write.push(target);
-      else blocked.push(target);
+      const target = { client: client.client, ...row, set: label ?? null, kind: row.db_q === null ? "fill" : "align" };
+      if (!label) {
+        blocked.push(target);
+        continue;
+      }
+      if (target.kind === "align") {
+        if (!align) continue;
+        if (!ALIGNABLE.has(row.db_q) || !ALIGNABLE.has(label)) {
+          heldBack.push(target);
+          continue;
+        }
+      }
+      write.push(target);
     }
   }
-  return { write, blocked, skipped };
+  return { write, blocked, heldBack, skipped };
 }
 
 async function main() {
   loadEnv();
-  const { plan: planPath, apply } = parseArgs(process.argv.slice(2));
+  const { plan: planPath, apply, align } = parseArgs(process.argv.slice(2));
   if (!process.env.SUPABASE_DB_URL) throw new Error("SUPABASE_DB_URL is not set.");
 
   const report = JSON.parse(readFileSync(planPath, "utf8"));
-  const { write, blocked, skipped } = buildPlan(report);
+  const { write, blocked, heldBack, skipped } = buildPlan(report, align);
+  const fills = write.filter((w) => w.kind === "fill");
+  const aligns = write.filter((w) => w.kind === "align");
 
-  console.log(`plan: ${write.length} leads to fill, ${blocked.length} blocked, ${skipped.length} clients skipped`);
+  console.log(`plan: ${fills.length} to fill, ${aligns.length} to align${align ? "" : " (--align not passed)"}, `
+    + `${blocked.length} blocked, ${skipped.length} clients skipped`);
   if (skipped.length) console.log(`  skipped (tab layout differs): ${skipped.join(", ")}`);
   for (const b of blocked) {
     console.log(`  BLOCKED  ${b.client} · ${b.name ?? "—"} · sheet says "${b.sheet_q}" — no such enum label`);
+  }
+  for (const h of heldBack) {
+    console.log(`  HELD     ${h.client} · ${h.name ?? "—"} · ${h.db_q} here vs "${h.sheet_q}" in the sheet `
+      + `— past the MQL/preMQL stage, not the sheet's to change`);
   }
   if (!write.length) {
     console.log("nothing to do.");
     return;
   }
 
-  const byLabel = new Map();
-  for (const w of write) byLabel.set(w.set, (byLabel.get(w.set) ?? 0) + 1);
-  console.log(`  writing: ${[...byLabel].map(([k, v]) => `${v} × ${k}`).join(", ")}`);
+  const byMove = new Map();
+  for (const w of write) {
+    const key = w.kind === "fill" ? `(empty) → ${w.set}` : `${w.db_q} → ${w.set}`;
+    byMove.set(key, (byMove.get(key) ?? 0) + 1);
+  }
+  for (const [k, v] of [...byMove].sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(4)} × ${k}`);
 
   const sql = postgres(process.env.SUPABASE_DB_URL, { ssl: "require", max: 1 });
   try {
     await sql.begin(async (tx) => {
-      let filled = 0;
-      let moved = 0; // a lead whose qualification stopped being NULL since the probe ran
+      let written = 0;
+      let stale = 0; // the row moved between the probe and this run — left alone, reported
       for (const w of write) {
-        // The NULL guard is the whole safety story: it makes the write idempotent AND refuses to
-        // overwrite a value somebody set between the probe and this run.
-        const done = await tx`
-          UPDATE public.leads
-             SET qualification = ${w.set}::public.lead_qualification, updated_at = now()
-           WHERE id = ${w.lead_id}::uuid AND qualification IS NULL
-          RETURNING id`;
-        if (done.length) filled += 1;
-        else moved += 1;
+        // The predicate is the whole safety story. It makes each write idempotent and refuses to
+        // act on a row that changed since the probe read it: a fill only touches a still-empty
+        // field, an align only moves a lead still sitting on the value the probe saw.
+        const done = w.kind === "fill"
+          ? await tx`
+              UPDATE public.leads
+                 SET qualification = ${w.set}::public.lead_qualification, updated_at = now()
+               WHERE id = ${w.lead_id}::uuid AND qualification IS NULL
+              RETURNING id`
+          : await tx`
+              UPDATE public.leads
+                 SET qualification = ${w.set}::public.lead_qualification, updated_at = now()
+               WHERE id = ${w.lead_id}::uuid AND qualification::text = ${w.db_q}
+              RETURNING id`;
+        if (done.length) written += 1;
+        else stale += 1;
       }
-      const remaining = await tx`
-        SELECT count(*)::int AS n FROM public.leads
-         WHERE id = ANY(${write.map((w) => w.lead_id)}::uuid[]) AND qualification IS NULL`;
-
-      console.log(`\nfilled ${filled}, already set ${moved}, still NULL ${remaining[0].n}`);
+      console.log(`\nwritten ${written}, skipped as stale ${stale}`);
       if (!apply) {
         console.log("dry run — rolling back. Re-run with --apply to keep it.");
         throw new Error("__rollback__");
