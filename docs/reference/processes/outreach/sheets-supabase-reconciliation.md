@@ -298,6 +298,30 @@ a placeholder name is not an identity (`x x` appears 14× for OmniOxy and 7× fo
 e-mail each time — grouping on it would have proposed deleting 19 live leads), and two different
 e-mails are two contacts.
 
+**Sheet side, cleared 2026-08-05:** all 103 removed by hand, except TouchlessFreaks, whose workbook
+the operator cannot edit. That one needed the automation's own Google account — and a protected
+range on **row 1** blocked it even there, because Google refuses `deleteDimension` anywhere in a
+sheet holding a protected range the caller cannot edit. Lifting the header protection unblocked it.
+
+**Supabase side, merged 2026-08-05 —** and *merged* is the word, not deleted. In all three pairs the
+redundant row carried enrichment the survivor lacked: company, job title, industry, headcount,
+website, phone source, e-mail. It came from the 2026-07-22 sheet import, which enriched generously
+but attached no reply; the survivor came from `promote_contact_to_lead` and holds `origin_reply_id`
+and a sequencer contact but almost no profile. A plain delete would have thrown away the better half
+of each record.
+
+[`merge-duplicate-leads`](../../../../scripts/sheets/merge-duplicate-leads.mjs) encodes the rule:
+
+| | |
+|---|---|
+| **Survivor** | the row holding `origin_reply_id` — not a judgement call, it is what ties a lead to its reply (ADR-0015) and what `uq_leads_origin_reply` protects. The script refuses the pair if that row is not the one marked keep |
+| **Copied** | contact attributes only — name, job title, company, industry, headcount, website, country, phone, e-mail, LinkedIn. They describe a person, so taking them from whichever row has them is safe |
+| **Refilled from the survivor's own reply** | message title, message number, reply text. The redundant row's copies belong to a *different* reply, in one case a year earlier |
+| **Never copied** | `campaign_id`, `external_id`, `external_blacklist_id`. Campaign attribution feeds the metrics; carrying a 2025 campaign onto a 2026 lead would misattribute it silently |
+| **OR'd** | the outcome flags — if either row records a meeting or a win, the merged lead keeps it |
+
+Duplicate leads in Supabase afterwards: **0**.
+
 ### `qualification` {#qualification-2026-08-05}
 
 | Sheet → Supabase | Rows | Cause | Status |
