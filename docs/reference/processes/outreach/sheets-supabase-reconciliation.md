@@ -300,12 +300,17 @@ e-mails are two contacts.
 
 ### `qualification` {#qualification-2026-08-05}
 
-| Sheet → Supabase | Rows | Cause |
-|---|---|---|
-| `preMQL` → `MQL` | 102 | the RPC was upgrade-only, the sheet rewrites in both directions — see below |
-| `PreMQL` → *(empty)* | 92 | the enum accepts `preMQL`; the workbooks write a capital **P**. The 2026-07-22 import could not cast it, wrote NULL and said nothing |
-| `MQL` → `preMQL` | 13 | 12 of them are the Aimfox `Create Record` hardcode; 1 predates branch S |
-| `Referral` → *(empty)* | 11 | no such enum label. Still open — needs a mapping decision, not a backfill |
+| Sheet → Supabase | Rows | Cause | Status |
+|---|---|---|---|
+| `preMQL` → `MQL` | 102 | the RPC was upgrade-only, the sheet rewrites in both directions — see below | **aligned to the sheet 2026-08-05** |
+| `PreMQL` → *(empty)* | 92 | the enum accepts `preMQL`; the workbooks write a capital **P**. The 2026-07-22 import could not cast it, wrote NULL and said nothing | **filled 2026-08-05** |
+| `MQL` → `preMQL` | 13 | 12 of them are the Aimfox `Create Record` hardcode; 1 predates branch S | **aligned to the sheet 2026-08-05** |
+| `Referral` → *(empty)* | 11 | no such enum label | **open** — needs a mapping decision, not a backfill |
+
+The `Referral` rows are all **June–July 2025**: ColdUnicorn PL ×7 (05.06, 12.06, 01.07, 07.07, 08.07,
+09.07, 18.07), Konrad ×2 (27.06, 07.07), Runmageddon ×2 (25.07, 29.07). Every one of them is older
+than the four months MoM reaches back, so none moves a metric the portal renders today — which is
+why this is a naming decision to take calmly rather than a gap to plug.
 
 A NULL `qualification` is not a harmless gap: the lead still counts in WoW and MoM Total (both are
 `COUNT(*)`) but vanishes from 3-DoD Total, which requires `MQL` or `preMQL`, and can never be SQL.
@@ -320,9 +325,15 @@ and [`aimfox-leads-processing`](../../../../automation/n8n/workflows/outreach/ai
 with [20260805](../../../../supabase/migrations/20260805_promote_contact_lead_two_way_qualification.sql)
 making the RPC sync both ways. **Order matters: callers first, migration second.**
 
-This repairs the mechanism, not the history. Re-aligning the existing 102 needs the current Bison
-tag set per lead, which needs the per-client API keys the extract deliberately never emits — so it
-is a separate pass with its own access decision.
+**History was then converged on the sheet**, decided 2026-08-05. Re-deriving each lead's true stage
+from Bison would need the per-client API keys the extract deliberately never emits; the workbooks
+already hold the answer the team works from daily, and under [ADR-0017](../../../adr/0017-sheets-to-supabase-dual-write-transition.md)
+phase A they are the authoritative surface anyway. So `--align` writes the sheet's value over
+Supabase for the 115 rows, guarded to `MQL ⇄ preMQL` — a lead that reached `meeting_scheduled`,
+`offer_sent`, `won` or `rejected` is never demoted by a sheet value, the same guard the RPC now
+carries. Nothing was held back: no disagreeing lead had advanced past those two stages.
+
+After the run, `preMQL ⇄ MQL` disagreements across all 31 comparable clients: **0**.
 
 ### What is left, by the action it needs
 
