@@ -341,10 +341,37 @@ After the run, `preMQL ⇄ MQL` disagreements across all 31 comparable clients: 
 |---|---|---|
 | Append the lead to the client's sheet | 26 | plain addition; the portal counts them, PDCA does not |
 | Lead in the sheet, absent from Supabase | 14 | **blocked** — ADR-0015 has no path: a historical row has no reply to attach. Same decision that stopped the 192-row backfill above |
-| Dates | 19 | all Aimfox, 1–3 days late. [`sheets-lead-date-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md) matches only 2 of them: it compares `company_name` whole, and the Aimfox sheet row joins every employer with commas while the column holds the first. Needs a comma-trim in its `matched` CTE |
+| Dates | 19 | all Aimfox, 1–3 days late. **Re-dated 2026-08-05** — see below |
 
 The remaining 12 date rows carry no readable `LEAD RECEIVED`, so `COUNTIFS` never counted them and
 there is nothing in the sheet to converge on — the fix is a date in the sheet, not a write here.
+
+### The date backfill could not see the leads it was built for — fixed 2026-08-05
+
+[`sheets-lead-date-backfill`](../../../../automation/n8n/workflows/ops/sheets-lead-date-backfill/README.md)
+proposed **2** of the 19. Its `matched` CTE pairs a sheet row to a lead on e-mail, or on full name
+**and company** — comparing `company_name` as a whole string. An Aimfox sheet row joins *every*
+current employer with commas (`"Eco Fix sp z o o, Ecofix Group"`) while `leads.company_name` keeps
+the first, so the two never matched. Every lead the workflow exists to repair is an Aimfox lead, so
+it was blind to almost all of its own job.
+
+Both sides of that comparison now take `split_part(…, ',', 1)`. The run then proposed exactly **19**,
+name-for-name identical to the reconciliation's independent list — two different code paths agreeing
+is the check that made it safe to apply.
+
+**Applied 2026-08-05: 19 leads and 19 replies re-dated** (Kaizen rent 14, Runmageddon 3,
+EvidencePrime 1, ColdUnicorn PL 1). `created_at` and `received_at` move together, which is the whole
+reason to use this workflow instead of an UPDATE. Afterwards, date disagreements where both stores
+hold a date: **0**.
+
+`ambiguous_leads` rose from 101 to 174 — trimming the company makes more rows share a key. Those are
+skipped, never guessed: `plan` still demands a strictly unique pairing on both sides.
+
+One limitation stays, deliberately. This workflow reads the tab through the Google Sheets node, by
+header name, so on the two shifted tabs it reads `INDUSTRY` where it expects a date. That cannot
+mis-date anyone — industry text parses to `null` and the row is dropped as `sheet_rows_no_date` — it
+only means RevOpsi and Spiree are under-covered here. Switching it to the positional raw read is a
+separate change.
 
 ## Related
 
