@@ -5,11 +5,10 @@ name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
 domain: ops
 owner: automation
 
-# `observed` until the graph exists on the instance and has been exported. Section C of
-# workflow-lifecycle.md requires the manifest, README and contracts BEFORE the graph, so this
-# artifact is deliberately incomplete right now: workflow.json is absent and `pnpm n8n:validate`
-# will say so as a warning. Flip to `managed` / `active` in the same change that lands the export.
-lifecycle: observed
+# `managed` since 2026-08-07: the graph exists as ehhFUR3SYIxDahER and workflow.json is the export.
+# `status` stays `planned` because only the read half is built — the workflow is inactive and
+# creates nothing. It becomes `active` in the change that lands the write nodes.
+lifecycle: managed
 status: planned
 criticality: high         # mints API keys and creates webhooks in a client's sending system
 
@@ -20,15 +19,20 @@ architectureDecisions:
   - docs/adr/0012-multi-sequencer-model.md
   - docs/adr/0016-repository-as-automation-source-of-truth.md
 
+# Only the executeWorkflowTrigger exists today. The webhook lands with ADR-0018, when the gateway
+# gains the right to make an outbound call — declaring it before then would claim a surface that
+# is not there.
 triggers:
+  - type: executeWorkflowTrigger
+    detail: >-
+      The current entry point. Callable as a sub-workflow, and how the five production dry-runs of
+      2026-08-07 were made.
   - type: webhook
+    planned: true
     detail: >-
       POST /webhook/workspace-setup-aimfox, from the orm-gateway `requestWorkspaceSetup` action.
       Header-authenticated — unlike the Aimfox ingestion webhooks, which are unauthenticated and
       are a known defect (security.md §3) that must not be copied here.
-  - type: executeWorkflowTrigger
-    detail: >-
-      Callable as a sub-workflow so a future orchestrator can provision both sequencers in one pass.
 
 reads:
   tables:
@@ -62,13 +66,14 @@ writes:
 credentials:
   - alias: "Aimfox Master"
     type: httpBearerAuth
-    usedBy: "Resolve Workspace, Create Workspace Key"
+    usedBy: "List Workspaces, List Tokens"
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Resolve Client, Read Connector, Upsert Connector, Record Run"
+    usedBy: "Resolve Client, Read Claimed"
   - alias: "Workspace setup webhook auth"
     type: httpHeaderAuth
-    usedBy: "Webhook"
+    planned: true
+    usedBy: "Webhook (ADR-0018, not built)"
 
 targetContract:
   input: automation/n8n/workflows/ops/aimfox-workspace-setup/contracts/setup-input.schema.json

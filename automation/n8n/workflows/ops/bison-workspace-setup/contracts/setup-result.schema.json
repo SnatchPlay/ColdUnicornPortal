@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldunicorn.internal/n8n/ops/bison-workspace-setup/setup-result.schema.json",
+  "title": "Bison workspace provisioning · result",
+  "description": "Response body of the webhook (responseMode: lastNode) and the return value of the sub-workflow. Also the shape persisted to client_sequencers.setup_state, minus `candidates`. Deliberately the same shape as the Aimfox result so the portal renders one component for both sequencers — the differences are `sequencer`, the id format of workspace_id, and that the tag step is called `tags` rather than `labels`. It must never contain an api_key: the gateway derives booleans and the key stays server-side (process doc, invariant 7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["client_id", "sequencer", "state", "steps", "dry_run"],
+  "properties": {
+    "client_id": { "type": "string", "format": "uuid" },
+    "sequencer": { "const": "emailbison" },
+    "dry_run": { "type": "boolean" },
+    "state": {
+      "description": "configured = the whole canonical set is present. partial = some elements were missing (and were created unless dry_run). missing = the workspace resolved but nothing was wired. needs_selection = the workspace could not be resolved unambiguously and a human must choose. client_not_found = the client_id matched no client with an enabled connector — a caller error, reported out loud rather than allowed to end the run silently.",
+      "enum": ["configured", "partial", "missing", "needs_selection", "client_not_found"]
+    },
+    "reason": {
+      "description": "Present when state is needs_selection or client_not_found. Says why in one sentence, so the operator does not have to open the execution.",
+      "type": "string"
+    },
+    "read_only_iteration": {
+      "description": "True while the workflow contains no write node at all. Iteration 2 adds the writes and drops this flag.",
+      "type": "boolean"
+    },
+    "client_name": { "type": ["string", "null"] },
+    "resolved": {
+      "description": "Absent when state is needs_selection.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["workspace_id", "matched_by"],
+      "properties": {
+        "workspace_id": {
+          "description": "Numeric string — Bison ids are integers, unlike Aimfox UUIDs.",
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "name": { "type": ["string", "null"] },
+        "matched_by": {
+          "description": "Resolution order, first hit wins. `explicit` — the caller supplied the id. `stored` — client_sequencers already holds one for this client. `name` — exactly one workspace matched the client name. No fuzzy value exists on purpose: an inexact match must terminate in needs_selection (invariant 2).",
+          "enum": ["explicit", "stored", "name"]
+        },
+        "personal_team": {
+          "description": "From GET /api/workspaces/v1.1. Kept because Bison workspace names repeat far more than Aimfox's, and personal_team / main / parent_id are what let an operator tell two same-named rows apart.",
+          "type": ["boolean", "null"]
+        },
+        "parent_id": { "type": ["string", "number", "null"] }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "webhooks", "tags", "campaigns"],
+      "properties": {
+        "key": { "$ref": "#/$defs/step" },
+        "webhooks": { "$ref": "#/$defs/step" },
+        "tags": { "$ref": "#/$defs/step" },
+        "campaigns": {
+          "description": "Reports only. The three OOO automation campaigns are never created by this workflow: their sequence copy does not exist in a usable form (all three bodies on the old canvas are the same feminine-Polish text with a hardcoded {PANIEKAMILU} placeholder), and creating them blind already produced six campaigns for Bent Iron PL. `outcome` is therefore `ok` or `missing`, never `created`.",
+          "$ref": "#/$defs/step"
+        }
+      }
+    },
+    "candidates": {
+      "description": "Only present when state is needs_selection. Already filtered: every workspace whose id appears in client_sequencers, for any client and any sequencer, is excluded — offering one would invite the misassignment that put GIC's Aimfox workspace on Prac.Finansowa.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workspace_id", "name"],
+        "properties": {
+          "workspace_id": { "type": "string", "pattern": "^[0-9]+$" },
+          "name": { "type": "string" },
+          "personal_team": { "type": ["boolean", "null"] },
+          "main": { "type": ["boolean", "null"] },
+          "parent_id": { "type": ["string", "number", "null"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {
+          "description": "ok = already present, nothing done. created = was missing and has been created. missing = was missing and was NOT created (dry_run, or a step that never creates). skipped = the step could not run because an earlier one failed. failed = the vendor rejected the call.",
+          "enum": ["ok", "created", "missing", "skipped", "failed"]
+        },
+        "present": {
+          "description": "Element identities already at the vendor. Webhooks are identified as \"<events joined by +> <url>\", never by name — UniTalk's is called \"Reply Classification\" where every other workspace says \"Reply classification\" (invariant 4).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "created": { "type": "array", "items": { "type": "string" } },
+        "error": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

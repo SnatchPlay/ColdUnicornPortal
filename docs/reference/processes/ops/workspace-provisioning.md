@@ -61,17 +61,68 @@ Measured across all 9 wired Aimfox workspaces on 2026-08-07.
 | label | `name` | `MQL` (success) |
 | campaigns | — | catalogued by [`aimfox-campaign-sync`](../../../../automation/n8n/workflows/ingestion/aimfox-campaign-sync/README.md), not created by us |
 
-**Bison**
+**Bison** — measured across all 16 Active Bison workspaces on 2026-08-07 (read-only `GET
+/api/webhook-url` + `GET /api/tags` with each workspace's own key).
 
-| Element | Identity | Value |
-|---|---|---|
-| webhook | `url` + `events` | `[lead_replied]` → `/webhook/replies-classification` |
-| webhook | `url` + `events` | `[tag_attached, tag_removed]` → `/webhook/bison-replies-hub` |
-| tag | `name` | `preMQL`, `MQL`, `OOO` |
-| campaign | `name` | `OOO automation \| general`, `\| male`, `\| female` — type `reply_followup`, each with a schedule and a sequence |
+| Element | Identity | Value | Found in |
+|---|---|---|---|
+| webhook | `url` + `events` | `[lead_replied]` → `/webhook/replies-classification` | **16/16** |
+| webhook | `url` + `events` | `[tag_attached, tag_removed]` → `/webhook/bison-replies-hub` | **16/16** |
+| tag | `name` | `preMQL` | **16/16** |
+| tag | `name` | `OOO` | **16/16** |
+| campaign | `name` | `OOO automation \| general`, `\| male`, `\| female` — type `reply_followup`, each with a schedule and a sequence | see below |
 
-`DNC` is **not** in the canonical set. It exists in 3 of 9 Aimfox workspaces; that is a client
-preference, not our contract, and provisioning must not create it.
+### `MQL` is not a Bison tag we create
+
+The plan of record said the Bison tag set was `{preMQL, MQL, OOO}`. Measurement says otherwise:
+`MQL` exists in only **7 of 16** workspaces, while `preMQL` and `OOO` are in all 16.
+
+It is not a nine-workspace gap. On Bison an MQL is produced by the **`Interested`** tag, which is a
+Bison built-in present in 16/16 — [`bison-lead-enrichment`](../../../../automation/n8n/workflows/outreach/bison-lead-enrichment/workflow.json)
+reads `names.includes('interested') || names.includes('mql')`, so `MQL` is an accepted alias and
+nothing more. Nothing in the platform branches on a literal Bison `MQL` tag.
+
+So creating `MQL` in the other nine workspaces would add clutter to a client's system and a second,
+less-wired route to the same qualification. **The Bison tag canon is `preMQL` + `OOO`.** This is
+the opposite of Aimfox, where `MQL` is a label we do create and GIC's absence of it is a real
+defect — the two vendors genuinely differ, and one canonical set cannot serve both.
+
+Ten further tags sit at 16/16 (`Automated Reply`, `Barracuda`, `Custom Mail Server`, `Google`,
+`Interested`, `Meeting Booked`, `Mimecast`, `Outlook`, `Proofpoint`, `Zoho`). These are Bison's own
+ESP-detection and classification tags, not ours. `NRR` is at 3/16 and is likewise not created here.
+
+### The OOO campaign triple is the part that is not safe to automate yet
+
+The three `OOO automation | …` campaigns are real canon — 15 of the 16 Active clients have all
+three catalogued in `public.campaigns`. But two things block creating them:
+
+**They have already been created twice for one client.** Bent Iron PL has **six**: external ids
+629/630/631 from 2026-04-21 and 937/938/939 from 2026-06-30. Four are still `active` at the vendor.
+`client_ooo_routing` points at the June set, so the April three are orphaned and live in the
+client's workspace doing nothing. That is defect 6 — no idempotency — with a named victim, and it
+is the single strongest argument for read-before-write.
+
+**The sequence copy is not ours to author.** All three `sequence-steps` bodies on the old canvas
+are byte-identical (1931 characters each), written in feminine Polish (`Pani`, `wróciła Pani`), and
+carry a hardcoded `{PANIEKAMILU}` placeholder. So the male/female split exists in the campaign name
+only; the copy behind all three is the same female-gendered text. Whatever the intended male and
+general variants are, they are not in the canvas and cannot be invented here — the copy is business
+content and must come from the client-facing source of truth.
+
+Consequence: `bison-workspace-setup` **reports** which of the three campaigns are missing and does
+not create them. Step 6 stays `missing` with a reason until the three real copy variants exist.
+
+### `DNC` is not in the canonical set either
+
+It exists in 3 of 9 Aimfox workspaces; that is a client preference, not our contract, and
+provisioning must not create it.
+
+### Bison webhook names vary too
+
+UniTalk's `lead_replied` webhook is named **`Reply Classification`**; everywhere else it is
+`Reply classification`. Same URL, same event, different string. The url + events identity rule
+(invariant 4) is therefore not an Aimfox-specific precaution — it is load-bearing on both vendors,
+and a name comparison would have created a seventeenth webhook here.
 
 ## Triggering events
 
@@ -107,11 +158,12 @@ already present reports `ok` and does nothing.
 4. webhooks              vendor list → compare on url + events → create only what is missing
 5. labels / tags         vendor list → compare on name → create only what is missing
 6. campaigns             Aimfox: hand off to aimfox-campaign-sync
-                         Bison:  vendor list → compare on name → create missing + schedule + sequence
+                         Bison:  vendor list → compare on name → REPORT what is missing
+                                 (creating them is blocked on real copy — see the canonical set)
 7. record                setup_state on client_sequencers + a row in integration_sync_runs
 ```
 
-The outcome is one of four states:
+The outcome is one of five states:
 
 | State | Meaning |
 |---|---|
@@ -119,6 +171,11 @@ The outcome is one of four states:
 | `partial` | some are present, some were missing (and were created, unless `dry_run`) |
 | `missing` | the workspace resolved but nothing was wired |
 | `needs_selection` | the workspace could not be resolved unambiguously — a human must choose |
+| `client_not_found` | the `client_id` matched no client with an enabled connector |
+
+`client_not_found` is not defensive padding. Without it, a `client_id` that resolved to nothing
+ended the run with `status: success` and no output at all — a silent success, the same failure
+shape that lost Audytel's leads. Every terminal path has to say something.
 
 ## Alternative flows
 

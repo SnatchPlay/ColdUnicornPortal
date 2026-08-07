@@ -1,0 +1,133 @@
+schemaVersion: 1
+
+id: bison-workspace-setup
+name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
+domain: ops
+owner: automation
+
+# `observed` until the graph exists on the instance and has been exported. Section C of
+# workflow-lifecycle.md requires the manifest, README and contracts BEFORE the graph, so this
+# artifact is deliberately incomplete right now: workflow.json is absent and `pnpm n8n:validate`
+# will say so as a warning. Flip to `managed` in the same change that lands the export.
+lifecycle: observed
+status: planned
+criticality: high         # mints API keys and creates webhooks in a client's sending system
+
+businessProcess:
+  - docs/reference/processes/ops/workspace-provisioning.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+# Only the executeWorkflowTrigger is planned for the first iteration. The webhook lands with
+# ADR-0018, when the gateway gains the right to make an outbound call.
+triggers:
+  - type: executeWorkflowTrigger
+    detail: >-
+      The entry point. Callable as a sub-workflow so an orchestrator can provision both sequencers
+      in one pass.
+  - type: webhook
+    planned: true
+    detail: >-
+      POST /webhook/workspace-setup-bison, from the orm-gateway `requestWorkspaceSetup` action.
+      Header-authenticated from the first day.
+
+reads:
+  tables:
+    - clients
+    - sequencers
+    - client_sequencers
+  external:
+    - "Bison API · GET /api/workspaces/v1.1 (master key) — resolve a workspace by name; returns data[].{id,name,personal_team,main,parent_id}"
+    - "Bison API · GET /api/webhook-url — current webhook set, compared on url + events"
+    - "Bison API · GET /api/tags — current tag set, compared on name"
+    - "Bison API · GET /api/campaigns — the three OOO automation campaigns, compared on name (report only)"
+
+# Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
+# scripts/n8n/lib/business-rules.mjs. Neither table is one of the ADR-0015 ingestion tables, and
+# neither carries a business invariant an RPC would be protecting. The two credential-sync
+# workflows write client_sequencers the same way.
+writes:
+  tables:
+    - client_sequencers
+    - integration_sync_runs
+  tablesWritten:
+    - client_sequencers
+    - integration_sync_runs
+  rpcs: []
+  external:
+    - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens — only when neither the connector row nor the vendor already holds a usable key"
+    - "Bison API · POST /api/webhook-url — only for a url+events pair that is absent"
+    - "Bison API · POST /api/tags — only for a name that is absent, and only preMQL and OOO"
+
+# NOT written, deliberately: POST /api/campaigns and its /schedule + /sequence-steps children.
+# The canonical copy for the three OOO automation campaigns does not exist in usable form, and
+# creating them blind is what left Bent Iron PL with six campaigns instead of three. Step 6
+# reports and does not create. See the process document, "The OOO campaign triple".
+
+credentials:
+  - alias: "Bison Master"
+    type: httpBearerAuth
+    usedBy: "List Workspaces, Create Workspace Key"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve Client, Read Claimed, Upsert Connector, Record Run"
+  - alias: "Workspace setup webhook auth"
+    type: httpHeaderAuth
+    planned: true
+    usedBy: "Webhook (ADR-0018, not built)"
+
+targetContract:
+  input: automation/n8n/workflows/ops/bison-workspace-setup/contracts/setup-input.schema.json
+  output: automation/n8n/workflows/ops/bison-workspace-setup/contracts/setup-result.schema.json
+
+portalSurfaces:
+  - "Clients page — provisioning status column (client_sequencers.setup_state)"
+  - "Client drawer — Workspaces section: Перевірити (dry_run) / Налаштувати"
+
+metrics: []
+
+idempotency:
+  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a tag"
+  notes: >-
+    Every step reads the vendor's current state before it writes and creates only what is absent, so
+    a second run is a no-op. This is not theoretical here: Bent Iron PL has six OOO automation
+    campaigns because the old canvas was run twice, and four of them are still active at the vendor.
+    Webhooks are matched on url + events and NEVER on name — UniTalk's lead_replied webhook is
+    named "Reply Classification" against "Reply classification" everywhere else, and a name match
+    would create a duplicate, which means two deliveries per reply, which means two leads.
+
+retryPolicy:
+  notes: >-
+    No retries. Every vendor call runs with onError continueRegularOutput and contributes its own
+    outcome to the `steps` object, so one 4xx yields state `partial` instead of an unexplained stop
+    midway. settings.errorWorkflow points at automation-failure-recorder.
+
+cancellation:
+  notes: >-
+    Nothing to cancel — a single synchronous pass. A failure leaves the workspace partially
+    provisioned, which is safe precisely because re-running completes it.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: null
+
+# The workflow this one replaces, together with aimfox-workspace-setup.
+supersedes:
+  - id: 8uRWXHe9FIfglq1u
+    name: "My workflow 6"
+    note: >-
+      Orphan manual canvas, inactive, 23 nodes, both sequencers in one graph. Defects carried into
+      this rewrite as fixes: workspace id 13 hardcoded into every Bison URL; Create Campaign
+      Sequence1 and Sequence2 both target $('Create "OOO automation | general"'), so male and
+      female sequences were written into general three times over; Create Campaign Schedule2
+      references $('Create "OOO automation | female"') while the node is named
+      'Create "OOO automation | female"1', a dead reference; a node labelled "Add 'MQL' label1"
+      actually creates DNC; the minted Bison token is consumed inline from
+      data.plain_text_token and never stored in client_sequencers; no idempotency and no error
+      handling anywhere.
+
+knownViolations: []

@@ -77,6 +77,11 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "missing": {
+          "description": "Element identities the canonical set requires and the vendor does not have. Same identity format as `present`.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "created": { "type": "array", "items": { "type": "string" } },
         "error": { "type": ["string", "null"] }
       }

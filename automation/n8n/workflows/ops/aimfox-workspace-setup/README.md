@@ -1,9 +1,10 @@
 # aimfox-workspace-setup
 
 **Logical ID:** `aimfox-workspace-setup` · **Domain:** `ops` · **Criticality:** high
-**Remote (production):** not created yet
+**Remote (production):** `ehhFUR3SYIxDahER` — **inactive**
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** contract and artifacts written; the graph does not exist yet
+**Status:** read half built and proven against production; **no write node exists yet**, so a run
+observes and reports and changes nothing, anywhere
 
 ## Business purpose
 
@@ -26,7 +27,12 @@ OUT  contracts/setup-result.schema.json
   → { client_id, sequencer: "aimfox", resolved, steps, state, candidates? }
 ```
 
-`state` is one of `configured` · `partial` · `missing` · `needs_selection`.
+`state` is one of `configured` · `partial` · `missing` · `needs_selection` · `client_not_found`.
+
+The last one exists because the first version did not have it: a `client_id` that matched no client
+with an enabled connector ended the run with `status: success` and no output at all. That is the
+same failure shape that lost Audytel's leads — a silent success. `Resolve Client` now carries
+`alwaysOutputData: true` so the chain reaches the end and says what happened.
 
 `dry_run: true` performs every read and no write, and returns the same `steps` object. That is what
 feeds the status shown in the portal — there is no separate "check" path to drift out of sync with
@@ -34,13 +40,26 @@ the "apply" path.
 
 ## Flow
 
+Built today — 11 nodes, every one of them a read:
+
 ```
-Webhook  ─┐
-          ├─ Resolve Client ─ Resolve Workspace ─┬─ (ambiguous) ─ Candidates ─ respond needs_selection
-Execute  ─┘                                      │
-                                                 └─ Read Connector ─ Ensure Key
-                                                    └─ Ensure Webhooks ─ Ensure Labels
-                                                       └─ Sync Campaigns ─ Record Run ─ respond
+Start (executeWorkflowTrigger)
+  └─ Resolve Client ─ Read Claimed ─ List Workspaces ─ Resolve Workspace ─ Resolved?
+                                                                            ├─ no  → Needs Selection
+                                                                            └─ yes → List Tokens
+                                                                                     ─ List Webhooks
+                                                                                     ─ List Labels
+                                                                                     ─ Build Result
+```
+
+`Read Claimed` is the one node whose purpose is not obvious: it reads every
+`external_workspace_id` already present in `client_sequencers`, so `Resolve Workspace` can subtract
+them from the candidate list.
+
+Still to come, in this order — writes (iteration 2), then the webhook entry point (ADR-0018):
+
+```
+… Resolved? ─ yes ─ Ensure Key ─ Ensure Webhooks ─ Ensure Labels ─ Sync Campaigns ─ Record Run
 ```
 
 ## The canonical set

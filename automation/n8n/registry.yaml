@@ -439,3 +439,28 @@ workflows:
         remoteWorkflowId: ehhFUR3SYIxDahER
     lastRepositorySync: 2026-08-07
     lastValidation: 2026-08-07 read path proven on production (executions 70399-70406, dry_run only) — Kaizen/Bent Iron/Audytel configured, Fortum missing preMQL, GIC missing MQL; write path does not exist yet
+
+  # The Bison half of the same split. Contracts and manifest first, graph second (workflow-lifecycle
+  # section C). Its canonical set is NOT the Aimfox one: measured across all 16 Active Bison
+  # workspaces, the tags we create are preMQL + OOO only. MQL sits at 7/16 and is not a gap — the
+  # Bison MQL path runs off the built-in `Interested` tag, so creating MQL would add a second,
+  # less-wired route. The three OOO automation campaigns are reported and never created: their
+  # sequence copy does not exist in usable form, and creating them blind already gave Bent Iron PL
+  # six campaigns instead of three.
+  - id: bison-workspace-setup
+    name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
+    domain: ops
+    path: automation/n8n/workflows/ops/bison-workspace-setup
+    businessProcess: docs/reference/processes/ops/workspace-provisioning.md
+    owner: automation
+    lifecycle: observed
+    status: planned
+    criticality: high
+    trigger: executeWorkflowTrigger
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: null
+    lastRepositorySync: 2026-08-07
+    lastValidation: 2026-08-07 canonical set measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16); no graph yet
