@@ -99,4 +99,27 @@ export function updateWorkflow(id, workflow) {
   return rest("PUT", `/workflows/${id}`, body);
 }
 
+/**
+ * Create a workflow. POST accepts the same narrow body as PUT — anything else ("id", "active",
+ * "tags", timestamps) is rejected outright.
+ *
+ * **A new workflow is always created inactive.** The public API has no way to activate one, which
+ * is exactly the behaviour workflow-lifecycle.md §C step 6 asks for ("Do not activate"): a fresh
+ * graph is reviewed and test-run before anything can reach it. Activation stays a deliberate act in
+ * the n8n UI.
+ *
+ * Note this is the ONE production write that cannot damage anything that already exists — nothing
+ * references a workflow that does not yet exist. The caller is still expected to gate it, the same
+ * way scripts/n8n/deploy.mjs gates PUT.
+ */
+export function createWorkflow(workflow) {
+  const body = {
+    name: workflow.name,
+    nodes: workflow.nodes,
+    connections: workflow.connections,
+    settings: filterSettings(workflow.settings).kept,
+  };
+  return rest("POST", "/workflows", body);
+}
+
 export { restBase };

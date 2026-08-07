@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000002",
+  "workspace_id": null,
+  "dry_run": false,
+  "requested_by": null,
+  "_fixture": "Synthetic. A brand-new client whose workspace exists at the vendor but is wired to nothing. requested_by is null because this run was triggered by client creation rather than by a button. Expected: steps.key=created, steps.webhooks=created (both), steps.labels=created (preMQL, MQL), steps.campaigns=ok, state=partial. DNC must NOT be created — it is not in the canonical set."
+}

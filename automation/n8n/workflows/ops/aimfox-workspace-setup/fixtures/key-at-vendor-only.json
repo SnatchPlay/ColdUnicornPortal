@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000005",
+  "workspace_id": "33333333-0000-4000-a000-000000000005",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000002",
+  "_fixture": "Synthetic, modelled on the Natalia Kobielska shape found 2026-08-07: the old provisioning canvas minted a workspace token and created both webhooks, then stopped — so the vendor holds a key that client_sequencers never stored. Expected: step 3 reads GET /workspaces/{id}/tokens, REUSES the existing token and upserts the connector row; it must not mint a second. steps.key=created (the row is new) with created=[] (no token minted). If the vendor's token list turns out to expose only metadata and not the secret, minting is unavoidable — record that outcome in the README rather than leaving this fixture describing a behaviour that cannot happen."
+}

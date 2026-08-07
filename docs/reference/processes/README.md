@@ -31,7 +31,7 @@ restate them. If you find yourself copying a column list, link instead.
 processes/<domain>/<process>.md
 ```
 
-Current domains: `outreach`.
+Current domains: `outreach`, `ops`.
 
 ## Template
 
@@ -56,6 +56,7 @@ to prevent.
 | [Bison ingestion (campaigns and counters)](outreach/bison-ingestion.md) | outreach | live, Supabase-only — repaired 2026-07-22 after days of silent failure |
 | [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase A on the metrics workflow** (branch S live 2026-07-22); the other four still phase 0 |
 | [Sheets ↔ Supabase reconciliation](outreach/sheets-supabase-reconciliation.md) | outreach | measured **and back-filled** 2026-07-22 — 184 leads (30 Aimfox) + 117 Aimfox client-days |
+| [Workspace provisioning (Aimfox and Bison)](ops/workspace-provisioning.md) | ops | **contract accepted, nothing implements it yet** — the current canvas contradicts invariants 3, 4 and 5 |
 
 ## Traceability
 

@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000003",
+  "workspace_id": "33333333-0000-4000-a000-000000000003",
+  "dry_run": true,
+  "requested_by": "22222222-0000-4000-a000-000000000002",
+  "_fixture": "Synthetic, modelled on the FortumEnergia shape found 2026-08-07: key and both webhooks present, but the preMQL label does not exist, so no preMQL lead can ever be created there. Checked, not applied. Expected: steps.key=ok, steps.webhooks=ok, steps.labels.outcome=missing with created=[] and present=['MQL'], state=partial, and NOTHING written anywhere — not at the vendor, not to setup_state's created lists. dry_run must exercise exactly the same reads as a real run."
+}

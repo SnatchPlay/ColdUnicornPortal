@@ -414,3 +414,28 @@ workflows:
         remoteWorkflowId: ATPnIVnO0sAB9GQx
     lastRepositorySync: 2026-07-29
     lastValidation: 2026-07-29 statement proven in a rolled-back transaction; webhook unauthenticated (security.md #9)
+
+  # Provisioning. Splits the Aimfox half out of the hand-run canvas 8uRWXHe9FIfglq1u ("My workflow
+  # 6"), which hardcodes one workspace id, POSTs unconditionally and reads no vendor state — so it
+  # can only be run once per client, by hand, and a second run would duplicate every webhook.
+  # Iteration 1 is READ-ONLY: it resolves the workspace and reports what is present, and contains
+  # no write node at all — not one POST to Aimfox, not one INSERT. The writes land in iteration 2,
+  # once the read path is proven against real workspaces. Created inactive; there is no webhook yet
+  # (that arrives with the gateway action, header-authenticated).
+  - id: aimfox-workspace-setup
+    name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
+    domain: ops
+    path: automation/n8n/workflows/ops/aimfox-workspace-setup
+    businessProcess: docs/reference/processes/ops/workspace-provisioning.md
+    owner: automation
+    lifecycle: managed
+    status: planned
+    criticality: high
+    trigger: executeWorkflowTrigger
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: ehhFUR3SYIxDahER
+    lastRepositorySync: 2026-08-07
+    lastValidation: 2026-08-07 read path proven on production (executions 70399-70406, dry_run only) — Kaizen/Bent Iron/Audytel configured, Fortum missing preMQL, GIC missing MQL; write path does not exist yet

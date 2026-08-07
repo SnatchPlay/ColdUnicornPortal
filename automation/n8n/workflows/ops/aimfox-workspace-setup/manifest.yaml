@@ -1,0 +1,110 @@
+schemaVersion: 1
+
+id: aimfox-workspace-setup
+name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
+domain: ops
+owner: automation
+
+# `observed` until the graph exists on the instance and has been exported. Section C of
+# workflow-lifecycle.md requires the manifest, README and contracts BEFORE the graph, so this
+# artifact is deliberately incomplete right now: workflow.json is absent and `pnpm n8n:validate`
+# will say so as a warning. Flip to `managed` / `active` in the same change that lands the export.
+lifecycle: observed
+status: planned
+criticality: high         # mints API keys and creates webhooks in a client's sending system
+
+businessProcess:
+  - docs/reference/processes/ops/workspace-provisioning.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+triggers:
+  - type: webhook
+    detail: >-
+      POST /webhook/workspace-setup-aimfox, from the orm-gateway `requestWorkspaceSetup` action.
+      Header-authenticated — unlike the Aimfox ingestion webhooks, which are unauthenticated and
+      are a known defect (security.md §3) that must not be copied here.
+  - type: executeWorkflowTrigger
+    detail: >-
+      Callable as a sub-workflow so a future orchestrator can provision both sequencers in one pass.
+
+reads:
+  tables:
+    - clients
+    - sequencers
+    - client_sequencers
+  external:
+    - "Aimfox API · GET /api/v2/workspaces (master key) — the only way to resolve a workspace by name"
+    - "Aimfox API · GET /api/v2/workspaces/{id}/tokens (master key) — reuse an existing key rather than minting a second"
+    - "Aimfox API · GET /api/v2/webhooks — current webhook set, compared on url + events"
+    - "Aimfox API · GET /api/v2/labels — current label set, compared on name"
+
+# Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
+# scripts/n8n/lib/business-rules.mjs. The ingestion RPC contract of ADR-0015 covers leads, replies,
+# ooo_followups and sequencer_contacts; neither table below is one of them, and neither carries a
+# business invariant that an RPC would be protecting. The two credential-sync workflows write
+# client_sequencers the same way.
+writes:
+  tables:
+    - client_sequencers
+    - integration_sync_runs
+  tablesWritten:
+    - client_sequencers
+    - integration_sync_runs
+  rpcs: []
+  external:
+    - "Aimfox API · POST /api/v2/workspaces/{id}/tokens — only when neither the connector row nor the vendor already holds a usable key"
+    - "Aimfox API · POST /api/v2/webhooks — only for a url+events pair that is absent"
+    - "Aimfox API · POST /api/v2/labels — only for a name that is absent"
+
+credentials:
+  - alias: "Aimfox Master"
+    type: httpBearerAuth
+    usedBy: "Resolve Workspace, Create Workspace Key"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve Client, Read Connector, Upsert Connector, Record Run"
+  - alias: "Workspace setup webhook auth"
+    type: httpHeaderAuth
+    usedBy: "Webhook"
+
+targetContract:
+  input: automation/n8n/workflows/ops/aimfox-workspace-setup/contracts/setup-input.schema.json
+  output: automation/n8n/workflows/ops/aimfox-workspace-setup/contracts/setup-result.schema.json
+
+portalSurfaces:
+  - "Clients page — provisioning status column (client_sequencers.setup_state)"
+  - "Client drawer — Workspaces section: Перевірити (dry_run) / Налаштувати"
+
+metrics: []
+
+idempotency:
+  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a label"
+  notes: >-
+    Every step reads the vendor's current state before it writes and creates only what is absent, so
+    a second run is a no-op. This is invariant 3 of the process document and it is not cosmetic: a
+    duplicated webhook produces two deliveries per event, which produces two leads. Webhooks are
+    matched on url + events and NEVER on name — GIC's lead_label_added webhook is named "Manual Tag",
+    and a name match would create a second webhook on the same event.
+
+retryPolicy:
+  notes: >-
+    No retries. Every vendor call runs with onError continueRegularOutput and contributes its own
+    outcome to the `steps` object, so one 4xx yields state `partial` instead of an unexplained stop
+    midway. settings.errorWorkflow points at automation-failure-recorder, so a hard failure also
+    becomes an integration_sync_runs row.
+
+cancellation:
+  notes: >-
+    Nothing to cancel — a single synchronous pass. A failure leaves the workspace partially
+    provisioned, which is safe precisely because re-running completes it.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: null
+
+knownViolations: []

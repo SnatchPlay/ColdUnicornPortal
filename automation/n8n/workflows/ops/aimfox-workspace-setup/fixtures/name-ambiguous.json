@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000006",
+  "workspace_id": null,
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. Two workspaces at the vendor carry the client's name, so no exact match is unambiguous. Expected: state=needs_selection, resolved=null, candidates listing both — and NOTHING written, even though dry_run is false. The candidate list must exclude any workspace whose id already appears in client_sequencers for any client. THE REGRESSION THIS GUARDS: picking one on a guess. That is how GIC's workspace came to sit on Prac.Finansowa, an Inactive client, where its leads would have been created under the wrong name. Invariant 2."
+}

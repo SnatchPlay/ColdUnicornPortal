@@ -1,0 +1,339 @@
+{
+  "name": "[SETUP] Aimfox workspace · resolve, key, webhooks, labels",
+  "nodes": [
+    {
+      "id": "87e6287b-9c68-4b46-9255-eafc1e9b7414",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -224
+      ],
+      "parameters": {
+        "jsCode": "// Складаємо steps/state за contracts/setup-result.schema.json. Ітерація 1 нічого не створює,\n// тому outcome тут може бути лише ok | missing | skipped — created/failed зʼявляться з ітерацією 2.\nconst CANON_WEBHOOKS = [\n  { events: ['reply'], url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = ['preMQL', 'MQL'];\n\nconst input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\nconst tokensRaw = $('List Tokens').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\n\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", б'є в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\n\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst storedKey = Boolean(client.api_key);\nconst vendorTokens = Array.isArray(tokensRaw.tokens) ? tokensRaw.tokens\n  : Array.isArray(tokensRaw.data) ? tokensRaw.data : [];\n\nlet key;\nif (storedKey) key = step('ok', ['client_sequencers.api_key']);\nelse if (errored(tokensRaw)) key = step('missing', [], ['api_key'], 'could not read vendor tokens');\nelse if (vendorTokens.length) key = step('missing', [`vendor holds ${vendorTokens.length} token(s)`], ['api_key']);\nelse key = step('missing', [], ['api_key']);\n\nlet webhooks, labels;\nif (!storedKey || errored(hooksRaw)) {\n  webhooks = step('skipped', [], [], storedKey ? 'vendor call failed' : 'no workspace key stored yet');\n} else {\n  const present = (hooksRaw.webhooks ?? []).map((w) => hookKey(w.events, w.url));\n  const missing = CANON_WEBHOOKS.filter((c) => !present.includes(hookKey(c.events, c.url)))\n    .map((c) => hookKey(c.events, c.url));\n  webhooks = step(missing.length ? 'missing' : 'ok', present, missing);\n}\n\nif (!storedKey || errored(labelsRaw)) {\n  labels = step('skipped', [], [], storedKey ? 'vendor call failed' : 'no workspace key stored yet');\n} else {\n  const present = (labelsRaw.labels ?? []).map((l) => String(l?.name ?? ''));\n  const missing = CANON_LABELS.filter((n) => !present.includes(n));\n  labels = step(missing.length ? 'missing' : 'ok', present, missing);\n}\n\nconst steps = { key, webhooks, labels, campaigns: step('skipped', [], [], 'not implemented in the read-only iteration') };\n\nconst decided = [key, webhooks, labels];\nconst state = decided.every((s) => s.outcome === 'ok') ? 'configured'\n  : decided.every((s) => s.outcome !== 'ok') ? 'missing'\n  : 'partial';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: true,\n  read_only_iteration: true,\n  resolved: resolution.resolved ?? null,\n  state,\n  steps,\n} }];"
+      }
+    },
+    {
+      "id": "2ff3eb1d-1617-49bd-8363-4373e2aa4084",
+      "name": "List Labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Resolve Client').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/labels"
+      }
+    },
+    {
+      "id": "9f7a0e1b-f11f-4aa8-882b-3150639e609b",
+      "name": "List Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        352,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "=https://api.aimfox.com/api/v2/workspaces/{{ $('Resolve Workspace').first().json.resolved.workspace_id }}/tokens"
+      }
+    },
+    {
+      "id": "a397a999-3499-4f54-8413-ca64e9d0441f",
+      "name": "List Webhooks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        560,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Resolve Client').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/webhooks"
+      }
+    },
+    {
+      "id": "10d218c0-157c-4d56-b7a2-14ef7a213b36",
+      "name": "List Workspaces",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -320,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "https://api.aimfox.com/api/v2/workspaces"
+      }
+    },
+    {
+      "id": "95674075-c1d4-4942-be47-ee4099aadd37",
+      "name": "Needs Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Неіснуючий клієнт — помилка того, хто викликав, а не стан провіженінгу. Але сказати про це\n// треба вголос: мовчазний обрив із status=success — це те, як зникли ліди Audytel.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no such client, or it has no enabled aimfox connector'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: true,\n  read_only_iteration: true,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    labels: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n  },\n} }];"
+      }
+    },
+    {
+      "id": "f96014d8-a8b4-4d68-9fdf-b5a49d2e69b0",
+      "name": "Read Claimed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -544,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select coalesce(json_agg(external_workspace_id), '[]'::json) as claimed\n  from public.client_sequencers\n where sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid\n   and external_workspace_id is not null;"
+      }
+    },
+    {
+      "id": "b9dddbdf-ed0a-4136-a654-2ae503b6b092",
+      "name": "Resolve Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -768,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_id ] }}"
+        },
+        "query": "select c.name                       as client_name,\n       cs.id::text                  as client_sequencer_id,\n       nullif(cs.api_key, '')       as api_key,\n       cs.external_workspace_id     as stored_workspace_id\n  from public.clients c\n  left join public.client_sequencers cs\n    on cs.client_id = c.id\n   and cs.sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid\n   and cs.enabled\n where c.id = $1::uuid;"
+      }
+    },
+    {
+      "id": "e910bc2f-4fed-4b7b-95c7-ff86fc0df7f9",
+      "name": "Resolve Workspace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Порядок резолву: явний id → уже записаний за клієнтом → ТОЧНИЙ збіг назви → кандидати.\n//\n// Крок \"записаний\" критичний. Виміряно 2026-08-07: назва клієнта збігається з назвою воркспейсу\n// лише в 4 випадках із 9 (\"Bent Iron PL\" vs \"Bent Iron\", \"FortumEnergia\" vs \"Fortum\",\n// \"ColdUnicorn PL\" vs \"Łukasz Kot\"). Для вже заведеного клієнта воркспейс відомий з бази, і\n// шукати за назвою не треба взагалі — інакше Bent Iron PL іде в needs_selection на рівному місці.\n//\n// Неоднозначність ніколи не вирішується здогадкою — інваріант 2. Саме здогадка призвела до того,\n// що воркспейс GIC опинився на клієнті Prac.Finansowa.\nconst input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : Array.isArray(listRaw.data) ? listRaw.data\n  : [];\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Resolve Client має alwaysOutputData, тож порожній клієнт приходить як {} замість того, щоб\n// тихо обірвати ланцюжок. Кажемо про це вголос — мовчазний успіх гірший за помилку.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst nameFor = (id) => nameOf(list.find((w) => idOf(w) === id)) || null;\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) {\n  return [{ json: { ...base, resolved: { workspace_id: explicit, name: nameFor(explicit), matched_by: 'explicit' } } }];\n}\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) {\n  return [{ json: { ...base, resolved: { workspace_id: stored, name: nameFor(stored), matched_by: 'stored' } } }];\n}\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) {\n  return [{ json: { ...base, resolved: { workspace_id: idOf(matches[0]), name: nameOf(matches[0]), matched_by: 'name' } } }];\n}\n\n// Кандидати — усе, що ще не закріплене за жодним клієнтом. Показати зайнятий воркспейс означає\n// запросити те саме хибне призначення ще раз.\nconst candidates = list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({ workspace_id: idOf(w), name: nameOf(w) || null }));\n\nreturn [{ json: { ...base, resolved: null, candidates, ambiguous: matches.length > 1 } }];"
+      }
+    },
+    {
+      "id": "4ba6f751-db37-4efc-a5a7-d2954c157720",
+      "name": "Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8f2c1a10-0000-4000-a000-000000000001",
+              "leftValue": "={{ $json.resolved }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6907f3f3-87a5-4bf8-8398-ceefe93b636a",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        0
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "client_id"
+            },
+            {
+              "name": "workspace_id"
+            },
+            {
+              "name": "dry_run"
+            },
+            {
+              "name": "requested_by"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "List Labels": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Tokens": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Webhooks",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Webhooks": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Labels",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Workspaces": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Workspace",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Claimed": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Workspaces",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Claimed",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Workspace": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolved?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolved?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Tokens",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Needs Selection",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Client",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}
