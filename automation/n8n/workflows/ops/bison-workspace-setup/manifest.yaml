@@ -91,9 +91,7 @@ idempotency:
   key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a tag"
   notes: >-
     Every step reads the vendor's current state before it writes and creates only what is absent, so
-    a second run is a no-op. This is not theoretical here: Bent Iron PL has six OOO automation
-    campaigns because the old canvas was run twice, and four of them are still active at the vendor.
-    Webhooks are matched on url + events and NEVER on name — UniTalk's lead_replied webhook is
+    a second run is a no-op. Webhooks are matched on url + events and NEVER on name — UniTalk's lead_replied webhook is
     named "Reply Classification" against "Reply classification" everywhere else, and a name match
     would create a duplicate, which means two deliveries per reply, which means two leads.
 
@@ -113,6 +111,12 @@ environments:
     remoteWorkflowId: null
   production:
     remoteWorkflowId: c82kKnHaREUMvPBR
+
+# Read path proven on production 2026-08-07, executions 70463-70467, dry_run only: five clients,
+# all resolved by `stored`, all with both webhooks and both tags. It surfaced two defects outside
+# its own scope — public.campaigns keeps campaigns the vendor no longer has (bison-campaign-sync is
+# INSERT ... ON CONFLICT DO UPDATE with no removal path), and FortumEnergia's client_ooo_routing
+# points at GIC's three campaigns. Neither is fixed here; both are recorded in the process document.
 
 # The workflow this one replaces, together with aimfox-workspace-setup.
 supersedes:

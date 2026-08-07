@@ -93,14 +93,8 @@ ESP-detection and classification tags, not ours. `NRR` is at 3/16 and is likewis
 
 ### The OOO campaign triple is the part that is not safe to automate yet
 
-The three `OOO automation | …` campaigns are real canon — 15 of the 16 Active clients have all
-three catalogued in `public.campaigns`. But two things block creating them:
-
-**They have already been created twice for one client.** Bent Iron PL has **six**: external ids
-629/630/631 from 2026-04-21 and 937/938/939 from 2026-06-30. Four are still `active` at the vendor.
-`client_ooo_routing` points at the June set, so the April three are orphaned and live in the
-client's workspace doing nothing. That is defect 6 — no idempotency — with a named victim, and it
-is the single strongest argument for read-before-write.
+The three `OOO automation | …` campaigns are canon for 12 of the 16 Active Bison clients. Creating
+them is still out of scope, and the first runs of the workflow on 2026-08-07 sharpened why.
 
 **The sequence copy is not ours to author.** All three `sequence-steps` bodies on the old canvas
 are byte-identical (1931 characters each), written in feminine Polish (`Pani`, `wróciła Pani`), and
@@ -109,8 +103,54 @@ only; the copy behind all three is the same female-gendered text. Whatever the i
 general variants are, they are not in the canvas and cannot be invented here — the copy is business
 content and must come from the client-facing source of truth.
 
+**Four of sixteen Active clients do not have the triple**, and the gaps are not what the catalogue
+says:
+
+| Client | ws | `public.campaigns` | At the vendor |
+|---|---|---|---|
+| Bent Iron UA | 110 | 0 | not checked |
+| ColdUnicorn PL | 2 | 0 | not checked |
+| FortumEnergia | 125 | 0 | **0** — confirmed, execution `70465`: 4 campaigns, none OOO |
+| Bent Iron PL | 73 | **6** | **3** — confirmed, execution `70464`: 32 campaigns, one of each |
+
 Consequence: `bison-workspace-setup` **reports** which of the three campaigns are missing and does
-not create them. Step 6 stays `missing` with a reason until the three real copy variants exist.
+not create them. Step `campaigns` stays `missing` until the three real copy variants exist.
+
+### Bent Iron PL's six campaigns are a stale catalogue, not six campaigns
+
+This corrects an earlier reading of the same data. Bison workspace 73 holds **exactly one of each**
+— `937` female `active`, `938` male `active`, `939` general `archived` — out of 32 campaigns across
+three pages. External ids `629`/`630`/`631` from 2026-04-21 do not exist there at all.
+
+They do exist in `public.campaigns`, marked `active`. The reason is
+[`bison-campaign-sync`](../../../../automation/n8n/workflows/ingestion/bison-campaign-sync/workflow.json):
+its statement is `INSERT … ON CONFLICT (external_id) DO UPDATE` and nothing else. **There is no
+removal path.** A campaign deleted at the vendor keeps its row, and keeps whatever status it last
+had, forever.
+
+So the duplication is in our catalogue, not in the client's workspace — which is the more useful
+finding, because a stale `active` campaign is something the portal will happily show and something
+OOO routing can be pointed at. Which is exactly what happened next.
+
+### FortumEnergia's OOO routing points at GIC's campaigns
+
+`client_ooo_routing` has exactly three rows whose campaign belongs to a different client than the
+routing itself, and all three are FortumEnergia → GIC (`950` general, `951` male, `952` female).
+
+It follows directly from the row above: Fortum has no OOO campaigns of its own, so whoever wired
+the routing picked from a list that was not scoped to the client. Eleven `pending` follow-ups for
+Fortum currently carry `routing_key = 'general'`.
+
+Nothing has been sent. The branch that actually enrols people in
+[`ooo-enrol-followups`](../../../../automation/n8n/workflows/outreach/ooo-enrol-followups/workflow.json)
+reads its campaign from the ARM sheet keyed by Bison workspace id, not from `client_ooo_routing`;
+the Supabase branch is shadow-only in phase A and submits nothing
+([ADR-0017](../../../adr/0017-sheets-to-supabase-dual-write-transition.md)). So this is a loaded
+gun, not a fired one — it becomes live the moment phase B makes Supabase authoritative.
+
+This is the same defect family as the Aimfox token that sat on Prac.Finansowa's row: a
+client-scoped identifier chosen from an unscoped list. It is out of scope for provisioning to fix,
+and it is in scope for provisioning to have found.
 
 ### `DNC` is not in the canonical set either
 

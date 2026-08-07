@@ -3,8 +3,8 @@
 **Logical ID:** `bison-workspace-setup` · **Domain:** `ops` · **Criticality:** high
 **Remote (production):** `c82kKnHaREUMvPBR` — **inactive**
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** read half built, **not yet run**; no write node exists, so a run observes and reports
-and changes nothing, anywhere
+**Status:** read half built and proven against production; no write node exists, so a run observes
+and reports and changes nothing, anywhere
 **Sibling:** [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md) — same contract, same
 shape, different vendor
 
@@ -133,13 +133,12 @@ before the write nodes are built.
 
 ## Campaigns are reported, never created
 
-The three `OOO automation | general / male / female` campaigns are genuine canon — 15 of 16 Active
-clients have all three. This workflow still will not create them, for two independent reasons:
+The three `OOO automation | general / male / female` campaigns are canon for 12 of the 16 Active
+clients. This workflow still will not create them, for two independent reasons:
 
-**It has already gone wrong once.** Bent Iron PL has **six**: ids 629/630/631 from 2026-04-21 and
-937/938/939 from 2026-06-30, four of them still `active` at the vendor. `client_ooo_routing` points
-at the June set; the April three are orphans sitting in the client's workspace. That is what a
-non-idempotent create looks like in production.
+**Four of the sixteen Active clients do not have the triple**, and the catalogue disagrees with the
+vendor about all of it — see the Verified section. Creating campaigns blind on top of that is how a
+workspace ends up with a set nobody can reconcile.
 
 **The copy is not ours to write.** All three `sequence-steps` bodies on the old canvas are
 byte-identical (1931 characters each), in feminine Polish (`Pani`, `wróciła Pani`), with a
@@ -168,16 +167,55 @@ Acceptance criteria live in the
 
 | Target | Expected |
 |---|---|
-| any Active client | both webhooks and both tags `ok`; campaigns `ok` |
+| any Active client | both webhooks and both tags `ok` |
 | UniTalk (`36`) | webhook step `ok` despite the differing name — the url + events proof |
 | a client without `MQL` (9 of 16) | still `configured`; `MQL` is not in the canonical set |
-| Bent Iron PL (`73`) | campaigns `ok`; the duplicate set is reported, never "fixed" by creating more |
 | any target, run twice | second run creates nothing |
+
+## Verified
+
+**2026-08-07, executions `70463`–`70467`** — read path proven against production, five real
+clients, `dry_run` only, nothing written anywhere:
+
+| Exec | Client | ws | State | Resolved by | Finding |
+|---|---|---|---|---|---|
+| 70463 | Kaizen rent | 123 | `configured` | stored | — |
+| 70464 | Bent Iron PL | 73 | `configured` | stored | 32 campaigns over 3 pages; **one** of each OOO campaign, not two |
+| 70465 | FortumEnergia | 125 | `partial` | stored | **no OOO campaigns at all** — 4 campaigns, none of them ours |
+| 70466 | GIC | 89 | `configured` | stored | — |
+| 70467 | Audytel | 55 | `configured` | stored | — |
+
+Every one of the five resolved by `stored`, every one had both webhooks and both tags. Audytel and
+Kaizen rent have no `MQL` tag and are `configured` anyway — the canonical set behaving as designed.
+
+**Pagination is load-bearing and was proven so.** Bent Iron PL's OOO campaigns sit on page 1 of 3,
+but Fortum's absence could only be established by reading all of a workspace's campaigns. Without
+`links.next` the `campaigns` step would report noise.
+
+### What the run corrected
+
+Bent Iron PL's six OOO campaigns are **a stale catalogue, not six campaigns.** Workspace 73 holds
+exactly `937` female `active`, `938` male `active`, `939` general `archived`. Ids `629`/`630`/`631`
+from 2026-04-21 are not there at all — yet `public.campaigns` still lists them as `active`, because
+[`bison-campaign-sync`](../../ingestion/bison-campaign-sync/workflow.json) is
+`INSERT … ON CONFLICT DO UPDATE` with **no removal path**. A campaign deleted at the vendor keeps
+its row and its last status forever.
+
+That stale row then got used: `client_ooo_routing` has exactly three rows pointing at another
+client's campaign, and all three are **FortumEnergia → GIC** (`950`/`951`/`952`). Fortum has no OOO
+campaigns of its own, so the routing was picked from a list that was not scoped to the client.
+Eleven `pending` follow-ups for Fortum carry `routing_key = 'general'`. Nothing has been sent —
+phase A enrols from the ARM sheet, and the Supabase branch is shadow-only — so it is a loaded gun,
+not a fired one, and it goes live with phase B.
+
+Not yet proven: the write path (it does not exist), `state: needs_selection`, and
+`state: client_not_found`.
 
 ## History
 
 - **2026-08-07** — canonical set measured across all 16 Active workspaces; manifest and contracts
   written. Two corrections to the plan of record came out of the measurement: `MQL` is not a Bison
   tag we create, and the OOO campaign triple cannot be created until its copy exists.
-  Read-only graph created as `c82kKnHaREUMvPBR`, inactive. **Not yet run against any workspace** —
-  the table under Verification is a set of predictions, not results, until it is.
+  Read-only graph created as `c82kKnHaREUMvPBR`, inactive, and run against five clients the same
+  day. It found two things nobody was looking for: our campaign catalogue keeps campaigns the
+  vendor no longer has, and FortumEnergia's OOO routing points at GIC's campaigns.

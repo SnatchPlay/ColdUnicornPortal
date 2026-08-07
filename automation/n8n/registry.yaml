@@ -463,4 +463,4 @@ workflows:
       production:
         remoteWorkflowId: c82kKnHaREUMvPBR
     lastRepositorySync: 2026-08-07
-    lastValidation: 2026-08-07 canonical set measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16); read-only graph created inactive, not yet run
+    lastValidation: 2026-08-07 read path proven on production (executions 70463-70467, dry_run only) — Kaizen/Bent Iron/GIC/Audytel configured, Fortum partial (no OOO campaigns at all); canon measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16); write path does not exist yet

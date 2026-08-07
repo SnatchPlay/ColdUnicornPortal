@@ -130,15 +130,22 @@ exists on either side yet.
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | A workspace belongs to exactly one client | `client_sequencers` | — | — | — | — | candidate list subtracts every `external_workspace_id` already stored, any client, any sequencer | execution `70393`: 12 workspaces − 9 claimed = 3 offered | ✅ |
 | 2 | A workspace is never assigned on a guess | `client_sequencers` | — | — | — | — | resolution is explicit → stored → **exact** name → `needs_selection` | `70393` (Bent Iron PL) before/after the `stored` fix | ✅ |
-| 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ⛔ untested: no write node exists. Bent Iron PL's **six** OOO campaigns are what the untested path costs | ⛔ |
+| 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ⛔ untested: no write node exists on either side | ⛔ |
 | 4 | A webhook is identified by `url` + `events`, never by name | — | — | — | — | — | both workflows | proven twice independently: Aimfox GIC `Manual Tag`, Bison UniTalk `Reply Classification` | ✅ |
 | 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL`; Bison: `preMQL` + `OOO` | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
 | 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | `loadWorkspaceSetupStatus` ⛔ | Clients page status column ⛔ | — | `dry_run` returns the same `steps` as a live run | column added by `20260807_workspace_setup_state.sql`; nothing writes it yet | ⚠️ |
 | 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ⛔ | — | — | `Aimfox Master` / `Bison Master` credentials; the result carries no `api_key` | contract forbids it (`additionalProperties: false`) | ⚠️ pending ADR-0018 |
 | 8 | No terminal path is silent | — | — | — | — | — | `client_not_found` + `alwaysOutputData` on Resolve Client | added after a run ended `success` with no output | ✅ |
 
-**What's left.** Rows 3, 6 and 7 — that is, the entire write half plus the gateway. Row 3 is the
-one with a measured cost already on the board.
+**What's left.** Rows 3, 6 and 7 — that is, the entire write half plus the gateway.
+
+**Found by running it, out of scope to fix here.** Both belong to other processes and are recorded
+in the [process document](processes/ops/workspace-provisioning.md):
+
+| Finding | Where it belongs |
+|---|---|
+| `public.campaigns` keeps campaigns the vendor no longer has — `bison-campaign-sync` is `INSERT … ON CONFLICT DO UPDATE` with no removal path, so Bent Iron PL shows six OOO campaigns where workspace 73 has three | [Bison ingestion](processes/outreach/bison-ingestion.md) |
+| `client_ooo_routing` has three rows pointing at another client's campaign — all FortumEnergia → GIC. 11 pending follow-ups, nothing sent (phase A enrols from the sheet), live at phase B | [OOO follow-ups](processes/outreach/ooo-followups.md) |
 
 ---
 
