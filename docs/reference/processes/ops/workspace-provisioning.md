@@ -190,9 +190,29 @@ last run. Nothing may make a business decision from it; it exists to render a st
 ## Database entities
 
 - [`client_sequencers`](../../functional/11-integrations.md) — the row this process creates or completes.
+  `setup_state jsonb not null default '{}'` and `setup_checked_at timestamptz` were added by
+  [`20260807_workspace_setup_state.sql`](../../../../supabase/migrations/20260807_workspace_setup_state.sql).
+  A `check (jsonb_typeof(setup_state) = 'object')` rejects a wrong-shaped write at the source
+  rather than letting the portal render nonsense.
 - `integration_sync_runs` — the audit trail, shared with `automation-failure-recorder`.
+  `sync_type = 'workspace_setup'`, `provider = 'aimfox' | 'bison'`. Both columns are free text and
+  the table already carries a UNIQUE on `n8n_execution_id`, so no schema change was needed.
 
 No new table. A queue table was considered and rejected: the portal triggers n8n synchronously.
+
+**RLS is inherited, not extended.** `client_sequencers` is gated at table level on
+`private.can_manage_client(client_id)`, so the two new columns are scoped exactly as `api_key`
+already is. Verified 2026-08-07 on the local stack with `EXPLAIN (ANALYZE, BUFFERS)` as the
+`authenticated` role, per role, before and after: admin 48 rows, manager 3, **client 0**. Numbers
+and method are in the migration comment.
+
+Three states have nowhere to be stored, and that is deliberate:
+
+| Situation | Where it lives |
+|---|---|
+| never checked | the row exists, `setup_state = '{}'`, `setup_checked_at is null` |
+| no connector at all | **no row** — the portal renders this as `missing`, never as `unknown` |
+| `needs_selection` before any row exists | not persisted; it is the synchronous answer to the operator, who then re-runs with an explicit `workspace_id` |
 
 ## RPC / API contracts
 

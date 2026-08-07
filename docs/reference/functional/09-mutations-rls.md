@@ -264,6 +264,7 @@ Definitions are admin-tier only; values are gated by the field's `editable_by` a
 - **RLS:** `client_sequencers_{select,insert,update,delete}_scoped` — all gated `private.can_manage_client(client_id)`. Client role has zero visibility (API keys).
 - **Allowed roles:** admin, super_admin, master_admin, manager (assigned).
 - **Called from:** Clients page drawer save (`buildSequencerPatches` diffs the EmailBison workspace/key + Aimfox key fields against the loaded rows) and `createClient` (`sequencerCredentials` array, §2.4).
+- **Does not touch `setup_state` / `setup_checked_at`.** Those two columns ([`20260807`](../../../supabase/migrations/20260807_workspace_setup_state.sql)) are written only by the workspace-setup workflows over the service role ([process](../processes/ops/workspace-provisioning.md)); the portal reads them and never writes them. They inherit the table's policies unchanged, so a client still sees zero rows.
 
 ### Per-user table preferences
 
@@ -477,7 +478,7 @@ Before any new SELECT action on a table with >1 k rows goes to production:
 | `daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260421` |
 | `clients` | Per-row: `can_access_client(id)` | — (48 rows — acceptable) |
 | `sequencer_daily_stats` | Set-based: `client_id IN (SELECT ...)` | `20260704` |
-| `sequencers`, `client_sequencers` | Per-row helper (tiny tables) | `20260704` |
+| `sequencers`, `client_sequencers` | Per-row helper (tiny tables) | `20260704` — re-measured 2026-08-07 on 48 rows: admin 1.98 ms / manager 3.05 ms / client **0 rows**; below the ADR-0006 line, left as is |
 | `domains`, `invoices`, `condition_rules` | Per-row helper | Phase 7 audit pending |
 
 ### 5.4 `_serverMs` response field

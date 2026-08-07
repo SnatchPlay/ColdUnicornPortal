@@ -171,9 +171,13 @@ RLS: `sequencers_select_authenticated` (`using true` — 3 rows, no secrets); `s
 | `external_workspace_id` | text | Text on purpose (platform-agnostic). Partial-unique per sequencer. |
 | `settings` | jsonb default `{}` | Future per-sequencer options. |
 | `enabled` | boolean default true | |
+| `setup_state` | jsonb not null default `{}`, check `jsonb_typeof = 'object'` | Last provisioning verdict — `setup-result.schema.json` minus `candidates`. **Never a secret**; the gateway derives booleans from it. `{}` = never checked. |
+| `setup_checked_at` | timestamptz | When setup last ran. NULL = never. No scheduled drift check exists, so this value is meant to age. |
 | `created_at` / `updated_at` | timestamptz | |
 
 RLS: all four commands gated `private.can_manage_client(client_id)` (manager-own / admin; **client role sees zero rows**). Written by the portal via `upsertClientSequencer`; read by n8n (service role).
+
+**The absence of a row is itself a state.** A client with no `client_sequencers` row is not connected to that sequencer, and the portal must render that as *missing* rather than *unknown* — Audytel sat in exactly that gap while three leads were dropped. `setup_state` / `setup_checked_at` were added by [`20260807_workspace_setup_state.sql`](../../../supabase/migrations/20260807_workspace_setup_state.sql) and are written **only** by the workspace-setup workflows ([process](../processes/ops/workspace-provisioning.md)), never by the portal.
 
 #### `sequencer_daily_stats` — ingestion-only LinkedIn/Aimfox PDCA counters
 
