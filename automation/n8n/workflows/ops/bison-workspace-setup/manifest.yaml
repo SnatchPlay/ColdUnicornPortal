@@ -6,8 +6,9 @@ domain: ops
 owner: automation
 
 # `managed` since 2026-08-07: the graph exists as c82kKnHaREUMvPBR and workflow.json is the export.
-# `status` stays `planned` because only the read half is built — the workflow is inactive and
-# creates nothing, in Bison or in Postgres. It becomes `active` in the change that lands the writes.
+# The write half landed the same day (iteration 2, 11 nodes -> 21). `status` stays `planned` until a
+# real dry_run:false run has been observed; the workflow is INACTIVE and called by hand, and has no
+# trigger of its own until ADR-0018 gives the gateway its webhook.
 lifecycle: managed
 status: planned
 criticality: high         # mints API keys and creates webhooks in a client's sending system
@@ -56,9 +57,15 @@ writes:
     - integration_sync_runs
   rpcs: []
   external:
-    - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens — only when neither the connector row nor the vendor already holds a usable key"
-    - "Bison API · POST /api/webhook-url — only for a url+events pair that is absent"
-    - "Bison API · POST /api/tags — only for a name that is absent, and only preMQL and OOO"
+    - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens (node: Mint Key) — only when the connector row holds no key. Unlike Aimfox there is no token-list endpoint to fall back on, so storing the result is not a nicety: a minted key that is not written down is lost for good."
+    - "Bison API · POST /api/webhook-url (node: Create Missing) — only for a url+events pair that is absent"
+    - "Bison API · POST /api/tags (node: Create Missing) — only for a name that is absent, and only preMQL and OOO"
+
+# Exactly two nodes issue a POST — Mint Key and Create Missing — and a dry run cannot reach either.
+# dry_run safety is structural, not a flag inside an HTTP node: Plan Writes returns an EMPTY array on
+# a dry run, and n8n does not execute a node with no input items. There is nothing to write with, so
+# nothing is written. `dry_run` is read as true for anything except an explicit false — a missing
+# field has to mean "do not touch", never "write into a client's system".
 
 # NOT written, deliberately: POST /api/campaigns and its /schedule + /sequence-steps children.
 # The canonical copy for the three OOO automation campaigns does not exist in usable form, and
@@ -68,10 +75,10 @@ writes:
 credentials:
   - alias: "Bison Master"
     type: httpBearerAuth
-    usedBy: "List Workspaces (and Create Workspace Key, iteration 2)"
+    usedBy: "List Workspaces, Mint Key"
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Resolve Client, Read Claimed (and Upsert Connector, Record Run, iteration 2)"
+    usedBy: "Resolve Client, Read Claimed, Record"
   - alias: "Workspace setup webhook auth"
     type: httpHeaderAuth
     planned: true

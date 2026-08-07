@@ -3,8 +3,8 @@
 **Logical ID:** `bison-workspace-setup` · **Domain:** `ops` · **Criticality:** high
 **Remote (production):** `c82kKnHaREUMvPBR` — **inactive**
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** read half built and proven against production; no write node exists, so a run observes
-and reports and changes nothing, anywhere
+**Status:** read and write halves built (21 nodes). Inactive, and called by hand until ADR-0018
+gives the gateway its webhook. A `dry_run` run writes nothing, anywhere — structurally
 **Sibling:** [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md) — same contract, same
 shape, different vendor
 
@@ -32,30 +32,73 @@ sequencers. Two differences matter to a caller:
 
 ## Flow
 
-Built — 11 nodes, every one of them a read. One fewer than a naive mirror of Aimfox and one more:
-there is **no `List Tokens`**, because Bison has no endpoint that returns a workspace's existing
-token, and there **is** a `List Campaigns`, because the campaign triple has to be reported.
+21 nodes — the same shape as [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md), minus
+its `List Tokens` and plus a `List Campaigns`.
 
 ```
 Start (executeWorkflowTrigger)
   └─ Resolve Client ─ Read Claimed ─ List Workspaces ─ Resolve Workspace ─ Resolved?
-                                                                            ├─ no  → Needs Selection
-                                                                            └─ yes → List Webhooks
-                                                                                     ─ List Tags
-                                                                                     ─ List Campaigns
-                                                                                     ─ Build Result
+       ├─ no  → Needs Selection
+       └─ yes → Need Mint? ─┬─ yes → Mint Key ─┐
+                            └─ no ─────────────┴→ Effective Key
+                → List Webhooks ─ List Tags ─ List Campaigns ─ Build Result ─ Has Work?
+                     ├─ yes → Plan Writes ─ Create Missing ─ Collect Creates ─┐
+                     └─ no ──────────────────────────────────────────────────┴→ Merge Outcomes
+                          → Record → Final Result
 ```
 
 `Read Claimed` collects every `external_workspace_id` already stored for `emailbison`, so
 `Resolve Workspace` can subtract them from the candidate list. `List Campaigns` paginates on
-`links.next` — the same configuration `bison-campaign-sync` already uses, because without it the
-three OOO campaigns can simply fall off page one and get reported as missing.
+`links.next` — the same configuration `bison-campaign-sync` uses, and it is load-bearing: without
+it a workspace's OOO campaigns can fall off page one and be reported missing. Bent Iron PL's sit on
+page 1 of 3.
 
-Still to come — writes (iteration 2), then the webhook entry point (ADR-0018):
+## `dry_run` is structural, not a flag
 
-```
-… Resolved? ─ yes ─ Ensure Key ─ Ensure Webhooks ─ Ensure Tags ─ Record Run
-```
+**`Plan Writes` returns an empty array on a dry run, and n8n does not execute a node with no input
+items.** So `Create Missing` never runs — not because it was asked politely not to, but because
+there is nothing to write with. `Need Mint?` guards `Mint Key` the same way.
+
+Exactly two nodes issue a POST, `Mint Key` and `Create Missing`, and both sit downstream of one of
+those guards. `pnpm n8n:deploy` prints the POST inventory on every deploy.
+
+`dry_run` is read as **true for anything except an explicit `false`**.
+
+## A minted key here is lost if it is not stored
+
+This is the one place where Bison is materially more dangerous than Aimfox.
+
+Aimfox has `GET /workspaces/{id}/tokens`, which returns the secret itself, so a key that was minted
+and forgotten can always be re-read. **Bison has no such endpoint.** `Effective Key` therefore knows
+only two sources — `stored → freshly minted` — and `Record` writing that fresh key back is not a
+nicety but the only thing standing between a token and oblivion.
+
+The old canvas got this exactly wrong: it consumed
+`$('Create API key Bison').item.json.data.plain_text_token` inline and wrote it nowhere. Every run
+of it minted a token nobody could ever use again.
+
+On a dry run against a keyless workspace nothing is minted at all: the run reports `key: missing`
+and says why.
+
+## What `Record` writes, and what it refuses to
+
+One statement. `INSERT … SELECT … WHERE` creates the connector row **only** when this is not a dry
+run, or when the row already exists:
+
+- creating a connector where none existed would mark the client as connected, and a *check* must
+  never do that;
+- `api_key` is overwritten only with a key actually minted — an empty value means "leave it";
+- `external_workspace_id` is never overwritten, because it is what pins the client to a workspace;
+- `setup_state` holds `state` / `steps` / `resolved` and **no secret** — invariant 7.
+
+`recorded: false` means the vendor work may well have happened while the record of it did not.
+
+## `state` deliberately ignores the campaign step
+
+`state` is computed from `key`, `webhooks` and `tags` only. Campaigns are reported but never
+created, so folding them in would leave four clients permanently `partial` behind a **Налаштувати**
+button that cannot fix them — a status that lies about what pressing it would do. The finding is not
+lost: it stays in `steps.campaigns`, which the portal renders as its own line.
 
 ## The canonical set
 
@@ -114,22 +157,6 @@ Four steps, first hit wins — identical to Aimfox except for the endpoint:
 
 An inexact match is never assumed. Assigning the wrong workspace is invisible downstream: the leads
 simply appear for someone else.
-
-## The key step reads first, too
-
-`POST /api/workspaces/v1.1/{id}/api-tokens` mints a token; it is not an upsert. So:
-
-1. `client_sequencers.api_key` present → `ok`, nothing happens.
-2. otherwise mint, and **store it** in the connector row.
-
-Step 2's second half is the fix for a defect in the old canvas: it consumed the fresh token inline
-as `$('Create API key Bison').item.json.data.plain_text_token` and never wrote it anywhere. A token
-that exists only inside one execution is a token nobody can use tomorrow — the same shape as
-Natalia Kobielska's orphaned Aimfox key.
-
-Unlike Aimfox there is no `GET .../api-tokens` to fall back on, so a workspace whose key was minted
-and lost cannot be recovered by reading; it gets a second token. That asymmetry is worth knowing
-before the write nodes are built.
 
 ## Campaigns are reported, never created
 
@@ -219,3 +246,8 @@ Not yet proven: the write path (it does not exist), `state: needs_selection`, an
   Read-only graph created as `c82kKnHaREUMvPBR`, inactive, and run against five clients the same
   day. It found two things nobody was looking for: our campaign catalogue keeps campaigns the
   vendor no longer has, and FortumEnergia's OOO routing points at GIC's campaigns.
+- **2026-08-07, later** — iteration 2: the write half, 11 nodes → 21, deployed from the committed
+  artifact. It carries the two fixes the first live Aimfox run exposed: node failures are rendered
+  through a shared `describe()` rather than as `[object Object]`, and a vendor response is scored on
+  `statusCode` alone — Bison, like Aimfox, puts its own word in `status`. Still inactive and never
+  run with `dry_run: false`.
