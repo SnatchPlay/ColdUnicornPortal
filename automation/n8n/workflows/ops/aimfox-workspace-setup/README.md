@@ -196,23 +196,58 @@ In short:
 
 ## Verified
 
-**2026-08-07, executions `70399`–`70406`** — read path proven against production, five real clients,
-`dry_run` only, nothing written anywhere:
+**2026-08-07, executions `70399`–`70406`** — read path, five real clients, `dry_run` only:
 
 | Client | State | Resolved by | Finding |
 |---|---|---|---|
 | Kaizen rent | `configured` | stored | — |
 | Bent Iron PL | `configured` | stored | — |
 | Audytel | `configured` | stored | — |
-| **FortumEnergia** | `partial` | stored | label **`preMQL` missing** — no preMQL lead can be created there |
+| **FortumEnergia** | `partial` | stored | label **`preMQL` missing** — no preMQL lead could be created there |
 | **GIC** | `partial` | stored | label **`MQL` missing** |
 
-The last two are the drifts that had only ever been found by hand. Candidate filtering was proven
-separately in execution `70393`: 12 workspaces minus 9 claimed left exactly the three unclaimed ones.
+Candidate filtering was proven separately in execution `70393`: 12 workspaces minus 9 claimed left
+exactly the three unclaimed ones.
 
-**The write path is built but not yet exercised.** Nothing in the table above involved a write, and
-no run with `dry_run: false` has happened yet. `state: client_not_found` and `needs_selection` are
-likewise unproven against a real run.
+**2026-08-07, executions `70487`–`70490`** — the write path, first live change:
+
+| Exec | Client | `dry_run` | Result |
+|---|---|---|---|
+| 70487 | Kaizen rent | true | `configured`; `Plan Writes`, `Create Missing`, `Mint Key` never executed |
+| 70488 | Kaizen rent | true | identical — a second check changes nothing |
+| **70489** | **FortumEnergia** | **false** | `labels.outcome: created`, `created: ["preMQL"]`, `state: configured` |
+| 70490 | FortumEnergia | false | `labels.outcome: ok`, `present: ["MQL","preMQL"]`, **no `created`** — `Has Work?` returned 0 items and the write branch never ran |
+
+Aimfox answered `70489` with `{"status":"ok","label":{"id":"f3d8bfd4…","name":"preMQL","color":"yellow"}}`.
+Exactly one thing was created. `Mint Key` did not run in any of the four — Fortum's key was already
+stored, so `Need Mint?` stayed shut even with `dry_run: false`.
+
+`70489`/`70490` are the first proof of invariant 3 (idempotency) against a real vendor, and
+`70487`/`70488` the first proof that a dry run reaches the end of the graph without touching
+anything.
+
+### What the first live runs exposed
+
+**`recorded: false` on all four.** `Record` failed with
+`column "setup_state" of relation "client_sequencers" does not exist`: migration
+[`20260807_workspace_setup_state.sql`](../../../../../supabase/migrations/20260807_workspace_setup_state.sql)
+has been applied to the local stack only. Production gets it when the branch merges and the CI
+`db-migrate` job runs — it is not applied by hand. Until then every run reports `recorded: false`,
+which is the honest answer, and the vendor half is unaffected: `70489` created its label regardless.
+
+**Two defects of my own, fixed the same run:**
+
+- `record_error` came back as the literal string `[object Object]`. n8n emits a node failure as
+  `{ message, error }` where `error` is an object, so `String(err)` says nothing at all. Both
+  `Final Result` and `Collect Creates` now share a `describe()` that reads `message` /
+  `description` before falling back to JSON.
+- `Collect Creates` scored the vendor response with `Number(r.statusCode ?? r.status ?? 0)`. Aimfox
+  answers `status: "ok"` — a vendor field, not an HTTP code — and `Number('ok')` is `NaN`, which is
+  never `>= 400`. It happened to read the success correctly and would have read a failure as one
+  too. It now looks at `statusCode` only.
+
+Still unproven: `state: needs_selection`, `state: client_not_found`, and the `Mint Key` branch —
+no run has yet met a workspace with no key anywhere.
 
 ## History
 
@@ -223,4 +258,5 @@ likewise unproven against a real run.
 - **2026-08-07, later** — iteration 2: the write half, 11 nodes → 21. Deployed from the committed
   artifact with `pnpm n8n:deploy`, which grew `--rewire` and `--credentials-from` for the purpose —
   the graph had to gain two edges and two credential-bearing nodes, and neither was expressible
-  before. Still inactive; still never run with `dry_run: false`.
+  before. First live run the same evening created FortumEnergia's missing `preMQL` label
+  (execution `70489`) and proved idempotency on the repeat.

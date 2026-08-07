@@ -438,7 +438,7 @@ workflows:
       production:
         remoteWorkflowId: ehhFUR3SYIxDahER
     lastRepositorySync: 2026-08-07
-    lastValidation: 2026-08-07 read path proven on production (executions 70399-70406, dry_run only) — Kaizen/Bent Iron/Audytel configured, Fortum missing preMQL, GIC missing MQL. Iteration 2 (write half, 21 nodes) deployed from the artifact the same day, approved as "workspace-setup"; NOT yet run with dry_run:false
+    lastValidation: 2026-08-07 write path proven on production (executions 70487-70490) — dry runs on Kaizen touched nothing; FortumEnergia dry_run:false created its missing preMQL label and the repeat created nothing (invariant 3). All four report recorded:false because 20260807_workspace_setup_state.sql reaches production only when this branch merges and CI db-migrate runs
 
   # The Bison half of the same split. Contracts and manifest first, graph second (workflow-lifecycle
   # section C). Its canonical set is NOT the Aimfox one: measured across all 16 Active Bison
