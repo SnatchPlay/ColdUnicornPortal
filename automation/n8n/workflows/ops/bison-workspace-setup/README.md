@@ -1,9 +1,10 @@
 # bison-workspace-setup
 
 **Logical ID:** `bison-workspace-setup` · **Domain:** `ops` · **Criticality:** high
-**Remote (production):** not created yet
+**Remote (production):** `c82kKnHaREUMvPBR` — **inactive**
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** contract and manifest written; the graph does not exist yet
+**Status:** read half built, **not yet run**; no write node exists, so a run observes and reports
+and changes nothing, anywhere
 **Sibling:** [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md) — same contract, same
 shape, different vendor
 
@@ -28,6 +29,33 @@ sequencers. Two differences matter to a caller:
 - **`workspace_id` is a numeric string** (`"73"`, `"125"`), not a UUID. Anything that handles both
   sequencers must not assume one id format.
 - the third step is called **`tags`**, where Aimfox says `labels`.
+
+## Flow
+
+Built — 11 nodes, every one of them a read. One fewer than a naive mirror of Aimfox and one more:
+there is **no `List Tokens`**, because Bison has no endpoint that returns a workspace's existing
+token, and there **is** a `List Campaigns`, because the campaign triple has to be reported.
+
+```
+Start (executeWorkflowTrigger)
+  └─ Resolve Client ─ Read Claimed ─ List Workspaces ─ Resolve Workspace ─ Resolved?
+                                                                            ├─ no  → Needs Selection
+                                                                            └─ yes → List Webhooks
+                                                                                     ─ List Tags
+                                                                                     ─ List Campaigns
+                                                                                     ─ Build Result
+```
+
+`Read Claimed` collects every `external_workspace_id` already stored for `emailbison`, so
+`Resolve Workspace` can subtract them from the candidate list. `List Campaigns` paginates on
+`links.next` — the same configuration `bison-campaign-sync` already uses, because without it the
+three OOO campaigns can simply fall off page one and get reported as missing.
+
+Still to come — writes (iteration 2), then the webhook entry point (ADR-0018):
+
+```
+… Resolved? ─ yes ─ Ensure Key ─ Ensure Webhooks ─ Ensure Tags ─ Record Run
+```
 
 ## The canonical set
 
@@ -151,3 +179,5 @@ Acceptance criteria live in the
 - **2026-08-07** — canonical set measured across all 16 Active workspaces; manifest and contracts
   written. Two corrections to the plan of record came out of the measurement: `MQL` is not a Bison
   tag we create, and the OOO campaign triple cannot be created until its copy exists.
+  Read-only graph created as `c82kKnHaREUMvPBR`, inactive. **Not yet run against any workspace** —
+  the table under Verification is a set of predictions, not results, until it is.

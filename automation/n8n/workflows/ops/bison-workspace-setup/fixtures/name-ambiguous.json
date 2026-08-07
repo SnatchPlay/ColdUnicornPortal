@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000006",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": "22222222-0000-4000-a000-000000000002",
+  "_fixture": "Synthetic. Two Bison workspaces share the client's name and neither is stored on the connector. Expected: state=needs_selection, resolved=null, candidates listed with personal_team / main / parent_id so a human can tell them apart, and nothing written. Bison repeats workspace names far more than Aimfox does, which is why those three fields are in the contract. An inexact match is never assumed — invariant 2."
+}

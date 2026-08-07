@@ -5,11 +5,10 @@ name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
 domain: ops
 owner: automation
 
-# `observed` until the graph exists on the instance and has been exported. Section C of
-# workflow-lifecycle.md requires the manifest, README and contracts BEFORE the graph, so this
-# artifact is deliberately incomplete right now: workflow.json is absent and `pnpm n8n:validate`
-# will say so as a warning. Flip to `managed` in the same change that lands the export.
-lifecycle: observed
+# `managed` since 2026-08-07: the graph exists as c82kKnHaREUMvPBR and workflow.json is the export.
+# `status` stays `planned` because only the read half is built — the workflow is inactive and
+# creates nothing, in Bison or in Postgres. It becomes `active` in the change that lands the writes.
+lifecycle: managed
 status: planned
 criticality: high         # mints API keys and creates webhooks in a client's sending system
 
@@ -69,10 +68,10 @@ writes:
 credentials:
   - alias: "Bison Master"
     type: httpBearerAuth
-    usedBy: "List Workspaces, Create Workspace Key"
+    usedBy: "List Workspaces (and Create Workspace Key, iteration 2)"
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Resolve Client, Read Claimed, Upsert Connector, Record Run"
+    usedBy: "Resolve Client, Read Claimed (and Upsert Connector, Record Run, iteration 2)"
   - alias: "Workspace setup webhook auth"
     type: httpHeaderAuth
     planned: true
@@ -113,7 +112,7 @@ environments:
   development:
     remoteWorkflowId: null
   production:
-    remoteWorkflowId: null
+    remoteWorkflowId: c82kKnHaREUMvPBR
 
 # The workflow this one replaces, together with aimfox-workspace-setup.
 supersedes:

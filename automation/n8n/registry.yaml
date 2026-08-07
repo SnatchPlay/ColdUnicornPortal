@@ -453,7 +453,7 @@ workflows:
     path: automation/n8n/workflows/ops/bison-workspace-setup
     businessProcess: docs/reference/processes/ops/workspace-provisioning.md
     owner: automation
-    lifecycle: observed
+    lifecycle: managed
     status: planned
     criticality: high
     trigger: executeWorkflowTrigger
@@ -461,6 +461,6 @@ workflows:
       development:
         remoteWorkflowId: null
       production:
-        remoteWorkflowId: null
+        remoteWorkflowId: c82kKnHaREUMvPBR
     lastRepositorySync: 2026-08-07
-    lastValidation: 2026-08-07 canonical set measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16); no graph yet
+    lastValidation: 2026-08-07 canonical set measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16); read-only graph created inactive, not yet run

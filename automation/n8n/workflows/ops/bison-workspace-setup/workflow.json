@@ -1,0 +1,355 @@
+{
+  "name": "[SETUP] Bison workspace · resolve, key, webhooks, tags",
+  "nodes": [
+    {
+      "id": "b1000000-0000-4000-a000-00000000000a",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -224
+      ],
+      "parameters": {
+        "jsCode": "// Складаємо steps/state за contracts/setup-result.schema.json. Ітерація 1 нічого не створює,\n// тому outcome тут може бути лише ok | missing | skipped.\n//\n// Канон виміряний 2026-08-07 по всіх 16 Active-воркспейсах, не взятий зі старого полотна.\nconst CANON_WEBHOOKS = [\n  { events: ['lead_replied'], url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { events: ['tag_attached', 'tag_removed'], url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL і OOO — 16/16. MQL сюди НЕ входить: він є лише в 7 із 16, і це не діра — у Bison MQL\n// народжується з вбудованого тега Interested (16/16), а bison-lead-enrichment читає\n// includes('interested') || includes('mql'). Створити MQL означало б дати клієнту другий,\n// гірше підключений маршрут до тієї ж кваліфікації.\nconst CANON_TAGS = ['preMQL', 'OOO'];\n// Кампанії лише звіряємо. Створювати їх не можна: копія трьох sequence-steps на старому полотні\n// побайтово однакова й жіночим польським із зашитим {PANIEKAMILU}, а сліпий create уже дав\n// Bent Iron PL шість кампаній замість трьох.\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n\nconst input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Кожен із трьох списків може прийти кількома айтемами (пагінація /api/campaigns іде\n// через links.next), тому збираємо .all() і склеюємо data.\nconst collect = (nodeName) => {\n  let items;\n  try { items = $(nodeName).all(); } catch (e) { return { rows: [], error: String(e.message ?? e) }; }\n  const rows = [];\n  let error = null;\n  for (const item of items) {\n    const j = item.json ?? {};\n    if (j.error) { error = String(j.error?.message ?? j.error); continue; }\n    if (Array.isArray(j.data)) rows.push(...j.data);\n    else if (Array.isArray(j)) rows.push(...j);\n  }\n  return { rows, error };\n};\n\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук UniTalk зветься\n// \"Reply Classification\" проти \"Reply classification\" у решти пʼятнадцяти, і звірка за назвою\n// створила б сімнадцятий вебхук на lead_replied: дві доставки на відповідь, два ліди.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\n\nconst storedKey = Boolean(client.api_key);\n\n// У Bison немає GET на токени воркспейсу — на відміну від Aimfox, де вендора можна перепитати.\n// Тому єдине джерело правди про ключ тут — рядок конектора.\nconst key = storedKey\n  ? step('ok', ['client_sequencers.api_key'])\n  : step('missing', [], ['api_key'], 'Bison has no token-list endpoint: a lost key cannot be re-read, only re-minted');\n\nconst webhooks = (() => {\n  if (!storedKey) return step('skipped', [], [], 'no workspace key stored yet');\n  const { rows, error } = collect('List Webhooks');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((w) => hookKey(w.events, w.url));\n  const missing = CANON_WEBHOOKS.map((c) => hookKey(c.events, c.url)).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst tags = (() => {\n  if (!storedKey) return step('skipped', [], [], 'no workspace key stored yet');\n  const { rows, error } = collect('List Tags');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((t) => String(t?.name ?? '').trim()).filter(Boolean);\n  const missing = CANON_TAGS.filter((n) => !present.includes(n));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst campaigns = (() => {\n  if (!storedKey) return step('skipped', [], [], 'no workspace key stored yet');\n  const { rows, error } = collect('List Campaigns');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const names = rows.map((c) => String(c?.name ?? '').trim());\n  // Дублікати показуємо явно: Bent Iron PL має шість кампаній замість трьох, і \"×2\" у present —\n  // єдине місце, де це видно, не відкриваючи вендора.\n  const present = CANON_CAMPAIGNS\n    .map((n) => ({ n, count: names.filter((x) => x === n).length }))\n    .filter((x) => x.count > 0)\n    .map((x) => (x.count > 1 ? `${x.n} ×${x.count}` : x.n));\n  const missing = CANON_CAMPAIGNS.filter((n) => !names.includes(n));\n  const dup = present.some((p) => p.includes(' ×'));\n  return step(\n    missing.length ? 'missing' : 'ok',\n    present,\n    missing,\n    dup ? 'duplicate OOO campaigns at the vendor — reported, never resolved by creating more' : null,\n  );\n})();\n\nconst steps = { key, webhooks, tags, campaigns };\n\nconst decided = [key, webhooks, tags, campaigns];\nconst state = decided.every((s) => s.outcome === 'ok') ? 'configured'\n  : decided.every((s) => s.outcome !== 'ok') ? 'missing'\n  : 'partial';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: true,\n  read_only_iteration: true,\n  resolved: resolution.resolved ?? null,\n  state,\n  steps,\n} }];"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000009",
+      "name": "List Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Resolve Client').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "completeExpression": "={{ $response.body.links.next == null }}",
+              "nextURL": "={{ $response.body.links.next }}",
+              "paginationCompleteWhen": "other",
+              "paginationMode": "responseContainsNextURL",
+              "requestInterval": 200
+            }
+          }
+        },
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/campaigns"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000008",
+      "name": "List Tags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        560,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Resolve Client').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/tags"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000007",
+      "name": "List Webhooks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        336,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Resolve Client').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/webhook-url"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000004",
+      "name": "List Workspaces",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -320,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "https://go.gheads.com/api/workspaces/v1.1"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-00000000000b",
+      "name": "Needs Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Неіснуючий клієнт — помилка того, хто викликав, а не стан провіженінгу. Але сказати про це\n// треба вголос: мовчазний обрив із status=success — це те, як зникли ліди Audytel.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no such client, or it has no enabled emailbison connector'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: true,\n  read_only_iteration: true,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    tags: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n  },\n} }];"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000003",
+      "name": "Read Claimed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -544,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select coalesce(json_agg(external_workspace_id), '[]'::json) as claimed\n  from public.client_sequencers\n where sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid\n   and external_workspace_id is not null;"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000002",
+      "name": "Resolve Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -768,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_id ] }}"
+        },
+        "query": "select c.name                       as client_name,\n       cs.id::text                  as client_sequencer_id,\n       nullif(cs.api_key, '')       as api_key,\n       cs.external_workspace_id     as stored_workspace_id\n  from public.clients c\n  left join public.client_sequencers cs\n    on cs.client_id = c.id\n   and cs.sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid\n   and cs.enabled\n where c.id = $1::uuid;"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000005",
+      "name": "Resolve Workspace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Порядок резолву: явний id → уже записаний за клієнтом → ТОЧНИЙ збіг назви → кандидати.\n// Той самий порядок, що в aimfox-workspace-setup, і з тієї ж причини: для вже заведеного\n// клієнта воркспейс відомий з бази, і шукати за назвою не треба взагалі.\n//\n// Неоднозначність ніколи не вирішується здогадкою — інваріант 2. У Bison це важить більше,\n// ніж в Aimfox: однойменних воркспейсів тут помітно більше, тому в кандидатах віддаємо ще\n// personal_team / main / parent_id — саме вони дають людині шанс відрізнити два однакові рядки.\nconst input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.data) ? listRaw.data\n  : Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : [];\n// Id у Bison — ціле число. Скрізь тримаємо його рядком, бо в client_sequencers він text,\n// і порівняння 73 === '73' мовчки дало б \"не закріплений\".\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Resolve Client має alwaysOutputData, тож неіснуючий клієнт приходить як {} замість того, щоб\n// тихо обірвати ланцюжок. Кажемо про це вголос — мовчазний успіх гірший за помилку.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst find = (id) => list.find((w) => idOf(w) === id) ?? null;\nconst decorate = (id, matched_by) => {\n  const w = find(id);\n  return {\n    workspace_id: id,\n    name: w ? nameOf(w) || null : null,\n    matched_by,\n    personal_team: w?.personal_team ?? null,\n    parent_id: w?.parent_id ?? null,\n  };\n};\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) return [{ json: { ...base, resolved: decorate(explicit, 'explicit') } }];\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) return [{ json: { ...base, resolved: decorate(stored, 'stored') } }];\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) return [{ json: { ...base, resolved: decorate(idOf(matches[0]), 'name') } }];\n\n// Кандидати — усе, що ще не закріплене за жодним клієнтом. Показати зайнятий воркспейс означає\n// запросити те саме хибне призначення, через яке воркспейс GIC опинився на Prac.Finansowa.\nconst candidates = list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({\n    workspace_id: idOf(w),\n    name: nameOf(w) || null,\n    personal_team: w?.personal_team ?? null,\n    main: w?.main ?? null,\n    parent_id: w?.parent_id ?? null,\n  }));\n\nreturn [{ json: { ...base, resolved: null, candidates, ambiguous: matches.length > 1 } }];"
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000006",
+      "name": "Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b1000000-0000-4000-a000-0000000000f1",
+              "leftValue": "={{ $json.resolved }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1000000-0000-4000-a000-000000000001",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        0
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "client_id"
+            },
+            {
+              "name": "workspace_id"
+            },
+            {
+              "name": "dry_run"
+            },
+            {
+              "name": "requested_by"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "List Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Tags": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Webhooks": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Tags",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Workspaces": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Workspace",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Claimed": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Workspaces",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Claimed",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Workspace": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolved?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolved?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Webhooks",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Needs Selection",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Client",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

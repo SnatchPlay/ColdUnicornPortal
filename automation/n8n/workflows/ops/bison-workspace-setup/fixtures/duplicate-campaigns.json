@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000005",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": null,
+  "_fixture": "Synthetic, modelled on Bent Iron PL, which has six OOO automation campaigns instead of three because the old canvas was run twice (ids 629/630/631 on 2026-04-21 and 937/938/939 on 2026-06-30, four still active at the vendor). Expected: steps.campaigns.present shows each duplicated name with a count suffix, outcome=ok, error notes the duplication — and NOTHING is created. Provisioning reports duplicates; it never resolves them by creating more, and it never deletes."
+}

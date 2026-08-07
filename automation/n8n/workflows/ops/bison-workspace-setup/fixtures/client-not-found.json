@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-0000000000ff",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": null,
+  "_fixture": "Synthetic. The client_id matches no client with an enabled emailbison connector. Expected: state=client_not_found with a reason. Before this state existed the run ended with status=success and no output at all — a silent success, the same failure shape that lost Audytel's leads. Every terminal path has to say something."
+}
