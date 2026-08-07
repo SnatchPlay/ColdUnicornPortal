@@ -797,7 +797,9 @@ function toSequencerRecord(row: Record<string, unknown>) {
   };
 }
 
-function toClientSequencerRecord(row: Record<string, unknown>) {
+// `setup` is the row from the separate provisioning-status query, or undefined when that query
+// degraded (pre-20260807 schema). Undefined must read as "never checked", never as "not configured".
+function toClientSequencerRecord(row: Record<string, unknown>, setup?: Record<string, unknown>) {
   return {
     id: String(row.id),
     client_id: String(row.client_id),
@@ -809,6 +811,15 @@ function toClientSequencerRecord(row: Record<string, unknown>) {
         : String(row.external_workspace_id),
     settings: (row.settings ?? {}) as Record<string, unknown>,
     enabled: Boolean(row.enabled),
+    // Written only by the workspace-setup workflows, never by the portal. `{}` = never checked;
+    // `setup_checked_at` is what distinguishes that from "checked and found empty".
+    setup_state: (setup?.setup_state ?? {}) as Record<string, unknown>,
+    setup_checked_at:
+      setup?.setup_checked_at instanceof Date
+        ? setup.setup_checked_at.toISOString()
+        : setup?.setup_checked_at
+          ? String(setup.setup_checked_at)
+          : null,
     created_at:
       row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
     updated_at:
@@ -1450,7 +1461,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows, setupStateRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer.
         tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
@@ -1506,6 +1517,19 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           SELECT id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
           FROM public.client_sequencers
         `),
+
+        // Provisioning status (ADR-0018 §6) — a plain read, deliberately in its OWN query.
+        //
+        // safeRawSelect swallows "does not exist" and returns [], which is the right degradation
+        // for a whole table but the wrong one for two columns: folded into the query above, a
+        // schema that predates migration 20260807 would return zero connector rows, and a manager
+        // would open a client to find no API keys at all and quite reasonably re-enter them. Split
+        // out, the same failure costs only the status, which then reads "never checked" — true, and
+        // harmless. The edge function and the migration deploy from the same push but not in a
+        // guaranteed order, so this window is real, not hypothetical.
+        safeRawSelect(tx, sql`
+          SELECT id, setup_state, setup_checked_at FROM public.client_sequencers
+        `),
       ]);
 
     const durationMs = performance.now() - t0;
@@ -1514,7 +1538,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
         `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
-        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length})`,
+        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length}, ` +
+        `setupState=${setupStateRows.length})`,
     );
 
     return {
@@ -1526,7 +1551,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
       sequencers: (sequencerRows as Record<string, unknown>[]).map(toSequencerRecord),
-      clientSequencers: (clientSequencerRows as Record<string, unknown>[]).map(toClientSequencerRecord),
+      clientSequencers: (() => {
+        const setupById = new Map(
+          (setupStateRows as Record<string, unknown>[]).map((row) => [String(row.id), row]),
+        );
+        return (clientSequencerRows as Record<string, unknown>[]).map((row) =>
+          toClientSequencerRecord(row, setupById.get(String(row.id))),
+        );
+      })(),
     };
   }
 

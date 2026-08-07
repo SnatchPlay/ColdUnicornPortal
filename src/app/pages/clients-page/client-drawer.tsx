@@ -6,6 +6,7 @@ import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { SatisfactionHearts, satisfactionLabel } from "../../components/satisfaction-hearts";
 import { OooRoutingEditor } from "./ooo-routing-editor";
+import { WorkspaceSetupStatus } from "./workspace-setup-status";
 import { Checkbox } from "../../components/ui/checkbox";
 import {
   Select,
@@ -360,6 +361,8 @@ export interface ClientDrawerProps {
   isDraftDirty: boolean;
   canEditAssignments: boolean;
   canInviteUsers: boolean;
+  /** The client's connector rows, already loaded by the page — carries setup_state (ADR-0018 §6). */
+  sequencerCreds: ClientSequencerCreds;
   onClose: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -391,6 +394,7 @@ export function ClientDrawer({
   isDraftDirty,
   canEditAssignments,
   canInviteUsers,
+  sequencerCreds,
   onClose,
   onSave,
   onCancel,
@@ -886,6 +890,11 @@ export function ClientDrawer({
               </label>
             </div>
           </section>
+
+          {/* Sits directly under Credentials & IDs because it answers the question those fields
+              raise: a key being present says nothing about whether the workspace is actually
+              wired. Read-only — setup_state is written by n8n alone (ADR-0018 §6). */}
+          <WorkspaceSetupStatus creds={sequencerCreds} />
 
           {/* Contacts */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
