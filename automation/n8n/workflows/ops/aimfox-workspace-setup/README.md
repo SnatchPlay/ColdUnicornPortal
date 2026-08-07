@@ -3,8 +3,8 @@
 **Logical ID:** `aimfox-workspace-setup` · **Domain:** `ops` · **Criticality:** high
 **Remote (production):** `ehhFUR3SYIxDahER` — **inactive**
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** read half built and proven against production; **no write node exists yet**, so a run
-observes and reports and changes nothing, anywhere
+**Status:** read and write halves built (21 nodes). Inactive, and called by hand until ADR-0018
+gives the gateway its webhook. A `dry_run` run still writes nothing, anywhere — structurally
 
 ## Business purpose
 
@@ -40,27 +40,59 @@ the "apply" path.
 
 ## Flow
 
-Built today — 11 nodes, every one of them a read:
+21 nodes. Every read happens before the write that depends on it.
 
 ```
 Start (executeWorkflowTrigger)
   └─ Resolve Client ─ Read Claimed ─ List Workspaces ─ Resolve Workspace ─ Resolved?
-                                                                            ├─ no  → Needs Selection
-                                                                            └─ yes → List Tokens
-                                                                                     ─ List Webhooks
-                                                                                     ─ List Labels
-                                                                                     ─ Build Result
+       ├─ no  → Needs Selection
+       └─ yes → List Tokens ─ Need Mint? ─┬─ yes → Mint Key ─┐
+                                          └─ no ─────────────┴→ Effective Key
+                → List Webhooks ─ List Labels ─ Build Result ─ Has Work?
+                     ├─ yes → Plan Writes ─ Create Missing ─ Collect Creates ─┐
+                     └─ no ──────────────────────────────────────────────────┴→ Merge Outcomes
+                          → Record → Final Result
 ```
 
 `Read Claimed` is the one node whose purpose is not obvious: it reads every
 `external_workspace_id` already present in `client_sequencers`, so `Resolve Workspace` can subtract
 them from the candidate list.
 
-Still to come, in this order — writes (iteration 2), then the webhook entry point (ADR-0018):
+## `dry_run` is structural, not a flag
 
-```
-… Resolved? ─ yes ─ Ensure Key ─ Ensure Webhooks ─ Ensure Labels ─ Sync Campaigns ─ Record Run
-```
+**`Plan Writes` returns an empty array on a dry run, and n8n does not execute a node with no input
+items.** So `Create Missing` never runs — not because it was asked politely not to, but because
+there is nothing to write with. `Need Mint?` guards `Mint Key` the same way.
+
+Exactly two nodes issue a POST, `Mint Key` and `Create Missing`, and both are downstream of one of
+those guards. `pnpm n8n:deploy` prints the POST inventory on every deploy, so a third would be
+visible before it ever ran.
+
+`dry_run` is read as **true for anything except an explicit `false`**. A missing field has to mean
+"do not touch", never "write into a client's system".
+
+## The key has to be resolved before the listings, not after
+
+`List Webhooks` and `List Labels` take their bearer token from `Effective Key`, which picks
+`stored → already at the vendor → freshly minted`. Before iteration 2 they read it straight from
+`Resolve Client`, which was fine only because a keyless workspace was reported as `skipped`. Now
+that a key can be minted mid-run, reading the stored value would send `null` and every subsequent
+call would 401 — silently, since they all carry `onError: continueRegularOutput`.
+
+## What `Record` writes, and what it refuses to
+
+One statement. `INSERT … SELECT … WHERE` creates the connector row **only** when this is not a dry
+run, or when the row already exists:
+
+- creating a connector where none existed would mark the client as connected, and a *check* must
+  never do that;
+- `api_key` is overwritten only with a key actually obtained — an empty value means "leave it";
+- `external_workspace_id` is never overwritten, because it is what pins the client to a workspace;
+- `setup_state` holds `state` / `steps` / `resolved` and **no secret** — invariant 7. The audit row
+  in `integration_sync_runs` is keyed on `$execution.id`, so a re-run cannot double-count.
+
+`recorded: false` in the result means the vendor work may well have happened while the record of it
+did not. A caller must not read that as a failed provisioning.
 
 ## The canonical set
 
@@ -74,9 +106,10 @@ What "wired" means for Aimfox — measured across all 9 wired workspaces on 2026
 | label | `name` | `MQL` (success) |
 
 Campaigns are **not** created here — they are the client's, and
-[`aimfox-campaign-sync`](../../ingestion/aimfox-campaign-sync/README.md) catalogues them. Step 6
-hands off to it so a freshly-keyed client gets a campaign catalogue immediately rather than up to
-two hours later.
+[`aimfox-campaign-sync`](../../ingestion/aimfox-campaign-sync/README.md) catalogues them on its own
+schedule. The `campaigns` step therefore reports `skipped` with a reason and never `created`.
+Handing off to the sync so a freshly-keyed client gets its catalogue immediately, rather than up to
+two hours later, is worth doing and is not built yet.
 
 `DNC` is deliberately absent. It exists in 3 of the 9 workspaces; that is a client preference, not
 our contract.
@@ -116,21 +149,23 @@ client, and would have created GIC's leads under the wrong name.
 An inexact match is never assumed. Assigning the wrong workspace is invisible downstream: the leads
 simply appear for someone else.
 
-## The key step reads first, too
+## Reusing a key instead of minting a second
 
 `POST /api/v2/workspaces/{id}/tokens` **mints an additional token every time it is called** — it is
-not an upsert. So step 3 checks two places before it writes:
+not an upsert. So `Effective Key` checks two places before `Mint Key` is ever reached:
 
 1. `client_sequencers.api_key` — present → `ok`, nothing happens.
-2. `GET /api/v2/workspaces/{id}/tokens` (master) — the vendor already holds one → reuse it.
-3. Neither → mint, and store it.
+2. `GET /api/v2/workspaces/{id}/tokens` (master) — the vendor already holds one → reuse it, and
+   `Record` stores it so the next run finds it in step 1.
+3. Neither, and `dry_run: false` → `Need Mint?` opens and `Mint Key` runs.
 
 Step 2 is what stops Natalia Kobielska's workspace from ending up with two tokens: the old canvas
 already minted her one and never stored it.
 
 **The token list returns the secret itself** — confirmed 2026-08-07 in execution `70395`, where
 `tokens[].token` held the live key alongside `id`, `name`, `read`, `write`. Reuse is therefore
-always possible and minting a second token is never necessary.
+always possible, and on a dry run against a keyless workspace nothing is minted at all: the run
+reports `key: missing` and says why.
 
 ## What it must never do
 
@@ -175,7 +210,9 @@ In short:
 The last two are the drifts that had only ever been found by hand. Candidate filtering was proven
 separately in execution `70393`: 12 workspaces minus 9 claimed left exactly the three unclaimed ones.
 
-Not yet proven: the write path (it does not exist), and `state: client_not_found`.
+**The write path is built but not yet exercised.** Nothing in the table above involved a write, and
+no run with `dry_run: false` has happened yet. `state: client_not_found` and `needs_selection` are
+likewise unproven against a real run.
 
 ## History
 
@@ -183,3 +220,7 @@ Not yet proven: the write path (it does not exist), and `state: client_not_found
   created as `ehhFUR3SYIxDahER`, inactive. First runs exposed two defects, both fixed the same day:
   the resolver ignored the stored workspace id, and a client that did not resolve ended the run
   silently with `status: success`.
+- **2026-08-07, later** — iteration 2: the write half, 11 nodes → 21. Deployed from the committed
+  artifact with `pnpm n8n:deploy`, which grew `--rewire` and `--credentials-from` for the purpose —
+  the graph had to gain two edges and two credential-bearing nodes, and neither was expressible
+  before. Still inactive; still never run with `dry_run: false`.

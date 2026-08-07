@@ -6,8 +6,9 @@ domain: ops
 owner: automation
 
 # `managed` since 2026-08-07: the graph exists as ehhFUR3SYIxDahER and workflow.json is the export.
-# `status` stays `planned` because only the read half is built — the workflow is inactive and
-# creates nothing. It becomes `active` in the change that lands the write nodes.
+# The write half landed the same day (iteration 2, 11 nodes -> 21). `status` stays `planned` until
+# a real dry_run:false run has been observed end to end; the workflow is still INACTIVE and is
+# called by hand. It has no trigger of its own until ADR-0018 gives the gateway its webhook.
 lifecycle: managed
 status: planned
 criticality: high         # mints API keys and creates webhooks in a client's sending system
@@ -59,17 +60,23 @@ writes:
     - integration_sync_runs
   rpcs: []
   external:
-    - "Aimfox API · POST /api/v2/workspaces/{id}/tokens — only when neither the connector row nor the vendor already holds a usable key"
-    - "Aimfox API · POST /api/v2/webhooks — only for a url+events pair that is absent"
-    - "Aimfox API · POST /api/v2/labels — only for a name that is absent"
+    - "Aimfox API · POST /api/v2/workspaces/{id}/tokens (node: Mint Key) — only when neither the connector row nor the vendor already holds a usable key"
+    - "Aimfox API · POST /api/v2/webhooks (node: Create Missing) — only for a url+events pair that is absent"
+    - "Aimfox API · POST /api/v2/labels (node: Create Missing) — only for a name that is absent"
+
+# Exactly two nodes issue a POST — Mint Key and Create Missing — and both sit behind a branch that
+# a dry run cannot reach. dry_run safety is structural, not a flag inside an HTTP node: Plan Writes
+# returns an EMPTY array on a dry run, and n8n does not execute a node with no input items. There is
+# nothing to write with, so nothing is written. `dry_run` is also read as true for anything except an
+# explicit false — a missing field has to mean "do not touch", never "write into a client's system".
 
 credentials:
   - alias: "Aimfox Master"
     type: httpBearerAuth
-    usedBy: "List Workspaces, List Tokens"
+    usedBy: "List Workspaces, List Tokens, Mint Key"
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Resolve Client, Read Claimed"
+    usedBy: "Resolve Client, Read Claimed, Record"
   - alias: "Workspace setup webhook auth"
     type: httpHeaderAuth
     planned: true
@@ -110,6 +117,6 @@ environments:
   development:
     remoteWorkflowId: null
   production:
-    remoteWorkflowId: null
+    remoteWorkflowId: ehhFUR3SYIxDahER
 
 knownViolations: []

@@ -5,6 +5,12 @@
 //   N8N_APPROVED_PRODUCTION_WRITE="<what+why>" \
 //     pnpm n8n:deploy --id <logical-id> --nodes "Node A" --apply          # write
 //
+// Four allowlists, each naming its own blast radius:
+//   --nodes             update the `parameters`/`typeVersion` of existing nodes
+//   --add               append nodes that exist in the artifact but not on live
+//   --rewire            replace the outgoing connections of existing nodes
+//   --credentials-from  give an --added node the credential block of a named LIVE node
+//
 // What it does, and deliberately does NOT do:
 //   * It copies ONLY the `parameters` (and typeVersion) of the named nodes from the artifact onto
 //     the LIVE graph fetched over REST. Everything else on those nodes — credentials, webhookId,
@@ -13,6 +19,9 @@
 //     (scripts/n8n/lib/sanitize.mjs), so pushing it as-is would strip auth from every node.
 //   * The node allowlist is mandatory — there is no "sync everything". The blast radius is the nodes
 //     you name, and the printed diff shows exactly what changes before anything is written.
+//   * A STRUCTURAL change (--add / --rewire) to an ACTIVE workflow needs --allow-active on top of
+//     everything else. Re-parameterising a live node is routine; re-shaping the graph a webhook is
+//     currently delivering into is not, and it must not be possible to do it in passing.
 //
 // This is a production write (docs/reference/n8n/environments.md: the only instance IS production),
 // so the actual PUT is gated on BOTH --apply AND N8N_APPROVED_PRODUCTION_WRITE, mirroring
@@ -52,12 +61,31 @@ async function main() {
   const environment = currentEnvironment();
 
   const addArg = arg("add");
+  const rewireArg = arg("rewire");
+  const credentialsArg = arg("credentials-from");
   if (!logicalId) throw new Error("Pass --id <logical-id>.");
-  if (!nodesArg && !addArg) {
-    throw new Error('Pass --nodes "Node A" (update existing) and/or --add "Node B" (add new nodes).');
+  if (!nodesArg && !addArg && !rewireArg) {
+    throw new Error(
+      'Pass --nodes "Node A" (update existing), --add "Node B" (add new nodes) ' +
+        'and/or --rewire "Node C" (replace outgoing connections).',
+    );
   }
   const nodeNames = (nodesArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const addNames = (addArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const rewireNames = (rewireArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  // "New Node=Live Node" pairs. The donor is read from LIVE, never from the artifact — the artifact
+  // is credential-sanitised, so this is the only way an added node can end up authenticated, and no
+  // credential id or value ever has to be written down in the repository.
+  const credentialPairs = (credentialsArg ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [target, donor] = pair.split("=").map((s) => s?.trim());
+      if (!target || !donor) throw new Error(`--credentials-from expects "New Node=Live Node", got "${pair}".`);
+      return { target, donor };
+    });
 
   const entry = (loadRegistry().workflows ?? []).find((w) => w.id === logicalId);
   if (!entry) throw new Error(`Logical id "${logicalId}" is not in registry.yaml.`);
@@ -74,13 +102,24 @@ async function main() {
   console.log(`nodes       : live ${live.nodes?.length}, artifact ${artifact.nodes?.length}`);
   if (nodeNames.length) console.log(`update      : ${nodeNames.join(", ")}`);
   if (addNames.length) console.log(`add         : ${addNames.join(", ")}`);
+  if (rewireNames.length) console.log(`rewire      : ${rewireNames.join(", ")}`);
   console.log("");
+
+  // A structural change to a workflow that is currently serving traffic is a different act from
+  // re-parameterising one, and it must be asked for out loud.
+  if (live.active && (addNames.length || rewireNames.length) && !process.argv.includes("--allow-active")) {
+    throw new Error(
+      `"${logicalId}" is ACTIVE on ${environment}. --add/--rewire re-shape the graph while it is\n` +
+        `serving traffic; re-run with --allow-active if that is genuinely intended, or deactivate first.`,
+    );
+  }
 
   // Snapshot the pre-write live parameters of EVERY node, plus the connection graph, so post-write
   // verification can prove that untargeted nodes and existing edges are untouched.
   const liveBefore = new Map((live.nodes ?? []).map((n) => [n.name, stable(n.parameters)]));
   const connBefore = stable(live.connections ?? {});
   const addedSources = [];
+  const rewiredSources = [];
 
   let changed = 0;
   for (const name of nodeNames) {
@@ -130,7 +169,7 @@ async function main() {
     if (live.connections?.[name]) throw new Error(`live already has connections from "${name}" — refusing to overwrite.`);
 
     console.log(`+ ${name} (${artNode.type})${artConn ? ` → ${(artConn.main?.[0] ?? []).map((e) => e.node).join(", ")}` : ""}`);
-    live.nodes.push(artNode);
+    live.nodes.push({ ...artNode });
     if (artConn) {
       live.connections = live.connections ?? {};
       live.connections[name] = artConn;
@@ -139,11 +178,63 @@ async function main() {
     changed += 1;
   }
 
+  // --credentials-from: an --added node arrives credential-less, because the artifact is sanitised.
+  // Rather than reintroduce a credential id into the repository, copy the block off a LIVE node that
+  // already uses the same one. Only aliases are printed; the id is data we pass through, never show.
+  for (const { target, donor } of credentialPairs) {
+    if (!addNames.includes(target)) {
+      throw new Error(`--credentials-from target "${target}" is not in --add; existing nodes keep their own credentials.`);
+    }
+    const donorNode = nodeByName(live, donor);
+    if (!donorNode) throw new Error(`--credentials-from donor "${donor}" is not on the LIVE workflow.`);
+    if (!donorNode.credentials || !Object.keys(donorNode.credentials).length) {
+      throw new Error(`--credentials-from donor "${donor}" has no credentials to copy.`);
+    }
+    const targetNode = nodeByName(live, target);
+    targetNode.credentials = JSON.parse(JSON.stringify(donorNode.credentials));
+    const aliases = Object.entries(targetNode.credentials).map(([type, ref]) => `${type}:${ref?.name}`);
+    console.log(`  ${target} ← credentials of "${donor}" (${aliases.join(", ")})`);
+  }
+
+  // --rewire: replace the outgoing connections of nodes that ALREADY exist on live. --add cannot do
+  // this (it refuses a node that exists), and --nodes only touches parameters — so without this a
+  // structural change has to be made by hand in the UI, which is how a graph stops matching its
+  // artifact. Every target must end up existing, or the write would strand an edge.
+  for (const name of rewireNames) {
+    if (!nodeByName(live, name)) throw new Error(`--rewire node "${name}" is not on the LIVE workflow.`);
+    if (!nodeByName(artifact, name)) throw new Error(`--rewire node "${name}" is not in the artifact.`);
+    if (addNames.includes(name)) throw new Error(`"${name}" is in both --add and --rewire; --add already carries its edges.`);
+
+    const artConn = (artifact.connections ?? {})[name];
+    for (const port of artConn?.main ?? []) {
+      for (const edge of port ?? []) {
+        if (!nodeByName(live, edge.node)) {
+          throw new Error(`--rewire "${name}" wires to "${edge.node}", which is not on live nor being added.`);
+        }
+      }
+    }
+
+    const before = stable((live.connections ?? {})[name] ?? null);
+    const after = stable(artConn ?? null);
+    if (before === after) {
+      console.log(`= ${name}: connections already match artifact.`);
+      continue;
+    }
+    const targets = (conn) => (conn?.main ?? []).map((port) => (port ?? []).map((e) => e.node).join(" + ") || "∅").join(" | ") || "∅";
+    console.log(`⇄ ${name}: ${targets((live.connections ?? {})[name])} → ${targets(artConn)}`);
+
+    live.connections = live.connections ?? {};
+    if (artConn) live.connections[name] = artConn;
+    else delete live.connections[name];
+    rewiredSources.push(name);
+    changed += 1;
+  }
+
   if (changed === 0) {
     console.log("Nothing to deploy — live already matches the artifact for the named nodes.");
     return;
   }
-  if (addNames.length) console.log("");
+  if (addNames.length || rewireNames.length) console.log("");
 
   // PUT replaces settings wholesale, and the API rejects some UI-set keys — surface any that the
   // write will drop, so a settings reset is never silent (shown on dry-run too).
@@ -199,18 +290,37 @@ async function main() {
       problems.push(`untargeted node "${node.name}" changed`);
     }
   }
-  // Every pre-existing connection source must be byte-identical; only the added sources are new.
+  // Credentials on added nodes must have survived the round trip, or the node is authenticated
+  // nowhere and only fails at runtime, inside a client's system.
+  for (const { target, donor } of credentialPairs) {
+    const landed = nodeByName(after, target)?.credentials;
+    if (!landed || !Object.keys(landed).length) {
+      problems.push(`"${target}" landed WITHOUT the credentials of "${donor}"`);
+    }
+  }
+  // Every pre-existing connection source must be byte-identical; only added and explicitly rewired
+  // sources may differ. Checked in both directions so a vanished source is caught too.
   const afterConn = after.connections ?? {};
-  for (const src of Object.keys(afterConn)) {
-    if (addedSources.includes(src)) continue;
-    const beforeConn = JSON.parse(connBefore);
+  const beforeConn = JSON.parse(connBefore);
+  const allowedConnChange = new Set([...addedSources, ...rewiredSources]);
+  for (const src of new Set([...Object.keys(afterConn), ...Object.keys(beforeConn)])) {
+    if (allowedConnChange.has(src)) continue;
     if (stable(beforeConn[src]) !== stable(afterConn[src])) {
       problems.push(`connections from "${src}" changed`);
     }
   }
+  for (const src of rewiredSources) {
+    if (stable(afterConn[src]) !== stable((artifact.connections ?? {})[src] ?? null)) {
+      problems.push(`rewired connections from "${src}" did not land as expected`);
+    }
+  }
   if (problems.length) throw new Error(`Post-write verification FAILED:\n  - ${problems.join("\n  - ")}`);
 
-  const summary = [nodeNames.length && `${nodeNames.length} updated`, addNames.length && `${addNames.length} added`]
+  const summary = [
+    nodeNames.length && `${nodeNames.length} updated`,
+    addNames.length && `${addNames.length} added`,
+    rewiredSources.length && `${rewiredSources.length} rewired`,
+  ]
     .filter(Boolean)
     .join(", ");
   console.log("");

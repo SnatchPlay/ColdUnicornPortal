@@ -418,10 +418,10 @@ workflows:
   # Provisioning. Splits the Aimfox half out of the hand-run canvas 8uRWXHe9FIfglq1u ("My workflow
   # 6"), which hardcodes one workspace id, POSTs unconditionally and reads no vendor state — so it
   # can only be run once per client, by hand, and a second run would duplicate every webhook.
-  # Iteration 1 is READ-ONLY: it resolves the workspace and reports what is present, and contains
-  # no write node at all — not one POST to Aimfox, not one INSERT. The writes land in iteration 2,
-  # once the read path is proven against real workspaces. Created inactive; there is no webhook yet
-  # (that arrives with the gateway action, header-authenticated).
+  # Iteration 1 (read-only) was proven on five real clients before iteration 2 added the writes.
+  # Exactly two nodes POST — Mint Key and Create Missing — and a dry run cannot reach either: Plan
+  # Writes returns an empty array, and n8n does not execute a node with no input items. Still
+  # INACTIVE and called by hand; the webhook arrives with the gateway action (ADR-0018).
   - id: aimfox-workspace-setup
     name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
     domain: ops
@@ -438,7 +438,7 @@ workflows:
       production:
         remoteWorkflowId: ehhFUR3SYIxDahER
     lastRepositorySync: 2026-08-07
-    lastValidation: 2026-08-07 read path proven on production (executions 70399-70406, dry_run only) — Kaizen/Bent Iron/Audytel configured, Fortum missing preMQL, GIC missing MQL; write path does not exist yet
+    lastValidation: 2026-08-07 read path proven on production (executions 70399-70406, dry_run only) — Kaizen/Bent Iron/Audytel configured, Fortum missing preMQL, GIC missing MQL. Iteration 2 (write half, 21 nodes) deployed from the artifact the same day, approved as "workspace-setup"; NOT yet run with dry_run:false
 
   # The Bison half of the same split. Contracts and manifest first, graph second (workflow-lifecycle
   # section C). Its canonical set is NOT the Aimfox one: measured across all 16 Active Bison
