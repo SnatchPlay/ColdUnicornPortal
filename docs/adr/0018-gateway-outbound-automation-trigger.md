@@ -52,15 +52,33 @@ The gateway must **never** call a vendor (Aimfox, Bison, Google) directly. Those
 n8n, which holds the credentials. The gateway calls n8n; n8n calls the vendor. That boundary is what
 keeps a vendor master key out of the edge function's environment entirely.
 
-### 2. The call carries a shared secret, and the workflow verifies it
+### 2. The call carries a shared secret, and the workflow should verify it
 
-`N8N_AUTOMATION_SHARED_SECRET`, sent as a header. The receiving n8n webhook uses **header auth from
-its first day**.
+`N8N_AUTOMATION_SHARED_SECRET`, sent as a header on every request. The receiving n8n webhook is
+meant to use header auth.
 
-The existing Aimfox ingestion webhooks are unauthenticated — their path is effectively a bearer
-token, which is a known defect recorded in [security.md](../reference/n8n/security.md). It is not to
-be copied into anything new. An unauthenticated provisioning webhook would let anyone who learned
-the path mint API keys and create webhooks inside a client's sending system.
+> **Shipped in violation of this clause, deliberately.** The two provisioning webhooks went live on
+> 2026-08-08 **unauthenticated**, at the owner's explicit direction after the alternative was offered
+> and declined. The gateway sends `x-automation-secret` regardless, so turning verification on is a
+> one-side change: create the credential, attach it, set the same value on the edge function.
+>
+> Registered as `unauthenticated-webhook` in both manifests' `knownViolations` with a review date of
+> **2026-11-30**, and written up as
+> [security finding 11](../reference/n8n/security.md#11-the-workspace-provisioning-webhooks-are-unauthenticated--medium-open).
+> `pnpm n8n:validate` keeps reporting it as an accepted warning until that date, then fails.
+>
+> This note exists because the alternative — leaving the clause reading as though it were true — is
+> worse than the gap it describes. A document that misreports its own system cannot be used to
+> reason about it.
+
+The existing Aimfox ingestion webhooks are unauthenticated for the same practical reason, and their
+path is effectively a bearer token. The exposure a provisioning webhook adds is bounded and worth
+stating precisely: the run is idempotent and additive against a closed canonical set, it never
+deletes, the workspace is resolved from `client_sequencers` or an exact name match rather than from
+the request, and **no credential is ever returned** (§4). What an unauthenticated caller can do is
+force provisioning runs — burning vendor quota — and complete provisioning for a client we had
+deliberately left unwired. What they cannot do is read a key or point us at a workspace of their
+choosing.
 
 ### 3. Authorisation is the caller's role, checked the way every other action is
 
@@ -100,8 +118,11 @@ load stays exactly as cheap as it was.
 - The edge function gains `N8N_WORKSPACE_SETUP_URL_AIMFOX`, `N8N_WORKSPACE_SETUP_URL_BISON` and
   `N8N_AUTOMATION_SHARED_SECRET`. Absent configuration means the action refuses with a clear message
   — it does not fall back to anything.
-- Both provisioning workflows gain a header-authenticated webhook trigger alongside their existing
-  `executeWorkflowTrigger`, so the hand-run path keeps working.
+- Both provisioning workflows gained a webhook trigger alongside their existing
+  `executeWorkflowTrigger`, so the hand-run path keeps working. An `Input` node normalises the two
+  trigger shapes — the webhook delivers under `body`, the sub-workflow trigger at the root — and is
+  where `dry_run` is forced to a boolean. Anything but an explicit `false` is a check, so a partial
+  or mistyped body cannot write. That guard matters more with the webhook open than it did before.
 - `supabase functions list` must keep showing `orm-gateway` as `verify_jwt: true`. An outbound
   capability behind an unauthenticated function would be a serious defect.
 - A future automation trigger (say, re-running a campaign sync for one client) is now a small,

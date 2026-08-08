@@ -36,7 +36,8 @@ sequencers. Two differences matter to a caller:
 its `List Tokens` and plus a `List Campaigns`.
 
 ```
-Start (executeWorkflowTrigger)
+Start (executeWorkflowTrigger) ─┐
+Webhook  (POST /webhook/workspace-setup-bison) ─┴→ Input
   └─ Resolve Client ─ Read Claimed ─ List Workspaces ─ Resolve Workspace ─ Resolved?
        ├─ no  → Needs Selection
        └─ yes → Need Mint? ─┬─ yes → Mint Key ─┐
@@ -99,6 +100,27 @@ run, or when the row already exists:
 created, so folding them in would leave four clients permanently `partial` behind a **Налаштувати**
 button that cannot fix them — a status that lies about what pressing it would do. The finding is not
 lost: it stays in `steps.campaigns`, which the portal renders as its own line.
+
+## Two triggers, one input
+
+`Start` (sub-workflow) and `Webhook` both feed an **`Input`** node that normalises them: the webhook
+delivers its payload under `body`, the sub-workflow trigger at the root. Without it every
+`$('Start')` reference would throw on a webhook run, because `Start` does not execute there.
+
+`Input` is also where `dry_run` becomes a boolean, and it is strict: **anything but an explicit
+`false` is a check** — including the string `'false'`. The body arrives from the network, so neither
+a forgotten field nor a wrong type may mean "write into a client's system".
+
+> **The webhook is unauthenticated.** Owner's decision, 2026-08-08; registered as
+> `unauthenticated-webhook` in [`manifest.yaml`](manifest.yaml) with a review date of 2026-11-30 and
+> written up as [security finding 11](../../../../../docs/reference/n8n/security.md#11-the-workspace-provisioning-webhooks-are-unauthenticated--medium-open).
+> Anyone with the path and a valid `client_id` can start a run. What that buys them is bounded: the
+> run is idempotent and additive against a closed set, never deletes, resolves the workspace from
+> the database rather than the request, and returns no credential. What it costs us is vendor quota
+> and the ability to provision a client we had deliberately left unwired.
+>
+> The gateway already sends `x-automation-secret`, so attaching an `httpHeaderAuth` credential to
+> the `Webhook` node closes this with no change on either side.
 
 ## The canonical set
 

@@ -20,20 +20,16 @@ architectureDecisions:
   - docs/adr/0012-multi-sequencer-model.md
   - docs/adr/0016-repository-as-automation-source-of-truth.md
 
-# Only the executeWorkflowTrigger exists today. The webhook lands with ADR-0018, when the gateway
-# gains the right to make an outbound call — declaring it before then would claim a surface that
-# is not there.
 triggers:
   - type: executeWorkflowTrigger
     detail: >-
       The current entry point. Callable as a sub-workflow, and how the five production dry-runs of
       2026-08-07 were made.
   - type: webhook
-    planned: true
     detail: >-
       POST /webhook/workspace-setup-aimfox, from the orm-gateway `requestWorkspaceSetup` action.
-      Header-authenticated — unlike the Aimfox ingestion webhooks, which are unauthenticated and
-      are a known defect (security.md §3) that must not be copied here.
+      UNAUTHENTICATED — see knownViolations. An `Input` node normalises the webhook body and the
+      sub-workflow item into one shape and forces dry_run to a boolean.
 
 reads:
   tables:
@@ -77,10 +73,12 @@ credentials:
   - alias: "Postgres account"
     type: postgres
     usedBy: "Resolve Client, Read Claimed, Record"
+  # NOT attached. The Webhook node is unauthenticated as of 2026-08-08 — see knownViolations.
+  # The gateway already sends x-automation-secret, so attaching this closes the gap on its own.
   - alias: "Workspace setup webhook auth"
     type: httpHeaderAuth
     planned: true
-    usedBy: "Webhook (ADR-0018, not built)"
+    usedBy: "Webhook — intended, not attached"
 
 targetContract:
   input: automation/n8n/workflows/ops/aimfox-workspace-setup/contracts/setup-input.schema.json
@@ -119,4 +117,19 @@ environments:
   production:
     remoteWorkflowId: ehhFUR3SYIxDahER
 
-knownViolations: []
+knownViolations:
+  # `rule` is the validator's finding id, not prose — it is what suppresses the warning. The prose
+  # belongs in `reason`, and the ADR clause being broken is ADR-0018 §2.
+  - rule: unauthenticated-webhook
+    reason: >-
+      Breaks ADR-0018 §2 ("header-authenticated from its first day"). Explicit owner decision on
+      2026-08-08; the header-auth alternative was offered, costed at two minutes in the n8n UI, and
+      declined for now. The gateway ALREADY sends x-automation-secret, so attaching a credential
+      later is a one-side change that breaks nothing. Mitigation: the run is idempotent and additive
+      against a closed canonical set, never deletes, and cannot be pointed at an arbitrary workspace
+      — that comes from client_sequencers or an exact name match, never from the request. No
+      credential crosses back (the result contract forbids api_key; the gateway strips
+      api_key/token/plain_text_token at its boundary). The Input node treats anything but an
+      explicit boolean false as a dry run, so a malformed body cannot write.
+    trackedIn: docs/reference/n8n/security.md#11-the-workspace-provisioning-webhooks-are-unauthenticated--medium-open
+    expires: 2026-11-30

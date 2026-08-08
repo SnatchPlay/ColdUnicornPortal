@@ -11,7 +11,7 @@
         -152
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Start').first().json.dry_run !== false;\n\n// Стан ДО запису. Те, що звідси виходить, або віддається як є (dry_run / нічого не бракує), або\n// доповнюється результатами створення у Merge Outcomes.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'vendor' ? step('ok', [`vendor token reused (${key.vendor_tokens} at the vendor)`])\n  : key.key_source === 'minted' ? step('created', [], [], null)\n  : step('missing', [], ['api_key'], key.mint_error ?? (isDryRun() ? 'no key stored and none at the vendor' : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst listStep = (raw, arrayKey, canon, identity) => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (errored(raw)) return step('skipped', [], [], 'vendor call failed');\n  const present = (raw[arrayKey] ?? []).map(identity);\n  const missing = canon.map(identity).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n};\n\nconst webhooks = listStep(hooksRaw, 'webhooks', CANON_WEBHOOKS, (w) => hookKey(w.events, w.url));\nconst labels = listStep(labelsRaw, 'labels', CANON_LABELS, (l) => String(l?.name ?? ''));\n\nreturn [{ json: {\n  client_id: $('Start').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: {\n    key: keyStep, webhooks, labels,\n    campaigns: step('skipped', [], [], 'catalogued by aimfox-campaign-sync, not created here'),\n  },\n} }];"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// Стан ДО запису. Те, що звідси виходить, або віддається як є (dry_run / нічого не бракує), або\n// доповнюється результатами створення у Merge Outcomes.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'vendor' ? step('ok', [`vendor token reused (${key.vendor_tokens} at the vendor)`])\n  : key.key_source === 'minted' ? step('created', [], [], null)\n  : step('missing', [], ['api_key'], key.mint_error ?? (isDryRun() ? 'no key stored and none at the vendor' : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst listStep = (raw, arrayKey, canon, identity) => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (errored(raw)) return step('skipped', [], [], 'vendor call failed');\n  const present = (raw[arrayKey] ?? []).map(identity);\n  const missing = canon.map(identity).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n};\n\nconst webhooks = listStep(hooksRaw, 'webhooks', CANON_WEBHOOKS, (w) => hookKey(w.events, w.url));\nconst labels = listStep(labelsRaw, 'labels', CANON_LABELS, (l) => String(l?.name ?? ''));\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: {\n    key: keyStep, webhooks, labels,\n    campaigns: step('skipped', [], [], 'catalogued by aimfox-campaign-sync, not created here'),\n  },\n} }];"
       }
     },
     {
@@ -114,6 +114,19 @@
           }
         },
         "options": {}
+      }
+    },
+    {
+      "id": "a3000000-0000-4000-a000-000000000002",
+      "name": "Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        88
+      ],
+      "parameters": {
+        "jsCode": "// Один вхід для двох тригерів. Вебхук кладе тіло в body; executeWorkflowTrigger — у корінь.\n// Без цього вузла кожне $('Start') падало б на вебхучному прогоні, бо Start там не виконується.\nconst fromWebhook = $('Webhook').isExecuted;\nconst raw = fromWebhook ? ($('Webhook').first().json?.body ?? {}) : ($('Start').first().json ?? {});\n\n// dry_run: усе, крім ЯВНОГО булевого false, — сухий прогін. Рядок 'false' теж не рахується.\n// Через відкритий вебхук це важить більше, ніж через UI: тіло приходить із мережі, і ні забуте\n// поле, ні хибний тип не сміють означати \"пиши в систему клієнта\".\nreturn [{ json: {\n  client_id: raw.client_id ?? null,\n  workspace_id: raw.workspace_id ?? null,\n  dry_run: raw.dry_run === false ? false : true,\n  requested_by: raw.requested_by ?? null,\n  via: fromWebhook ? 'webhook' : 'sub-workflow',\n} }];"
       }
     },
     {
@@ -252,7 +265,7 @@
           "conditions": [
             {
               "id": "a2000000-0000-4000-a000-00000000000f",
-              "leftValue": "={{ (() => { const c = $('Resolve Client').first().json ?? {}; const t = $json ?? {}; const v = Array.isArray(t.tokens) ? t.tokens : Array.isArray(t.data) ? t.data : []; return !c.api_key && !v.some(x => x?.token) && $('Start').first().json.dry_run === false; })() }}",
+              "leftValue": "={{ (() => { const c = $('Resolve Client').first().json ?? {}; const t = $json ?? {}; const v = Array.isArray(t.tokens) ? t.tokens : Array.isArray(t.data) ? t.data : []; return !c.api_key && !v.some(x => x?.token) && $('Input').first().json.dry_run === false; })() }}",
               "operator": {
                 "operation": "true",
                 "singleValue": true,
@@ -281,7 +294,7 @@
         40
       ],
       "parameters": {
-        "jsCode": "const input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Неіснуючий клієнт — помилка того, хто викликав, а не стан провіженінгу. Але сказати про це\n// треба вголос: мовчазний обрив із status=success — це те, як зникли ліди Audytel.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no such client, or it has no enabled aimfox connector'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: $('Start').first().json.dry_run !== false,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    labels: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n  },\n} }];"
+        "jsCode": "const input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Неіснуючий клієнт — помилка того, хто викликав, а не стан провіженінгу. Але сказати про це\n// треба вголос: мовчазний обрив із status=success — це те, як зникли ліди Audytel.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no such client, or it has no enabled aimfox connector'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: $('Input').first().json.dry_run !== false,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    labels: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n  },\n} }];"
       }
     },
     {
@@ -294,7 +307,7 @@
         -224
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Start').first().json.dry_run !== false;\n\n// Один айтем на КОЖЕН відсутній елемент. Порожній масив означає, що Create Missing не виконається\n// взагалі — саме так тут влаштована безпека сухого прогону.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://api.aimfox.com/api/v2/webhooks',\n      body: { name: c.name, events: c.events, url: c.url, integration: false } } });\n  }\n}\nfor (const c of CANON_LABELS) {\n  if ((s.labels?.missing ?? []).includes(c.name)) {\n    out.push({ json: { kind: 'label', identity: c.name, url: 'https://api.aimfox.com/api/v2/labels',\n      body: { name: c.name, color: c.color } } });\n  }\n}\nreturn out;"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// Один айтем на КОЖЕН відсутній елемент. Порожній масив означає, що Create Missing не виконається\n// взагалі — саме так тут влаштована безпека сухого прогону.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://api.aimfox.com/api/v2/webhooks',\n      body: { name: c.name, events: c.events, url: c.url, integration: false } } });\n  }\n}\nfor (const c of CANON_LABELS) {\n  if ((s.labels?.missing ?? []).includes(c.name)) {\n    out.push({ json: { kind: 'label', identity: c.name, url: 'https://api.aimfox.com/api/v2/labels',\n      body: { name: c.name, color: c.color } } });\n  }\n}\nreturn out;"
       }
     },
     {
@@ -326,7 +339,7 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => {\n  const r = $json;\n  const key = $('Effective Key').first().json ?? {};\n  const start = $('Start').first().json;\n  const dry = r.dry_run !== false;\n  return [\n    r.client_id,\n    JSON.stringify({ state: r.state, steps: r.steps, resolved: r.resolved, dry_run: r.dry_run, sequencer: r.sequencer }),\n    dry ? '' : (key.key_to_store ?? ''),\n    r.resolved?.workspace_id ?? '',\n    dry,\n    String($execution.id),\n    r.state === 'configured' || r.state === 'partial' ? 'success' : 'failed',\n    JSON.stringify({ client_id: r.client_id, workspace_id: r.resolved?.workspace_id ?? null,\n                     requested_by: start.requested_by ?? null, dry_run: dry, state: r.state, steps: r.steps }),\n  ];\n})() }}"
+          "queryReplacement": "={{ (() => {\n  const r = $json;\n  const key = $('Effective Key').first().json ?? {};\n  const start = $('Input').first().json;\n  const dry = r.dry_run !== false;\n  return [\n    r.client_id,\n    JSON.stringify({ state: r.state, steps: r.steps, resolved: r.resolved, dry_run: r.dry_run, sequencer: r.sequencer }),\n    dry ? '' : (key.key_to_store ?? ''),\n    r.resolved?.workspace_id ?? '',\n    dry,\n    String($execution.id),\n    r.state === 'configured' || r.state === 'partial' ? 'success' : 'failed',\n    JSON.stringify({ client_id: r.client_id, workspace_id: r.resolved?.workspace_id ?? null,\n                     requested_by: start.requested_by ?? null, dry_run: dry, state: r.state, steps: r.steps }),\n  ];\n})() }}"
         },
         "query": "-- Один statement: connector row + аудит. INSERT ... SELECT ... WHERE дозволяє не створювати\n-- рядок конектора на сухому прогоні — перевірка «чи не dry_run, або рядок уже існує».\n-- Створити конектор там, де його не було, означає зробити клієнта підключеним; для перевірки\n-- це неприпустимо.\nwith upserted as (\n  insert into public.client_sequencers\n    (client_id, sequencer_id, api_key, external_workspace_id, setup_state, setup_checked_at)\n  select $1::uuid, '00000000-0000-4000-a000-000000000003'::uuid, nullif($3, ''), nullif($4, ''), $2::jsonb, now()\n   where $5::boolean = false\n      or exists (select 1 from public.client_sequencers\n                  where client_id = $1::uuid and sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid)\n  on conflict (client_id, sequencer_id) do update\n     set setup_state           = excluded.setup_state,\n         setup_checked_at      = now(),\n         -- ключ перезаписуємо лише тим, що реально здобули; порожнє означає «не чіпай»\n         api_key               = coalesce(excluded.api_key, public.client_sequencers.api_key),\n         -- збережений воркспейс не перезаписуємо ніколи: він і є те, чим клієнт закріплений\n         external_workspace_id = coalesce(public.client_sequencers.external_workspace_id,\n                                          excluded.external_workspace_id),\n         updated_at            = now()\n  returning id\n), audited as (\n  insert into public.integration_sync_runs\n    (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\n  values ('aimfox', 'workspace_setup', $6, $7, now(), now(), $8::jsonb)\n  on conflict (n8n_execution_id) do nothing\n  returning id\n)\nselect (select count(*) from upserted) as connector_rows,\n       (select count(*) from audited)  as audit_rows;"
       }
@@ -359,7 +372,7 @@
         -56
       ],
       "parameters": {
-        "jsCode": "// Порядок резолву: явний id → уже записаний за клієнтом → ТОЧНИЙ збіг назви → кандидати.\n//\n// Крок \"записаний\" критичний. Виміряно 2026-08-07: назва клієнта збігається з назвою воркспейсу\n// лише в 4 випадках із 9 (\"Bent Iron PL\" vs \"Bent Iron\", \"FortumEnergia\" vs \"Fortum\",\n// \"ColdUnicorn PL\" vs \"Łukasz Kot\"). Для вже заведеного клієнта воркспейс відомий з бази, і\n// шукати за назвою не треба взагалі — інакше Bent Iron PL іде в needs_selection на рівному місці.\n//\n// Неоднозначність ніколи не вирішується здогадкою — інваріант 2. Саме здогадка призвела до того,\n// що воркспейс GIC опинився на клієнті Prac.Finansowa.\nconst input = $('Start').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : Array.isArray(listRaw.data) ? listRaw.data\n  : [];\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Resolve Client має alwaysOutputData, тож порожній клієнт приходить як {} замість того, щоб\n// тихо обірвати ланцюжок. Кажемо про це вголос — мовчазний успіх гірший за помилку.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst nameFor = (id) => nameOf(list.find((w) => idOf(w) === id)) || null;\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) {\n  return [{ json: { ...base, resolved: { workspace_id: explicit, name: nameFor(explicit), matched_by: 'explicit' } } }];\n}\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) {\n  return [{ json: { ...base, resolved: { workspace_id: stored, name: nameFor(stored), matched_by: 'stored' } } }];\n}\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) {\n  return [{ json: { ...base, resolved: { workspace_id: idOf(matches[0]), name: nameOf(matches[0]), matched_by: 'name' } } }];\n}\n\n// Кандидати — усе, що ще не закріплене за жодним клієнтом. Показати зайнятий воркспейс означає\n// запросити те саме хибне призначення ще раз.\nconst candidates = list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({ workspace_id: idOf(w), name: nameOf(w) || null }));\n\nreturn [{ json: { ...base, resolved: null, candidates, ambiguous: matches.length > 1 } }];"
+        "jsCode": "// Порядок резолву: явний id → уже записаний за клієнтом → ТОЧНИЙ збіг назви → кандидати.\n//\n// Крок \"записаний\" критичний. Виміряно 2026-08-07: назва клієнта збігається з назвою воркспейсу\n// лише в 4 випадках із 9 (\"Bent Iron PL\" vs \"Bent Iron\", \"FortumEnergia\" vs \"Fortum\",\n// \"ColdUnicorn PL\" vs \"Łukasz Kot\"). Для вже заведеного клієнта воркспейс відомий з бази, і\n// шукати за назвою не треба взагалі — інакше Bent Iron PL іде в needs_selection на рівному місці.\n//\n// Неоднозначність ніколи не вирішується здогадкою — інваріант 2. Саме здогадка призвела до того,\n// що воркспейс GIC опинився на клієнті Prac.Finansowa.\nconst input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : Array.isArray(listRaw.data) ? listRaw.data\n  : [];\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Resolve Client має alwaysOutputData, тож порожній клієнт приходить як {} замість того, щоб\n// тихо обірвати ланцюжок. Кажемо про це вголос — мовчазний успіх гірший за помилку.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst nameFor = (id) => nameOf(list.find((w) => idOf(w) === id)) || null;\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) {\n  return [{ json: { ...base, resolved: { workspace_id: explicit, name: nameFor(explicit), matched_by: 'explicit' } } }];\n}\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) {\n  return [{ json: { ...base, resolved: { workspace_id: stored, name: nameFor(stored), matched_by: 'stored' } } }];\n}\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) {\n  return [{ json: { ...base, resolved: { workspace_id: idOf(matches[0]), name: nameOf(matches[0]), matched_by: 'name' } } }];\n}\n\n// Кандидати — усе, що ще не закріплене за жодним клієнтом. Показати зайнятий воркспейс означає\n// запросити те саме хибне призначення ще раз.\nconst candidates = list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({ workspace_id: idOf(w), name: nameOf(w) || null }));\n\nreturn [{ json: { ...base, resolved: null, candidates, ambiguous: matches.length > 1 } }];"
       }
     },
     {
@@ -423,6 +436,22 @@
           ]
         }
       }
+    },
+    {
+      "id": "a3000000-0000-4000-a000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        176
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "workspace-setup-aimfox",
+        "responseMode": "lastNode"
+      }
     }
   ],
   "connections": {
@@ -483,6 +512,17 @@
           {
             "index": 0,
             "node": "Merge Outcomes",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Input": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Client",
             "type": "main"
           }
         ]
@@ -650,7 +690,18 @@
         [
           {
             "index": 0,
-            "node": "Resolve Client",
+            "node": "Input",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Input",
             "type": "main"
           }
         ]

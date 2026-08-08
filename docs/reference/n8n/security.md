@@ -204,6 +204,45 @@ Two related facts about the same workflow, both from the same session:
 `pnpm n8n:validate` raises `unauthenticated-webhook` as a warning on the artifact. That warning is
 the reminder; do not silence it.
 
+### 11. The workspace-provisioning webhooks are unauthenticated — **medium, open**
+
+Added 2026-08-08 at the owner's explicit direction, after the alternative (a two-minute
+`httpHeaderAuth` credential) was offered and declined for now. Recorded rather than overlooked.
+
+```
+POST https://n8n.coldunicorn.com/webhook/workspace-setup-aimfox
+POST https://n8n.coldunicorn.com/webhook/workspace-setup-bison
+```
+
+Anyone who knows a path and a valid `client_id` can start a provisioning run for that client.
+
+**Why it is medium and not high**, unlike finding 10: the run is idempotent and purely additive
+against a **closed** canonical set — two webhooks and two labels/tags per vendor. It creates nothing
+else, it never deletes, and running it twice changes nothing the second time. It cannot be pointed
+at an arbitrary workspace: the workspace is resolved from `client_sequencers` or from an exact name
+match, never from the request. And it returns no credential — the result contracts forbid an
+`api_key` (`additionalProperties: false`) and the gateway strips `api_key`/`token`/`plain_text_token`
+at its boundary regardless.
+
+**What it does cost.** An attacker can force provisioning runs, which burns vendor API quota, and
+can complete provisioning for a client we had deliberately left unwired. With `dry_run` omitted the
+run is a read — the `Input` node treats anything but an explicit boolean `false` as a check, so a
+malformed or partial body cannot write.
+
+`client_id` is a UUID and is not enumerable in practice, but it is not a secret either: it appears
+in portal URLs and in n8n execution data.
+
+The fix is one step and an agent cannot do it (the MCP exposes no credential tools — same constraint
+as findings 7 and 10): create an `httpHeaderAuth` credential named `Workspace setup webhook auth`
+with header `x-automation-secret`, attach it to both `Webhook` nodes, and set the same value as
+`N8N_AUTOMATION_SHARED_SECRET` on the edge function. **The gateway already sends that header**, so
+switching auth on is a one-side change that breaks nothing.
+
+Registered as a `knownViolation` against
+[ADR-0018 §2](../../adr/0018-gateway-outbound-automation-trigger.md) in both manifests, with a
+review date of **2026-11-30**. `pnpm n8n:validate` raises `unauthenticated-webhook` on both
+artifacts; that warning is the reminder — do not silence it.
+
 ## Reviewing a workflow
 
 - [ ] `pnpm n8n:validate` passes

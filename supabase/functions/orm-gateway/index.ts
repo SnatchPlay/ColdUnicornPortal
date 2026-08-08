@@ -889,14 +889,18 @@ async function requestWorkspaceSetup(
   requestedBy: string | null,
 ): Promise<Record<string, unknown>> {
   const url = WORKSPACE_SETUP_URLS[payload.sequencerKey];
+  // The secret is sent whenever it is set, but is NOT required to call: as of 2026-08-08 the
+  // receiving webhooks do not verify it (owner's decision — ADR-0018 §2, security finding 11).
+  // Requiring a value nothing checks would only block the feature behind a ritual. Attaching the
+  // credential in n8n later needs no change here, because the header already goes out.
   const secret = Deno.env.get("N8N_AUTOMATION_SHARED_SECRET") ?? "";
-  if (!url || !secret) {
+  if (!url) {
     // No fallback. A provisioning trigger that silently does nothing is worse than one that refuses.
     fail(
       503,
       `Workspace provisioning is not configured for "${payload.sequencerKey}": set ` +
-        `N8N_WORKSPACE_SETUP_URL_${payload.sequencerKey === "aimfox" ? "AIMFOX" : "BISON"} and ` +
-        `N8N_AUTOMATION_SHARED_SECRET on the edge function.`,
+        `N8N_WORKSPACE_SETUP_URL_${payload.sequencerKey === "aimfox" ? "AIMFOX" : "BISON"} ` +
+        `on the edge function.`,
     );
   }
 
@@ -921,7 +925,10 @@ async function requestWorkspaceSetup(
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-automation-secret": secret },
+      headers: {
+        "content-type": "application/json",
+        ...(secret ? { "x-automation-secret": secret } : {}),
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
