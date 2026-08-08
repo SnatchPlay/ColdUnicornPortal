@@ -414,3 +414,53 @@ workflows:
         remoteWorkflowId: ATPnIVnO0sAB9GQx
     lastRepositorySync: 2026-07-29
     lastValidation: 2026-07-29 statement proven in a rolled-back transaction; webhook unauthenticated (security.md #9)
+
+  # Provisioning. Splits the Aimfox half out of the hand-run canvas 8uRWXHe9FIfglq1u ("My workflow
+  # 6"), which hardcodes one workspace id, POSTs unconditionally and reads no vendor state — so it
+  # can only be run once per client, by hand, and a second run would duplicate every webhook.
+  # Iteration 1 (read-only) was proven on five real clients before iteration 2 added the writes.
+  # Exactly two nodes POST — Mint Key and Create Missing — and a dry run cannot reach either: Plan
+  # Writes returns an empty array, and n8n does not execute a node with no input items. Still
+  # INACTIVE and called by hand; the webhook arrives with the gateway action (ADR-0018).
+  - id: aimfox-workspace-setup
+    name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
+    domain: ops
+    path: automation/n8n/workflows/ops/aimfox-workspace-setup
+    businessProcess: docs/reference/processes/ops/workspace-provisioning.md
+    owner: automation
+    lifecycle: managed
+    status: planned
+    criticality: high
+    trigger: webhook + executeWorkflowTrigger
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: ehhFUR3SYIxDahER
+    lastRepositorySync: 2026-08-07
+    lastValidation: 2026-08-07 write path proven on production (executions 70487-70490) — dry runs on Kaizen touched nothing; FortumEnergia dry_run:false created its missing preMQL label and the repeat created nothing (invariant 3). All four report recorded:false because 20260807_workspace_setup_state.sql reaches production only when this branch merges and CI db-migrate runs
+
+  # The Bison half of the same split. Contracts and manifest first, graph second (workflow-lifecycle
+  # section C). Its canonical set is NOT the Aimfox one: measured across all 16 Active Bison
+  # workspaces, the tags we create are preMQL + OOO only. MQL sits at 7/16 and is not a gap — the
+  # Bison MQL path runs off the built-in `Interested` tag, so creating MQL would add a second,
+  # less-wired route. The three OOO automation campaigns are reported and never created: their
+  # sequence copy does not exist in usable form, and creating them blind already gave Bent Iron PL
+  # six campaigns instead of three.
+  - id: bison-workspace-setup
+    name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
+    domain: ops
+    path: automation/n8n/workflows/ops/bison-workspace-setup
+    businessProcess: docs/reference/processes/ops/workspace-provisioning.md
+    owner: automation
+    lifecycle: managed
+    status: planned
+    criticality: high
+    trigger: webhook + executeWorkflowTrigger
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: c82kKnHaREUMvPBR
+    lastRepositorySync: 2026-08-07
+    lastValidation: 2026-08-07 read path proven on production (executions 70463-70467, dry_run only) — Kaizen/Bent Iron/GIC/Audytel configured, Fortum partial (no OOO campaigns at all); canon measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16). Iteration 2 (write half) deployed the same day; not yet run with dry_run:false. 2026-08-08 gained an UNAUTHENTICATED webhook trigger at the owner's direction (knownViolations, review 2026-11-30), activated and proven live — executions 70751/70752/70753 confirmed the fail-safe default, a string 'false', and state client_not_found

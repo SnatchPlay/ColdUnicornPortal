@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000003",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": null,
+  "_fixture": "Synthetic, modelled on UniTalk. The lead_replied webhook is named 'Reply Classification' where every other workspace says 'Reply classification' — same URL, same event, one capital letter apart. Expected: steps.webhooks=ok. A name-based comparison would report it missing and create a seventeenth webhook on lead_replied, which means two deliveries per reply, which means two leads. Invariant 4."
+}

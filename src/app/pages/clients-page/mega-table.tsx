@@ -2,6 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type 
 import { ExternalLink, Pencil } from "lucide-react";
 import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
+import type { ClientSequencerCreds } from "./client-drawer";
+import type { ClientSequencerRecord } from "../../types/core";
 import { SatisfactionHearts } from "../../components/satisfaction-hearts";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
@@ -34,6 +36,8 @@ export interface ClientMegaRow {
   managerName: string;
   metrics: ClientMetricsPack;
   conditionPack: ReturnType<typeof evaluateClientConditions> | null;
+  /** Connector rows for this client — carries setup_state for the provisioning column. */
+  sequencerCreds: ClientSequencerCreds;
 }
 
 export interface MegaSortState {
@@ -90,6 +94,70 @@ interface MegaColumn {
   momBucket?: string;
   momMetricKey?: string;
   defaultDirection?: SortDirection;
+}
+
+// ── Provisioning marks (ADR-0018 §6; written by the setup workflows, read here) ─────────────────
+
+/** No row at all is a state, not an absence — it is the Audytel case and it ranks worst. */
+function provisioningState(row: ClientSequencerRecord | null): string {
+  if (!row) return "no_connector";
+  const state = (row.setup_state as { state?: string } | null)?.state;
+  return state ?? "never";
+}
+
+const PROVISIONING_WORDS: Record<string, string> = {
+  configured: "configured",
+  partial: "partly configured",
+  missing: "not wired",
+  needs_selection: "workspace not chosen",
+  client_not_found: "no connector enabled",
+  no_connector: "no connector",
+  never: "never checked",
+};
+
+function provisioningWord(row: ClientSequencerRecord | null): string {
+  return PROVISIONING_WORDS[provisioningState(row)] ?? provisioningState(row);
+}
+
+/** Higher = more wrong. Summed across both sequencers so one sort surfaces the worst clients. */
+function provisioningRank(row: ClientSequencerRecord | null): number {
+  switch (provisioningState(row)) {
+    case "configured":
+      return 0;
+    // Same reasoning as the colour: an absent connector is not evidence of a fault, so it must not
+    // outrank a run that actually found something wrong.
+    case "never":
+    case "no_connector":
+      return 1;
+    case "partial":
+    case "needs_selection":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function ProvisioningMark({ letter, row }: { letter: string; row: ClientSequencerRecord | null }) {
+  const state = provisioningState(row);
+  // "No connector" is MUTED, not red. Most clients are deliberately single-channel — 43 of 56 have
+  // EmailBison and 2 have Aimfox — so colouring every missing connector as a fault paints a wall of
+  // red across a column nobody would then read. We cannot tell "not on this channel" from "should
+  // be and isn't" without knowing which channels the client bought, and a status column must not
+  // assert a defect it cannot establish. Red is kept for states a run actually reported as broken.
+  // The drawer says "not connected at all" in words for whoever opens it.
+  const tone =
+    state === "configured"
+      ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
+      : state === "partial" || state === "needs_selection"
+        ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
+        : state === "never" || state === "no_connector"
+          ? "border-white/15 bg-white/5 text-white/40"
+          : "border-red-400/40 bg-red-500/15 text-red-100";
+  return (
+    <span className={cn("inline-flex h-4 w-4 items-center justify-center rounded border text-[9px] font-bold", tone)}>
+      {letter}
+    </span>
+  );
 }
 
 const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
@@ -197,6 +265,42 @@ function buildColumns(): MegaColumn[] {
       );
     },
     sortValue: (row) => row.client.status ?? "",
+  });
+  out.push({
+    id: "provisioning",
+    group: "basic",
+    sub: "Basic",
+    // NOT "Setup": clients carry a user-defined custom field of that name, and two identically
+    // labelled columns in one grid is a defect regardless of which one is ours.
+    label: "Workspaces",
+    width: 82,
+    minWidth: 64,
+    align: "center",
+    defaultDirection: "asc",
+    // Two letters, EmailBison then Aimfox. The point of this column is the sweep: 56 clients at a
+    // glance is what would have surfaced Audytel (no connector), Fortum and GIC (missing label)
+    // months before somebody went looking by hand. The drawer carries the detail.
+    render: (row) => (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex gap-1">
+            <ProvisioningMark letter="B" row={row.sequencerCreds.emailbison} />
+            <ProvisioningMark letter="A" row={row.sequencerCreds.aimfox} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="text-xs">
+            EmailBison: {provisioningWord(row.sequencerCreds.emailbison)}
+            <br />
+            Aimfox: {provisioningWord(row.sequencerCreds.aimfox)}
+          </span>
+        </TooltipContent>
+      </Tooltip>
+    ),
+    // Sorts worst-first so a descending click surfaces the clients that need attention, which is
+    // the only reason to sort this column at all.
+    sortValue: (row) =>
+      provisioningRank(row.sequencerCreds.emailbison) + provisioningRank(row.sequencerCreds.aimfox),
   });
   out.push({
     id: "inboxes",

@@ -6,7 +6,13 @@ if (!CONNECTION) {
   process.exit(1);
 }
 
-const sql = postgres(CONNECTION, { prepare: false, ssl: "require", max: 1 });
+// The local stack speaks plaintext, and `rls-migration` requires every migration to be verified
+// there before the cloud. Same detection as scripts/db-invariants.mjs.
+const isLocal = /@(localhost|127\.0\.0\.1|host\.docker\.internal|db)[:/]/.test(CONNECTION);
+const sslEnv = process.env.SUPABASE_DB_SSL?.trim().toLowerCase();
+const ssl = sslEnv === "disable" ? false : sslEnv === "require" ? "require" : isLocal ? false : "require";
+
+const sql = postgres(CONNECTION, { prepare: false, ssl, max: 1 });
 const superAdminId = "a46b2eaa-be36-4b8c-8559-82c74db778ac";
 
 async function h(t) { console.log(`\n=== ${t} ===`); }

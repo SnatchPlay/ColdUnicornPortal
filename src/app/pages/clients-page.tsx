@@ -316,7 +316,15 @@ function useClientsOverview() {
           const idx = prev.clientSequencers.findIndex((row) => row.id === updated.id);
           const clientSequencers =
             idx >= 0
-              ? prev.clientSequencers.map((row, i) => (i === idx ? updated : row))
+              ? prev.clientSequencers.map((row, i) =>
+                  i === idx
+                    ? // Keep the provisioning status we already had. The upsert statement does not
+                      // touch setup_state/setup_checked_at and does not return them, so taking the
+                      // response wholesale would blank the status in the UI while the database
+                      // still holds it — a saved API key would make the client look "never checked".
+                      { ...updated, setup_state: row.setup_state, setup_checked_at: row.setup_checked_at }
+                    : row,
+                )
               : [...prev.clientSequencers, updated];
           return { ...prev, clientSequencers };
         });
@@ -1074,10 +1082,11 @@ export function ClientsPage() {
           managerName,
           metrics,
           conditionPack,
+          sequencerCreds: credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS,
         };
       }),
     );
-  }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
+  }, [conditionPackByClientId, credsByClientId, managerById, metricsByClientId, scopedClients]);
 
   const customFieldById = useMemo(
     () => new Map(clientCustomFields.map((f) => [f.id, f] as const)),
@@ -1544,6 +1553,7 @@ export function ClientsPage() {
           isSavingMapping={isSavingMapping}
           isSendingInvite={isSendingInvite}
           isDraftDirty={isDraftDirty}
+          sequencerCreds={selectedClientCreds}
           canEditAssignments={canEditAssignments}
           canInviteUsers={canInviteUsers}
           onClose={closeClient}

@@ -15,6 +15,7 @@ import type {
   ClientCustomFieldValueRecord,
   ClientRecord,
   ClientSequencerRecord,
+  WorkspaceSetupStep,
   ClientStatus,
   ColumnOverrideRecord,
   ConditionRuleRecord,
@@ -274,6 +275,30 @@ export interface ClientsOverviewPayload {
   sequencers: SequencerRecord[];
   /** Per-client sequencer credentials. RLS-scoped: manager-own/admin; empty for client role. */
   clientSequencers: ClientSequencerRecord[];
+}
+
+/**
+ * What a provisioning run reported (ADR-0018). Mirrors the two n8n result contracts
+ * (`setup-result.schema.json` under each workflow in automation/n8n/workflows/ops), which are the
+ * source of truth for the shape.
+ *
+ * It carries no credential and must never grow one: the gateway derives booleans, the key stays
+ * server-side (process doc, invariant 7).
+ */
+export interface WorkspaceSetupResult {
+  client_id: string;
+  sequencer: string;
+  dry_run: boolean;
+  state: "configured" | "partial" | "missing" | "needs_selection" | "client_not_found" | "unknown";
+  reason?: string;
+  client_name?: string | null;
+  resolved?: { workspace_id: string; name: string | null; matched_by: string } | null;
+  steps?: Record<string, WorkspaceSetupStep>;
+  /** Present only on needs_selection — already filtered of workspaces claimed by other clients. */
+  candidates?: Array<{ workspace_id: string; name: string | null }>;
+  /** False means the vendor work may have happened while the record of it did not. */
+  recorded?: boolean;
+  record_error?: string;
 }
 
 /**

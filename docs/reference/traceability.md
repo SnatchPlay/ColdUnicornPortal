@@ -116,6 +116,39 @@ green, and it is an instance-config plus Apps-Script change, not a graph change.
 
 ---
 
+## Process: workspace provisioning
+
+[Process doc](processes/ops/workspace-provisioning.md) ·
+[ADR-0012](../adr/0012-multi-sequencer-model.md) ·
+[ADR-0016](../adr/0016-repository-as-automation-source-of-truth.md)
+
+Bringing one client's Aimfox or Bison workspace from "exists at the vendor" to "fully wired". Two
+workflows, one contract, one portal surface. Everything below is read-only so far: no write node
+exists on either side yet.
+
+| # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | A workspace belongs to exactly one client | `client_sequencers` | — | — | — | — | candidate list subtracts every `external_workspace_id` already stored, any client, any sequencer | execution `70393`: 12 workspaces − 9 claimed = 3 offered | ✅ |
+| 2 | A workspace is never assigned on a guess | `client_sequencers` | — | — | — | — | resolution is explicit → stored → **exact** name → `needs_selection` | `70393` (Bent Iron PL) before/after the `stored` fix | ✅ |
+| 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ⛔ untested: no write node exists on either side | ⛔ |
+| 4 | A webhook is identified by `url` + `events`, never by name | — | — | — | — | — | both workflows | proven twice independently: Aimfox GIC `Manual Tag`, Bison UniTalk `Reply Classification` | ✅ |
+| 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL`; Bison: `preMQL` + `OOO` | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
+| 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | rides on `loadClientsOverview` ✅ (no new action needed) | Clients page **Workspaces** column + drawer section ✅ | — | `dry_run` returns the same `steps` as a live run | screenshotted in both roles 2026-08-08; production still `{}` until the migration merges | ⚠️ |
+| 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ✅ built | Перевірити / Налаштувати ✅ built | — | gateway calls n8n, never a vendor; result stripped of `api_key`/`token` at the boundary | contract forbids it (`additionalProperties: false`) + explicit delete in the handler | ⚠️ webhook + secret not yet created |
+| 8 | No terminal path is silent | — | — | — | — | — | `client_not_found` + `alwaysOutputData` on Resolve Client | added after a run ended `success` with no output | ✅ |
+
+**What's left.** Rows 3, 6 and 7 — that is, the entire write half plus the gateway.
+
+**Found by running it, out of scope to fix here.** Both belong to other processes and are recorded
+in the [process document](processes/ops/workspace-provisioning.md):
+
+| Finding | Where it belongs |
+|---|---|
+| `public.campaigns` keeps campaigns the vendor no longer has — `bison-campaign-sync` is `INSERT … ON CONFLICT DO UPDATE` with no removal path, so Bent Iron PL shows six OOO campaigns where workspace 73 has three | [Bison ingestion](processes/outreach/bison-ingestion.md) |
+| `client_ooo_routing` has three rows pointing at another client's campaign — all FortumEnergia → GIC. 11 pending follow-ups, nothing sent (phase A enrols from the sheet), live at phase B | [OOO follow-ups](processes/outreach/ooo-followups.md) |
+
+---
+
 ## Adding a process
 
 1. Write the process document under [processes/](processes/).

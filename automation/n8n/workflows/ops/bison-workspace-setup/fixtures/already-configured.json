@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000001",
+  "workspace_id": null,
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. A fully wired Bison workspace resolved from the stored external_workspace_id. Expected: steps.key=ok, steps.webhooks=ok (both url+events pairs present), steps.tags=ok (preMQL and OOO present), steps.campaigns=ok, state=configured, and NOTHING created even though dry_run is false. This is acceptance criterion 1 — the vendor's webhook, tag and campaign lists must be identical before and after."
+}

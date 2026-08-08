@@ -797,7 +797,9 @@ function toSequencerRecord(row: Record<string, unknown>) {
   };
 }
 
-function toClientSequencerRecord(row: Record<string, unknown>) {
+// `setup` is the row from the separate provisioning-status query, or undefined when that query
+// degraded (pre-20260807 schema). Undefined must read as "never checked", never as "not configured".
+function toClientSequencerRecord(row: Record<string, unknown>, setup?: Record<string, unknown>) {
   return {
     id: String(row.id),
     client_id: String(row.client_id),
@@ -809,6 +811,15 @@ function toClientSequencerRecord(row: Record<string, unknown>) {
         : String(row.external_workspace_id),
     settings: (row.settings ?? {}) as Record<string, unknown>,
     enabled: Boolean(row.enabled),
+    // Written only by the workspace-setup workflows, never by the portal. `{}` = never checked;
+    // `setup_checked_at` is what distinguishes that from "checked and found empty".
+    setup_state: (setup?.setup_state ?? {}) as Record<string, unknown>,
+    setup_checked_at:
+      setup?.setup_checked_at instanceof Date
+        ? setup.setup_checked_at.toISOString()
+        : setup?.setup_checked_at
+          ? String(setup.setup_checked_at)
+          : null,
     created_at:
       row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at ?? ""),
     updated_at:
@@ -851,6 +862,119 @@ async function upsertClientSequencerRow(
   const result = (Array.isArray(rows) ? rows : rows.rows ?? []) as Record<string, unknown>[];
   if (!result[0]) fail(400, `Unknown sequencer key "${sequencerKey}" or upsert rejected by RLS.`);
   return result[0];
+}
+
+// ── Workspace provisioning trigger (ADR-0018) ───────────────────────────────────────────────────
+//
+// The ONLY outbound call this function makes. Everything about it is closed:
+//   · the destination comes from this map, never from the caller — a sequencer key is chosen, an
+//     address is not passed;
+//   · the shared secret is verified by the receiving n8n webhook, which is header-authenticated
+//     from its first day (the unauthenticated Aimfox ingestion webhooks are a known defect and are
+//     not to be copied);
+//   · the vendor is never called from here. n8n holds those credentials, and that boundary is what
+//     keeps a master key out of this function's environment entirely.
+const WORKSPACE_SETUP_URLS: Record<string, string> = {
+  aimfox: Deno.env.get("N8N_WORKSPACE_SETUP_URL_AIMFOX") ?? "",
+  emailbison: Deno.env.get("N8N_WORKSPACE_SETUP_URL_BISON") ?? "",
+};
+
+// A full run is up to eight vendor calls. Past this we stop listening — but the workflow keeps
+// running, so the honest answer is "unknown", never a 500 and never a fabricated success.
+const WORKSPACE_SETUP_TIMEOUT_MS = 45_000;
+
+async function requestWorkspaceSetup(
+  tx: any,
+  payload: { clientId: string; sequencerKey: string; workspaceId: string | null; dryRun: boolean },
+  requestedBy: string | null,
+): Promise<Record<string, unknown>> {
+  const url = WORKSPACE_SETUP_URLS[payload.sequencerKey];
+  // The secret is sent whenever it is set, but is NOT required to call: as of 2026-08-08 the
+  // receiving webhooks do not verify it (owner's decision — ADR-0018 §2, security finding 11).
+  // Requiring a value nothing checks would only block the feature behind a ritual. Attaching the
+  // credential in n8n later needs no change here, because the header already goes out.
+  const secret = Deno.env.get("N8N_AUTOMATION_SHARED_SECRET") ?? "";
+  if (!url) {
+    // No fallback. A provisioning trigger that silently does nothing is worse than one that refuses.
+    fail(
+      503,
+      `Workspace provisioning is not configured for "${payload.sequencerKey}": set ` +
+        `N8N_WORKSPACE_SETUP_URL_${payload.sequencerKey === "aimfox" ? "AIMFOX" : "BISON"} ` +
+        `on the edge function.`,
+    );
+  }
+
+  // Authorisation is the pre-flight read, not a second rule. RLS already scopes `clients` to
+  // can_manage_client, so a caller who cannot see the row gets zero rows here and never reaches the
+  // network. This is ADR-0018 §3 and it is deliberately not new code.
+  const allowed = await rawQuery<{ id: string }>(
+    tx,
+    sql`SELECT id FROM public.clients WHERE id = ${payload.clientId}::uuid`,
+  );
+  if (!allowed[0]) fail(403, "No such client, or you may not manage it.");
+
+  const body = {
+    client_id: payload.clientId,
+    workspace_id: payload.workspaceId,
+    dry_run: payload.dryRun,
+    requested_by: requestedBy,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WORKSPACE_SETUP_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(secret ? { "x-automation-secret": secret } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      fail(502, `Provisioning workflow returned ${response.status}: ${text.slice(0, 300)}`);
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      fail(502, `Provisioning workflow returned a non-JSON body: ${text.slice(0, 200)}`);
+    }
+    // Belt and braces against the one thing that must never cross back (ADR-0018 §4). The contracts
+    // forbid it, but this function is the boundary, so it checks rather than trusts.
+    for (const key of ["api_key", "token", "plain_text_token"]) {
+      if (key in parsed!) delete parsed![key];
+    }
+    return parsed!;
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") {
+      // The run may well have succeeded — it just outlived our patience. Say exactly that, so the
+      // UI offers "check again" rather than "retry", which would imply nothing happened.
+      return {
+        client_id: payload.clientId,
+        sequencer: payload.sequencerKey,
+        dry_run: payload.dryRun,
+        state: "unknown",
+        reason:
+          `The provisioning run did not answer within ${WORKSPACE_SETUP_TIMEOUT_MS / 1000}s. It may ` +
+          `still be running and may still succeed — re-check rather than re-run.`,
+      };
+    }
+    throw reason;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The caller's users.id, from the JWT claims this transaction already established (ADR-0008). */
+async function callerUserId(tx: any): Promise<string | null> {
+  const rows = await rawQuery<{ sub: string | null }>(
+    tx,
+    sql`SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid::text AS sub`,
+  );
+  return rows[0]?.sub ?? null;
 }
 
 // Generic typed raw-SQL executor. Rows are returned as plain objects; caller is responsible for
@@ -1450,7 +1574,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows, setupStateRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer.
         tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
@@ -1506,6 +1630,19 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           SELECT id, client_id, sequencer_id, api_key, external_workspace_id, settings, enabled, created_at, updated_at
           FROM public.client_sequencers
         `),
+
+        // Provisioning status (ADR-0018 §6) — a plain read, deliberately in its OWN query.
+        //
+        // safeRawSelect swallows "does not exist" and returns [], which is the right degradation
+        // for a whole table but the wrong one for two columns: folded into the query above, a
+        // schema that predates migration 20260807 would return zero connector rows, and a manager
+        // would open a client to find no API keys at all and quite reasonably re-enter them. Split
+        // out, the same failure costs only the status, which then reads "never checked" — true, and
+        // harmless. The edge function and the migration deploy from the same push but not in a
+        // guaranteed order, so this window is real, not hypothetical.
+        safeRawSelect(tx, sql`
+          SELECT id, setup_state, setup_checked_at FROM public.client_sequencers
+        `),
       ]);
 
     const durationMs = performance.now() - t0;
@@ -1514,7 +1651,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         `(clients=${clientRows.length}, usersLite=${usersLiteRows.length}, clientUsers=${clientUsersRows.length}, ` +
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
         `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
-        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length})`,
+        `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length}, ` +
+        `setupState=${setupStateRows.length})`,
     );
 
     return {
@@ -1526,7 +1664,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       clientCustomFields: (customFieldRows as Record<string, unknown>[]).map(toClientCustomFieldRecord),
       clientCustomFieldValues: (customFieldValueRows as Record<string, unknown>[]).map(toClientCustomFieldValueRecord),
       sequencers: (sequencerRows as Record<string, unknown>[]).map(toSequencerRecord),
-      clientSequencers: (clientSequencerRows as Record<string, unknown>[]).map(toClientSequencerRecord),
+      clientSequencers: (() => {
+        const setupById = new Map(
+          (setupStateRows as Record<string, unknown>[]).map((row) => [String(row.id), row]),
+        );
+        return (clientSequencerRows as Record<string, unknown>[]).map((row) =>
+          toClientSequencerRecord(row, setupById.get(String(row.id))),
+        );
+      })(),
     };
   }
 
@@ -3188,6 +3333,22 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       await upsertClientSequencerRow(tx, client.id, cred.sequencer_key, cred);
     }
     return client;
+  }
+
+  if (payload.action === "requestWorkspaceSetup") {
+    return await requestWorkspaceSetup(
+      tx,
+      {
+        clientId: payload.clientId,
+        sequencerKey: payload.sequencerKey,
+        workspaceId: payload.workspaceId ?? null,
+        dryRun: payload.dryRun,
+      },
+      // No `identity` object exists in handleAction; the caller's id lives in the transaction's
+      // JWT context, which is where every other handler reads it from (see the userId defaults
+      // elsewhere in this file). Read it there rather than inventing a parameter.
+      await callerUserId(tx),
+    );
   }
 
   if (payload.action === "upsertClientSequencer") {

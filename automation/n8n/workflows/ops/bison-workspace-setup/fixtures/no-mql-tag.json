@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000004",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": null,
+  "_fixture": "Synthetic. A workspace with preMQL and OOO but no MQL tag — the shape of 9 of the 16 Active workspaces measured 2026-08-07. Expected: steps.tags=ok, state=configured. MQL is NOT in the Bison canonical set: an MQL there is produced by the built-in 'Interested' tag (16/16), and bison-lead-enrichment reads includes('interested') || includes('mql'), so a literal MQL tag is only an alias. Creating it would give the client a second, less-wired route to the same qualification."
+}

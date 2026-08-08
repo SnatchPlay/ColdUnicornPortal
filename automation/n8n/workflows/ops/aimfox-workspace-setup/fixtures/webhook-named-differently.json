@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000004",
+  "workspace_id": "33333333-0000-4000-a000-000000000004",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic, modelled on the GIC shape found 2026-08-07: the lead_label_added webhook exists and points at the right URL, but is named 'Manual Tag' instead of 'preMQL'. Expected: steps.webhooks.outcome=ok, present listing both pairs as '<events> <url>'. THE REGRESSION THIS GUARDS: a name-based comparison reports it missing and creates a second webhook on lead_label_added, which delivers every tag twice and creates two leads. Invariant 4 — match on url + events, never on name."
+}

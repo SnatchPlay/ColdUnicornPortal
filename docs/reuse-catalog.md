@@ -59,6 +59,7 @@ If you add a reusable building block, add it to this file in the same change.
 | [`app-shell.tsx`](../src/app/components/app-shell.tsx) | `AppShell` — sidebar, `NAV_BY_ROLE`, impersonation controls, gradient canvas, contrast toggle |
 | [`app-error-boundary.tsx`](../src/app/components/app-error-boundary.tsx) | `AppErrorBoundary` — already wraps the routed surface; do not duplicate |
 | [`pages/clients-page/mega-table.tsx`](../src/app/pages/clients-page/mega-table.tsx) | The clients mega-table (its own subsystem) |
+| [`pages/clients-page/workspace-setup-status.tsx`](../src/app/pages/clients-page/workspace-setup-status.tsx) | `WorkspaceSetupStatus` — provisioning verdict per sequencer + the Перевірити / Налаштувати buttons ([ADR-0018](adr/0018-gateway-outbound-automation-trigger.md)). Reads `client_sequencers.setup_state`, never writes it |
 
 ### shadcn / Radix — [`components/ui/`](../src/app/components/ui/)
 
@@ -92,6 +93,12 @@ shadcn MCP registry first, then add it deliberately.
 | Contrast theme axis | `useColorTheme()` — [`providers/color-theme.tsx`](../src/app/providers/color-theme.tsx) |
 
 There is **no** `useCoreData()` and no global snapshot. Both were deleted.
+
+**The gateway makes exactly one kind of outbound call**: `requestWorkspaceSetup` triggers an n8n
+provisioning workflow, to a URL from a closed server-side list, with a shared secret
+([ADR-0018](adr/0018-gateway-outbound-automation-trigger.md)). It never calls a vendor — n8n holds
+those credentials. Any *other* outbound need is a new ADR, not a new parameter on this one. Reading
+provisioning status is not an outbound call: `setup_state` rides on `loadClientsOverview`.
 
 ### Per-page hooks — [`lib/`](../src/app/lib/)
 

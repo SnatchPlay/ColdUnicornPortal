@@ -157,6 +157,32 @@ export interface SequencerRecord {
   created_at: string;
 }
 
+/** One element of the canonical set, as the provisioning workflows report it. */
+export type WorkspaceSetupOutcome = "ok" | "created" | "missing" | "skipped" | "failed";
+
+export interface WorkspaceSetupStep {
+  outcome: WorkspaceSetupOutcome;
+  present?: string[];
+  missing?: string[];
+  created?: string[];
+  error?: string | null;
+}
+
+/**
+ * Last provisioning verdict for one client+sequencer — `client_sequencers.setup_state`, written
+ * only by the workspace-setup workflows (ADR-0018 §6; migration 20260807).
+ *
+ * `{}` means never checked. Tell that apart from "checked and found empty" via `setup_checked_at`,
+ * never by inspecting this. It holds no secret by contract: `steps` says what is present, not what
+ * it is.
+ */
+export interface WorkspaceSetupState {
+  state?: "configured" | "partial" | "missing" | "needs_selection" | "client_not_found";
+  dry_run?: boolean;
+  resolved?: { workspace_id: string; name: string | null; matched_by: string } | null;
+  steps?: Record<string, WorkspaceSetupStep>;
+}
+
 export interface ClientSequencerRecord {
   id: string;
   client_id: string;
@@ -166,6 +192,14 @@ export interface ClientSequencerRecord {
   external_workspace_id: string | null;
   settings: Record<string, unknown>;
   enabled: boolean;
+  /** `{}` until provisioning has run at least once. See WorkspaceSetupState. */
+  setup_state: WorkspaceSetupState;
+  /**
+   * When provisioning last ran, dry-run or not. NULL = never. There is no scheduled drift check by
+   * design, so this value ages and is meant to: a six-week-old "configured" is still just a
+   * six-week-old observation, and the UI shows the date so nobody mistakes it for a live one.
+   */
+  setup_checked_at: string | null;
   created_at: string;
   updated_at: string;
 }

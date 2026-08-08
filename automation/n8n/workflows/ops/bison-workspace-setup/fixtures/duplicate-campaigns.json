@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000005",
+  "workspace_id": null,
+  "dry_run": true,
+  "requested_by": null,
+  "_fixture": "Synthetic. A workspace where the OOO triple genuinely exists twice at the vendor. Expected: steps.campaigns.present shows each duplicated name with a count suffix, outcome=ok, error notes the duplication — and NOTHING is created. Provisioning reports duplicates; it never resolves them by creating more, and it never deletes. Note that the case this was modelled on turned out not to be one: Bent Iron PL's six rows in public.campaigns are a stale catalogue (bison-campaign-sync has no removal path), while workspace 73 holds exactly one of each. So this fixture covers a shape the workflow must handle, not a shape anyone has been observed in."
+}

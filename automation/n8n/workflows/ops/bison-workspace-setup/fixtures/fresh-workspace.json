@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000002",
+  "workspace_id": "900001",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. The workspace exists at Bison and nothing is wired. Expected in iteration 2: a token is minted AND STORED in client_sequencers.api_key, two webhooks and two tags are created, campaigns are reported missing but never created, state=partial. Storing the token is the fix for the old canvas, which consumed data.plain_text_token inline and wrote it nowhere — Bison has no token-list endpoint, so a key lost that way can only be re-minted."
+}

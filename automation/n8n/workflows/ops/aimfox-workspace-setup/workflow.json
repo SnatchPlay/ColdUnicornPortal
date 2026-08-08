@@ -1,0 +1,717 @@
+{
+  "name": "[SETUP] Aimfox workspace · resolve, key, webhooks, labels",
+  "nodes": [
+    {
+      "id": "87e6287b-9c68-4b46-9255-eafc1e9b7414",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -152
+      ],
+      "parameters": {
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// Стан ДО запису. Те, що звідси виходить, або віддається як є (dry_run / нічого не бракує), або\n// доповнюється результатами створення у Merge Outcomes.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'vendor' ? step('ok', [`vendor token reused (${key.vendor_tokens} at the vendor)`])\n  : key.key_source === 'minted' ? step('created', [], [], null)\n  : step('missing', [], ['api_key'], key.mint_error ?? (isDryRun() ? 'no key stored and none at the vendor' : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst listStep = (raw, arrayKey, canon, identity) => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (errored(raw)) return step('skipped', [], [], 'vendor call failed');\n  const present = (raw[arrayKey] ?? []).map(identity);\n  const missing = canon.map(identity).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n};\n\nconst webhooks = listStep(hooksRaw, 'webhooks', CANON_WEBHOOKS, (w) => hookKey(w.events, w.url));\nconst labels = listStep(labelsRaw, 'labels', CANON_LABELS, (l) => String(l?.name ?? ''));\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: {\n    key: keyStep, webhooks, labels,\n    campaigns: step('skipped', [], [], 'catalogued by aimfox-campaign-sync, not created here'),\n  },\n} }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000008",
+      "name": "Collect Creates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        -224
+      ],
+      "parameters": {
+        "jsCode": "// Зводимо N відповідей вендора назад в один айтем. Порядок айтемів n8n зберігає, тож i-та\n// відповідь відповідає i-му запланованому елементу.\n// n8n кладе помилку вузла як { message, error }, і error — обʼєкт. Наївний String(err) дає\n// `[object Object]`, тобто рядок, який нічого не каже: рівно це й повернув перший бойовий прогін.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // ТІЛЬКИ statusCode. Поле `status` тут належить вендору, а не HTTP: Aimfox на успіх відповідає\n  // status:\"ok\", і Number('ok') це NaN — читати його як код означає зарахувати провал за успіх.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\nreturn [{ json: { created, failed } }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000007",
+      "name": "Create Missing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2384,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{ $json.url }}"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000003",
+      "name": "Effective Key",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -152
+      ],
+      "parameters": {
+        "jsCode": "// Який ключ воркспейсу використовувати далі. Порядок: збережений → уже наявний у вендора →\n// щойно змінтчений. POST /tokens не є upsert — він щоразу випускає ЩЕ ОДИН токен, тому читання\n// перед записом тут не оптимізація, а єдине, що не лишає воркспейсу два ключі.\nconst client = $('Resolve Client').first().json ?? {};\nconst tokensRaw = $('List Tokens').first().json ?? {};\nconst vendor = Array.isArray(tokensRaw.tokens) ? tokensRaw.tokens\n  : Array.isArray(tokensRaw.data) ? tokensRaw.data : [];\nconst vendorToken = vendor.find((t) => t?.token)?.token ?? null;\n\nlet minted = null;\nlet mint_error = null;\nif ($('Mint Key').isExecuted) {\n  const m = $('Mint Key').first().json ?? {};\n  minted = m.token ?? m.data?.token ?? null;\n  if (!minted) mint_error = String(m.error?.message ?? m.error ?? 'mint returned no token');\n}\n\nconst stored = client.api_key || null;\nconst api_key = stored ?? vendorToken ?? minted;\nconst key_source = stored ? 'stored' : vendorToken ? 'vendor' : minted ? 'minted' : 'none';\n\n// key_to_store — те, що Record має покласти в client_sequencers.api_key. Збережений ключ\n// перезаписувати нема сенсу; ключ вендора треба саме зберегти, інакше наступний прогін знову\n// піде його шукати, а вузли читання без нього мовчки падають у 401.\nreturn [{ json: {\n  api_key,\n  key_source,\n  key_to_store: key_source === 'stored' ? null : api_key,\n  vendor_tokens: vendor.length,\n  mint_error,\n} }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-00000000000b",
+      "name": "Final Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        -152
+      ],
+      "parameters": {
+        "jsCode": "// n8n кладе помилку вузла як { message, error }, і error — обʼєкт. Наївний String(err) дає\n// `[object Object]`, тобто рядок, який нічого не каже: рівно це й повернув перший бойовий прогін.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst out = $('Merge Outcomes').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: {\n  ...out,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000005",
+      "name": "Has Work?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1936,
+        -152
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a2000000-0000-4000-a000-00000000000f",
+              "leftValue": "={{ (() => { const s = $json.steps ?? {}; if ($json.dry_run !== false) return false; return ['webhooks','labels'].some(k => (s[k]?.missing ?? []).length > 0); })() }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a3000000-0000-4000-a000-000000000002",
+      "name": "Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        88
+      ],
+      "parameters": {
+        "jsCode": "// Один вхід для двох тригерів. Вебхук кладе тіло в body; executeWorkflowTrigger — у корінь.\n// Без цього вузла кожне $('Start') падало б на вебхучному прогоні, бо Start там не виконується.\nconst fromWebhook = $('Webhook').isExecuted;\nconst raw = fromWebhook ? ($('Webhook').first().json?.body ?? {}) : ($('Start').first().json ?? {});\n\n// dry_run: усе, крім ЯВНОГО булевого false, — сухий прогін. Рядок 'false' теж не рахується.\n// Через відкритий вебхук це важить більше, ніж через UI: тіло приходить із мережі, і ні забуте\n// поле, ні хибний тип не сміють означати \"пиши в систему клієнта\".\nreturn [{ json: {\n  client_id: raw.client_id ?? null,\n  workspace_id: raw.workspace_id ?? null,\n  dry_run: raw.dry_run === false ? false : true,\n  requested_by: raw.requested_by ?? null,\n  via: fromWebhook ? 'webhook' : 'sub-workflow',\n} }];"
+      }
+    },
+    {
+      "id": "2ff3eb1d-1617-49bd-8363-4373e2aa4084",
+      "name": "List Labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1488,
+        -152
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/labels"
+      }
+    },
+    {
+      "id": "9f7a0e1b-f11f-4aa8-882b-3150639e609b",
+      "name": "List Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        368,
+        -152
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "=https://api.aimfox.com/api/v2/workspaces/{{ $('Resolve Workspace').first().json.resolved.workspace_id }}/tokens"
+      }
+    },
+    {
+      "id": "a397a999-3499-4f54-8413-ca64e9d0441f",
+      "name": "List Webhooks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1264,
+        -152
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/webhooks"
+      }
+    },
+    {
+      "id": "10d218c0-157c-4d56-b7a2-14ef7a213b36",
+      "name": "List Workspaces",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -304,
+        -56
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {},
+        "url": "https://api.aimfox.com/api/v2/workspaces"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000009",
+      "name": "Merge Outcomes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        -152
+      ],
+      "parameters": {
+        "jsCode": "// Єдина форма для Record і для відповіді. Виконується і після створення, і в обхід нього.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'labels']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n}\n\nconst decided = [steps.key, steps.webhooks, steps.labels];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\n// setup_state НІКОЛИ не містить ключа — інваріант 7. Тут його й нема: steps описують наявність,\n// а не значення.\nreturn [{ json: { ...base, state, steps } }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000002",
+      "name": "Mint Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        816,
+        -224
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "jsonBody": "{ \"name\": \"ColdUnicorn portal\", \"write\": true }",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/workspaces/{{ $('Resolve Workspace').first().json.resolved.workspace_id }}/tokens"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000001",
+      "name": "Need Mint?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        592,
+        -152
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a2000000-0000-4000-a000-00000000000f",
+              "leftValue": "={{ (() => { const c = $('Resolve Client').first().json ?? {}; const t = $json ?? {}; const v = Array.isArray(t.tokens) ? t.tokens : Array.isArray(t.data) ? t.data : []; return !c.api_key && !v.some(x => x?.token) && $('Input').first().json.dry_run === false; })() }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "95674075-c1d4-4942-be47-ee4099aadd37",
+      "name": "Needs Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// Неіснуючий клієнт — помилка того, хто викликав, а не стан провіженінгу. Але сказати про це\n// треба вголос: мовчазний обрив із status=success — це те, як зникли ліди Audytel.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no such client, or it has no enabled aimfox connector'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: $('Input').first().json.dry_run !== false,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    labels: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n  },\n} }];"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-000000000006",
+      "name": "Plan Writes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -224
+      ],
+      "parameters": {
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// Ідентичність вебхука — events + url, НІКОЛИ не назва. Вебхук GIC зветься \"Manual Tag\", бʼє в\n// правильний URL на правильну подію, і звірка за назвою створила б другий на ту саму подію.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// Один айтем на КОЖЕН відсутній елемент. Порожній масив означає, що Create Missing не виконається\n// взагалі — саме так тут влаштована безпека сухого прогону.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://api.aimfox.com/api/v2/webhooks',\n      body: { name: c.name, events: c.events, url: c.url, integration: false } } });\n  }\n}\nfor (const c of CANON_LABELS) {\n  if ((s.labels?.missing ?? []).includes(c.name)) {\n    out.push({ json: { kind: 'label', identity: c.name, url: 'https://api.aimfox.com/api/v2/labels',\n      body: { name: c.name, color: c.color } } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "f96014d8-a8b4-4d68-9fdf-b5a49d2e69b0",
+      "name": "Read Claimed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -528,
+        -56
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "select coalesce(json_agg(external_workspace_id), '[]'::json) as claimed\n  from public.client_sequencers\n where sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid\n   and external_workspace_id is not null;"
+      }
+    },
+    {
+      "id": "a2000000-0000-4000-a000-00000000000a",
+      "name": "Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3056,
+        -152
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ (() => {\n  const r = $json;\n  const key = $('Effective Key').first().json ?? {};\n  const start = $('Input').first().json;\n  const dry = r.dry_run !== false;\n  return [\n    r.client_id,\n    JSON.stringify({ state: r.state, steps: r.steps, resolved: r.resolved, dry_run: r.dry_run, sequencer: r.sequencer }),\n    dry ? '' : (key.key_to_store ?? ''),\n    r.resolved?.workspace_id ?? '',\n    dry,\n    String($execution.id),\n    r.state === 'configured' || r.state === 'partial' ? 'success' : 'failed',\n    JSON.stringify({ client_id: r.client_id, workspace_id: r.resolved?.workspace_id ?? null,\n                     requested_by: start.requested_by ?? null, dry_run: dry, state: r.state, steps: r.steps }),\n  ];\n})() }}"
+        },
+        "query": "-- Один statement: connector row + аудит. INSERT ... SELECT ... WHERE дозволяє не створювати\n-- рядок конектора на сухому прогоні — перевірка «чи не dry_run, або рядок уже існує».\n-- Створити конектор там, де його не було, означає зробити клієнта підключеним; для перевірки\n-- це неприпустимо.\nwith upserted as (\n  insert into public.client_sequencers\n    (client_id, sequencer_id, api_key, external_workspace_id, setup_state, setup_checked_at)\n  select $1::uuid, '00000000-0000-4000-a000-000000000003'::uuid, nullif($3, ''), nullif($4, ''), $2::jsonb, now()\n   where $5::boolean = false\n      or exists (select 1 from public.client_sequencers\n                  where client_id = $1::uuid and sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid)\n  on conflict (client_id, sequencer_id) do update\n     set setup_state           = excluded.setup_state,\n         setup_checked_at      = now(),\n         -- ключ перезаписуємо лише тим, що реально здобули; порожнє означає «не чіпай»\n         api_key               = coalesce(excluded.api_key, public.client_sequencers.api_key),\n         -- збережений воркспейс не перезаписуємо ніколи: він і є те, чим клієнт закріплений\n         external_workspace_id = coalesce(public.client_sequencers.external_workspace_id,\n                                          excluded.external_workspace_id),\n         updated_at            = now()\n  returning id\n), audited as (\n  insert into public.integration_sync_runs\n    (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\n  values ('aimfox', 'workspace_setup', $6, $7, now(), now(), $8::jsonb)\n  on conflict (n8n_execution_id) do nothing\n  returning id\n)\nselect (select count(*) from upserted) as connector_rows,\n       (select count(*) from audited)  as audit_rows;"
+      }
+    },
+    {
+      "id": "b9dddbdf-ed0a-4136-a654-2ae503b6b092",
+      "name": "Resolve Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -752,
+        -56
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_id ] }}"
+        },
+        "query": "select c.name                       as client_name,\n       cs.id::text                  as client_sequencer_id,\n       nullif(cs.api_key, '')       as api_key,\n       cs.external_workspace_id     as stored_workspace_id\n  from public.clients c\n  left join public.client_sequencers cs\n    on cs.client_id = c.id\n   and cs.sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid\n   and cs.enabled\n where c.id = $1::uuid;"
+      }
+    },
+    {
+      "id": "e910bc2f-4fed-4b7b-95c7-ff86fc0df7f9",
+      "name": "Resolve Workspace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -56
+      ],
+      "parameters": {
+        "jsCode": "// Порядок резолву: явний id → уже записаний за клієнтом → ТОЧНИЙ збіг назви → кандидати.\n//\n// Крок \"записаний\" критичний. Виміряно 2026-08-07: назва клієнта збігається з назвою воркспейсу\n// лише в 4 випадках із 9 (\"Bent Iron PL\" vs \"Bent Iron\", \"FortumEnergia\" vs \"Fortum\",\n// \"ColdUnicorn PL\" vs \"Łukasz Kot\"). Для вже заведеного клієнта воркспейс відомий з бази, і\n// шукати за назвою не треба взагалі — інакше Bent Iron PL іде в needs_selection на рівному місці.\n//\n// Неоднозначність ніколи не вирішується здогадкою — інваріант 2. Саме здогадка призвела до того,\n// що воркспейс GIC опинився на клієнті Prac.Finansowa.\nconst input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : Array.isArray(listRaw.data) ? listRaw.data\n  : [];\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Resolve Client має alwaysOutputData, тож порожній клієнт приходить як {} замість того, щоб\n// тихо обірвати ланцюжок. Кажемо про це вголос — мовчазний успіх гірший за помилку.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst nameFor = (id) => nameOf(list.find((w) => idOf(w) === id)) || null;\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) {\n  return [{ json: { ...base, resolved: { workspace_id: explicit, name: nameFor(explicit), matched_by: 'explicit' } } }];\n}\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) {\n  return [{ json: { ...base, resolved: { workspace_id: stored, name: nameFor(stored), matched_by: 'stored' } } }];\n}\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) {\n  return [{ json: { ...base, resolved: { workspace_id: idOf(matches[0]), name: nameOf(matches[0]), matched_by: 'name' } } }];\n}\n\n// Кандидати — усе, що ще не закріплене за жодним клієнтом. Показати зайнятий воркспейс означає\n// запросити те саме хибне призначення ще раз.\nconst candidates = list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({ workspace_id: idOf(w), name: nameOf(w) || null }));\n\nreturn [{ json: { ...base, resolved: null, candidates, ambiguous: matches.length > 1 } }];"
+      }
+    },
+    {
+      "id": "4ba6f751-db37-4efc-a5a7-d2954c157720",
+      "name": "Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        144,
+        -56
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8f2c1a10-0000-4000-a000-000000000001",
+              "leftValue": "={{ $json.resolved }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6907f3f3-87a5-4bf8-8398-ceefe93b636a",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        -56
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "client_id"
+            },
+            {
+              "name": "workspace_id"
+            },
+            {
+              "name": "dry_run"
+            },
+            {
+              "name": "requested_by"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a3000000-0000-4000-a000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        176
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "workspace-setup-aimfox",
+        "responseMode": "lastNode"
+      }
+    }
+  ],
+  "connections": {
+    "Build Result": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Has Work?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collect Creates": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Merge Outcomes",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Create Missing": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Collect Creates",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Effective Key": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Webhooks",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Has Work?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Plan Writes",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Merge Outcomes",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Input": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Client",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Labels": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Tokens": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Need Mint?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Webhooks": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Labels",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Workspaces": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Workspace",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge Outcomes": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Record",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Mint Key": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Effective Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Need Mint?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Mint Key",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Effective Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Plan Writes": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Create Missing",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Read Claimed": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Workspaces",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Record": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Final Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Client": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Read Claimed",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Workspace": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolved?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolved?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Tokens",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Needs Selection",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Input",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Input",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

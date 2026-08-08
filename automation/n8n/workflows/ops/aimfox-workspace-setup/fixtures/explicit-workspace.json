@@ -1,0 +1,7 @@
+{
+  "client_id": "11111111-0000-4000-a000-000000000006",
+  "workspace_id": "33333333-0000-4000-a000-000000000006",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. The operator's answer to name-ambiguous.json: the same client, now with the chosen workspace supplied explicitly. Expected: no name search happens at all, resolved.matched_by=explicit, and provisioning proceeds normally. An explicit id always wins — it is the only way a human overrides the resolver, and the resolver must not second-guess it."
+}

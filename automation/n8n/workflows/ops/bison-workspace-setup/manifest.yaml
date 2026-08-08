@@ -1,0 +1,158 @@
+schemaVersion: 1
+
+id: bison-workspace-setup
+name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
+domain: ops
+owner: automation
+
+# `managed` since 2026-08-07: the graph exists as c82kKnHaREUMvPBR and workflow.json is the export.
+# The write half landed the same day (iteration 2, 11 nodes -> 21). `status` stays `planned` until a
+# real dry_run:false run has been observed; the workflow is INACTIVE and called by hand, and has no
+# trigger of its own until ADR-0018 gives the gateway its webhook.
+lifecycle: managed
+status: planned
+criticality: high         # mints API keys and creates webhooks in a client's sending system
+
+businessProcess:
+  - docs/reference/processes/ops/workspace-provisioning.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+triggers:
+  - type: executeWorkflowTrigger
+    detail: >-
+      The entry point. Callable as a sub-workflow so an orchestrator can provision both sequencers
+      in one pass.
+  - type: webhook
+    detail: >-
+      POST /webhook/workspace-setup-bison, from the orm-gateway `requestWorkspaceSetup` action.
+      UNAUTHENTICATED — see knownViolations. An `Input` node normalises the webhook body and the
+      sub-workflow item into one shape and forces dry_run to a boolean.
+
+reads:
+  tables:
+    - clients
+    - sequencers
+    - client_sequencers
+  external:
+    - "Bison API · GET /api/workspaces/v1.1 (master key) — resolve a workspace by name; returns data[].{id,name,personal_team,main,parent_id}"
+    - "Bison API · GET /api/webhook-url — current webhook set, compared on url + events"
+    - "Bison API · GET /api/tags — current tag set, compared on name"
+    - "Bison API · GET /api/campaigns — the three OOO automation campaigns, compared on name (report only)"
+
+# Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
+# scripts/n8n/lib/business-rules.mjs. Neither table is one of the ADR-0015 ingestion tables, and
+# neither carries a business invariant an RPC would be protecting. The two credential-sync
+# workflows write client_sequencers the same way.
+writes:
+  tables:
+    - client_sequencers
+    - integration_sync_runs
+  tablesWritten:
+    - client_sequencers
+    - integration_sync_runs
+  rpcs: []
+  external:
+    - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens (node: Mint Key) — only when the connector row holds no key. Unlike Aimfox there is no token-list endpoint to fall back on, so storing the result is not a nicety: a minted key that is not written down is lost for good."
+    - "Bison API · POST /api/webhook-url (node: Create Missing) — only for a url+events pair that is absent"
+    - "Bison API · POST /api/tags (node: Create Missing) — only for a name that is absent, and only preMQL and OOO"
+
+# Exactly two nodes issue a POST — Mint Key and Create Missing — and a dry run cannot reach either.
+# dry_run safety is structural, not a flag inside an HTTP node: Plan Writes returns an EMPTY array on
+# a dry run, and n8n does not execute a node with no input items. There is nothing to write with, so
+# nothing is written. `dry_run` is read as true for anything except an explicit false — a missing
+# field has to mean "do not touch", never "write into a client's system".
+
+# NOT written, deliberately: POST /api/campaigns and its /schedule + /sequence-steps children.
+# The canonical copy for the three OOO automation campaigns does not exist in usable form, and
+# creating them blind is what left Bent Iron PL with six campaigns instead of three. Step 6
+# reports and does not create. See the process document, "The OOO campaign triple".
+
+credentials:
+  - alias: "Bison Master"
+    type: httpBearerAuth
+    usedBy: "List Workspaces, Mint Key"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve Client, Read Claimed, Record"
+  # NOT attached. The Webhook node is unauthenticated as of 2026-08-08 — see knownViolations.
+  # The gateway already sends x-automation-secret, so attaching this closes the gap on its own.
+  - alias: "Workspace setup webhook auth"
+    type: httpHeaderAuth
+    planned: true
+    usedBy: "Webhook — intended, not attached"
+
+targetContract:
+  input: automation/n8n/workflows/ops/bison-workspace-setup/contracts/setup-input.schema.json
+  output: automation/n8n/workflows/ops/bison-workspace-setup/contracts/setup-result.schema.json
+
+portalSurfaces:
+  - "Clients page — provisioning status column (client_sequencers.setup_state)"
+  - "Client drawer — Workspaces section: Перевірити (dry_run) / Налаштувати"
+
+metrics: []
+
+idempotency:
+  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a tag"
+  notes: >-
+    Every step reads the vendor's current state before it writes and creates only what is absent, so
+    a second run is a no-op. Webhooks are matched on url + events and NEVER on name — UniTalk's lead_replied webhook is
+    named "Reply Classification" against "Reply classification" everywhere else, and a name match
+    would create a duplicate, which means two deliveries per reply, which means two leads.
+
+retryPolicy:
+  notes: >-
+    No retries. Every vendor call runs with onError continueRegularOutput and contributes its own
+    outcome to the `steps` object, so one 4xx yields state `partial` instead of an unexplained stop
+    midway. settings.errorWorkflow points at automation-failure-recorder.
+
+cancellation:
+  notes: >-
+    Nothing to cancel — a single synchronous pass. A failure leaves the workspace partially
+    provisioned, which is safe precisely because re-running completes it.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: c82kKnHaREUMvPBR
+
+# Read path proven on production 2026-08-07, executions 70463-70467, dry_run only: five clients,
+# all resolved by `stored`, all with both webhooks and both tags. It surfaced two defects outside
+# its own scope — public.campaigns keeps campaigns the vendor no longer has (bison-campaign-sync is
+# INSERT ... ON CONFLICT DO UPDATE with no removal path), and FortumEnergia's client_ooo_routing
+# points at GIC's three campaigns. Neither is fixed here; both are recorded in the process document.
+
+# The workflow this one replaces, together with aimfox-workspace-setup.
+supersedes:
+  - id: 8uRWXHe9FIfglq1u
+    name: "My workflow 6"
+    note: >-
+      Orphan manual canvas, inactive, 23 nodes, both sequencers in one graph. Defects carried into
+      this rewrite as fixes: workspace id 13 hardcoded into every Bison URL; Create Campaign
+      Sequence1 and Sequence2 both target $('Create "OOO automation | general"'), so male and
+      female sequences were written into general three times over; Create Campaign Schedule2
+      references $('Create "OOO automation | female"') while the node is named
+      'Create "OOO automation | female"1', a dead reference; a node labelled "Add 'MQL' label1"
+      actually creates DNC; the minted Bison token is consumed inline from
+      data.plain_text_token and never stored in client_sequencers; no idempotency and no error
+      handling anywhere.
+
+knownViolations:
+  # `rule` is the validator's finding id, not prose — it is what suppresses the warning. The prose
+  # belongs in `reason`, and the ADR clause being broken is ADR-0018 §2.
+  - rule: unauthenticated-webhook
+    reason: >-
+      Breaks ADR-0018 §2 ("header-authenticated from its first day"). Explicit owner decision on
+      2026-08-08; the header-auth alternative was offered, costed at two minutes in the n8n UI, and
+      declined for now. The gateway ALREADY sends x-automation-secret, so attaching a credential
+      later is a one-side change that breaks nothing. Mitigation: the run is idempotent and additive
+      against a closed canonical set, never deletes, and cannot be pointed at an arbitrary workspace
+      — that comes from client_sequencers or an exact name match, never from the request. No
+      credential crosses back (the result contract forbids api_key; the gateway strips
+      api_key/token/plain_text_token at its boundary). The Input node treats anything but an
+      explicit boolean false as a dry run, so a malformed body cannot write.
+    trackedIn: docs/reference/n8n/security.md#11-the-workspace-provisioning-webhooks-are-unauthenticated--medium-open
+    expires: 2026-11-30

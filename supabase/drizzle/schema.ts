@@ -648,6 +648,11 @@ export const clientSequencers = pgTable("client_sequencers", {
 	enabled: boolean().default(true).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// Last verdict of the workspace-setup workflows (20260807). Shaped like setup-result.schema.json
+	// minus `candidates`, and never containing a secret. `{}` = never checked — tell that apart from
+	// "checked and empty" via setupCheckedAt, not via this.
+	setupState: jsonb("setup_state").default({}).notNull(),
+	setupCheckedAt: timestamp("setup_checked_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	index("idx_client_sequencers_sequencer").using("btree", table.sequencerId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({ columns: [table.clientId], foreignColumns: [clients.id], name: "client_sequencers_client_id_fkey" }).onDelete("cascade"),
