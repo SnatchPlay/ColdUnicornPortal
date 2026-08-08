@@ -250,12 +250,16 @@ anything.
 
 ### What the first live runs exposed
 
-**`recorded: false` on all four.** `Record` failed with
+**`recorded: false` on all four**, at the time. `Record` failed with
 `column "setup_state" of relation "client_sequencers" does not exist`: migration
 [`20260807_workspace_setup_state.sql`](../../../../../supabase/migrations/20260807_workspace_setup_state.sql)
-has been applied to the local stack only. Production gets it when the branch merges and the CI
-`db-migrate` job runs — it is not applied by hand. Until then every run reports `recorded: false`,
-which is the honest answer, and the vendor half is unaffected: `70489` created its label regardless.
+had been applied to the local stack only. That was not a workflow defect — the vendor half was
+unaffected, and `70489` created its label regardless, which is exactly what `recorded: false` is
+supposed to mean.
+
+**Closed 2026-08-08** when PR #28 merged and CI ran `db-migrate`. Re-checked immediately after
+against both workflows: `recorded: true`, no `record_error`, and no `api_key` / `token` /
+`plain_text_token` anywhere in the response.
 
 **Two defects of my own, fixed the same run:**
 

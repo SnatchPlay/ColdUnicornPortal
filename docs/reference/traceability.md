@@ -130,14 +130,14 @@ exists on either side yet.
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | A workspace belongs to exactly one client | `client_sequencers` | — | — | — | — | candidate list subtracts every `external_workspace_id` already stored, any client, any sequencer | execution `70393`: 12 workspaces − 9 claimed = 3 offered | ✅ |
 | 2 | A workspace is never assigned on a guess | `client_sequencers` | — | — | — | — | resolution is explicit → stored → **exact** name → `needs_selection` | `70393` (Bent Iron PL) before/after the `stored` fix | ✅ |
-| 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ⛔ untested: no write node exists on either side | ⛔ |
+| 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ✅ Aimfox `70489` created FortumEnergia's missing `preMQL`; `70490`, same input, created nothing | ✅ Aimfox · ⚠️ Bison write path never exercised — no Active workspace is missing a canonical tag |
 | 4 | A webhook is identified by `url` + `events`, never by name | — | — | — | — | — | both workflows | proven twice independently: Aimfox GIC `Manual Tag`, Bison UniTalk `Reply Classification` | ✅ |
 | 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL`; Bison: `preMQL` + `OOO` | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
-| 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | rides on `loadClientsOverview` ✅ (no new action needed) | Clients page **Workspaces** column + drawer section ✅ | — | `dry_run` returns the same `steps` as a live run | screenshotted in both roles 2026-08-08; production still `{}` until the migration merges | ⚠️ |
-| 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ✅ built | Перевірити / Налаштувати ✅ built | — | gateway calls n8n, never a vendor; result stripped of `api_key`/`token` at the boundary | contract forbids it (`additionalProperties: false`) + explicit delete in the handler | ⚠️ webhook + secret not yet created |
+| 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | rides on `loadClientsOverview` ✅ (no new action needed) | Clients page **Workspaces** column + drawer section ✅ | — | `dry_run` returns the same `steps` as a live run | screenshotted in both roles 2026-08-08; migration live since PR #28 and a post-merge run returned `recorded: true` | ✅ |
+| 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ✅ built | Перевірити / Налаштувати ✅ built | — | gateway calls n8n, never a vendor; result stripped of `api_key`/`token` at the boundary | contract forbids it (`additionalProperties: false`) + explicit delete in the handler; a live response was scanned for `api_key`/`token` and had none | ⚠️ webhook is UNAUTHENTICATED by decision — knownViolations, review 2026-11-30 |
 | 8 | No terminal path is silent | — | — | — | — | — | `client_not_found` + `alwaysOutputData` on Resolve Client | added after a run ended `success` with no output | ✅ |
 
-**What's left.** Rows 3, 6 and 7 — that is, the entire write half plus the gateway.
+**What's left.** Row 7's authentication, and exercising the Bison write path — which needs a workspace that is actually missing something, and none of the 16 Active ones is. It will first run for real on a new client.
 
 **Found by running it, out of scope to fix here.** Both belong to other processes and are recorded
 in the [process document](processes/ops/workspace-provisioning.md):

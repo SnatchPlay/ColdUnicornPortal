@@ -1,7 +1,10 @@
 # Process · Workspace provisioning (Aimfox and Bison)
 
-**Domain:** ops · **Owner:** automation · **Status:** **both workflows built and proven; the portal
-reads status, and its buttons wait only on the n8n webhook + shared secret**
+**Domain:** ops · **Owner:** automation · **Status:** **live.** Both workflows are active and
+provisioning is reachable from the portal. Two gaps remain and are recorded, not hidden: the
+webhooks are unauthenticated by decision (security finding 11, review 2026-11-30), and the Bison
+write path has never had anything to create — no Active workspace is missing a canonical tag, so it
+will run for real the first time a new client is onboarded.
 **Governing ADRs:** [ADR-0012](../../../adr/0012-multi-sequencer-model.md) (per-client vendor
 credentials live in `client_sequencers`),
 [ADR-0016](../../../adr/0016-repository-as-automation-source-of-truth.md) (this document wins over
