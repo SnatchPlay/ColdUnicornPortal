@@ -271,6 +271,21 @@ which is the honest answer, and the vendor half is unaffected: `70489` created i
 Still unproven: `state: needs_selection`, `state: client_not_found`, and the `Mint Key` branch —
 no run has yet met a workspace with no key anywhere.
 
+### The webhook path, proven live
+
+**2026-08-08, executions `70751` (Aimfox), `70752`–`70753` (Bison)** — real POSTs to the live
+webhooks, `mode: webhook`, all three read-only:
+
+| Sent | Got | Proves |
+|---|---|---|
+| `{client_id}` — **`dry_run` omitted entirely** | `dry_run: true`, full read, `configured` | the fail-safe default: a missing field is a check, never a write |
+| `{client_id: 0000…00ff, dry_run: true}` | **`state: client_not_found`** with a reason | the silent-success hole is really closed — this state had never been reached by a run before |
+| `{client_id, dry_run: "false"}` — a **string** | `dry_run: true`, `configured` | a wrong type cannot write either |
+
+The third is the one worth keeping. The gateway always sends a real boolean, but the webhook is open
+and a hand-written body will not always be well-formed. `'false'` is exactly the input a careless
+caller produces, and it must not provision anything.
+
 ## History
 
 - **2026-08-07** — process document, manifest, contracts and fixtures written; read-only graph
