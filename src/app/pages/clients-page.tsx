@@ -1082,10 +1082,11 @@ export function ClientsPage() {
           managerName,
           metrics,
           conditionPack,
+          sequencerCreds: credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS,
         };
       }),
     );
-  }, [conditionPackByClientId, managerById, metricsByClientId, scopedClients]);
+  }, [conditionPackByClientId, credsByClientId, managerById, metricsByClientId, scopedClients]);
 
   const customFieldById = useMemo(
     () => new Map(clientCustomFields.map((f) => [f.id, f] as const)),
