@@ -54,6 +54,7 @@ import type {
   ClientOooRoutingPagePayload,
   ShellData,
   TablePreferencesPayload,
+  WorkspaceSetupResult,
 } from "../types/view-contracts.ts";
 
 export type OrmGatewayAuthErrorCode =
@@ -478,6 +479,23 @@ export interface UpsertClientSequencerPayload {
   patch: Omit<SequencerCredentialInput, "sequencer_key">;
 }
 
+/**
+ * Trigger workspace provisioning for one client+sequencer (ADR-0018).
+ *
+ * The ONLY action that leaves the gateway's network. The caller names a sequencer, never a URL:
+ * the destination comes from a closed server-side list, so nothing about where the request goes is
+ * attacker-controlled. `workspaceId` is how an operator answers a previous `needs_selection`.
+ */
+export interface RequestWorkspaceSetupPayload {
+  action: "requestWorkspaceSetup";
+  clientId: string;
+  sequencerKey: "emailbison" | "aimfox";
+  /** Bison ids are numeric strings, Aimfox ids are UUIDs — validated by the workflow, not here. */
+  workspaceId?: string | null;
+  /** false actually creates things in the client's sending system. Defaults to a check. */
+  dryRun: boolean;
+}
+
 export interface LoadLeadCustomFieldsPayload {
   action: "loadLeadCustomFields";
   /** Restrict to a single client; omit to load all accessible clients' definitions. */
@@ -599,6 +617,7 @@ export type OrmGatewayRequest =
   | DeleteClientCustomFieldPayload
   | UpsertClientCustomFieldValuePayload
   | UpsertClientSequencerPayload
+  | RequestWorkspaceSetupPayload
   | LoadLeadCustomFieldsPayload
   | CreateLeadCustomFieldPayload
   | UpdateLeadCustomFieldPayload
@@ -676,6 +695,7 @@ export interface OrmGatewayResponseMap {
   deleteClientCustomField: { ok: true };
   upsertClientCustomFieldValue: ClientCustomFieldValueRecord;
   upsertClientSequencer: ClientSequencerRecord;
+  requestWorkspaceSetup: WorkspaceSetupResult;
   loadLeadCustomFields: LeadCustomFieldRecord[];
   createLeadCustomField: LeadCustomFieldRecord;
   updateLeadCustomField: LeadCustomFieldRecord;
@@ -1251,6 +1271,37 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
         clientId: String(payload.clientId),
         fieldId: String(payload.fieldId),
         value: value as string | null,
+      },
+    };
+  }
+
+  if (action === "requestWorkspaceSetup") {
+    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "sequencerKey")) {
+      return { ok: false, error: "requestWorkspaceSetup requires clientId and sequencerKey." };
+    }
+    const sequencerKey = (payload as { sequencerKey: string }).sequencerKey;
+    // Closed set. The sequencer key selects the destination URL server-side, so an unknown value
+    // must be refused here rather than reaching the lookup (ADR-0018 §1).
+    if (sequencerKey !== "emailbison" && sequencerKey !== "aimfox") {
+      return { ok: false, error: `requestWorkspaceSetup: unknown sequencerKey "${sequencerKey}".` };
+    }
+    const rawWorkspace = (payload as { workspaceId?: unknown }).workspaceId;
+    if (rawWorkspace !== undefined && rawWorkspace !== null && typeof rawWorkspace !== "string") {
+      return { ok: false, error: "requestWorkspaceSetup: workspaceId must be a string or null." };
+    }
+    // dryRun must be an explicit boolean. A missing or malformed flag defaulting to `false` would
+    // write into a client's sending system because a field was forgotten.
+    if (typeof (payload as { dryRun?: unknown }).dryRun !== "boolean") {
+      return { ok: false, error: "requestWorkspaceSetup requires an explicit boolean dryRun." };
+    }
+    return {
+      ok: true,
+      value: {
+        action: "requestWorkspaceSetup",
+        clientId: (payload as { clientId: string }).clientId,
+        sequencerKey,
+        workspaceId: typeof rawWorkspace === "string" ? rawWorkspace : null,
+        dryRun: (payload as { dryRun: boolean }).dryRun,
       },
     };
   }

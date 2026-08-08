@@ -133,8 +133,8 @@ exists on either side yet.
 | 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ⛔ untested: no write node exists on either side | ⛔ |
 | 4 | A webhook is identified by `url` + `events`, never by name | — | — | — | — | — | both workflows | proven twice independently: Aimfox GIC `Manual Tag`, Bison UniTalk `Reply Classification` | ✅ |
 | 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL`; Bison: `preMQL` + `OOO` | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
-| 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | `loadWorkspaceSetupStatus` ⛔ | Clients page status column ⛔ | — | `dry_run` returns the same `steps` as a live run | column added by `20260807_workspace_setup_state.sql`; nothing writes it yet | ⚠️ |
-| 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ⛔ | — | — | `Aimfox Master` / `Bison Master` credentials; the result carries no `api_key` | contract forbids it (`additionalProperties: false`) | ⚠️ pending ADR-0018 |
+| 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | rides on `loadClientsOverview` ✅ (no new action needed) | Clients page **Workspaces** column + drawer section ✅ | — | `dry_run` returns the same `steps` as a live run | screenshotted in both roles 2026-08-08; production still `{}` until the migration merges | ⚠️ |
+| 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ✅ built | Перевірити / Налаштувати ✅ built | — | gateway calls n8n, never a vendor; result stripped of `api_key`/`token` at the boundary | contract forbids it (`additionalProperties: false`) + explicit delete in the handler | ⚠️ webhook + secret not yet created |
 | 8 | No terminal path is silent | — | — | — | — | — | `client_not_found` + `alwaysOutputData` on Resolve Client | added after a run ended `success` with no output | ✅ |
 
 **What's left.** Rows 3, 6 and 7 — that is, the entire write half plus the gateway.

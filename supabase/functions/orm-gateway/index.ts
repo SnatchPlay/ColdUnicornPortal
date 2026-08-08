@@ -864,6 +864,112 @@ async function upsertClientSequencerRow(
   return result[0];
 }
 
+// ── Workspace provisioning trigger (ADR-0018) ───────────────────────────────────────────────────
+//
+// The ONLY outbound call this function makes. Everything about it is closed:
+//   · the destination comes from this map, never from the caller — a sequencer key is chosen, an
+//     address is not passed;
+//   · the shared secret is verified by the receiving n8n webhook, which is header-authenticated
+//     from its first day (the unauthenticated Aimfox ingestion webhooks are a known defect and are
+//     not to be copied);
+//   · the vendor is never called from here. n8n holds those credentials, and that boundary is what
+//     keeps a master key out of this function's environment entirely.
+const WORKSPACE_SETUP_URLS: Record<string, string> = {
+  aimfox: Deno.env.get("N8N_WORKSPACE_SETUP_URL_AIMFOX") ?? "",
+  emailbison: Deno.env.get("N8N_WORKSPACE_SETUP_URL_BISON") ?? "",
+};
+
+// A full run is up to eight vendor calls. Past this we stop listening — but the workflow keeps
+// running, so the honest answer is "unknown", never a 500 and never a fabricated success.
+const WORKSPACE_SETUP_TIMEOUT_MS = 45_000;
+
+async function requestWorkspaceSetup(
+  tx: any,
+  payload: { clientId: string; sequencerKey: string; workspaceId: string | null; dryRun: boolean },
+  requestedBy: string | null,
+): Promise<Record<string, unknown>> {
+  const url = WORKSPACE_SETUP_URLS[payload.sequencerKey];
+  const secret = Deno.env.get("N8N_AUTOMATION_SHARED_SECRET") ?? "";
+  if (!url || !secret) {
+    // No fallback. A provisioning trigger that silently does nothing is worse than one that refuses.
+    fail(
+      503,
+      `Workspace provisioning is not configured for "${payload.sequencerKey}": set ` +
+        `N8N_WORKSPACE_SETUP_URL_${payload.sequencerKey === "aimfox" ? "AIMFOX" : "BISON"} and ` +
+        `N8N_AUTOMATION_SHARED_SECRET on the edge function.`,
+    );
+  }
+
+  // Authorisation is the pre-flight read, not a second rule. RLS already scopes `clients` to
+  // can_manage_client, so a caller who cannot see the row gets zero rows here and never reaches the
+  // network. This is ADR-0018 §3 and it is deliberately not new code.
+  const allowed = await rawQuery<{ id: string }>(
+    tx,
+    sql`SELECT id FROM public.clients WHERE id = ${payload.clientId}::uuid`,
+  );
+  if (!allowed[0]) fail(403, "No such client, or you may not manage it.");
+
+  const body = {
+    client_id: payload.clientId,
+    workspace_id: payload.workspaceId,
+    dry_run: payload.dryRun,
+    requested_by: requestedBy,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WORKSPACE_SETUP_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-automation-secret": secret },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      fail(502, `Provisioning workflow returned ${response.status}: ${text.slice(0, 300)}`);
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      fail(502, `Provisioning workflow returned a non-JSON body: ${text.slice(0, 200)}`);
+    }
+    // Belt and braces against the one thing that must never cross back (ADR-0018 §4). The contracts
+    // forbid it, but this function is the boundary, so it checks rather than trusts.
+    for (const key of ["api_key", "token", "plain_text_token"]) {
+      if (key in parsed!) delete parsed![key];
+    }
+    return parsed!;
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") {
+      // The run may well have succeeded — it just outlived our patience. Say exactly that, so the
+      // UI offers "check again" rather than "retry", which would imply nothing happened.
+      return {
+        client_id: payload.clientId,
+        sequencer: payload.sequencerKey,
+        dry_run: payload.dryRun,
+        state: "unknown",
+        reason:
+          `The provisioning run did not answer within ${WORKSPACE_SETUP_TIMEOUT_MS / 1000}s. It may ` +
+          `still be running and may still succeed — re-check rather than re-run.`,
+      };
+    }
+    throw reason;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The caller's users.id, from the JWT claims this transaction already established (ADR-0008). */
+async function callerUserId(tx: any): Promise<string | null> {
+  const rows = await rawQuery<{ sub: string | null }>(
+    tx,
+    sql`SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid::text AS sub`,
+  );
+  return rows[0]?.sub ?? null;
+}
+
 // Generic typed raw-SQL executor. Rows are returned as plain objects; caller is responsible for
 // typing the generic parameter to match the SELECT projection.
 async function rawQuery<T>(tx: any, query: any): Promise<T[]> {
@@ -3220,6 +3326,22 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       await upsertClientSequencerRow(tx, client.id, cred.sequencer_key, cred);
     }
     return client;
+  }
+
+  if (payload.action === "requestWorkspaceSetup") {
+    return await requestWorkspaceSetup(
+      tx,
+      {
+        clientId: payload.clientId,
+        sequencerKey: payload.sequencerKey,
+        workspaceId: payload.workspaceId ?? null,
+        dryRun: payload.dryRun,
+      },
+      // No `identity` object exists in handleAction; the caller's id lives in the transaction's
+      // JWT context, which is where every other handler reads it from (see the userId defaults
+      // elsewhere in this file). Read it there rather than inventing a parameter.
+      await callerUserId(tx),
+    );
   }
 
   if (payload.action === "upsertClientSequencer") {

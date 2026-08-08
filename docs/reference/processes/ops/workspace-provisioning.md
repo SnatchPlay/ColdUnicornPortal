@@ -1,11 +1,13 @@
 # Process · Workspace provisioning (Aimfox and Bison)
 
-**Domain:** ops · **Owner:** automation · **Status:** **contract accepted; no workflow implements it yet**
+**Domain:** ops · **Owner:** automation · **Status:** **both workflows built and proven; the portal
+reads status, and its buttons wait only on the n8n webhook + shared secret**
 **Governing ADRs:** [ADR-0012](../../../adr/0012-multi-sequencer-model.md) (per-client vendor
 credentials live in `client_sequencers`),
 [ADR-0016](../../../adr/0016-repository-as-automation-source-of-truth.md) (this document wins over
 any workflow), [ADR-0008](../../../adr/0008-orm-gateway-edge-function.md) (the portal never calls a
-vendor directly)
+vendor directly), [ADR-0018](../../../adr/0018-gateway-outbound-automation-trigger.md) (the gateway
+may trigger the workflow, and nothing else outbound)
 
 > **Level 1 document.** This describes what the rule *is*. Where it disagrees with a running n8n
 > workflow, the workflow is wrong.
@@ -337,7 +339,14 @@ one token per provisioning attempt.
 
 ## Portal surfaces
 
-- Clients page — a provisioning status column, read from `setup_state`.
+- Clients page — the **Workspaces** column: two marks per row, EmailBison and Aimfox, read from
+  `setup_state`. Deliberately quiet: an absent connector is muted, not red, because 43 of 56 clients
+  are EmailBison-only and a column that is mostly red stops being read. Red is reserved for a state
+  a run actually reported as broken.
+- Client drawer — the **Workspace provisioning** section: per sequencer, the verdict, how long ago
+  it was observed (with a `stale` marker past 30 days), and the per-step outcomes in words. Two
+  buttons: **Перевірити** (`dry_run: true`) and **Налаштувати** (`dry_run: false`, confirmed first,
+  because it writes into the client's own system).
 - Client drawer — a per-sequencer section showing the five facts, with **Перевірити** (`dry_run`)
   and **Налаштувати**. Internal roles only; a `client` never sees it.
 - Client creation — provisioning is requested automatically for both sequencers.

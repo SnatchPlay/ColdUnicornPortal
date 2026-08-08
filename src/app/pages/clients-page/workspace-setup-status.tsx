@@ -1,14 +1,18 @@
+import { useState } from "react";
+import { toast } from "sonner";
+import { repository } from "../../data/repository";
 import type { ClientSequencerRecord, WorkspaceSetupState, WorkspaceSetupStep } from "../../types/core";
+import type { WorkspaceSetupResult } from "../../types/view-contracts";
 import type { ClientSequencerCreds } from "./client-drawer";
 
 /**
  * What workspace provisioning last observed, per sequencer
  * ([process](docs/reference/processes/ops/workspace-provisioning.md)).
  *
- * Read-only, and deliberately so: `setup_state` is written **only** by the two n8n workflows
- * (ADR-0018 §6). The portal renders their verdict and never edits it. The "Перевірити" /
- * "Налаштувати" buttons arrive with the `requestWorkspaceSetup` gateway action, which needs the
- * workflows' webhook trigger to exist first.
+ * The portal never edits `setup_state` — it is written only by the two n8n workflows. What the
+ * buttons do is *ask n8n to run*, through the single outbound call the gateway is allowed to make
+ * (ADR-0018). "Перевірити" reads and reports; "Налаштувати" creates what is missing in a client's
+ * sending system, so it asks first.
  *
  * The distinction this section exists to make visible: **a client with no connector row is not
  * "unknown", it is "missing"**. Audytel sat in exactly that gap while three of its leads were
@@ -136,7 +140,56 @@ function orderedSteps(steps: Record<string, WorkspaceSetupStep>): Array<[string,
   return [...known, ...extra];
 }
 
-function SequencerCard({ label, row }: { label: string; row: ClientSequencerRecord | null }) {
+function SequencerCard({
+  label,
+  row,
+  clientId,
+  sequencerKey,
+}: {
+  label: string;
+  row: ClientSequencerRecord | null;
+  clientId: string;
+  sequencerKey: "emailbison" | "aimfox";
+}) {
+  const [busy, setBusy] = useState<"check" | "apply" | null>(null);
+  // The run's own answer, shown until the page reloads. `setup_state` in the database is updated by
+  // the workflow, but this component is fed by a payload the page loaded earlier — without this the
+  // card would still show the previous verdict after a successful run.
+  const [fresh, setFresh] = useState<WorkspaceSetupResult | null>(null);
+
+  const run = async (mode: "check" | "apply") => {
+    if (mode === "apply") {
+      const confirmed = window.confirm(
+        `Provision ${label} for this client?\n\nThis creates whatever is missing — webhooks, ` +
+          `labels or tags — inside the client's own ${label} workspace. It never deletes anything, ` +
+          `and running it twice changes nothing the second time.`,
+      );
+      if (!confirmed) return;
+    }
+    setBusy(mode);
+    try {
+      const result = await repository.requestWorkspaceSetup({
+        clientId,
+        sequencerKey,
+        dryRun: mode === "check",
+      });
+      setFresh(result);
+      if (result.state === "unknown") {
+        // Not an error and not a success. The run may still be going, so the honest instruction is
+        // "check again", never "try again" (ADR-0018 §5).
+        toast.warning(`${label}: no answer yet — the run may still be going. Check again shortly.`);
+      } else if (result.recorded === false) {
+        toast.warning(`${label}: ${result.state}, but the result could not be recorded.`);
+      } else {
+        toast.success(`${label}: ${result.state.replace(/_/g, " ")}`);
+      }
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : `Could not reach ${label} provisioning.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // No row at all is a provisioning state, not an absent one — the whole point of this section.
   if (!row) {
     return (
@@ -149,6 +202,8 @@ function SequencerCard({ label, row }: { label: string; row: ClientSequencerReco
           This client is not connected to {label} at all — no workspace, no key. Leads sent there
           would arrive nowhere.
         </p>
+        <RunButtons busy={busy} onRun={run} />
+        {fresh ? <FreshResult result={fresh} /> : null}
       </div>
     );
   }
@@ -198,11 +253,75 @@ function SequencerCard({ label, row }: { label: string; row: ClientSequencerReco
       {setup.dry_run === true && state !== "configured" ? (
         <p className="text-[11px] text-white/40">Last run was a check — nothing was created.</p>
       ) : null}
+
+      <RunButtons busy={busy} onRun={run} />
+      {fresh ? <FreshResult result={fresh} /> : null}
     </div>
   );
 }
 
-export function WorkspaceSetupStatus({ creds }: { creds: ClientSequencerCreds }) {
+function RunButtons({
+  busy,
+  onRun,
+}: {
+  busy: "check" | "apply" | null;
+  onRun: (mode: "check" | "apply") => void;
+}) {
+  const base =
+    "rounded-full border px-2.5 py-1 text-[11px] font-medium transition disabled:opacity-40 disabled:cursor-not-allowed";
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      <button
+        type="button"
+        disabled={busy !== null}
+        onClick={() => onRun("check")}
+        className={`${base} border-white/15 bg-white/5 text-white/80 hover:bg-white/10`}
+      >
+        {busy === "check" ? "Checking…" : "Перевірити"}
+      </button>
+      <button
+        type="button"
+        disabled={busy !== null}
+        onClick={() => onRun("apply")}
+        className={`${base} border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20`}
+      >
+        {busy === "apply" ? "Provisioning…" : "Налаштувати"}
+      </button>
+    </div>
+  );
+}
+
+/** The answer from the run just made, which the loaded page payload does not yet know about. */
+function FreshResult({ result }: { result: WorkspaceSetupResult }) {
+  const created = Object.values(result.steps ?? {}).flatMap((step) => step.created ?? []);
+  return (
+    <div className="space-y-1 rounded-lg border border-white/10 bg-black/30 p-2">
+      <p className="text-[11px] text-white/70">
+        Just now: <span className="font-medium">{result.state.replace(/_/g, " ")}</span>
+        {result.dry_run ? " (check only)" : ""}
+      </p>
+      {result.reason ? <p className="text-[11px] text-white/50">{result.reason}</p> : null}
+      {created.length ? (
+        <p className="text-[11px] text-sky-200">Created: {created.join(", ")}</p>
+      ) : null}
+      {/* needs_selection is the one state the operator has to answer. Listing the candidates is the
+          answer sheet; picking one is a re-run with an explicit workspace_id, which the UI does not
+          do yet — so name them rather than pretend the state is actionable here. */}
+      {result.candidates?.length ? (
+        <p className="text-[11px] text-white/50">
+          Unclaimed workspaces: {result.candidates.map((c) => c.name ?? c.workspace_id).join(", ")}
+        </p>
+      ) : null}
+      {result.recorded === false ? (
+        <p className="text-[11px] text-amber-200/80">
+          Not recorded — the vendor work may have happened even though the status did not update.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function WorkspaceSetupStatus({ clientId, creds }: { clientId: string; creds: ClientSequencerCreds }) {
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
       <div className="border-l-2 border-sky-400/50 pl-3">
@@ -213,8 +332,18 @@ export function WorkspaceSetupStatus({ creds }: { creds: ClientSequencerCreds })
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <SequencerCard label={SEQUENCER_LABELS.emailbison} row={creds.emailbison} />
-        <SequencerCard label={SEQUENCER_LABELS.aimfox} row={creds.aimfox} />
+        <SequencerCard
+          label={SEQUENCER_LABELS.emailbison}
+          row={creds.emailbison}
+          clientId={clientId}
+          sequencerKey="emailbison"
+        />
+        <SequencerCard
+          label={SEQUENCER_LABELS.aimfox}
+          row={creds.aimfox}
+          clientId={clientId}
+          sequencerKey="aimfox"
+        />
       </div>
     </section>
   );

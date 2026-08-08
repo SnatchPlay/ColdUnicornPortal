@@ -52,6 +52,7 @@ import type {
   ManagerDashboardOverview,
   ManagerDashboardParams,
   ClientOooRoutingPagePayload,
+  WorkspaceSetupResult,
   ShellData,
   TablePreferencesPayload,
 } from "../types/view-contracts";
@@ -132,6 +133,9 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   deleteClientCustomField: { table: "client_custom_fields", operation: "delete" },
   upsertClientCustomFieldValue: { table: "client_custom_field_values", operation: "upsert" },
   upsertClientSequencer: { table: "client_sequencers", operation: "upsert" },
+  // Not a table write from here — the gateway calls n8n, which writes (ADR-0018). The meta exists
+  // for error reporting, and names the table the run ultimately records into.
+  requestWorkspaceSetup: { table: "client_sequencers", operation: "upsert" },
   loadLeadCustomFields: { table: "lead_custom_fields", operation: "select" },
   createLeadCustomField: { table: "lead_custom_fields", operation: "insert" },
   updateLeadCustomField: { table: "lead_custom_fields", operation: "update" },
@@ -696,6 +700,16 @@ export interface Repository {
     sequencerKey: string,
     patch: Omit<SequencerCredentialInput, "sequencer_key">,
   ): Promise<ClientSequencerRecord>;
+  /**
+   * ADR-0018: ask n8n to provision one client's workspace. `dryRun: true` reads and reports;
+   * `false` creates what is missing in the client's sending system. Not retried — see below.
+   */
+  requestWorkspaceSetup(input: {
+    clientId: string;
+    sequencerKey: "emailbison" | "aimfox";
+    workspaceId?: string | null;
+    dryRun: boolean;
+  }): Promise<WorkspaceSetupResult>;
   // Lead custom fields (Batch 4, Task 4F) — per-client report columns.
   loadLeadCustomFields(clientId?: string): Promise<LeadCustomFieldRecord[]>;
   createLeadCustomField(input: {
@@ -1108,6 +1122,14 @@ export const repository: Repository = {
 
   async upsertClientSequencer(clientId, sequencerKey, patch) {
     return invokeOrmGatewayAction("upsertClientSequencer", { clientId, sequencerKey, patch });
+  },
+
+  // Deliberately on the mutation path, which does NOT retry. A retried provisioning call is a
+  // second run against a client's sending system; the workflow is idempotent, but a transport-level
+  // retry after a timeout would also start a second concurrent run. "Check again" is the user's
+  // recovery, not ours.
+  async requestWorkspaceSetup({ clientId, sequencerKey, workspaceId = null, dryRun }) {
+    return invokeOrmGatewayAction("requestWorkspaceSetup", { clientId, sequencerKey, workspaceId, dryRun });
   },
 
   async loadLeadCustomFields(clientId) {

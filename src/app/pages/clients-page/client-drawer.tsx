@@ -894,7 +894,7 @@ export function ClientDrawer({
           {/* Sits directly under Credentials & IDs because it answers the question those fields
               raise: a key being present says nothing about whether the workspace is actually
               wired. Read-only — setup_state is written by n8n alone (ADR-0018 §6). */}
-          <WorkspaceSetupStatus creds={sequencerCreds} />
+          <WorkspaceSetupStatus clientId={client.id} creds={sequencerCreds} />
 
           {/* Contacts */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
