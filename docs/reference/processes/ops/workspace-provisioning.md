@@ -356,6 +356,29 @@ Three states have nowhere to be stored, and that is deliberate:
 | no connector at all | **no row** — the portal renders this as `missing`, never as `unknown` |
 | `needs_selection` before any row exists | not persisted — nothing to write to. It is the synchronous answer to the operator, whose pick the card holds and replays on the next run (see *Name does not resolve*) |
 
+
+### The Aimfox `AutoConnect` campaign
+
+Provisioning creates it, since 2026-08-09. It is what
+[`aimfox-import-to-connection`](../../../../automation/n8n/workflows/outreach/aimfox-import-to-connection/README.md)
+feeds, and that workflow was measured importing leads for **0 of 9** clients because no workspace has
+a campaign by that name — the gap this closes.
+
+Three vendor facts shape it, all from live calls rather than documentation:
+
+- `POST /campaigns` wants **`account_ids`**; `owners` is only the read shape and a body copied from
+  it returns `422`.
+- A created campaign is born **`INIT`** and the import filter requires `ACTIVE`, so activation is a
+  second call on its own branch after `Merge Outcomes` — not a `Plan Writes` item, because a
+  campaign that exists but is paused needs no `POST`, and planning it there would leave `Plan Writes`
+  with zero items and strand the run short of `Record`.
+- The **schedule cannot be set through the API**: `POST` and `PATCH` both answer `200` and ignore it.
+  An auto-created campaign therefore runs 9–17 **seven days a week** against a 22-of-22 house
+  convention of Mon–Fri 9–17 / Sat 9–14 / no Sunday. Accepted by the owner on 2026-08-09 pending a
+  conversation with the client; correcting it means opening Aimfox by hand.
+
+The owner is the workspace's single logged-in seat from `GET /accounts`. Zero or two seats is
+reported, never guessed.
 ## RPC / API contracts
 
 Every step has a read endpoint, which is what makes invariant 3 achievable without a local mirror.

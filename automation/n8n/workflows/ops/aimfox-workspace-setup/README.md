@@ -127,11 +127,33 @@ What "wired" means for Aimfox — measured across all 9 wired workspaces on 2026
 | label | `name` | `preMQL` (yellow) |
 | label | `name` | `MQL` (success) |
 
-Campaigns are **not** created here — they are the client's, and
-[`aimfox-campaign-sync`](../../ingestion/aimfox-campaign-sync/README.md) catalogues them on its own
-schedule. The `campaigns` step therefore reports `skipped` with a reason and never `created`.
-Handing off to the sync so a freshly-keyed client gets its catalogue immediately, rather than up to
-two hours later, is worth doing and is not built yet.
+| campaign | `name` | `AutoConnect`, and it must be `ACTIVE` |
+
+`AutoConnect` **is** created here, since 2026-08-09. It is the campaign
+[`aimfox-import-to-connection`](../../outreach/aimfox-import-to-connection/README.md) feeds, and on
+2026-08-09 that workflow was measured importing leads for **0 of 9** clients for one reason: no
+workspace has a campaign by that name. Its filter also reads `campaigns[0]` only, so creating the
+campaign is necessary but not sufficient — that defect is still open on the import side.
+
+The step is matched by name across the whole campaign list, never by position. Three things about
+the vendor decide the rest, all established by live calls rather than documentation:
+
+| fact | consequence |
+|---|---|
+| `POST /campaigns` wants **`account_ids`**, not `owners` (`owners` is only the read shape) | a body copied from the read shape returns `422` |
+| a new campaign is born **`INIT`**, and the import filter requires `ACTIVE` | a second call, `PATCH {state:"ACTIVE"}`, on its own branch after `Merge Outcomes`. `INIT` is one-way — `PATCH` back to it answers `400`; `PAUSED` is the way down |
+| the **schedule cannot be set through the API at all** | `POST` and `PATCH` both answer `200` and ignore it. An auto-created campaign runs 9–17 **seven days a week**, including Sunday, against a house convention of Mon–Fri 9–17 / Sat 9–14 / no Sunday that holds for **22 of 22** existing campaigns. Accepted by the owner on 2026-08-09 pending a conversation with the client; fixing it means opening Aimfox by hand |
+
+The owner is the workspace's single logged-in LinkedIn seat, read from `GET /accounts`. All nine
+workspaces have exactly one today. Zero or two is reported, never guessed — the same rule that keeps
+workspace resolution from picking a workspace for somebody (invariant 2).
+
+Activation is a **branch off `Merge Outcomes`**, not a step in `Plan Writes`. A campaign that exists
+but is `PAUSED` needs no `POST`, so planning it there would leave `Plan Writes` with zero items —
+and a node with zero items does not execute, which would strand the run short of `Record`.
+
+[`aimfox-campaign-sync`](../../ingestion/aimfox-campaign-sync/README.md) still catalogues the
+client's own campaigns on its own schedule; nothing here touches those.
 
 `DNC` is deliberately absent. It exists in 3 of the 9 workspaces; that is a client preference, not
 our contract.
