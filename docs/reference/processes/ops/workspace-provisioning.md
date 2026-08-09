@@ -359,7 +359,12 @@ one token per provisioning attempt.
   observed (with a `stale` marker past 30 days). Keys, per-step outcomes and the buttons sit behind
   a **Details** disclosure: a CS manager needs to know EmailBison is configured, not what the key
   is, and **Set up** writes into a client's vendor account, which should not be one stray click
-  away in a summary. A card with an unsaved credential edit cannot be collapsed — it shows
+  away in a summary. After a run the card **adopts that run's verdict** and reads "Checked just
+  now" — the page payload was loaded before the run, and leaving the header on its old value put
+  "Never checked" directly above "Just now: configured". The one exception is `unknown`: no answer
+  means the last recorded verdict is still the best thing known, so the card keeps it and says why
+  underneath. `recorded: false` is not an exception — the workspace *was* observed; only the
+  write-back failed, and the card says a reload will bring the previous verdict back. A card with an unsaved credential edit cannot be collapsed — it shows
   `unsaved` and drops the toggle, so the drawer's Save bar is never armed by a hidden field.
   Two buttons: **Check** (`dry_run: true`) and **Set up** (`dry_run: false`, confirmed first).
   Internal roles only; a `client` never sees the clients page at all.

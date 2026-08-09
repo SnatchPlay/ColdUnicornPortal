@@ -330,9 +330,25 @@ function SequencerCard({
 
   // No row at all is a provisioning state, not an absent one — the whole point of this section.
   const setup: WorkspaceSetupState = row?.setup_state ?? {};
-  const state: DisplayState = row ? (setup.state ?? "never") : "no_connector";
-  const checked = row ? describeChecked(row.setup_checked_at) : null;
-  const steps = orderedSteps(setup.steps ?? {});
+
+  // A run that just answered is the newest thing known about this workspace, and the card has to
+  // say so. The page payload was loaded before the run, so reading only `row` left the header on
+  // "Never checked" directly above "Just now: configured" — the card contradicting itself, with
+  // the stale half on top where it gets read first.
+  //
+  // `unknown` is excluded on purpose: it means the run gave no answer (ADR-0018 §5), so the last
+  // recorded verdict is still the best thing known. `recorded: false` is NOT excluded — the run
+  // did observe the workspace, only the write-back failed, and RunNotes says so underneath.
+  const live = fresh && fresh.state !== "unknown" ? fresh : null;
+
+  const state: DisplayState = live ? live.state : row ? (setup.state ?? "never") : "no_connector";
+  const checked = live
+    ? { text: "just now", stale: false }
+    : row
+      ? describeChecked(row.setup_checked_at)
+      : null;
+  const steps = orderedSteps(live?.steps ?? setup.steps ?? {});
+  const wasDryRun = live ? live.dry_run : setup.dry_run;
 
   return (
     <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
@@ -360,9 +376,14 @@ function SequencerCard({
       </div>
 
       <p className="text-[11px] text-white/50">{stateSummary(state, label)}</p>
-      <p className={`text-[11px] ${checked?.stale ? "text-amber-200/70" : "text-white/40"}`}>
-        {checked ? `Checked ${checked.text}` : "Never checked."}
-      </p>
+      {/* Only when there is a date to give. With none, the pill already says "Never checked" and
+          the sentence above already explains it — a third line saying it again is the noise this
+          section was collapsed to remove. */}
+      {checked ? (
+        <p className={`text-[11px] ${checked.stale ? "text-amber-200/70" : "text-white/40"}`}>
+          Checked {checked.text}
+        </p>
+      ) : null}
 
       {expanded ? (
         <div className="space-y-3 border-t border-white/10 pt-3">
@@ -392,16 +413,16 @@ function SequencerCard({
 
           {/* A dry run reports the same steps as a real one. Say so where it changes the meaning —
               on anything short of "configured", "missing" means "we only looked", not "we tried". */}
-          {setup.dry_run === true && state !== "configured" ? (
+          {wasDryRun === true && state !== "configured" ? (
             <p className="text-[11px] text-white/40">Last run was a check — nothing was created.</p>
           ) : null}
 
           <RunButtons busy={busy} onRun={run} />
-          {fresh ? <FreshResult result={fresh} /> : null}
+          {fresh ? <RunNotes result={fresh} /> : null}
         </div>
       ) : (
         // A finished run must not vanish because the card was collapsed afterwards.
-        fresh && <FreshResult result={fresh} />
+        fresh && <RunNotes result={fresh} />
       )}
     </div>
   );
@@ -438,15 +459,26 @@ function RunButtons({
   );
 }
 
-/** The answer from the run just made, which the loaded page payload does not yet know about. */
-function FreshResult({ result }: { result: WorkspaceSetupResult }) {
+/**
+ * What the run adds beyond the verdict. The verdict itself is not repeated here — the card header
+ * already adopted it, and printing "Just now: configured" under a header reading "Never checked"
+ * is how this component last managed to contradict itself on screen.
+ */
+function RunNotes({ result }: { result: WorkspaceSetupResult }) {
   const created = Object.values(result.steps ?? {}).flatMap((step) => step.created ?? []);
+  const unknown = result.state === "unknown";
+  if (!unknown && !result.reason && !created.length && !result.candidates?.length && result.recorded !== false) {
+    return null;
+  }
   return (
     <div className="space-y-1 rounded-lg border border-white/10 bg-black/30 p-2">
-      <p className="text-[11px] text-white/70">
-        Just now: <span className="font-medium">{result.state.replace(/_/g, " ")}</span>
-        {result.dry_run ? " (check only)" : ""}
-      </p>
+      {/* The one state the card does not adopt, so it has to be stated here instead. */}
+      {unknown ? (
+        <p className="text-[11px] text-amber-200/80">
+          No answer yet — the run may still be going. Check again shortly; the verdict above is the
+          last one on record.
+        </p>
+      ) : null}
       {result.reason ? <p className="text-[11px] text-white/50">{result.reason}</p> : null}
       {created.length ? (
         <p className="text-[11px] text-sky-200">Created: {created.join(", ")}</p>
@@ -459,9 +491,13 @@ function FreshResult({ result }: { result: WorkspaceSetupResult }) {
           Unclaimed workspaces: {result.candidates.map((c) => c.name ?? c.workspace_id).join(", ")}
         </p>
       ) : null}
+      {/* The verdict above is this run's, but nothing stored it. Say what that costs, because the
+          card looks identical to a recorded one until the page is reloaded and the old value
+          returns. */}
       {result.recorded === false ? (
         <p className="text-[11px] text-amber-200/80">
-          Not recorded — the vendor work may have happened even though the status did not update.
+          Not recorded — the vendor work may have happened even though the database was not
+          updated. Reloading this page will show the previous verdict again.
         </p>
       ) : null}
     </div>
