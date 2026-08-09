@@ -97,7 +97,7 @@ run, or when the row already exists:
 ## `state` deliberately ignores the campaign step
 
 `state` is computed from `key`, `webhooks` and `tags` only. Campaigns are reported but never
-created, so folding them in would leave four clients permanently `partial` behind a **Налаштувати**
+created, so folding them in would leave four clients permanently `partial` behind a **Set up**
 button that cannot fix them — a status that lies about what pressing it would do. The finding is not
 lost: it stays in `steps.campaigns`, which the portal renders as its own line.
 

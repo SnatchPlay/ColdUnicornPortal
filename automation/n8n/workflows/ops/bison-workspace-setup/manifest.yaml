@@ -90,7 +90,7 @@ targetContract:
 
 portalSurfaces:
   - "Clients page — provisioning status column (client_sequencers.setup_state)"
-  - "Client drawer — Workspaces section: Перевірити (dry_run) / Налаштувати"
+  - "Client drawer — Credentials & IDs section: Check (dry_run) / Set up"
 
 metrics: []
 
