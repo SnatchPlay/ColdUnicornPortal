@@ -99,13 +99,20 @@ interface WorkspaceChoice {
 
 const SEQUENCER_TITLES: Record<SequencerKey, string> = { emailbison: "EmailBison", aimfox: "Aimfox" };
 
+// Radix rejects "" as a Select value, so the "no workspace" option needs a sentinel — the same
+// shape the manager select already uses for Unassigned.
+const NO_WORKSPACE = "__none__";
+
 /**
  * Pick the client's workspace out of the vendor's own list, before the client row exists.
  *
- * The list is fetched on demand rather than with the sheet: it is two live vendor round trips per
- * sequencer, and most of the time whoever opens this form is not going to need either. Only
- * workspaces no other client has claimed come back — the filtering is server-side, in the same node
- * that answers `needs_selection`.
+ * The list loads when the select is first opened, not with the sheet: it is a live vendor round
+ * trip per sequencer, and most sessions need neither. Only workspaces no other client has claimed
+ * come back — filtered server-side, in the same node that answers `needs_selection`, and backed by
+ * `client_sequencers_workspace_uk` so the database refuses a second claim regardless.
+ *
+ * One per vendor, not several: `UNIQUE (client_id, sequencer_id)` allows exactly one connector row,
+ * so a multi-select would offer a choice that cannot be saved.
  *
  * Typing an id was the alternative and it is the worse one. Provisioning resolves by an exact name
  * match, which held for 4 of 9 clients when measured, so a hand-typed id is both the common path and
@@ -123,7 +130,10 @@ function WorkspacePicker({
   const [options, setOptions] = useState<WorkspaceChoice[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  // Once per sheet. Re-fetching on every open would spend a vendor round trip to redraw a list the
+  // operator is looking at, and a workspace claimed elsewhere mid-session still cannot be saved.
+  const loadOnce = async () => {
+    if (options !== null || loading) return;
     setLoading(true);
     try {
       const result = await repository.requestWorkspaceSetup({
@@ -142,53 +152,46 @@ function WorkspacePicker({
   };
 
   return (
-    <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-white">{SEQUENCER_TITLES[sequencerKey]}</span>
-        {chosen ? (
-          <button
-            type="button"
-            onClick={() => onChoose(null)}
-            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white"
-          >
-            Clear
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void load()}
-            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
-          >
-            {loading ? "Loading…" : options ? "Reload" : "Choose"}
-          </button>
-        )}
-      </div>
-
-      {chosen ? (
-        <p className="text-[11px] text-emerald-200">{chosen.name ?? chosen.workspace_id}</p>
-      ) : options ? (
-        options.length ? (
-          <div className="flex flex-wrap gap-1.5">
-            {options.map((option) => (
-              <button
-                key={option.workspace_id}
-                type="button"
-                onClick={() => onChoose(option)}
-                title={`Workspace ${option.workspace_id}`}
-                className="rounded-full border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/20"
-              >
-                {option.name ?? option.workspace_id}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="text-[11px] text-white/40">
-            Every workspace at this vendor already belongs to a client.
-          </p>
-        )
-      ) : null}
-    </div>
+    <label className="block space-y-2">
+      <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+        {SEQUENCER_TITLES[sequencerKey]} workspace
+      </span>
+      <Select
+        value={chosen?.workspace_id ?? NO_WORKSPACE}
+        onOpenChange={(open) => {
+          if (open) void loadOnce();
+        }}
+        onValueChange={(value) =>
+          onChoose(value === NO_WORKSPACE ? null : (options?.find((o) => o.workspace_id === value) ?? null))
+        }
+      >
+        <SelectTrigger className="h-auto rounded-2xl border-white/10 bg-black/20 px-4 py-3 text-sm text-white">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
+          <SelectItem value={NO_WORKSPACE} className="text-white focus:bg-[#1a1a1a] focus:text-white">
+            Not connected
+          </SelectItem>
+          {loading ? (
+            <div className="px-2 py-1.5 text-xs text-white/40">Loading…</div>
+          ) : null}
+          {options?.map((option) => (
+            <SelectItem
+              key={option.workspace_id}
+              value={option.workspace_id}
+              className="text-white focus:bg-[#1a1a1a] focus:text-white"
+            >
+              {option.name ?? option.workspace_id}
+            </SelectItem>
+          ))}
+          {options?.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-white/40">
+              Every workspace at this vendor already belongs to a client.
+            </div>
+          ) : null}
+        </SelectContent>
+      </Select>
+    </label>
   );
 }
 
@@ -770,23 +773,20 @@ const CreateClientSheet = memo(function CreateClientSheet({
             {/* No keys and no id to type. Provisioning obtains both; all a human has that it
                 cannot derive is which of the vendor's workspaces is this client, and only when the
                 names differ — an exact-name match held for 4 of 9 clients when measured. */}
-            <div className="space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspaces</span>
-              <WorkspacePicker
-                sequencerKey="emailbison"
-                chosen={draft.workspaces.emailbison}
-                onChoose={(choice) =>
-                  setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, emailbison: choice } } : d))
-                }
-              />
-              <WorkspacePicker
-                sequencerKey="aimfox"
-                chosen={draft.workspaces.aimfox}
-                onChoose={(choice) =>
-                  setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, aimfox: choice } } : d))
-                }
-              />
-            </div>
+            <WorkspacePicker
+              sequencerKey="emailbison"
+              chosen={draft.workspaces.emailbison}
+              onChoose={(choice) =>
+                setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, emailbison: choice } } : d))
+              }
+            />
+            <WorkspacePicker
+              sequencerKey="aimfox"
+              chosen={draft.workspaces.aimfox}
+              onChoose={(choice) =>
+                setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, aimfox: choice } } : d))
+              }
+            />
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>
