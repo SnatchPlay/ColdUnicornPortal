@@ -1,16 +1,16 @@
 schemaVersion: 1
 
 id: aimfox-workspace-setup
-name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"
+name: "[SETUP] Aimfox workspace · resolve, key, webhooks, labels"   # remote name; the graph also does campaigns since 2026-08-09
 domain: ops
 owner: automation
 
 # `managed` since 2026-08-07: the graph exists as ehhFUR3SYIxDahER and workflow.json is the export.
-# The write half landed the same day (iteration 2, 11 nodes -> 21). `status` stays `planned` until
-# a real dry_run:false run has been observed end to end; the workflow is still INACTIVE and is
-# called by hand. It has no trigger of its own until ADR-0018 gives the gateway its webhook.
+# `active` since 2026-08-09: the webhook is live, the gateway calls it, and dry_run:false runs have
+# been observed end to end — creating a missing label (70489), then creating and activating an
+# AutoConnect campaign from scratch, with the immediate re-run reporting `ok` and creating nothing.
 lifecycle: managed
-status: planned
+status: active
 criticality: high         # mints API keys and creates webhooks in a client's sending system
 
 businessProcess:
@@ -41,6 +41,8 @@ reads:
     - "Aimfox API · GET /api/v2/workspaces/{id}/tokens (master key) — reuse an existing key rather than minting a second"
     - "Aimfox API · GET /api/v2/webhooks — current webhook set, compared on url + events"
     - "Aimfox API · GET /api/v2/labels — current label set, compared on name"
+    - "Aimfox API · GET /api/v2/campaigns — is there an ACTIVE campaign named AutoConnect? Matched across the whole list, never by position"
+    - "Aimfox API · GET /api/v2/accounts — the workspace's LinkedIn seats; a created campaign needs exactly one logged-in owner"
 
 # Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
 # scripts/n8n/lib/business-rules.mjs. The ingestion RPC contract of ADR-0015 covers leads, replies,
@@ -59,9 +61,12 @@ writes:
     - "Aimfox API · POST /api/v2/workspaces/{id}/tokens (node: Mint Key) — only when neither the connector row nor the vendor already holds a usable key"
     - "Aimfox API · POST /api/v2/webhooks (node: Create Missing) — only for a url+events pair that is absent"
     - "Aimfox API · POST /api/v2/labels (node: Create Missing) — only for a name that is absent"
+    - "Aimfox API · POST /api/v2/campaigns (node: Create Missing) — only when no campaign named AutoConnect exists AND the workspace has exactly one logged-in seat"
+    - "Aimfox API · PATCH /api/v2/campaigns/{id} (node: Activate Campaign) — sets state=ACTIVE; a created campaign is born INIT and the import filter requires ACTIVE"
 
-# Exactly two nodes issue a POST — Mint Key and Create Missing — and both sit behind a branch that
-# a dry run cannot reach. dry_run safety is structural, not a flag inside an HTTP node: Plan Writes
+# Three nodes issue a POST — Mint Key, Create Missing, Activate Campaign (PATCH) — and all sit
+# behind a branch that a dry run cannot reach. dry_run safety is structural, not a flag inside an
+# HTTP node: Plan Writes
 # returns an EMPTY array on a dry run, and n8n does not execute a node with no input items. There is
 # nothing to write with, so nothing is written. `dry_run` is also read as true for anything except an
 # explicit false — a missing field has to mean "do not touch", never "write into a client's system".
@@ -70,6 +75,8 @@ credentials:
   - alias: "Aimfox Master"
     type: httpBearerAuth
     usedBy: "List Workspaces, List Tokens, Mint Key"
+    # The workspace-scoped calls (webhooks, labels, campaigns, accounts, activation) carry the
+    # per-workspace key in an Authorization header from Effective Key, not this credential.
   - alias: "Postgres account"
     type: postgres
     usedBy: "Resolve Client, Read Claimed, Record"
@@ -91,7 +98,7 @@ portalSurfaces:
 metrics: []
 
 idempotency:
-  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a label"
+  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a label; name for the AutoConnect campaign"
   notes: >-
     Every step reads the vendor's current state before it writes and creates only what is absent, so
     a second run is a no-op. This is invariant 3 of the process document and it is not cosmetic: a

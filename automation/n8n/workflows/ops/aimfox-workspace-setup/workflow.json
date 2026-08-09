@@ -2,6 +2,48 @@
   "name": "[SETUP] Aimfox workspace · resolve, key, webhooks, labels",
   "nodes": [
     {
+      "id": "c1000000-0000-4000-a000-000000000004",
+      "name": "Activate Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2544,
+        -232
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={\"state\":\"ACTIVE\"}",
+        "method": "PATCH",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.activate_campaign_id }}"
+      }
+    },
+    {
+      "id": "c1000000-0000-4000-a000-000000000005",
+      "name": "Apply Activation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        -232
+      ],
+      "parameters": {
+        "jsCode": "// Both branches must hand `Record` the same shape, so this restates Merge Outcomes' output with the\n// activation folded in rather than passing the HTTP response through.\nconst base = $('Merge Outcomes').first().json;\nconst res = $json ?? {};\nconst steps = JSON.parse(JSON.stringify(base.steps));\nconst st = steps.campaigns;\n\n// The vendor answers 200 to a PATCH it ignored when the field is `schedule`; for `state` it really\n// does change. Trust the echoed state, not the status code.\nconst now = res?.campaign?.state ?? null;\nif (now === 'ACTIVE') {\n  st.outcome = st.outcome === 'created' ? 'created' : 'ok';\n  st.present = [...(st.present ?? []).filter((p) => !p.startsWith('AutoConnect')), 'AutoConnect (ACTIVE)'];\n  delete st.missing;\n} else {\n  st.outcome = 'failed';\n  st.error = `activation did not take: state=${now ?? 'unknown'}`;\n}\n\nconst decided = [steps.key, steps.webhooks, steps.labels, steps.campaigns];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\nreturn [{ json: { ...base, state, steps, activate_campaign_id: undefined } }];"
+      }
+    },
+    {
       "id": "87e6287b-9c68-4b46-9255-eafc1e9b7414",
       "name": "Build Result",
       "type": "n8n-nodes-base.code",
@@ -11,7 +53,7 @@
         -152
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// A webhook's identity is events + url, NEVER its name. GIC's webhook is called \"Manual Tag\",\n// hits the right URL on the right event, and matching by name would have created a second one.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// State BEFORE any write. What leaves here is either returned as is (dry_run / nothing missing)\n// or merged with what Create Missing actually created, in Merge Outcomes.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'vendor' ? step('ok', [`vendor token reused (${key.vendor_tokens} at the vendor)`])\n  : key.key_source === 'minted' ? step('created', [], [], null)\n  : step('missing', [], ['api_key'], key.mint_error ?? (isDryRun() ? 'no key stored and none at the vendor' : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst listStep = (raw, arrayKey, canon, identity) => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (errored(raw)) return step('skipped', [], [], 'vendor call failed');\n  const present = (raw[arrayKey] ?? []).map(identity);\n  const missing = canon.map(identity).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n};\n\nconst webhooks = listStep(hooksRaw, 'webhooks', CANON_WEBHOOKS, (w) => hookKey(w.events, w.url));\nconst labels = listStep(labelsRaw, 'labels', CANON_LABELS, (l) => String(l?.name ?? ''));\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: {\n    key: keyStep, webhooks, labels,\n    campaigns: step('skipped', [], [], 'catalogued by aimfox-campaign-sync, not created here'),\n  },\n} }];"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// A webhook's identity is events + url, NEVER its name. GIC's webhook is called \"Manual Tag\",\n// hits the right URL on the right event, and matching by name would have created a second one.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// State BEFORE any write. What leaves here is either returned as is (dry_run / nothing missing)\n// or merged with what Create Missing actually created, in Merge Outcomes.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\nconst hooksRaw = $('List Webhooks').first().json ?? {};\nconst labelsRaw = $('List Labels').first().json ?? {};\n\nconst errored = (raw) => Boolean(raw?.error) || raw?.status === 'fail';\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'vendor' ? step('ok', [`vendor token reused (${key.vendor_tokens} at the vendor)`])\n  : key.key_source === 'minted' ? step('created', [], [], null)\n  : step('missing', [], ['api_key'], key.mint_error ?? (isDryRun() ? 'no key stored and none at the vendor' : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst listStep = (raw, arrayKey, canon, identity) => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (errored(raw)) return step('skipped', [], [], 'vendor call failed');\n  const present = (raw[arrayKey] ?? []).map(identity);\n  const missing = canon.map(identity).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n};\n\nconst webhooks = listStep(hooksRaw, 'webhooks', CANON_WEBHOOKS, (w) => hookKey(w.events, w.url));\nconst labels = listStep(labelsRaw, 'labels', CANON_LABELS, (l) => String(l?.name ?? ''));\n\n// AutoConnect is the campaign aimfox-import-to-connection feeds. Matched by name across the WHOLE\n// list on purpose: that workflow inspects campaigns[0] only, which is why it imported for 0 of 9\n// clients on 2026-08-09 — no workspace has AutoConnect first, or at all.\nconst campaignsRaw = $('List Campaigns').first().json ?? {};\nconst accountsRaw = $('List Accounts').first().json ?? {};\n\n// The seat a created campaign is owned by. All nine workspaces have exactly one logged-in seat\n// today; 0 or 2 is a state to report, never to guess (invariant 2).\nconst seats = (accountsRaw.accounts ?? []).filter((a) => a?.state === 'LoggedIn' && !a?.disabled);\nconst seat = seats.length === 1 ? String(seats[0].id) : null;\n\nconst all = campaignsRaw.campaigns ?? [];\nconst found = all.find((x) => String(x?.name ?? '') === 'AutoConnect') ?? null;\nconst campaigns = !haveKey ? step('skipped', [], [], 'no workspace key available')\n  : errored(campaignsRaw) ? step('skipped', [], [], 'vendor call failed')\n  : found && found.state === 'ACTIVE' ? step('ok', ['AutoConnect (ACTIVE)'])\n  // Present but not sending. The import filter requires ACTIVE, so this is missing work, not ok.\n  : found ? step('missing', [`AutoConnect (${found.state})`], ['AutoConnect not ACTIVE'])\n  : seat ? step('missing', [], ['AutoConnect'])\n  : step('missing', [], ['AutoConnect'],\n      seats.length === 0 ? 'no logged-in LinkedIn seat in this workspace'\n        : `${seats.length} logged-in seats — cannot choose an owner`);\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'aimfox',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  seat,\n  autoconnect: found ? { id: found.id, state: found.state } : null,\n  steps: { key: keyStep, webhooks, labels, campaigns },\n} }];"
       }
     },
     {
@@ -24,7 +66,7 @@
         -224
       ],
       "parameters": {
-        "jsCode": "// Fold N vendor responses back into one item. n8n preserves item order, so the i-th response\n// belongs to the i-th planned element.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing. That is what the first live run returned.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The `status` field here is the vendor's, not HTTP: Aimfox answers success\n  // with status:\"ok\", and Number('ok') is NaN — reading it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\nreturn [{ json: { created, failed } }];"
+        "jsCode": "// Fold N vendor responses back into one item. n8n preserves item order, so the i-th response\n// belongs to the i-th planned element.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing. That is what the first live run returned.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The `status` field here is the vendor's, not HTTP: Aimfox answers success\n  // with status:\"ok\", and Number('ok') is NaN — reading it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\n// A campaign's id is knowable only from its own create response, and activation needs it.\n// Same index correspondence the loop above relies on.\nconst created_ids = {};\nplanned.forEach((p, i) => {\n  const id = (results[i] ?? {}).campaign?.id ?? (results[i] ?? {}).id ?? null;\n  if (id && p.identity) created_ids[p.identity] = id;\n});\n\nreturn [{ json: { created, failed, created_ids } }];"
       }
     },
     {
@@ -79,7 +121,7 @@
         -152
       ],
       "parameters": {
-        "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing. That is what the first live run returned.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst out = $('Merge Outcomes').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: {\n  ...out,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
+        "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing. That is what the first live run returned.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\n// Prefer the activation branch when it ran. Reading Merge Outcomes unconditionally made the\n// first live activation report `campaigns: missing` while the campaign was already ACTIVE at\n// the vendor — a run that did the work and denied it, which invites a second press.\nconst out = ($('Apply Activation').isExecuted ? $('Apply Activation') : $('Merge Outcomes')).first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: {\n  ...out,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
       }
     },
     {
@@ -97,7 +139,7 @@
           "conditions": [
             {
               "id": "a2000000-0000-4000-a000-00000000000f",
-              "leftValue": "={{ (() => { const s = $json.steps ?? {}; if ($json.dry_run !== false) return false; return ['webhooks','labels'].some(k => (s[k]?.missing ?? []).length > 0); })() }}",
+              "leftValue": "={{ (() => { const s = $json.steps ?? {}; if ($json.dry_run !== false) return false; const create = ['webhooks','labels'].some(k => (s[k]?.missing ?? []).length > 0) || (!$json.autoconnect && (s.campaigns?.missing ?? []).length > 0 && Boolean($json.seat)); return create; })() }}",
               "operator": {
                 "operation": "true",
                 "singleValue": true,
@@ -127,6 +169,56 @@
       ],
       "parameters": {
         "jsCode": "// One entry point for two triggers. A webhook puts the payload in body; the sub-workflow trigger\n// puts it at the root. Without this node every $('Start') would throw on a webhook run.\nconst fromWebhook = $('Webhook').isExecuted;\nconst raw = fromWebhook ? ($('Webhook').first().json?.body ?? {}) : ($('Start').first().json ?? {});\n\n// dry_run: anything but an EXPLICIT boolean false is a dry run. The string 'false' does not count.\n// That matters more on an open webhook than in the UI: the body arrives from the network, and\n// neither a forgotten field nor a wrong type may mean \"write into the client's system\".\nreturn [{ json: {\n  client_id: raw.client_id ?? null,\n  workspace_id: raw.workspace_id ?? null,\n  dry_run: raw.dry_run === false ? false : true,\n  requested_by: raw.requested_by ?? null,\n  via: fromWebhook ? 'webhook' : 'sub-workflow',\n} }];"
+      }
+    },
+    {
+      "id": "c1000000-0000-4000-a000-000000000002",
+      "name": "List Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1600,
+        -40
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/accounts"
+      }
+    },
+    {
+      "id": "c1000000-0000-4000-a000-000000000001",
+      "name": "List Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1488,
+        -40
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.aimfox.com/api/v2/campaigns"
       }
     },
     {
@@ -225,7 +317,7 @@
         -152
       ],
       "parameters": {
-        "jsCode": "// One shape for Record and for the response. Runs both after creation and around it.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'labels']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n}\n\nconst decided = [steps.key, steps.webhooks, steps.labels];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\n// setup_state NEVER holds a key — invariant 7. There is none here: steps describe presence,\n// not values.\nreturn [{ json: { ...base, state, steps } }];"
+        "jsCode": "// One shape for Record and for the response. Runs both after creation and around it.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'labels', 'campaigns']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n}\n\n// A campaign that exists but is not ACTIVE, or one just created, still needs the PATCH. The id\n// is carried to `Needs Activation?`; `Apply Activation` strips it again.\nconst createdId = ($('Collect Creates').isExecuted\n  ? ($('Collect Creates').first().json?.created_ids ?? {})['AutoConnect']\n  : null) ?? null;\nconst activate_campaign_id = base.dry_run === false\n  ? (createdId ?? (base.autoconnect && base.autoconnect.state !== 'ACTIVE' ? base.autoconnect.id : null))\n  : null;\n\nconst decided = [steps.key, steps.webhooks, steps.labels, steps.campaigns];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\n// setup_state NEVER holds a key — invariant 7. There is none here: steps describe presence,\n// not values.\nreturn [{ json: { ...base, state, steps, activate_campaign_id } }];"
       }
     },
     {
@@ -285,6 +377,40 @@
       }
     },
     {
+      "id": "c1000000-0000-4000-a000-000000000003",
+      "name": "Needs Activation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2432,
+        -152
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-a000-00000000000a",
+              "leftValue": "={{ Boolean($json.activate_campaign_id) }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "95674075-c1d4-4942-be47-ee4099aadd37",
       "name": "Needs Selection",
       "type": "n8n-nodes-base.code",
@@ -307,7 +433,7 @@
         -224
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// A webhook's identity is events + url, NEVER its name. GIC's webhook is called \"Manual Tag\",\n// hits the right URL on the right event, and matching by name would have created a second one.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// One item per MISSING element. An empty array means Create Missing does not execute at all —\n// that, not a flag, is how dry-run safety works here.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://api.aimfox.com/api/v2/webhooks',\n      body: { name: c.name, events: c.events, url: c.url, integration: false } } });\n  }\n}\nfor (const c of CANON_LABELS) {\n  if ((s.labels?.missing ?? []).includes(c.name)) {\n    out.push({ json: { kind: 'label', identity: c.name, url: 'https://api.aimfox.com/api/v2/labels',\n      body: { name: c.name, color: c.color } } });\n  }\n}\nreturn out;"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'PDCA',   events: ['reply'],            url: 'https://n8n.coldunicorn.com/webhook/aimfox-classifier' },\n  { name: 'preMQL', events: ['lead_label_added'], url: 'https://n8n.coldunicorn.com/webhook/preMQL-Aimfox' },\n];\nconst CANON_LABELS = [{ name: 'preMQL', color: 'yellow' }, { name: 'MQL', color: 'success' }];\n// A webhook's identity is events + url, NEVER its name. GIC's webhook is called \"Manual Tag\",\n// hits the right URL on the right event, and matching by name would have created a second one.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// One item per MISSING element. An empty array means Create Missing does not execute at all —\n// that, not a flag, is how dry-run safety works here.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://api.aimfox.com/api/v2/webhooks',\n      body: { name: c.name, events: c.events, url: c.url, integration: false } } });\n  }\n}\nfor (const c of CANON_LABELS) {\n  if ((s.labels?.missing ?? []).includes(c.name)) {\n    out.push({ json: { kind: 'label', identity: c.name, url: 'https://api.aimfox.com/api/v2/labels',\n      body: { name: c.name, color: c.color } } });\n  }\n}\n// Only a campaign that does not exist is created here. One that exists but is not ACTIVE is an\n// activation, handled after Merge Outcomes — POSTing again would make a duplicate.\nif (!$json.autoconnect && (s.campaigns?.missing ?? []).includes('AutoConnect') && $json.seat) {\n  out.push({ json: { kind: 'campaign', identity: 'AutoConnect',\n    url: 'https://api.aimfox.com/api/v2/campaigns',\n    body: { name: 'AutoConnect', type: 'list', outreach_type: 'connect',\n            audience_size: 10000, account_ids: [$json.seat] } } });\n}\nreturn out;"
       }
     },
     {
@@ -455,6 +581,28 @@
     }
   ],
   "connections": {
+    "Activate Campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Apply Activation",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Apply Activation": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Record",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "Build Result": {
       "main": [
         [
@@ -528,12 +676,34 @@
         ]
       ]
     },
-    "List Labels": {
+    "List Accounts": {
       "main": [
         [
           {
             "index": 0,
             "node": "Build Result",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Campaigns": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Accounts",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "List Labels": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "List Campaigns",
             "type": "main"
           }
         ]
@@ -577,7 +747,7 @@
         [
           {
             "index": 0,
-            "node": "Record",
+            "node": "Needs Activation?",
             "type": "main"
           }
         ]
@@ -607,6 +777,24 @@
           {
             "index": 0,
             "node": "Effective Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Needs Activation?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Activate Campaign",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Record",
             "type": "main"
           }
         ]
