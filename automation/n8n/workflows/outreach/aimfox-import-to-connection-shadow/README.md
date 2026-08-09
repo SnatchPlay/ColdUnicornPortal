@@ -19,7 +19,7 @@ one. There is nothing to double.
 
 The reason that survives is different and better: nobody has ever seen how many invites this
 selection produces. Every row in the plan is a LinkedIn connection request to a person, and the
-backlog behind the day window was ~670 of them.
+backlog behind the day window is at least ~670 people — measured 2026-08-09 on the local mirror, which is stale to 2026-07-23 and knows only 3 of the 9 Aimfox clients, so production is more.
 
 ## Flow
 
@@ -54,8 +54,15 @@ Defects 2 and 4 are branch L's sheet-reading quirks and simply do not exist in a
 
 `Input` defaults to yesterday, UTC — the same intent as branch L's `$now.minus({days:1})`. Widening
 it to "every lead with a LinkedIn URL not yet invited" is a **business decision, not a port**: on
-2026-08-09 that set was ~670 people, and the flow would send all of them at once. Whether to catch
+that set is at least ~670 people — measured 2026-08-09 on the local mirror, which is stale to 2026-07-23 and knows only 3 of the 9 Aimfox clients, so production is more, and the flow
+would send all of them at once. Whether to catch
 up on the cohort branch L never sent, and at what rate, is open.
+
+What 670 is **not** is a day's worth. On the same mirror it spreads across eight months —
+17 / 143 / 90 / 89 / 135 / 53 / 59 / 84 from 2025-12 to 2026-07 — over three clients (Runmageddon
+306, ColdUnicorn PL 238, Bent Iron PL 126). That is roughly three leads a day, accumulating since
+December because nothing ever sent them. A day window selects the three; removing it selects the
+eight months.
 
 `Read Leads` accepts `since`/`until` overrides so a specific day can be measured without editing the
 workflow.
