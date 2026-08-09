@@ -5,16 +5,24 @@
   "description": "Body of POST /webhook/workspace-setup-bison, and the item passed to the executeWorkflowTrigger. Sent by the orm-gateway `requestWorkspaceSetup` action. Identical in shape to the Aimfox input except that workspace_id is a numeric string, not a UUID — the gateway must not assume one id format for both sequencers. The gateway never forwards a vendor credential: the master key lives only as an n8n credential (process doc, invariant 7).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["client_id", "dry_run"],
+  "required": [
+    "dry_run"
+  ],
   "properties": {
     "client_id": {
-      "description": "public.clients.id. The workflow resolves the client name from it; the caller never supplies the name, so a renamed client cannot silently target a different workspace.",
-      "type": "string",
+      "description": "public.clients.id. The workflow resolves the client name from it; the caller never supplies the name, so a renamed client cannot silently target a different workspace. **null lists instead of provisioning**: with no client id the run stops at `Needs Selection` and returns `state: \"workspace_list\"` with the vendor's unclaimed workspaces. That branch has no edge to `Record`, so a list request cannot write anything.",
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     },
     "workspace_id": {
       "description": "Bison workspace id — an integer the platform renders as a string ('73', '125'), NOT a UUID. When present it wins outright and no name search happens; this is how an operator answers a `needs_selection`. The old canvas had '13' — the Testing workspace — hardcoded into every URL, which is why it could serve exactly one client.",
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "pattern": "^[0-9]+$"
     },
     "dry_run": {
@@ -23,7 +31,10 @@
     },
     "requested_by": {
       "description": "users.id of the internal user who pressed the button, or null when the run was triggered by client creation. Recorded in integration_sync_runs.metadata for audit — provisioning writes into a client's sending system, so who asked is part of the record.",
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     }
   }

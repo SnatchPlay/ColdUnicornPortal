@@ -885,7 +885,7 @@ const WORKSPACE_SETUP_TIMEOUT_MS = 45_000;
 
 async function requestWorkspaceSetup(
   tx: any,
-  payload: { clientId: string; sequencerKey: string; workspaceId: string | null; dryRun: boolean },
+  payload: { clientId: string | null; sequencerKey: string; workspaceId: string | null; dryRun: boolean },
   requestedBy: string | null,
 ): Promise<Record<string, unknown>> {
   const url = WORKSPACE_SETUP_URLS[payload.sequencerKey];
@@ -904,14 +904,34 @@ async function requestWorkspaceSetup(
     );
   }
 
-  // Authorisation is the pre-flight read, not a second rule. RLS already scopes `clients` to
-  // can_manage_client, so a caller who cannot see the row gets zero rows here and never reaches the
-  // network. This is ADR-0018 §3 and it is deliberately not new code.
-  const allowed = await rawQuery<{ id: string }>(
-    tx,
-    sql`SELECT id FROM public.clients WHERE id = ${payload.clientId}::uuid`,
-  );
-  if (!allowed[0]) fail(403, "No such client, or you may not manage it.");
+  if (payload.clientId === null) {
+    // Listing mode: the New client form needs the vendor's unclaimed workspaces before the client
+    // row exists, so there is no client to authorise against and the pre-flight below cannot run.
+    // The list is agency-internal (other clients' vendor workspace names), so the gate is the
+    // caller's role instead. `private.current_app_role()` is unusable here — `authenticated` has no
+    // USAGE on the private schema outside an RLS predicate and it throws 42501 — so read the role
+    // the same way the leads projection does, via a self-lookup that RLS already limits to the
+    // caller's own row. The workflow refuses to write in this mode regardless: with no client_id
+    // it terminates at `Needs Selection`, which has no edge to `Record`.
+    const rows = await rawQuery<{ role: string | null }>(
+      tx,
+      sql`SELECT u.role FROM public.users u
+           WHERE u.id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid`,
+    );
+    const role = rows[0]?.role ?? null;
+    if (role === null || role === "client") {
+      fail(403, "Listing workspaces is internal-only.");
+    }
+  } else {
+    // Authorisation is the pre-flight read, not a second rule. RLS already scopes `clients` to
+    // can_manage_client, so a caller who cannot see the row gets zero rows here and never reaches
+    // the network. This is ADR-0018 §3 and it is deliberately not new code.
+    const allowed = await rawQuery<{ id: string }>(
+      tx,
+      sql`SELECT id FROM public.clients WHERE id = ${payload.clientId}::uuid`,
+    );
+    if (!allowed[0]) fail(403, "No such client, or you may not manage it.");
+  }
 
   const body = {
     client_id: payload.clientId,
@@ -3339,7 +3359,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     return await requestWorkspaceSetup(
       tx,
       {
-        clientId: payload.clientId,
+        clientId: payload.clientId ?? null,
         sequencerKey: payload.sequencerKey,
         workspaceId: payload.workspaceId ?? null,
         dryRun: payload.dryRun,

@@ -705,7 +705,8 @@ export interface Repository {
    * `false` creates what is missing in the client's sending system. Not retried — see below.
    */
   requestWorkspaceSetup(input: {
-    clientId: string;
+    /** `null` lists the vendor's unclaimed workspaces instead of provisioning a client. */
+    clientId: string | null;
     sequencerKey: "emailbison" | "aimfox";
     workspaceId?: string | null;
     dryRun: boolean;

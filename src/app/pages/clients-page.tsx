@@ -81,13 +81,115 @@ interface CreateClientDraft {
   name: string;
   managerId: string;
   status: ClientStatus | "";
-  // Saved to client_sequencers, not clients (ADR-0012). Only the workspace id: API keys are
-  // obtained by provisioning, not typed here — see the form.
-  externalWorkspaceId: string;
+  // Saved to client_sequencers, not clients (ADR-0012). Chosen from the vendor's own list, never
+  // typed: API keys and workspace ids are what provisioning exists to obtain.
+  workspaces: { emailbison: WorkspaceChoice | null; aimfox: WorkspaceChoice | null };
   kpiLeads: number | null;
   kpiMeetings: number | null;
   contractedAmount: number | null;
   contractDueDate: string;
+}
+
+
+type SequencerKey = "emailbison" | "aimfox";
+interface WorkspaceChoice {
+  workspace_id: string;
+  name: string | null;
+}
+
+const SEQUENCER_TITLES: Record<SequencerKey, string> = { emailbison: "EmailBison", aimfox: "Aimfox" };
+
+/**
+ * Pick the client's workspace out of the vendor's own list, before the client row exists.
+ *
+ * The list is fetched on demand rather than with the sheet: it is two live vendor round trips per
+ * sequencer, and most of the time whoever opens this form is not going to need either. Only
+ * workspaces no other client has claimed come back — the filtering is server-side, in the same node
+ * that answers `needs_selection`.
+ *
+ * Typing an id was the alternative and it is the worse one. Provisioning resolves by an exact name
+ * match, which held for 4 of 9 clients when measured, so a hand-typed id is both the common path and
+ * the one nobody can verify at the keyboard.
+ */
+function WorkspacePicker({
+  sequencerKey,
+  chosen,
+  onChoose,
+}: {
+  sequencerKey: SequencerKey;
+  chosen: WorkspaceChoice | null;
+  onChoose: (choice: WorkspaceChoice | null) => void;
+}) {
+  const [options, setOptions] = useState<WorkspaceChoice[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await repository.requestWorkspaceSetup({
+        clientId: null,
+        sequencerKey,
+        dryRun: true,
+      });
+      setOptions(result.candidates ?? []);
+    } catch (reason) {
+      toast.error(
+        reason instanceof Error ? reason.message : `Could not list ${SEQUENCER_TITLES[sequencerKey]} workspaces.`,
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-white">{SEQUENCER_TITLES[sequencerKey]}</span>
+        {chosen ? (
+          <button
+            type="button"
+            onClick={() => onChoose(null)}
+            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            Clear
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void load()}
+            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+          >
+            {loading ? "Loading…" : options ? "Reload" : "Choose"}
+          </button>
+        )}
+      </div>
+
+      {chosen ? (
+        <p className="text-[11px] text-emerald-200">{chosen.name ?? chosen.workspace_id}</p>
+      ) : options ? (
+        options.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {options.map((option) => (
+              <button
+                key={option.workspace_id}
+                type="button"
+                onClick={() => onChoose(option)}
+                title={`Workspace ${option.workspace_id}`}
+                className="rounded-full border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/20"
+              >
+                {option.name ?? option.workspace_id}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-white/40">
+            Every workspace at this vendor already belongs to a client.
+          </p>
+        )
+      ) : null}
+    </div>
+  );
 }
 
 function matchesSatisfactionFilter(filter: SatisfactionFilter, value: SatisfactionLevel | null): boolean {
@@ -297,6 +399,9 @@ function useClientsOverview() {
         // Server also created client_sequencers rows — refresh the shell to pull them
         // (rare op; keeps drawer credentials in sync without hand-building rows).
         if (sequencerCredentials?.length) void load();
+        // Returned, not swallowed: the create sheet provisions the chosen workspace straight after,
+        // and that call needs the id this is the only place to learn it from.
+        return created;
       } catch (reason) {
         const msg = mapClientsError(reason);
         toast.error(msg);
@@ -467,7 +572,9 @@ interface CreateClientSheetProps {
   onCreateClient: (
     input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
     sequencerCredentials?: SequencerCredentialInput[],
-  ) => Promise<void>;
+  ) => Promise<ClientRecord>;
+  /** Pull the page again once provisioning has written setup_state for the new client. */
+  onRefresh: () => void;
   defaultManagerId: string;
 }
 
@@ -477,6 +584,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
   managerUsers,
   canEditAssignments,
   onCreateClient,
+  onRefresh,
   defaultManagerId,
 }: CreateClientSheetProps) {
   useDevRenderCount("CreateClientSheet", () => `open=${open}`);
@@ -500,7 +608,7 @@ const CreateClientSheet = memo(function CreateClientSheet({
         name: "",
         managerId: defaultManagerId,
         status: "Active",
-        externalWorkspaceId: "",
+        workspaces: { emailbison: null, aimfox: null },
         kpiLeads: null,
         kpiMeetings: null,
         contractedAmount: null,
@@ -517,16 +625,18 @@ const CreateClientSheet = memo(function CreateClientSheet({
     if (!draft || !draft.name.trim() || !draft.status) return;
     setIsSubmitting(true);
     try {
-      // Sequencer credentials become client_sequencers rows server-side (ADR-0012). Only a known
-      // workspace id creates a row here; a client with no row at all is a legitimate starting
-      // state, and `Resolve Client` in both workflows left-joins the connector precisely so
-      // provisioning can run before one exists.
-      const sequencerCredentials: SequencerCredentialInput[] = [];
-      const workspaceId = draft.externalWorkspaceId.trim() || null;
-      if (workspaceId !== null) {
-        sequencerCredentials.push({ sequencer_key: "emailbison", api_key: null, external_workspace_id: workspaceId });
-      }
-      await onCreateClient(
+      // Sequencer credentials become client_sequencers rows server-side (ADR-0012). A client with
+      // no row at all is a legitimate starting state — `Resolve Client` left-joins the connector in
+      // both workflows precisely so provisioning can run before one exists.
+      const chosen = (["emailbison", "aimfox"] as const)
+        .map((key) => ({ key, choice: draft.workspaces[key] }))
+        .filter((entry): entry is { key: SequencerKey; choice: WorkspaceChoice } => entry.choice !== null);
+      const sequencerCredentials: SequencerCredentialInput[] = chosen.map(({ key, choice }) => ({
+        sequencer_key: key,
+        api_key: null,
+        external_workspace_id: choice.workspace_id,
+      }));
+      const created = await onCreateClient(
         {
           name: draft.name.trim(),
           manager_id: draft.managerId || null,
@@ -550,6 +660,36 @@ const CreateClientSheet = memo(function CreateClientSheet({
         },
         sequencerCredentials.length > 0 ? sequencerCredentials : undefined,
       );
+
+      // Provision each chosen workspace for real. This is the point of choosing one here: the
+      // manager should not have to open the client afterwards to finish the job. Sequential rather
+      // than parallel — each run is up to eight vendor calls behind one 45s gateway budget, and two
+      // at once is how you collect a pair of `unknown`s instead of one answer.
+      for (const { key, choice } of chosen) {
+        try {
+          const result = await repository.requestWorkspaceSetup({
+            clientId: created.id,
+            sequencerKey: key,
+            workspaceId: choice.workspace_id,
+            dryRun: false,
+          });
+          if (result.state === "configured") {
+            toast.success(`${SEQUENCER_TITLES[key]}: configured`);
+          } else {
+            // Never a silent partial. The client exists either way, so say what is left undone
+            // rather than let a green "created" imply the workspace is ready.
+            toast.warning(`${SEQUENCER_TITLES[key]}: ${result.state.replace(/_/g, " ")}`);
+          }
+        } catch (reason) {
+          // The client was created; only provisioning failed. Say exactly that — the operator's
+          // next move is the Set up button in the drawer, not creating the client again.
+          toast.error(
+            `${SEQUENCER_TITLES[key]}: ${reason instanceof Error ? reason.message : "provisioning failed"}. ` +
+              `The client was created — run Set up from its card.`,
+          );
+        }
+      }
+      if (chosen.length) onRefresh();
       onOpenChange(false);
     } catch {
       // error shown via toast from useClientsOverview
@@ -627,36 +767,26 @@ const CreateClientSheet = memo(function CreateClientSheet({
                 </SelectContent>
               </Select>
             </label>
-            {/* API keys are deliberately gone from this form. `bison-workspace-setup` mints a
-                token and stores it; `aimfox-workspace-setup` re-reads the vendor's or mints one.
-                Asking a human to paste what the workflow obtains is the manual flow those
-                workflows replaced — and a key pasted here was rendered in a plain text input,
-                unmasked, unlike everywhere else in the portal. Both keys stay editable in the
-                client's Credentials & IDs card for the day one has to be set by hand. */}
-            <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                EmailBison workspace ID
-              </span>
-              <input
-                type="text"
-                value={draft.externalWorkspaceId}
-                onChange={(e) => setDraft((d) => (d ? { ...d, externalWorkspaceId: e.target.value } : d))}
-                placeholder="Optional — e.g. 12345"
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+            {/* No keys and no id to type. Provisioning obtains both; all a human has that it
+                cannot derive is which of the vendor's workspaces is this client, and only when the
+                names differ — an exact-name match held for 4 of 9 clients when measured. */}
+            <div className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workspaces</span>
+              <WorkspacePicker
+                sequencerKey="emailbison"
+                chosen={draft.workspaces.emailbison}
+                onChoose={(choice) =>
+                  setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, emailbison: choice } } : d))
+                }
               />
-              {/* Worth one line, because it is the difference between provisioning resolving the
-                  workspace and dropping the client into needs_selection for a human to answer. */}
-              <span className="block text-[11px] leading-relaxed text-white/40">
-                Only if the workspace already exists and is not named exactly like the client.
-                Provisioning matches on an exact name, which held for 4 of 9 clients when measured.
-              </span>
-            </label>
-            <p className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] leading-relaxed text-white/50">
-              API keys are not set here. Once the client exists, open its{" "}
-              <span className="text-white/80">Credentials &amp; IDs</span> card and press{" "}
-              <span className="text-white/80">Set up</span> — provisioning finds the workspace,
-              obtains the key and creates whatever is missing in the vendor.
-            </p>
+              <WorkspacePicker
+                sequencerKey="aimfox"
+                chosen={draft.workspaces.aimfox}
+                onChoose={(choice) =>
+                  setDraft((d) => (d ? { ...d, workspaces: { ...d.workspaces, aimfox: choice } } : d))
+                }
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>
@@ -734,7 +864,9 @@ interface CreateClientSheetHostProps {
   onCreateClient: (
     input: Omit<ClientRecord, "id" | "created_at" | "updated_at">,
     sequencerCredentials?: SequencerCredentialInput[],
-  ) => Promise<void>;
+  ) => Promise<ClientRecord>;
+  /** Pull the page again once provisioning has written setup_state for the new client. */
+  onRefresh: () => void;
   defaultManagerId: string;
 }
 
@@ -742,6 +874,7 @@ const CreateClientSheetHost = memo(function CreateClientSheetHost({
   managerUsers,
   canEditAssignments,
   onCreateClient,
+  onRefresh,
   defaultManagerId,
 }: CreateClientSheetHostProps) {
   useDevRenderCount("CreateClientSheetHost");
@@ -765,6 +898,7 @@ const CreateClientSheetHost = memo(function CreateClientSheetHost({
           managerUsers={managerUsers}
           canEditAssignments={canEditAssignments}
           onCreateClient={onCreateClient}
+          onRefresh={onRefresh}
           defaultManagerId={defaultManagerId}
         />
       </DevProfiler>
@@ -1345,6 +1479,7 @@ export function ClientsPage() {
       managerUsers={managerUsers}
       canEditAssignments={canEditAssignments}
       onCreateClient={handleCreateClientStable}
+      onRefresh={refresh}
       defaultManagerId={defaultManagerId}
     />
   );

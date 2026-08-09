@@ -59,6 +59,7 @@ If you add a reusable building block, add it to this file in the same change.
 | [`app-shell.tsx`](../src/app/components/app-shell.tsx) | `AppShell` — sidebar, `NAV_BY_ROLE`, impersonation controls, gradient canvas, contrast toggle |
 | [`app-error-boundary.tsx`](../src/app/components/app-error-boundary.tsx) | `AppErrorBoundary` — already wraps the routed surface; do not duplicate |
 | [`pages/clients-page/mega-table.tsx`](../src/app/pages/clients-page/mega-table.tsx) | The clients mega-table (its own subsystem) |
+| [`pages/clients-page.tsx`](../src/app/pages/clients-page.tsx) | `WorkspacePicker` — loads a vendor's unclaimed workspaces on demand (`requestWorkspaceSetup` with `clientId: null`) and lets the operator pick one before the client exists. Used by the New client sheet |
 | [`pages/clients-page/sequencer-connections.tsx`](../src/app/pages/clients-page/sequencer-connections.tsx) | `SequencerConnections` — the whole **Credentials & IDs** drawer section: per-sequencer keys, the provisioning verdict and the Check / Set up buttons behind a per-card disclosure ([ADR-0018](adr/0018-gateway-outbound-automation-trigger.md)). Owns `SecretInput` and `MaskedField`. Reads `client_sequencers.setup_state`, never writes it |
 
 ### shadcn / Radix — [`components/ui/`](../src/app/components/ui/)
