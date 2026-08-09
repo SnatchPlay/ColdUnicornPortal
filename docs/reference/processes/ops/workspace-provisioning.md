@@ -183,6 +183,16 @@ workspace usually does not exist at the vendor yet at the moment the portal row 
 automatic run would report `needs_selection` and teach operators to ignore the verdict. Someone
 presses the button once the workspace exists.
 
+The **New client** form therefore asks for no API keys at all. `bison-workspace-setup` mints a token
+and stores it; `aimfox-workspace-setup` re-reads the vendor's or mints one — asking a human to paste
+what the workflow obtains is the manual flow these workflows replaced. It keeps one optional field,
+the EmailBison workspace id, because that is the one fact a human may hold that the workflows
+cannot derive: resolution matches on an **exact** name, which held for only 4 of 9 clients when
+measured. A client created with no connector row at all is a supported starting state — `Resolve
+Client` left-joins the connector in both workflows, verified by a live dry run against
+Fab.Marketingu (no aimfox row) on 2026-08-09, which resolved the client and returned
+`needs_selection` rather than `client_not_found`.
+
 There is **no scheduled drift check**. A workspace's state is only re-read when someone asks. This
 is a deliberate scope decision: it means a label deleted at the vendor stays invisible until the
 next run, and that is accepted.
@@ -242,6 +252,15 @@ expected outcome rather than a failure.
 returns the candidate list. The list is filtered: a workspace whose id already sits in
 `client_sequencers` for any client is **never offered**. The manager picks; provisioning is
 re-invoked with an explicit workspace id.
+
+In the portal each candidate is a **button** in the card, not a name to read and retype: pressing
+one re-runs as a check with that `workspace_id`. The card then **holds that pick** for as long as it
+is open, and every later run from it — including **Set up** — carries the same id. That is not a
+convenience. For a client that already has a connector row, `Record` persists the id on the check
+itself, because its `ON CONFLICT` branch coalesces a null `external_workspace_id` and `dry_run`
+protects the vendor rather than our database. For a **new** client there is no row, and `Record`'s
+`INSERT … SELECT … WHERE` correctly refuses to create one on a check — so nothing stores the pick,
+and a Set up sent without it would resolve from scratch and land back in `needs_selection`.
 
 **Client has no workspace at the vendor yet.** Legitimate at creation time — a workspace is often
 created days later. The state is `needs_selection` with an empty candidate list, and the manager
@@ -320,7 +339,7 @@ Three states have nowhere to be stored, and that is deliberate:
 |---|---|
 | never checked | the row exists, `setup_state = '{}'`, `setup_checked_at is null` |
 | no connector at all | **no row** — the portal renders this as `missing`, never as `unknown` |
-| `needs_selection` before any row exists | not persisted; it is the synchronous answer to the operator, who then re-runs with an explicit `workspace_id` |
+| `needs_selection` before any row exists | not persisted — nothing to write to. It is the synchronous answer to the operator, whose pick the card holds and replays on the next run (see *Name does not resolve*) |
 
 ## RPC / API contracts
 

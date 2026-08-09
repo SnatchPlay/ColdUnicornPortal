@@ -81,10 +81,9 @@ interface CreateClientDraft {
   name: string;
   managerId: string;
   status: ClientStatus | "";
-  // Sequencer credentials — saved to client_sequencers, not clients (ADR-0012).
+  // Saved to client_sequencers, not clients (ADR-0012). Only the workspace id: API keys are
+  // obtained by provisioning, not typed here — see the form.
   externalWorkspaceId: string;
-  externalApiKey: string;
-  linkedinApiKey: string;
   kpiLeads: number | null;
   kpiMeetings: number | null;
   contractedAmount: number | null;
@@ -502,8 +501,6 @@ const CreateClientSheet = memo(function CreateClientSheet({
         managerId: defaultManagerId,
         status: "Active",
         externalWorkspaceId: "",
-        externalApiKey: "",
-        linkedinApiKey: "",
         kpiLeads: null,
         kpiMeetings: null,
         contractedAmount: null,
@@ -520,16 +517,14 @@ const CreateClientSheet = memo(function CreateClientSheet({
     if (!draft || !draft.name.trim() || !draft.status) return;
     setIsSubmitting(true);
     try {
-      // Sequencer credentials become client_sequencers rows server-side (ADR-0012).
+      // Sequencer credentials become client_sequencers rows server-side (ADR-0012). Only a known
+      // workspace id creates a row here; a client with no row at all is a legitimate starting
+      // state, and `Resolve Client` in both workflows left-joins the connector precisely so
+      // provisioning can run before one exists.
       const sequencerCredentials: SequencerCredentialInput[] = [];
       const workspaceId = draft.externalWorkspaceId.trim() || null;
-      const emailbisonKey = draft.externalApiKey.trim() || null;
-      if (workspaceId !== null || emailbisonKey !== null) {
-        sequencerCredentials.push({ sequencer_key: "emailbison", api_key: emailbisonKey, external_workspace_id: workspaceId });
-      }
-      const aimfoxKey = draft.linkedinApiKey.trim() || null;
-      if (aimfoxKey !== null) {
-        sequencerCredentials.push({ sequencer_key: "aimfox", api_key: aimfoxKey });
+      if (workspaceId !== null) {
+        sequencerCredentials.push({ sequencer_key: "emailbison", api_key: null, external_workspace_id: workspaceId });
       }
       await onCreateClient(
         {
@@ -632,34 +627,36 @@ const CreateClientSheet = memo(function CreateClientSheet({
                 </SelectContent>
               </Select>
             </label>
+            {/* API keys are deliberately gone from this form. `bison-workspace-setup` mints a
+                token and stores it; `aimfox-workspace-setup` re-reads the vendor's or mints one.
+                Asking a human to paste what the workflow obtains is the manual flow those
+                workflows replaced — and a key pasted here was rendered in a plain text input,
+                unmasked, unlike everywhere else in the portal. Both keys stay editable in the
+                client's Credentials & IDs card for the day one has to be set by hand. */}
             <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">EmailBison workspace ID</span>
+              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                EmailBison workspace ID
+              </span>
               <input
                 type="text"
                 value={draft.externalWorkspaceId}
                 onChange={(e) => setDraft((d) => (d ? { ...d, externalWorkspaceId: e.target.value } : d))}
-                placeholder="EmailBison workspace ID"
+                placeholder="Optional — e.g. 12345"
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
               />
+              {/* Worth one line, because it is the difference between provisioning resolving the
+                  workspace and dropping the client into needs_selection for a human to answer. */}
+              <span className="block text-[11px] leading-relaxed text-white/40">
+                Only if the workspace already exists and is not named exactly like the client.
+                Provisioning matches on an exact name, which held for 4 of 9 clients when measured.
+              </span>
             </label>
-            <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">EmailBison API key</span>
-              <input
-                value={draft.externalApiKey}
-                onChange={(e) => setDraft((d) => (d ? { ...d, externalApiKey: e.target.value } : d))}
-                placeholder="EmailBison API key"
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
-              />
-            </label>
-            <label className="block space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Aimfox API key</span>
-              <input
-                value={draft.linkedinApiKey}
-                onChange={(e) => setDraft((d) => (d ? { ...d, linkedinApiKey: e.target.value } : d))}
-                placeholder="Paste Aimfox key…"
-                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-neutral-500"
-              />
-            </label>
+            <p className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] leading-relaxed text-white/50">
+              API keys are not set here. Once the client exists, open its{" "}
+              <span className="text-white/80">Credentials &amp; IDs</span> card and press{" "}
+              <span className="text-white/80">Set up</span> — provisioning finds the workspace,
+              obtains the key and creates whatever is missing in the vendor.
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">KPI leads</span>

@@ -43,6 +43,8 @@ export interface ClientDraft {
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
+  /** Aimfox workspace id. Editable so a `needs_selection` verdict can be answered from the UI. */
+  aimfoxWorkspaceId: string;
   // prospects & setup
   prospectsSigned: number;
   prospectsAdded: number;
@@ -150,6 +152,7 @@ export function toClientDraft(client: ClientRecord, creds: ClientSequencerCreds)
     externalWorkspaceId: creds.emailbison?.external_workspace_id ?? "",
     externalApiKey: creds.emailbison?.api_key ?? "",
     linkedinApiKey: creds.aimfox?.api_key ?? "",
+    aimfoxWorkspaceId: creds.aimfox?.external_workspace_id ?? "",
     prospectsSigned: client.prospects_signed,
     prospectsAdded: client.prospects_added,
     notes: client.notes ?? "",
@@ -243,10 +246,14 @@ export function buildSequencerPatches(
   if ((creds.emailbison?.api_key ?? null) !== nextApiKey) emailbisonPatch.api_key = nextApiKey;
   if (Object.keys(emailbisonPatch).length > 0) patches.push({ sequencerKey: "emailbison", patch: emailbisonPatch });
 
+  const aimfoxPatch: { api_key?: string | null; external_workspace_id?: string | null } = {};
   const nextAimfoxKey = draft.linkedinApiKey.trim() || null;
-  if ((creds.aimfox?.api_key ?? null) !== nextAimfoxKey) {
-    patches.push({ sequencerKey: "aimfox", patch: { api_key: nextAimfoxKey } });
+  if ((creds.aimfox?.api_key ?? null) !== nextAimfoxKey) aimfoxPatch.api_key = nextAimfoxKey;
+  const nextAimfoxWorkspace = draft.aimfoxWorkspaceId.trim() || null;
+  if ((creds.aimfox?.external_workspace_id ?? null) !== nextAimfoxWorkspace) {
+    aimfoxPatch.external_workspace_id = nextAimfoxWorkspace;
   }
+  if (Object.keys(aimfoxPatch).length > 0) patches.push({ sequencerKey: "aimfox", patch: aimfoxPatch });
 
   return patches;
 }
@@ -408,6 +415,7 @@ export function ClientDrawer({
             externalWorkspaceId={draft.externalWorkspaceId}
             externalApiKey={draft.externalApiKey}
             linkedinApiKey={draft.linkedinApiKey}
+            aimfoxWorkspaceId={draft.aimfoxWorkspaceId}
             onChange={(patch) => setDraft((current) => (current ? { ...current, ...patch } : current))}
           />
 
