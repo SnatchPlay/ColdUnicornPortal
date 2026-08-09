@@ -10,6 +10,8 @@
 //   --add               append nodes that exist in the artifact but not on live
 //   --rewire            replace the outgoing connections of existing nodes
 //   --credentials-from  give an --added node the credential block of a named LIVE node
+//   --create            POST a brand-new workflow from the artifact (no live counterpart yet)
+//   --settings          also push the artifact's `settings` (otherwise settings are never touched)
 //
 // What it does, and deliberately does NOT do:
 //   * It copies ONLY the `parameters` (and typeVersion) of the named nodes from the artifact onto
@@ -31,7 +33,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRegistry, WORKFLOWS_ROOT } from "./lib/registry.mjs";
 import { currentEnvironment } from "./lib/mcp.mjs";
-import { getWorkflow, updateWorkflow, filterSettings } from "./lib/rest.mjs";
+import { getWorkflow, updateWorkflow, createWorkflow, filterSettings } from "./lib/rest.mjs";
 
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -54,6 +56,114 @@ function nodeByName(workflow, name) {
   return (workflow.nodes ?? []).find((n) => n.name === name);
 }
 
+/**
+ * Create a workflow that does not exist yet, from its committed artifact.
+ *
+ * Separate from the surgical path because the guarantee is different. That path proves nothing
+ * outside the named nodes moved; here there is nothing to move — the whole graph is new. What has
+ * to be guaranteed instead is that it lands INACTIVE (a schedule or webhook must be switched on by
+ * a person who knows it is on) and that the registry gets the id it hands back, or the next run
+ * would create a second copy.
+ *
+ * The artifact is credential-sanitised, so a created workflow's nodes come up unauthenticated.
+ * Anything needing a credential has to be attached in the UI, or by a later --credentials-from
+ * deploy, and the caller is told so rather than discovering it in a 401 at runtime.
+ */
+async function createFromArtifact(logicalId, environment, apply, credentialsArg) {
+  const entry = (loadRegistry().workflows ?? []).find((w) => w.id === logicalId);
+  if (!entry) throw new Error(`Logical id "${logicalId}" is not in registry.yaml.`);
+  const existing = entry.environments?.[environment]?.remoteWorkflowId;
+  if (existing) {
+    throw new Error(
+      `registry.yaml already has a ${environment} remoteWorkflowId for "${logicalId}" (${existing}).\n` +
+        `--create would make a second copy; use --nodes/--add/--rewire instead.`,
+    );
+  }
+
+  const artifactPath = join(WORKFLOWS_ROOT, entry.path.replace(/^automation\/n8n\/workflows\//, ""), "workflow.json");
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+
+  // "Target Node=<logical-id>:Donor Node". The donor lives in ANOTHER workflow, because a
+  // brand-new one has no authenticated node to copy from and the artifact is credential-sanitised.
+  // Without this every created workflow would be born unable to run, and the gap would surface as a
+  // 401 at execution time rather than here.
+  for (const pair of (credentialsArg ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const [target, donorSpec] = pair.split("=").map((x) => x?.trim());
+    const [donorWorkflow, donorNode] = (donorSpec ?? "").split(":").map((x) => x?.trim());
+    if (!target || !donorWorkflow || !donorNode) {
+      throw new Error(`--create --credentials-from expects "Node=<logical-id>:Donor Node", got "${pair}".`);
+    }
+    const donorEntry = (loadRegistry().workflows ?? []).find((w) => w.id === donorWorkflow);
+    const donorRemote = donorEntry?.environments?.[environment]?.remoteWorkflowId;
+    if (!donorRemote) throw new Error(`No ${environment} remoteWorkflowId for donor workflow "${donorWorkflow}".`);
+    const donorLive = await getWorkflow(donorRemote);
+    const from = nodeByName(donorLive, donorNode);
+    if (!from?.credentials || !Object.keys(from.credentials).length) {
+      throw new Error(`Donor "${donorWorkflow}:${donorNode}" has no credentials to copy.`);
+    }
+    const to = (artifact.nodes ?? []).find((n) => n.name === target);
+    if (!to) throw new Error(`--credentials-from target "${target}" is not in the artifact.`);
+    if (to.type !== from.type) {
+      throw new Error(`"${target}" is ${to.type} but donor "${donorNode}" is ${from.type}.`);
+    }
+    to.credentials = JSON.parse(JSON.stringify(from.credentials));
+    // Aliases only. The id is data we pass through, never something to print.
+    console.log(`  ${target} ← credentials of ${donorWorkflow}:${donorNode} ` +
+      `(${Object.entries(to.credentials).map(([t, r]) => `${t}:${r?.name}`).join(", ")})`);
+  }
+
+  const credentialled = (artifact.nodes ?? []).filter((n) => n.credentials && Object.keys(n.credentials).length);
+  // `.kept` — filterSettings returns { kept, dropped }, and handing the whole thing to n8n makes it
+  // fall back to defaults for everything, silently. That is how the first created workflow came up
+  // without `executionOrder` or `errorWorkflow`.
+  // `availableInMCP` is not optional for a managed workflow: without it `pnpm n8n:check-drift`
+  // cannot read the graph and the artifact stops being verifiable against the instance (ADR-0016).
+  const { kept, dropped } = filterSettings({ availableInMCP: true, ...(artifact.settings ?? {}) });
+  const payload = {
+    name: artifact.name,
+    nodes: artifact.nodes,
+    connections: artifact.connections,
+    settings: kept,
+  };
+  if (Object.keys(dropped).length) {
+    console.log(`settings    : the API rejects ${Object.keys(dropped).join(", ")} — they fall back to instance defaults`);
+  }
+
+  console.log(`create      : ${logicalId} (${environment})`);
+  console.log(`name        : ${artifact.name}`);
+  console.log(`nodes       : ${artifact.nodes?.length}`);
+  console.log(`active      : false (always — activate deliberately, never as a side effect)`);
+  const needsCreds = (artifact.nodes ?? []).filter(
+    (n) => n.type === "n8n-nodes-base.postgres" && !(n.credentials && Object.keys(n.credentials).length),
+  );
+  console.log(`credentials : ${credentialled.length} node(s) carry one`);
+  if (needsCreds.length) {
+    console.log(`WARNING: ${needsCreds.map((n) => n.name).join(", ")} will be created UNAUTHENTICATED.`);
+    console.log(`         Pass --credentials-from "Node=<logical-id>:Donor Node".`);
+  }
+  console.log("");
+
+  if (!apply) {
+    console.log("DRY RUN — nothing created. Re-run with --apply (and N8N_APPROVED_PRODUCTION_WRITE set).");
+    return;
+  }
+  const approval = process.env.N8N_APPROVED_PRODUCTION_WRITE?.trim();
+  if (!approval) {
+    throw new Error(
+      `Refusing to POST to ${environment}: set N8N_APPROVED_PRODUCTION_WRITE="<what was approved>".`,
+    );
+  }
+  console.log(`[n8n] PRODUCTION WRITE: POST new workflow — approved as "${approval}"`);
+  const created = await createWorkflow(payload);
+  if (created.active) {
+    throw new Error(`Created ${created.id} but it came up ACTIVE — deactivate it now and investigate.`);
+  }
+  console.log("");
+  console.log(`Created ${created.id}, active=${created.active}, ${created.nodes?.length} node(s).`);
+  console.log(`Next: put this id in registry.yaml under ${environment}.remoteWorkflowId, then`);
+  console.log(`\`pnpm n8n:export --id ${logicalId}\` to canonicalise.`);
+}
+
 async function main() {
   const logicalId = arg("id");
   const nodesArg = arg("nodes");
@@ -63,12 +173,24 @@ async function main() {
   const addArg = arg("add");
   const rewireArg = arg("rewire");
   const credentialsArg = arg("credentials-from");
+  const create = process.argv.includes("--create");
   if (!logicalId) throw new Error("Pass --id <logical-id>.");
-  if (!nodesArg && !addArg && !rewireArg) {
+  if (!create && !nodesArg && !addArg && !rewireArg) {
     throw new Error(
-      'Pass --nodes "Node A" (update existing), --add "Node B" (add new nodes) ' +
-        'and/or --rewire "Node C" (replace outgoing connections).',
+      'Pass --nodes "Node A" (update existing), --add "Node B" (add new nodes), ' +
+        '--rewire "Node C" (replace outgoing connections) or --create (POST a brand-new workflow).',
     );
+  }
+  if (create && (nodesArg || addArg || rewireArg)) {
+    throw new Error("--create posts the whole artifact; it does not combine with --nodes/--add/--rewire.");
+  }
+
+  // A brand-new workflow has no live counterpart to diff against, so the surgical path below —
+  // which exists to prove that nothing outside the named nodes moved — has nothing to protect.
+  // It gets its own short path instead of a pile of `if (create)` branches through that one.
+  if (create) {
+    await createFromArtifact(logicalId, environment, apply, credentialsArg);
+    return;
   }
   const nodeNames = (nodesArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const addNames = (addArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -122,6 +244,26 @@ async function main() {
   const rewiredSources = [];
 
   let changed = 0;
+
+  // Settings are otherwise never managed by this tool, so drift in them is invisible: a workflow
+  // created through the API came up without `executionOrder` or `errorWorkflow` and nothing said so.
+  // Opt-in, because a PUT replaces settings wholesale and the API silently drops some keys.
+  if (process.argv.includes("--settings")) {
+    const { kept, dropped } = filterSettings({ availableInMCP: true, ...(artifact.settings ?? {}) });
+    const before = stable(live.settings ?? {});
+    const merged = { ...(live.settings ?? {}), ...kept };
+    if (stable(merged) !== before) {
+      console.log(`~ settings:`);
+      console.log(`    LIVE     ${JSON.stringify(live.settings ?? {})}`);
+      console.log(`    ARTIFACT ${JSON.stringify(merged)}`);
+      live.settings = merged;
+      changed += 1;
+    }
+    if (Object.keys(dropped).length) {
+      console.log(`  (API rejects ${Object.keys(dropped).join(", ")} — instance defaults apply)`);
+    }
+  }
+
   for (const name of nodeNames) {
     const liveNode = nodeByName(live, name);
     const artNode = nodeByName(artifact, name);
@@ -182,18 +324,48 @@ async function main() {
   // Rather than reintroduce a credential id into the repository, copy the block off a LIVE node that
   // already uses the same one. Only aliases are printed; the id is data we pass through, never show.
   for (const { target, donor } of credentialPairs) {
-    if (!addNames.includes(target)) {
-      throw new Error(`--credentials-from target "${target}" is not in --add; existing nodes keep their own credentials.`);
+    // Granting a credential to a node that has none is allowed; swapping one that exists is not.
+    // A node created by --create comes up unauthenticated because the artifact is sanitised, and
+    // refusing to fix that would mean the only route is the UI — outside the repository, which is
+    // the source of truth for automation (ADR-0016).
+    const targetLive = nodeByName(live, target);
+    const targetHasCreds = Boolean(targetLive?.credentials && Object.keys(targetLive.credentials).length);
+    if (!addNames.includes(target) && targetHasCreds) {
+      throw new Error(
+        `--credentials-from target "${target}" already has a credential; this tool never swaps one. ` +
+          `Detach it in n8n first if that is really the intent.`,
+      );
     }
-    const donorNode = nodeByName(live, donor);
-    if (!donorNode) throw new Error(`--credentials-from donor "${donor}" is not on the LIVE workflow.`);
+    if (!addNames.includes(target) && !targetLive) {
+      throw new Error(`--credentials-from target "${target}" is neither in --add nor on the LIVE workflow.`);
+    }
+    // "logical-id:Node" reads the donor from another workflow; a bare name reads it from this one.
+    const [donorWorkflow, donorName] = donor.includes(":")
+      ? donor.split(":").map((x) => x.trim())
+      : [null, donor];
+    let donorGraph = live;
+    if (donorWorkflow) {
+      const de = (loadRegistry().workflows ?? []).find((w) => w.id === donorWorkflow);
+      const dr = de?.environments?.[environment]?.remoteWorkflowId;
+      if (!dr) throw new Error(`No ${environment} remoteWorkflowId for donor workflow "${donorWorkflow}".`);
+      donorGraph = await getWorkflow(dr);
+    }
+    const donorNode = nodeByName(donorGraph, donorName);
+    if (!donorNode) throw new Error(`--credentials-from donor "${donor}" is not on the donor workflow.`);
     if (!donorNode.credentials || !Object.keys(donorNode.credentials).length) {
       throw new Error(`--credentials-from donor "${donor}" has no credentials to copy.`);
     }
     const targetNode = nodeByName(live, target);
+    if (targetNode.type !== donorNode.type) {
+      throw new Error(`"${target}" is ${targetNode.type} but donor "${donor}" is ${donorNode.type}.`);
+    }
     targetNode.credentials = JSON.parse(JSON.stringify(donorNode.credentials));
     const aliases = Object.entries(targetNode.credentials).map(([type, ref]) => `${type}:${ref?.name}`);
     console.log(`  ${target} ← credentials of "${donor}" (${aliases.join(", ")})`);
+    // Granting a credential IS a change. Without this the run exits at "nothing to deploy" whenever
+    // the parameters happen to match, and the node stays unauthenticated while the log says it was
+    // wired — the same shape of lie as a 200 on a PATCH that changed nothing.
+    changed += 1;
   }
 
   // --rewire: replace the outgoing connections of nodes that ALREADY exist on live. --add cannot do

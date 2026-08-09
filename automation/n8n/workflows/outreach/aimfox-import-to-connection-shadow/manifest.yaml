@@ -1,0 +1,94 @@
+schemaVersion: 1
+
+id: aimfox-import-to-connection-shadow
+name: "[SHADOW] Aimfox AutoConnect import · Supabase branch S"
+domain: outreach
+owner: automation
+lifecycle: managed
+
+# Created INACTIVE on 2026-08-09 and run by hand. It sends nothing — there is no HTTP write node in
+# the graph at all — so the only thing activating it changes is how often the measurement is taken.
+status: planned
+criticality: low             # reads only; the one write is its own audit row
+
+businessProcess:
+  - docs/reference/processes/outreach/linkedin-aimfox.md
+
+architectureDecisions:
+  - docs/adr/0012-multi-sequencer-model.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: executeWorkflowTrigger
+    detail: >-
+      By hand while the numbers are being read. A 19:00 schedule matching branch L is the obvious
+      next step and is deliberately not wired yet.
+
+reads:
+  tables:
+    - clients
+    - client_sequencers
+    - sequencers
+    - leads
+  external:
+    - "Aimfox API · GET /api/v2/campaigns — is there an ACTIVE campaign named AutoConnect? Matched across the whole list, never by position"
+
+# Direct table write, no RPC — checked against RPC_OWNED_TABLES in
+# scripts/n8n/lib/business-rules.mjs. The ingestion RPC contract of ADR-0015 covers leads, replies,
+# ooo_followups and sequencer_contacts; integration_sync_runs is none of them and carries no
+# business invariant an RPC would be protecting. Every other workflow that records a run writes it
+# the same way.
+writes:
+  tables:
+    - integration_sync_runs
+  tablesWritten:
+    - integration_sync_runs
+  rpcs: []
+  external: []
+
+# There is no POST node. Not a disabled one, not one behind a flag — the graph has no way to reach
+# the vendor's audience endpoint. That is the whole point of an A1 shadow and it is why this
+# workflow needed no dry_run plumbing.
+
+transition:
+  phase: A1
+  phaseState: shadow
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · CS PDCA + the client's Leads tab"
+  targetStore: "Supabase · leads + client_sequencers"
+  design: docs/reference/processes/outreach/linkedin-aimfox.md
+  notes: >-
+    Branch S of aimfox-import-to-connection. Its own manifest called for exactly this treatment —
+    "build the request, log it, measure agreement, only then send" — on the grounds that a second
+    branch would send a second set of invites to a real person. That grounds no longer holds: branch
+    L was measured on 2026-08-09 importing for 0 of 9 clients, because no workspace has a campaign
+    named AutoConnect. What survives is the reason that matters — nobody has ever seen how many
+    invites this selection produces, and every row is a connection request to a person.
+  reconciliation: >-
+    Compare `would_send` and `per_client` in this workflow's integration_sync_runs rows against
+    branch L's actual POSTs for the same day. Branch L records nothing, so its side has to be read
+    off the n8n execution list until that is fixed.
+  parityEvidence: null
+
+idempotency:
+  key: "n8n_execution_id on the audit row (ON CONFLICT DO NOTHING); the selection itself is a pure read"
+  notes: >-
+    Re-running produces the same plan for the same window and one audit row per execution. When the
+    send limb is added, `leads.linkedin_invitation_sent_at` becomes the real key — it exists, nothing
+    writes it today, and branch L has no local dedup at all (its defect 5).
+
+retryPolicy:
+  notes: >-
+    None needed. Every node is a read except the audit insert, which runs with onError
+    continueRegularOutput so a failed insert still yields a result the caller can read.
+
+cancellation:
+  notes: "Nothing to cancel — a single synchronous pass with no external side effect."
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: null
+
+knownViolations: []
