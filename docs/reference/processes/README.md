@@ -56,7 +56,7 @@ to prevent.
 | [Bison ingestion (campaigns and counters)](outreach/bison-ingestion.md) | outreach | live, Supabase-only — repaired 2026-07-22 after days of silent failure |
 | [LinkedIn outreach (Aimfox)](outreach/linkedin-aimfox.md) | outreach | **phase A on the metrics workflow** (branch S live 2026-07-22); the other four still phase 0 |
 | [Sheets ↔ Supabase reconciliation](outreach/sheets-supabase-reconciliation.md) | outreach | measured **and back-filled** 2026-07-22 — 184 leads (30 Aimfox) + 117 Aimfox client-days |
-| [Workspace provisioning (Aimfox and Bison)](ops/workspace-provisioning.md) | ops | **contract accepted, nothing implements it yet** — the current canvas contradicts invariants 3, 4 and 5 |
+| [Workspace provisioning (Aimfox and Bison)](ops/workspace-provisioning.md) | ops | **live** since 2026-08-09 — both workflows active, portal surfaces in the client drawer; Aimfox idempotency proven by runs `70489`/`70490`, the Bison write path still has had nothing to create |
 
 ## Traceability
 
