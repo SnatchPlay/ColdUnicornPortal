@@ -289,13 +289,29 @@ function SequencerCard({
   // the workflow, but this component is fed by a payload the page loaded earlier — without this the
   // card would still show the previous verdict after a successful run.
   const [fresh, setFresh] = useState<WorkspaceSetupResult | null>(null);
+  // The workspace the operator picked out of a `needs_selection` list, held so every later run from
+  // this card carries it. See `run` for why forgetting it strands a brand-new client.
+  const [picked, setPicked] = useState<string | null>(null);
 
   // Never collapse over an unsaved edit: the Save bar at the top of the drawer would then be armed
   // by a field the operator cannot see. While dirty the disclosure is not offered at all rather
   // than offered and ignored — a control that does nothing is worse than no control.
   const expanded = open || dirty;
 
-  const run = async (mode: "check" | "apply") => {
+  /**
+   * `workspaceId` answers a previous `needs_selection` — the operator naming which of the vendor's
+   * workspaces is this client's. Picking one runs as a check: naming a workspace is a claim about
+   * our own records and should not also write into the vendor in the same click.
+   *
+   * The pick has to be remembered, and that is not a convenience. For a client that already has a
+   * connector row, `Record` persists the id on the dry run itself (its ON CONFLICT branch coalesces
+   * a null `external_workspace_id`; dry_run protects the vendor, not our database). For a *new*
+   * client there is no row yet, and `Record`'s `INSERT … SELECT … WHERE` refuses to create one on a
+   * dry run — correctly, since creating it would make the client connected. So nothing is stored,
+   * and a subsequent Set up sent without the id would resolve from scratch and land right back in
+   * `needs_selection`. Holding the pick for the life of the card is what closes that loop.
+   */
+  const run = async (mode: "check" | "apply", workspaceId?: string) => {
     if (mode === "apply") {
       const confirmed = window.confirm(
         `Provision ${label} for this client?\n\nThis creates whatever is missing — webhooks, ` +
@@ -304,11 +320,14 @@ function SequencerCard({
       );
       if (!confirmed) return;
     }
+    const effectiveWorkspaceId = workspaceId ?? picked;
+    if (workspaceId) setPicked(workspaceId);
     setBusy(mode);
     try {
       const result = await repository.requestWorkspaceSetup({
         clientId,
         sequencerKey,
+        workspaceId: effectiveWorkspaceId,
         dryRun: mode === "check",
       });
       setFresh(result);
@@ -389,15 +408,6 @@ function SequencerCard({
         <div className="space-y-3 border-t border-white/10 pt-3">
           {fields}
 
-          {/* Labelled "stored" because it comes from the connector row, not from the run. Without
-              that word a `needs_selection` card reads as a contradiction — "workspace not chosen"
-              directly above a workspace id. */}
-          {row?.external_workspace_id && sequencerKey !== "emailbison" ? (
-            <p className="break-all font-mono text-[11px] text-white/40">
-              stored workspace {row.external_workspace_id}
-            </p>
-          ) : null}
-
           {/* A row of identical "not checked" pills carries no information; the state pill already
               says the run never got that far. Show the steps only when at least one was decided. */}
           {steps.some(([, step]) => step.outcome !== "skipped") ? (
@@ -418,11 +428,11 @@ function SequencerCard({
           ) : null}
 
           <RunButtons busy={busy} onRun={run} />
-          {fresh ? <RunNotes result={fresh} /> : null}
+          {fresh ? <RunNotes result={fresh} busy={busy !== null} onPick={(id) => void run("check", id)} /> : null}
         </div>
       ) : (
         // A finished run must not vanish because the card was collapsed afterwards.
-        fresh && <RunNotes result={fresh} />
+        fresh && <RunNotes result={fresh} busy={busy !== null} onPick={(id) => void run("check", id)} />
       )}
     </div>
   );
@@ -464,7 +474,15 @@ function RunButtons({
  * already adopted it, and printing "Just now: configured" under a header reading "Never checked"
  * is how this component last managed to contradict itself on screen.
  */
-function RunNotes({ result }: { result: WorkspaceSetupResult }) {
+function RunNotes({
+  result,
+  busy,
+  onPick,
+}: {
+  result: WorkspaceSetupResult;
+  busy: boolean;
+  onPick: (workspaceId: string) => void;
+}) {
   const created = Object.values(result.steps ?? {}).flatMap((step) => step.created ?? []);
   const unknown = result.state === "unknown";
   if (!unknown && !result.reason && !created.length && !result.candidates?.length && result.recorded !== false) {
@@ -483,13 +501,33 @@ function RunNotes({ result }: { result: WorkspaceSetupResult }) {
       {created.length ? (
         <p className="text-[11px] text-sky-200">Created: {created.join(", ")}</p>
       ) : null}
-      {/* needs_selection is the one state the operator has to answer. Listing the candidates is the
-          answer sheet; picking one is a re-run with an explicit workspace_id, which the UI does not
-          do yet — so name them rather than pretend the state is actionable here. */}
+      {/* needs_selection is the one state only a human can answer, and for a new client it is the
+          normal one, not an edge case: provisioning matches on an exact name, and a live run on
+          2026-08-09 put Fab.Marketingu here with three candidates. So the candidates are the
+          control, not a list to read and retype elsewhere — the `workspaceId` leg of the payload
+          has existed since ADR-0018 and had nothing wired to it.
+          Already filtered of workspaces claimed by other clients, server-side. */}
       {result.candidates?.length ? (
-        <p className="text-[11px] text-white/50">
-          Unclaimed workspaces: {result.candidates.map((c) => c.name ?? c.workspace_id).join(", ")}
-        </p>
+        <div className="space-y-1.5">
+          <p className="text-[11px] text-white/50">
+            Which of these is this client? Picking one claims it and re-checks — it writes nothing
+            into the vendor.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {result.candidates.map((candidate) => (
+              <button
+                key={candidate.workspace_id}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(candidate.workspace_id)}
+                title={`Workspace ${candidate.workspace_id}`}
+                className="rounded-full border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {candidate.name ?? candidate.workspace_id}
+              </button>
+            ))}
+          </div>
+        </div>
       ) : null}
       {/* The verdict above is this run's, but nothing stored it. Say what that costs, because the
           card looks identical to a recorded one until the page is reloaded and the old value
@@ -511,6 +549,7 @@ export function SequencerConnections({
   externalWorkspaceId,
   externalApiKey,
   linkedinApiKey,
+  aimfoxWorkspaceId,
   onChange,
 }: {
   clientId: string;
@@ -519,10 +558,12 @@ export function SequencerConnections({
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
+  aimfoxWorkspaceId: string;
   onChange: (patch: {
     externalWorkspaceId?: string;
     externalApiKey?: string;
     linkedinApiKey?: string;
+    aimfoxWorkspaceId?: string;
   }) => void;
 }) {
   // Compared against the connector rows the draft was seeded from, so this is exactly the same
@@ -530,7 +571,9 @@ export function SequencerConnections({
   const bisonDirty =
     externalWorkspaceId !== (creds.emailbison?.external_workspace_id ?? "") ||
     externalApiKey !== (creds.emailbison?.api_key ?? "");
-  const aimfoxDirty = linkedinApiKey !== (creds.aimfox?.api_key ?? "");
+  const aimfoxDirty =
+    linkedinApiKey !== (creds.aimfox?.api_key ?? "") ||
+    aimfoxWorkspaceId !== (creds.aimfox?.external_workspace_id ?? "");
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
@@ -580,16 +623,30 @@ export function SequencerConnections({
           sequencerKey="aimfox"
           dirty={aimfoxDirty}
           fields={
-            <label className="block space-y-1.5">
-              <FieldLabel>API key</FieldLabel>
-              {/* No workspace-id input on purpose: an Aimfox workspace is resolved by the setup
-                  workflow and stored on the connector row, never typed in by hand. */}
-              <SecretInput
-                value={linkedinApiKey}
-                onChange={(value) => onChange({ linkedinApiKey: value })}
-                placeholder="Paste LinkedIn key…"
-              />
-            </label>
+            <div className="space-y-3">
+              {/* This field exists because `needs_selection` is not an edge case: provisioning
+                  matches on an exact name, and a live dry run on 2026-08-09 put Fab.Marketingu in
+                  that state with three candidates. Without somewhere to put the chosen id, the
+                  card would list the answers and offer no way to give one. */}
+              <label className="block space-y-1.5">
+                <FieldLabel>Workspace ID</FieldLabel>
+                <input
+                  type="text"
+                  value={aimfoxWorkspaceId}
+                  onChange={(event) => onChange({ aimfoxWorkspaceId: event.target.value })}
+                  placeholder="Resolved by provisioning — or paste one to claim it"
+                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <FieldLabel>API key</FieldLabel>
+                <SecretInput
+                  value={linkedinApiKey}
+                  onChange={(value) => onChange({ linkedinApiKey: value })}
+                  placeholder="Obtained by provisioning — paste only to override"
+                />
+              </label>
+            </div>
           }
         />
       </div>
