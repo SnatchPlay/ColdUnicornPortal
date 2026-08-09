@@ -183,15 +183,25 @@ workspace usually does not exist at the vendor yet at the moment the portal row 
 automatic run would report `needs_selection` and teach operators to ignore the verdict. Someone
 presses the button once the workspace exists.
 
-The **New client** form therefore asks for no API keys at all. `bison-workspace-setup` mints a token
-and stores it; `aimfox-workspace-setup` re-reads the vendor's or mints one — asking a human to paste
-what the workflow obtains is the manual flow these workflows replaced. It keeps one optional field,
-the EmailBison workspace id, because that is the one fact a human may hold that the workflows
-cannot derive: resolution matches on an **exact** name, which held for only 4 of 9 clients when
-measured. A client created with no connector row at all is a supported starting state — `Resolve
-Client` left-joins the connector in both workflows, verified by a live dry run against
-Fab.Marketingu (no aimfox row) on 2026-08-09, which resolved the client and returned
-`needs_selection` rather than `client_not_found`.
+What the **New client** form does instead is let the manager pick the workspace, and provision it on
+save. No API keys and no ids are typed: `bison-workspace-setup` mints a token and stores it,
+`aimfox-workspace-setup` re-reads the vendor's or mints one, and both resolve the workspace. The one
+thing a human holds that the workflows cannot derive is *which* workspace is this client, and only
+when the names differ — an exact-name match held for 4 of 9 clients when measured.
+
+So each sequencer gets a **Choose** button. Pressing it calls provisioning in **listing mode**
+(`client_id: null`), which returns the vendor's workspaces minus every one already claimed by
+another client, and the manager picks one. The list is fetched on demand, not with the form: it is
+live vendor round trips, and most sessions need neither vendor. On **Create client** the connector
+row is written with the chosen id and provisioning runs for real (`dry_run: false`) against it,
+sequentially per sequencer — each run is up to eight vendor calls inside one 45s gateway budget, and
+two at once collects a pair of `unknown`s instead of one answer. A failure there is reported as
+itself: the client exists, provisioning did not finish, run **Set up** from its card.
+
+A client created with no workspace chosen is a supported starting state — `Resolve Client`
+left-joins the connector in both workflows, verified by a live dry run against Fab.Marketingu (no
+aimfox row) on 2026-08-09, which resolved the client and returned `needs_selection` rather than
+`client_not_found`.
 
 There is **no scheduled drift check**. A workspace's state is only re-read when someone asks. This
 is a deliberate scope decision: it means a label deleted at the vendor stays invisible until the

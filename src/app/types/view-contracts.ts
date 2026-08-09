@@ -286,10 +286,19 @@ export interface ClientsOverviewPayload {
  * server-side (process doc, invariant 7).
  */
 export interface WorkspaceSetupResult {
-  client_id: string;
+  /** Null on a `workspace_list` answer — there is no client in that call. */
+  client_id: string | null;
   sequencer: string;
   dry_run: boolean;
-  state: "configured" | "partial" | "missing" | "needs_selection" | "client_not_found" | "unknown";
+  /** `workspace_list` is not a verdict: it is the answer to a listing call, which names no client. */
+  state:
+    | "configured"
+    | "partial"
+    | "missing"
+    | "needs_selection"
+    | "client_not_found"
+    | "workspace_list"
+    | "unknown";
   reason?: string;
   client_name?: string | null;
   resolved?: { workspace_id: string; name: string | null; matched_by: string } | null;

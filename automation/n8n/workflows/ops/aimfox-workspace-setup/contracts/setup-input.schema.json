@@ -5,16 +5,24 @@
   "description": "Body of POST /webhook/workspace-setup-aimfox, and the item passed to the executeWorkflowTrigger. Sent by the orm-gateway `requestWorkspaceSetup` action. The gateway never forwards a vendor credential — the master key lives only as an n8n credential (process doc, invariant 7).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["client_id", "dry_run"],
+  "required": [
+    "dry_run"
+  ],
   "properties": {
     "client_id": {
-      "description": "public.clients.id. The workflow resolves the client name from it; the caller never supplies the name, so a renamed client cannot silently target a different workspace.",
-      "type": "string",
+      "description": "public.clients.id. The workflow resolves the client name from it; the caller never supplies the name, so a renamed client cannot silently target a different workspace. **null lists instead of provisioning**: with no client id the run stops at `Needs Selection` and returns `state: \"workspace_list\"` with the vendor's unclaimed workspaces. That branch has no edge to `Record`, so a list request cannot write anything.",
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     },
     "workspace_id": {
       "description": "Aimfox workspace UUID. When present it wins outright and no name search happens — this is how the operator answers a `needs_selection` result. When absent the workflow resolves by exact name match.",
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     },
     "dry_run": {
@@ -23,7 +31,10 @@
     },
     "requested_by": {
       "description": "profiles.id of the internal user who pressed the button, or null when the run was triggered by client creation. Recorded in integration_sync_runs.metadata for audit — provisioning writes into a client's sending system, so who asked is part of the record.",
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "uuid"
     }
   }

@@ -52,6 +52,16 @@ The gateway must **never** call a vendor (Aimfox, Bison, Google) directly. Those
 n8n, which holds the credentials. The gateway calls n8n; n8n calls the vendor. That boundary is what
 keeps a vendor master key out of the edge function's environment entirely.
 
+> **Amended 2026-08-09 — reading, through the same trigger.** The New client form has to offer the
+> vendor's workspaces *before* a client row exists, so `requestWorkspaceSetup` accepts
+> `clientId: null` and answers `state: "workspace_list"`. This stays inside the clause rather than
+> widening it: same action, same closed URL list, no new destination, and the caller still names a
+> sequencer rather than a URL. Two consequences had to be handled explicitly. Authorisation cannot
+> be the usual `clients` pre-flight when there is no client, so listing is gated on the caller's
+> role being internal — a `client` gets 403. And the mode cannot write: with no `client_id` the
+> workflow terminates at `Needs Selection`, a node with no edge to `Record`, so refusing to write is
+> structural rather than a flag.
+
 ### 2. The call carries a shared secret, and the workflow should verify it
 
 `N8N_AUTOMATION_SHARED_SECRET`, sent as a header on every request. The receiving n8n webhook is

@@ -488,7 +488,12 @@ export interface UpsertClientSequencerPayload {
  */
 export interface RequestWorkspaceSetupPayload {
   action: "requestWorkspaceSetup";
-  clientId: string;
+  /**
+   * `null` asks only for the vendor's unclaimed workspaces (`state: "workspace_list"`). The New
+   * client form needs that list before the client row exists. Nothing can be written in that mode:
+   * with no client id the workflow terminates at `Needs Selection`, which has no edge to `Record`.
+   */
+  clientId: string | null;
   sequencerKey: "emailbison" | "aimfox";
   /** Bison ids are numeric strings, Aimfox ids are UUIDs — validated by the workflow, not here. */
   workspaceId?: string | null;
@@ -1276,8 +1281,15 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "requestWorkspaceSetup") {
-    if (!hasStringField(payload, "clientId") || !hasStringField(payload, "sequencerKey")) {
-      return { ok: false, error: "requestWorkspaceSetup requires clientId and sequencerKey." };
+    // clientId may be null — that is the listing mode, and it is the only way the New client form
+    // can offer workspaces before a client exists. Anything other than a string or null is a
+    // malformed caller, not a listing request.
+    const rawClient = (payload as { clientId?: unknown }).clientId;
+    if (rawClient !== null && typeof rawClient !== "string") {
+      return { ok: false, error: "requestWorkspaceSetup: clientId must be a string or null." };
+    }
+    if (!hasStringField(payload, "sequencerKey")) {
+      return { ok: false, error: "requestWorkspaceSetup requires sequencerKey." };
     }
     const sequencerKey = (payload as { sequencerKey: string }).sequencerKey;
     // Closed set. The sequencer key selects the destination URL server-side, so an unknown value
