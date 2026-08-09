@@ -189,10 +189,15 @@ save. No API keys and no ids are typed: `bison-workspace-setup` mints a token an
 thing a human holds that the workflows cannot derive is *which* workspace is this client, and only
 when the names differ — an exact-name match held for 4 of 9 clients when measured.
 
-So each sequencer gets a **Choose** button. Pressing it calls provisioning in **listing mode**
-(`client_id: null`), which returns the vendor's workspaces minus every one already claimed by
-another client, and the manager picks one. The list is fetched on demand, not with the form: it is
-live vendor round trips, and most sessions need neither vendor. On **Create client** the connector
+So each sequencer gets a **dropdown** — the same select the Manager and Status fields use. Opening
+it calls provisioning in **listing mode** (`client_id: null`), which returns the vendor's workspaces
+minus every one already claimed by another client. The list loads on first open, not with the form:
+it is a live vendor round trip, and most sessions need neither vendor.
+
+One workspace per vendor, never several. `client_sequencers` carries
+`UNIQUE (client_id, sequencer_id)`, so a second choice has nowhere to be stored, and
+`UNIQUE (sequencer_id, external_workspace_id)` means the database refuses a workspace another client
+already holds even if the list were stale. On **Create client** the connector
 row is written with the chosen id and provisioning runs for real (`dry_run: false`) against it,
 sequentially per sequencer — each run is up to eight vendor calls inside one 45s gateway budget, and
 two at once collects a pair of `unknown`s instead of one answer. A failure there is reported as
