@@ -6,7 +6,7 @@ import { Plus, X } from "lucide-react";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { SatisfactionHearts, satisfactionLabel } from "../../components/satisfaction-hearts";
 import { OooRoutingEditor } from "./ooo-routing-editor";
-import { WorkspaceSetupStatus } from "./workspace-setup-status";
+import { SequencerConnections } from "./sequencer-connections";
 import { Checkbox } from "../../components/ui/checkbox";
 import {
   Select,
@@ -123,93 +123,6 @@ function StringListEditor({
         <Plus className="h-3.5 w-3.5" />
         {addLabel}
       </button>
-    </div>
-  );
-}
-
-interface SecretInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}
-
-function SecretInput({ value, onChange, placeholder }: SecretInputProps) {
-  const [shown, setShown] = useState(false);
-  return (
-    <div className="relative">
-      <input
-        type={shown ? "text" : "password"}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-16 text-sm outline-none font-mono"
-      />
-      {value && (
-        <button
-          type="button"
-          onClick={() => setShown((s) => !s)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[0.12em] text-white/40 transition hover:text-white"
-        >
-          {shown ? "hide" : "show"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-interface MaskedFieldProps {
-  label: string;
-  value: string | number | null | undefined;
-  mask?: boolean;
-}
-
-function MaskedField({ label, value, mask = false }: MaskedFieldProps) {
-  const [shown, setShown] = useState(!mask);
-  const [copied, setCopied] = useState(false);
-
-  const displayValue = value === null || value === undefined || value === "" ? null : String(value);
-  const masked = displayValue && !shown ? "•".repeat(Math.min(displayValue.length, 12)) : displayValue;
-
-  const doCopy = async () => {
-    if (!displayValue) return;
-    try {
-      await navigator.clipboard.writeText(displayValue);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-      <span className="min-w-[140px] text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-        {label}
-      </span>
-      <span className="flex-1 truncate font-mono text-xs text-white/80">{masked ?? "—"}</span>
-      {displayValue && mask && (
-        <button
-          type="button"
-          onClick={() => setShown((s) => !s)}
-          className="text-[10px] uppercase tracking-[0.12em] text-white/40 transition hover:text-white"
-        >
-          {shown ? "hide" : "show"}
-        </button>
-      )}
-      {displayValue && (
-        <button
-          type="button"
-          onClick={() => {
-            void doCopy();
-          }}
-          className={cn(
-            "rounded-md border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition",
-            copied ? "border-emerald-400/40 text-emerald-200" : "text-white/40 hover:text-white",
-          )}
-        >
-          {copied ? "✓" : "copy"}
-        </button>
-      )}
     </div>
   );
 }
@@ -483,77 +396,20 @@ export function ClientDrawer({
 
           {/* Phase 2: deferred sections — mount after overlay has painted */}
           {bodyReady ? (<>
-          {/* Credentials & IDs */}
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="border-l-2 border-sky-400/50 pl-3">
-              <p className="text-sm font-medium text-white">Credentials & IDs</p>
-              <p className="text-xs text-white/50">
-                Per-sequencer connection settings (EmailBison / Aimfox) read by n8n.
-              </p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  EmailBison workspace ID
-                </span>
-                <input
-                  type="text"
-                  value={draft.externalWorkspaceId}
-                  onChange={(event) =>
-                    setDraft((current) =>
-                      current ? { ...current, externalWorkspaceId: event.target.value } : current,
-                    )
-                  }
-                  placeholder="e.g. 12345"
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-                />
-              </label>
-
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  EmailBison API key
-                </span>
-                <SecretInput
-                  value={draft.externalApiKey}
-                  onChange={(value) =>
-                    setDraft((current) =>
-                      current ? { ...current, externalApiKey: value } : current,
-                    )
-                  }
-                  placeholder="Paste API key…"
-                />
-              </label>
-
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Aimfox API key
-                </span>
-                <SecretInput
-                  value={draft.linkedinApiKey}
-                  onChange={(value) =>
-                    setDraft((current) =>
-                      current ? { ...current, linkedinApiKey: value } : current,
-                    )
-                  }
-                  placeholder="Paste LinkedIn key…"
-                />
-              </label>
-
-              <div className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  CRM status
-                </span>
-                <MaskedField
-                  label=""
-                  value={
-                    client.crm_config && Object.keys(client.crm_config).length > 0
-                      ? "Connected"
-                      : "—"
-                  }
-                />
-              </div>
-            </div>
-          </section>
+          {/* Credentials and the provisioning verdict are one section, and first in the drawer:
+              a key being present says nothing about whether the workspace is actually wired, so
+              the two facts have to be read together. Keys and the run buttons sit behind a
+              per-card disclosure — a CS manager needs "EmailBison is configured", not the key.
+              `setup_state` is read-only here; it is written by n8n alone (ADR-0018 §6). */}
+          <SequencerConnections
+            clientId={client.id}
+            creds={sequencerCreds}
+            crmConnected={!!client.crm_config && Object.keys(client.crm_config).length > 0}
+            externalWorkspaceId={draft.externalWorkspaceId}
+            externalApiKey={draft.externalApiKey}
+            linkedinApiKey={draft.linkedinApiKey}
+            onChange={(patch) => setDraft((current) => (current ? { ...current, ...patch } : current))}
+          />
 
           {/* Contract & KPIs — admin only */}
           {canEditAssignments && (
@@ -890,11 +746,6 @@ export function ClientDrawer({
               </label>
             </div>
           </section>
-
-          {/* Sits directly under Credentials & IDs because it answers the question those fields
-              raise: a key being present says nothing about whether the workspace is actually
-              wired. Read-only — setup_state is written by n8n alone (ADR-0018 §6). */}
-          <WorkspaceSetupStatus clientId={client.id} creds={sequencerCreds} />
 
           {/* Contacts */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">

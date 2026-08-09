@@ -173,9 +173,15 @@ and a name comparison would have created a seventeenth webhook here.
 
 | Event | Source | Effect |
 |---|---|---|
-| A client is created in the portal | `createClient` | provisioning runs for both sequencers, applying immediately |
-| A manager presses **Налаштувати** on a client | portal | provisioning runs for the named sequencer |
-| A manager presses **Перевірити** | portal | provisioning runs in `dry_run` — reports, writes nothing |
+| A manager presses **Set up** on a client | portal | provisioning runs for the named sequencer, writing what is missing |
+| A manager presses **Check** | portal | provisioning runs in `dry_run` — reports, writes nothing |
+| A webhook is POSTed to the workflow | n8n | same two modes, driven by the payload's `dry_run` |
+
+Creating a client does **not** trigger provisioning. It was planned to and does not: `createClient`
+never calls `requestWorkspaceSetup` (the only caller is the drawer section). A new client's
+workspace usually does not exist at the vendor yet at the moment the portal row is created, so an
+automatic run would report `needs_selection` and teach operators to ignore the verdict. Someone
+presses the button once the workspace exists.
 
 There is **no scheduled drift check**. A workspace's state is only re-read when someone asks. This
 is a deliberate scope decision: it means a label deleted at the vendor stays invisible until the
@@ -346,13 +352,17 @@ one token per provisioning attempt.
   `setup_state`. Deliberately quiet: an absent connector is muted, not red, because 43 of 56 clients
   are EmailBison-only and a column that is mostly red stops being read. Red is reserved for a state
   a run actually reported as broken.
-- Client drawer — the **Workspace provisioning** section: per sequencer, the verdict, how long ago
-  it was observed (with a `stale` marker past 30 days), and the per-step outcomes in words. Two
-  buttons: **Перевірити** (`dry_run: true`) and **Налаштувати** (`dry_run: false`, confirmed first,
-  because it writes into the client's own system).
-- Client drawer — a per-sequencer section showing the five facts, with **Перевірити** (`dry_run`)
-  and **Налаштувати**. Internal roles only; a `client` never sees it.
-- Client creation — provisioning is requested automatically for both sequencers.
+- Client drawer — the **Credentials & IDs** section, first in the drawer. Credentials and the
+  provisioning verdict are one section on purpose: a key being present says nothing about whether
+  the workspace is wired, so the two facts have to be read together. One card per sequencer, and
+  the card is collapsed to the answer — verdict, one plain sentence, and how long ago it was
+  observed (with a `stale` marker past 30 days). Keys, per-step outcomes and the buttons sit behind
+  a **Details** disclosure: a CS manager needs to know EmailBison is configured, not what the key
+  is, and **Set up** writes into a client's vendor account, which should not be one stray click
+  away in a summary. A card with an unsaved credential edit cannot be collapsed — it shows
+  `unsaved` and drops the toggle, so the drawer's Save bar is never armed by a hidden field.
+  Two buttons: **Check** (`dry_run: true`) and **Set up** (`dry_run: false`, confirmed first).
+  Internal roles only; a `client` never sees the clients page at all.
 
 ## Dashboard metrics
 

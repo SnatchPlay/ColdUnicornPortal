@@ -18,7 +18,7 @@
       "pattern": "^[0-9]+$"
     },
     "dry_run": {
-      "description": "true performs every read and no write, and returns the same `steps` object as a real run. This is what the portal's \"Перевірити\" button sends, and what feeds the status column.",
+      "description": "true performs every read and no write, and returns the same `steps` object as a real run. This is what the portal's \"Check\" button sends, and what feeds the status column.",
       "type": "boolean"
     },
     "requested_by": {
