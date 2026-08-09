@@ -37,7 +37,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// One window, computed once, so every query and the audit row agree. Yesterday in UTC, matching\n// branch L's intent — it compares a sheet cell against `$now.minus({days:1})`. Widening this to the\n// whole backlog is a business decision, not a port: on 2026-08-09 that backlog was ~670 people, and\n// each row is a LinkedIn connection request to one of them.\nconst raw = $json ?? {};\nconst end = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));\nconst start = new Date(end.getTime() - 24 * 60 * 60 * 1000);\nreturn [{ json: {\n  client_id: raw.client_id ?? '',\n  since: raw.since ?? start.toISOString(),\n  until: raw.until ?? end.toISOString(),\n} }];"
+        "jsCode": "// One window, computed once, so every query and the audit row agree. Yesterday in UTC, matching\n// branch L's intent — it compares a sheet cell against `$now.minus({days:1})`. Widening this to the\n// whole backlog is a business decision, not a port: that backlog is at least ~670 people spread over\n// eight months, measured on a mirror that knows 3 of the 9 Aimfox clients — production is\n// more. Each row is a LinkedIn connection request to one of them.\nconst raw = $json ?? {};\nconst end = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));\nconst start = new Date(end.getTime() - 24 * 60 * 60 * 1000);\nreturn [{ json: {\n  client_id: raw.client_id ?? '',\n  since: raw.since ?? start.toISOString(),\n  until: raw.until ?? end.toISOString(),\n} }];"
       }
     },
     {
