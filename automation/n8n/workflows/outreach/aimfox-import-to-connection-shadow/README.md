@@ -2,14 +2,16 @@
 
 **Logical ID:** `aimfox-import-to-connection-shadow` · **Domain:** `outreach` · **Criticality:** low
 **Business process:** [LinkedIn outreach (Aimfox)](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md)
-**Phase:** **A1 — shadow.** Branch S of
-[`aimfox-import-to-connection`](../aimfox-import-to-connection/README.md), reading Supabase instead
-of Google Sheets and **sending nothing**.
+**Phase:** **C — Supabase only**, since 2026-08-10. This replaced
+[`aimfox-import-to-connection`](../aimfox-import-to-connection/README.md), which was deactivated the
+same day. It ran as a send-nothing shadow for one day first.
 
-> There is no HTTP write node in this graph. Not disabled, not behind a flag — the audience endpoint
-> is unreachable from here. Everything else follows from that.
+> One node queues real LinkedIn connection requests. Only the **Schedule** trigger can reach it: a
+> webhook call is forced to a dry run no matter what its body says, and `Plan Imports` returns an
+> empty array on a dry run, so the HTTP node has no items and n8n does not execute it. Not sending
+> is a property of the graph, not a flag.
 
-## Why a shadow and not a replacement
+## Why it ran as a shadow first
 
 Branch L's own manifest asked for this: *"build the request, log it, measure agreement, only then
 send"*. Its stated reason was that a second branch would send a second set of invites to a real
@@ -24,15 +26,31 @@ backlog behind the day window is at least ~670 people — measured 2026-08-09 on
 ## Flow
 
 ```
-Start ─ Input (window: yesterday, UTC)
+Schedule 19:00 ┐
+Webhook        ┼─ Input (window: yesterday UTC; only the schedule sets dry_run=false)
+Start          ┘
         └─ Read Clients        current clients with an enabled aimfox connector AND a stored key
            └─ GET /campaigns   once per client, with THAT client's key
               └─ Resolve Campaigns   AutoConnect, ACTIVE, matched across the whole list → one item
                  └─ Read Leads       yesterday's leads with a LinkedIn URL, not yet invited
-                    └─ Build Plan    what would be sent, per client
-                       └─ Record Run integration_sync_runs · sync_type = autoconnect_import_shadow
-                          └─ Final Result
+                    └─ Build Plan       report (recorded) + queue (carries the key, never recorded)
+                       └─ Has Imports? ─ yes → Plan Imports → Add To Audience → Collect Imports ─┐
+                                        └ no ──────────────────────────────────────────────────┴→ Merge Outcome
+                                           └─ Mark Invited   public.mark_linkedin_invited(uuid[])
+                                              └─ Record Run  integration_sync_runs
+                                                 └─ Final Result
 ```
+
+`leads` is RPC-owned (ADR-0015) and `pnpm n8n:validate` refuses a raw `UPDATE` on it. The first
+draft did exactly that and was caught; `mark_linkedin_invited` (migration `20260810`) is the RPC
+that was missing, and it is idempotent — an already-stamped lead keeps its first timestamp.
+
+## Measured on production before the cutover
+
+Through the read-only webhook, 2026-08-10: 7 clients hold an Aimfox key, **2 resolve**, 5 are
+blocked with `no AutoConnect campaign`. Volume on the same predicate — **0** for the previous day,
+**5** over 7 days, **36** over 30, **178** over 120 (ColdUnicorn PL and Audytel). Small enough that
+switching over could not produce a burst, which is the thing a shadow is for.
 
 ## What it fixes, and what it cannot
 

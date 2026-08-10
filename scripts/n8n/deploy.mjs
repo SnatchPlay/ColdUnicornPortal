@@ -12,6 +12,8 @@
 //   --credentials-from  give an --added node the credential block of a named LIVE node
 //   --create            POST a brand-new workflow from the artifact (no live counterpart yet)
 //   --settings          also push the artifact's `settings` (otherwise settings are never touched)
+//   --activate          switch the workflow ON  (its schedule fires, its webhook answers)
+//   --deactivate        switch the workflow OFF (nothing it is wired to will run again)
 //
 // What it does, and deliberately does NOT do:
 //   * It copies ONLY the `parameters` (and typeVersion) of the named nodes from the artifact onto
@@ -33,7 +35,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRegistry, WORKFLOWS_ROOT } from "./lib/registry.mjs";
 import { currentEnvironment } from "./lib/mcp.mjs";
-import { getWorkflow, updateWorkflow, createWorkflow, filterSettings } from "./lib/rest.mjs";
+import {
+  getWorkflow,
+  updateWorkflow,
+  createWorkflow,
+  activateWorkflow,
+  deactivateWorkflow,
+  filterSettings,
+} from "./lib/rest.mjs";
 
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -175,7 +184,8 @@ async function main() {
   const credentialsArg = arg("credentials-from");
   const create = process.argv.includes("--create");
   if (!logicalId) throw new Error("Pass --id <logical-id>.");
-  if (!create && !nodesArg && !addArg && !rewireArg) {
+  const toggling = process.argv.includes("--activate") || process.argv.includes("--deactivate");
+  if (!create && !toggling && !nodesArg && !addArg && !rewireArg) {
     throw new Error(
       'Pass --nodes "Node A" (update existing), --add "Node B" (add new nodes), ' +
         '--rewire "Node C" (replace outgoing connections) or --create (POST a brand-new workflow).',
@@ -183,6 +193,38 @@ async function main() {
   }
   if (create && (nodesArg || addArg || rewireArg)) {
     throw new Error("--create posts the whole artifact; it does not combine with --nodes/--add/--rewire.");
+  }
+
+  // Flipping a workflow on or off is not a deploy: nothing about the graph changes, and no diff
+  // would show it. It is the single most consequential thing this tool can do — a schedule starts
+  // firing, or stops — so it is its own path, gated the same way, and it prints what it saw before
+  // and after rather than trusting the call's return.
+  if (process.argv.includes("--activate") || process.argv.includes("--deactivate")) {
+    const on = process.argv.includes("--activate");
+    const e = (loadRegistry().workflows ?? []).find((w) => w.id === logicalId);
+    const rid = e?.environments?.[environment]?.remoteWorkflowId;
+    if (!rid) throw new Error(`registry.yaml has no ${environment} remoteWorkflowId for "${logicalId}".`);
+    const before = await getWorkflow(rid);
+    console.log(`workflow    : ${logicalId} → ${rid} (${environment})`);
+    console.log(`live name   : ${before.name}`);
+    console.log(`active      : ${before.active} → ${on}`);
+    if (before.active === on) {
+      console.log(`Already ${on ? "active" : "inactive"} — nothing to do.`);
+      return;
+    }
+    if (!apply) {
+      console.log(`DRY RUN — nothing changed. Re-run with --apply (and N8N_APPROVED_PRODUCTION_WRITE set).`);
+      return;
+    }
+    const approval = process.env.N8N_APPROVED_PRODUCTION_WRITE?.trim();
+    if (!approval) throw new Error(`Refusing to ${on ? "activate" : "deactivate"}: set N8N_APPROVED_PRODUCTION_WRITE.`);
+    console.log(`[n8n] PRODUCTION ${on ? "ACTIVATE" : "DEACTIVATE"}: ${rid} — approved as "${approval}"`);
+    await (on ? activateWorkflow(rid) : deactivateWorkflow(rid));
+    // Read it back. The call returning 200 is not the same as the instance having changed.
+    const after = await getWorkflow(rid);
+    if (after.active !== on) throw new Error(`FAILED: still active=${after.active} after the call.`);
+    console.log(`Done. active=${after.active}.`);
+    return;
   }
 
   // A brand-new workflow has no live counterpart to diff against, so the surgical path below —

@@ -1,15 +1,15 @@
 schemaVersion: 1
 
 id: aimfox-import-to-connection-shadow
-name: "[SHADOW] Aimfox AutoConnect import · Supabase branch S"
+name: "Aimfox AutoConnect import · Supabase"
 domain: outreach
 owner: automation
 lifecycle: managed
 
-# Created INACTIVE on 2026-08-09 and run by hand. It sends nothing — there is no HTTP write node in
-# the graph at all — so the only thing activating it changes is how often the measurement is taken.
-status: planned
-criticality: low             # reads only; the one write is its own audit row
+# Shadow on 2026-08-09, primary on 2026-08-10: the send limb landed and the schedule was switched
+# on, and `aimfox-import-to-connection` (the Sheets branch) was deactivated in the same sitting.
+status: active
+criticality: high            # POSTs to a campaign audience — queues real LinkedIn invites
 
 businessProcess:
   - docs/reference/processes/outreach/linkedin-aimfox.md
@@ -19,10 +19,14 @@ architectureDecisions:
   - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
 
 triggers:
-  - type: executeWorkflowTrigger
+  - type: schedule
+    detail: "daily at 19:00 — the ONLY caller that produces dry_run=false, i.e. the only one that sends"
+  - type: webhook
     detail: >-
-      By hand while the numbers are being read. A 19:00 schedule matching branch L is the obvious
-      next step and is deliberately not wired yet.
+      POST /webhook/autoconnect-import. Runs the selection and returns what it WOULD send. It can
+      never send: `Input` forces dry_run true for every webhook call regardless of body.
+  - type: executeWorkflowTrigger
+    detail: "By hand. n8n-authenticated, so it may pass dry_run:false explicitly."
 
 reads:
   tables:
@@ -43,17 +47,21 @@ writes:
     - integration_sync_runs
   tablesWritten:
     - integration_sync_runs
-  rpcs: []
-  external: []
+  rpcs:
+    - "public.mark_linkedin_invited(uuid[]) — stamps leads.linkedin_invitation_sent_at (migration 20260810)"
+  external:
+    - "Aimfox API · POST /api/v2/campaigns/{id}/audience (node: Add To Audience) — REAL SIDE EFFECT: queues a LinkedIn connection request"
 
-# There is no POST node. Not a disabled one, not one behind a flag — the graph has no way to reach
-# the vendor's audience endpoint. That is the whole point of an A1 shadow and it is why this
-# workflow needed no dry_run plumbing.
+
+# One node reaches the vendor's audience endpoint — `Add To Audience`, and it queues a real LinkedIn
+# connection request. It sits behind `Has Imports?`, and `Plan Imports` returns an EMPTY array on a
+# dry run: a node with no input items does not execute, so not sending is structural rather than a
+# flag inside the HTTP node. Only the Schedule trigger produces dry_run=false.
 
 transition:
-  phase: A1
-  phaseState: shadow
-  authoritativeSource: sheets
+  phase: C
+  phaseState: cutover
+  authoritativeSource: supabase
   legacyStore: "Google Sheets · CS PDCA + the client's Leads tab"
   targetStore: "Supabase · leads + client_sequencers"
   design: docs/reference/processes/outreach/linkedin-aimfox.md
@@ -65,10 +73,14 @@ transition:
     named AutoConnect. What survives is the reason that matters — nobody has ever seen how many
     invites this selection produces, and every row is a connection request to a person.
   reconciliation: >-
-    Compare `would_send` and `per_client` in this workflow's integration_sync_runs rows against
-    branch L's actual POSTs for the same day. Branch L records nothing, so its side has to be read
-    off the n8n execution list until that is fixed.
-  parityEvidence: null
+    No longer a comparison: branch L is deactivated and this is the only importer. What replaces it
+    is the audit row — `would_send`, `sent`, `failed` and `blocked` per run in integration_sync_runs
+    (sync_type autoconnect_import), which branch L never produced at all.
+  parityEvidence: >-
+    Measured on production 2026-08-10 before the cutover, through the read-only webhook: 7 clients
+    hold an Aimfox key, 2 resolve, 5 blocked with "no AutoConnect campaign". Volume over the same
+    predicate: 0 for the previous day, 5 over 7 days, 36 over 30, 178 over 120 (ColdUnicorn PL and
+    Audytel). Small enough that the cutover could not produce a burst.
 
 idempotency:
   key: "n8n_execution_id on the audit row (ON CONFLICT DO NOTHING); the selection itself is a pure read"
@@ -91,4 +103,14 @@ environments:
   production:
     remoteWorkflowId: null
 
-knownViolations: []
+knownViolations:
+  - rule: unauthenticated-webhook
+    reason: >-
+      The webhook exists to run the selection on demand and read the numbers; the schedule is what
+      sends. It carries no auth, matching the provisioning webhooks (owner decision, 2026-08-08).
+      The mitigation here is stronger than theirs and it is structural, not a policy: `Input` forces
+      dry_run TRUE for every webhook call regardless of body, so there is no request that makes this
+      path queue a LinkedIn invite. A caller who learns the path can trigger a read and an audit row,
+      nothing else.
+    trackedIn: docs/reference/n8n/security.md#11-the-workspace-provisioning-webhooks-are-unauthenticated--medium-open
+    expires: 2026-11-30

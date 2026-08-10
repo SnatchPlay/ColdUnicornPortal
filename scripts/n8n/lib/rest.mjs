@@ -103,10 +103,10 @@ export function updateWorkflow(id, workflow) {
  * Create a workflow. POST accepts the same narrow body as PUT — anything else ("id", "active",
  * "tags", timestamps) is rejected outright.
  *
- * **A new workflow is always created inactive.** The public API has no way to activate one, which
- * is exactly the behaviour workflow-lifecycle.md §C step 6 asks for ("Do not activate"): a fresh
- * graph is reviewed and test-run before anything can reach it. Activation stays a deliberate act in
- * the n8n UI.
+ * **A new workflow is always created inactive**, which is what workflow-lifecycle.md §C step 6 asks
+ * for ("Do not activate"): a fresh graph is reviewed and test-run before anything can reach it.
+ * POST cannot set `active` — but `POST /workflows/{id}/activate` DOES exist and works (verified
+ * 2026-08-10), so activation is a separate, deliberate call rather than something the API forbids.
  *
  * Note this is the ONE production write that cannot damage anything that already exists — nothing
  * references a workflow that does not yet exist. The caller is still expected to gate it, the same
@@ -123,3 +123,16 @@ export function createWorkflow(workflow) {
 }
 
 export { restBase };
+
+/**
+ * Activate / deactivate. These are the two most consequential verbs the public API exposes: they
+ * decide whether a schedule fires and whether a webhook path answers. Neither takes a body, and
+ * neither is reversible by re-running a deploy, so callers gate them the same way they gate a PUT.
+ */
+export function activateWorkflow(id) {
+  return rest("POST", `/workflows/${id}/activate`, undefined);
+}
+
+export function deactivateWorkflow(id) {
+  return rest("POST", `/workflows/${id}/deactivate`, undefined);
+}

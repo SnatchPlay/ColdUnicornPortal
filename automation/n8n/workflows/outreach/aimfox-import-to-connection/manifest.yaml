@@ -5,7 +5,11 @@ name: "Import leads to Aimfox connection"
 domain: outreach
 owner: automation
 lifecycle: managed
-status: active
+status: deprecated
+
+# DEACTIVATED 2026-08-10, replaced by aimfox-import-to-connection-shadow (Supabase). Kept, not
+# deleted: it is the only record of what the Sheets flow did, and its defect list is what the
+# replacement was built against. It imported for 0 of 9 clients when measured on 2026-08-09.
 criticality: high            # adding a profile to a campaign audience CAUSES LinkedIn invites
 
 businessProcess:
