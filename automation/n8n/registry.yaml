@@ -127,6 +127,24 @@ workflows:
     businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
     owner: automation
     lifecycle: managed
+    status: deprecated       # deactivated 2026-08-10; replaced by aimfox-import-to-connection-shadow
+    criticality: high        # POSTed to a campaign audience while it was on
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: nG6Q4KEGeXk7tBHm
+    lastRepositorySync: 2026-08-10
+    lastValidation: 2026-08-10 measured importing for 0 of 9 clients, then deactivated
+
+  - id: aimfox-import-to-connection-shadow
+    name: "Aimfox AutoConnect import · Supabase"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/aimfox-import-to-connection-shadow
+    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
+    owner: automation
+    lifecycle: managed
     status: active
     criticality: high        # POSTs to a campaign audience — queues real LinkedIn invites
     trigger: schedule
@@ -134,25 +152,9 @@ workflows:
       development:
         remoteWorkflowId: null
       production:
-        remoteWorkflowId: nG6Q4KEGeXk7tBHm
-    lastRepositorySync: 2026-07-21
-
-  - id: aimfox-import-to-connection-shadow
-    name: "[SHADOW] Aimfox AutoConnect import · Supabase branch S"
-    domain: outreach
-    path: automation/n8n/workflows/outreach/aimfox-import-to-connection-shadow
-    businessProcess: docs/reference/processes/outreach/linkedin-aimfox.md
-    owner: automation
-    lifecycle: managed
-    status: planned
-    criticality: low         # reads only; the graph contains no vendor write node
-    trigger: executeWorkflowTrigger
-    environments:
-      development:
-        remoteWorkflowId: null
-      production:
         remoteWorkflowId: akJ7RlG5Oog4Kxcb
-    lastRepositorySync: 2026-08-09
+    lastRepositorySync: 2026-08-10
+    lastValidation: 2026-08-10 cutover — send limb live, schedule on; Sheets branch deactivated the same day
 
   - id: aimfox-classification
     name: "AimFox Classification"

@@ -2,6 +2,35 @@
   "name": "[SHADOW] Aimfox AutoConnect import · Supabase branch S",
   "nodes": [
     {
+      "id": "d1000000-0000-4000-a000-000000000014",
+      "name": "Add To Audience",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1180,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ profile_url: $json.profile_url }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://api.aimfox.com/api/v2/campaigns/{{ $json.campaign_id }}/audience"
+      }
+    },
+    {
       "id": "d1000000-0000-4000-a000-000000000007",
       "name": "Build Plan",
       "type": "n8n-nodes-base.code",
@@ -11,7 +40,20 @@
         0
       ],
       "parameters": {
-        "jsCode": "// What branch S WOULD send. No HTTP node exists in this workflow, so this is the whole output.\nconst base = $('Resolve Campaigns').first().json;\nconst rows = $input.all().map((i) => i.json ?? {}).filter((r) => r.lead_id);\nconst byClient = new Map(base.resolved.map((r) => [r.client_id, r]));\n\nconst planned = rows.map((r) => ({\n  client: byClient.get(r.client_id)?.client_name ?? r.client_id,\n  campaign_id: byClient.get(r.client_id)?.campaign_id ?? null,\n  lead_id: r.lead_id,\n  profile_url: r.linkedin_url,\n}));\n\nconst per_client = {};\nfor (const p of planned) per_client[p.client] = (per_client[p.client] ?? 0) + 1;\n\n// No api_key anywhere in here, and this object is what goes into the audit row.\nreturn [{ json: {\n  window: { since: base.since, until: base.until },\n  clients_seen: base.clients_seen,\n  clients_resolved: base.resolved.length,\n  blocked: base.blocked,\n  would_send: planned.length,\n  per_client,\n  sample: planned.slice(0, 20),\n} }];"
+        "jsCode": "// Two outputs from one node: `report` is what gets recorded and returned, `queue` is what the send\n// limb consumes. They are separate because `queue` carries an api_key per row and `report` must\n// never contain one (the provisioning workflows' invariant 7, same rule).\nconst base = $('Resolve Campaigns').first().json;\nconst rows = $input.all().map((i) => i.json ?? {}).filter((r) => r.lead_id);\nconst byClient = new Map(base.resolved.map((r) => [r.client_id, r]));\n\nconst queue = rows.map((r) => {\n  const c = byClient.get(r.client_id);\n  return {\n    client: c?.client_name ?? r.client_id,\n    campaign_id: c?.campaign_id ?? null,\n    api_key: c?.api_key ?? null,\n    lead_id: r.lead_id,\n    profile_url: r.linkedin_url,\n  };\n}).filter((q) => q.campaign_id && q.api_key);\n\nconst per_client = {};\nfor (const q of queue) per_client[q.client] = (per_client[q.client] ?? 0) + 1;\n\nreturn [{ json: {\n  window: { since: base.since, until: base.until },\n  dry_run: base.dry_run,\n  clients_seen: base.clients_seen,\n  clients_resolved: base.resolved.length,\n  blocked: base.blocked,\n  would_send: queue.length,\n  per_client,\n  sample: queue.slice(0, 20).map(({ client, lead_id, profile_url }) => ({ client, lead_id, profile_url })),\n  queue,\n} }];"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000015",
+      "name": "Collect Imports",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// n8n preserves item order, so the i-th response belongs to the i-th queued lead.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\nconst planned = $('Plan Imports').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst sent_lead_ids = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. Aimfox answers success with status:\"ok\", and Number('ok') is NaN — reading the\n  // vendor's `status` as an HTTP code scores a failure as a success.\n  const code = Number(r.statusCode ?? 0);\n  if (Boolean(r.error) || code >= 400) failed.push(`${p.client}/${p.lead_id} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else sent_lead_ids.push(p.lead_id);\n});\nreturn [{ json: { sent_lead_ids, failed } }];"
       }
     },
     {
@@ -24,7 +66,41 @@
         0
       ],
       "parameters": {
-        "jsCode": "const describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\nconst plan = $('Build Plan').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: { ...plan, sent: 0, mode: 'shadow', recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}) } }];"
+        "jsCode": "const describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\nconst plan = $('Merge Outcome').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: { ...plan, recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}) } }];"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000012",
+      "name": "Has Imports?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        900,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d1000000-0000-4000-a000-00000000001a",
+              "leftValue": "={{ $json.dry_run === false && $json.would_send > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
       }
     },
     {
@@ -37,7 +113,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// One window, computed once, so every query and the audit row agree. Yesterday in UTC, matching\n// branch L's intent — it compares a sheet cell against `$now.minus({days:1})`. Widening this to the\n// whole backlog is a business decision, not a port: that backlog is at least ~670 people spread over\n// eight months, measured on a mirror that knows 3 of the 9 Aimfox clients — production is\n// more. Each row is a LinkedIn connection request to one of them.\nconst raw = $json ?? {};\nconst end = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));\nconst start = new Date(end.getTime() - 24 * 60 * 60 * 1000);\nreturn [{ json: {\n  client_id: raw.client_id ?? '',\n  since: raw.since ?? start.toISOString(),\n  until: raw.until ?? end.toISOString(),\n} }];"
+        "jsCode": "// Three entry points, one shape. Without this, every `$json` read below depends on which trigger\n// fired — the same trap the setup workflows' Input node exists to close.\nconst fromWebhook = $('Webhook').isExecuted;\nconst fromSchedule = $('Schedule').isExecuted;\nconst raw = fromWebhook ? ($('Webhook').first().json?.body ?? {}) : ($json ?? {});\n\n// One window, computed once, so every query and the audit row agree. Yesterday in UTC, matching\n// branch L's intent — it compares a sheet cell against `$now.minus({days:1})`. Widening this to the\n// whole backlog is a business decision, not a port: that backlog is at least ~670 people spread over\n// eight months, measured on a mirror that knows 3 of the 9 Aimfox clients — production is\n// more. Each row is a LinkedIn connection request to one of them.\nconst end = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));\nconst start = new Date(end.getTime() - 24 * 60 * 60 * 1000);\n\n// Only the schedule may send. The webhook is UNAUTHENTICATED, so honouring `dry_run: false` in its\n// body would let anyone who learns the path queue LinkedIn invites into a client's campaign — a far\n// worse hole than the provisioning webhooks, whose worst case is an idempotent, additive no-op.\n// Refusing it here is structural: there is no request body that makes a webhook call send.\n// A `Start` call is n8n-authenticated, so it may opt in explicitly.\nconst dry_run = fromSchedule ? false\n  : fromWebhook ? true\n  : raw.dry_run === false ? false\n  : true;\n\nreturn [{ json: {\n  client_id: raw.client_id ?? '',\n  since: raw.since ?? start.toISOString(),\n  until: raw.until ?? end.toISOString(),\n  dry_run,\n  via: fromWebhook ? 'webhook' : fromSchedule ? 'schedule' : 'manual',\n} }];"
       }
     },
     {
@@ -63,6 +139,51 @@
         "options": {},
         "sendHeaders": true,
         "url": "https://api.aimfox.com/api/v2/campaigns"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000017",
+      "name": "Mark Invited",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.sent_lead_ids ?? []) ] }}"
+        },
+        "query": "-- Through the RPC, not raw SQL: ADR-0015 keeps `leads` RPC-owned and pnpm n8n:validate refuses the\n-- direct UPDATE. The function is idempotent — an already-stamped lead keeps its first timestamp —\n-- and an empty array stamps nothing, which is why this needs no branch around it.\nselect public.mark_linkedin_invited(\n  (select coalesce(array_agg(x::uuid), '{}'::uuid[])\n     from jsonb_array_elements_text($1::jsonb) as t(x))\n) as stamped;"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000016",
+      "name": "Merge Outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One shape for Mark Invited, Record Run and the response, whether or not anything was sent.\n// `queue` is dropped here: it carries an api_key per row and everything downstream is recorded.\nconst plan = $('Build Plan').first().json;\nconst { queue, ...report } = plan;\nconst c = $('Collect Imports').isExecuted ? ($('Collect Imports').first().json ?? {}) : { sent_lead_ids: [], failed: [] };\nreturn [{ json: {\n  ...report,\n  mode: plan.dry_run === false ? 'live' : 'shadow',\n  sent: (c.sent_lead_ids ?? []).length,\n  failed: c.failed ?? [],\n  sent_lead_ids: c.sent_lead_ids ?? [],\n} }];"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000013",
+      "name": "Plan Imports",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// One item per lead. An empty array means Add To Audience does not execute at all — the same\n// structural dry-run safety the provisioning workflows use, not a flag inside the HTTP node.\nconst p = $json;\nif (p.dry_run !== false) return [];\nreturn (p.queue ?? []).map((q) => ({ json: q }));"
       }
     },
     {
@@ -115,9 +236,9 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [ String($execution.id), $json.would_send > 0 ? 'success' : 'success', JSON.stringify($json) ] }}"
+          "queryReplacement": "={{ [ String($execution.id), ($json.failed ?? []).length ? 'partial' : 'success', JSON.stringify($json), $json.mode === 'live' ? 'autoconnect_import' : 'autoconnect_import_shadow' ] }}"
         },
-        "query": "-- Branch L records nothing at all (defect 6), which is how a nightly job imported for nobody for\n-- months without anyone noticing. A shadow that is not recorded is not a measurement.\ninsert into public.integration_sync_runs\n  (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\nvalues ('aimfox', 'autoconnect_import_shadow', $1, $2, now(), now(), $3::jsonb)\non conflict (n8n_execution_id) do nothing\nreturning id::text as run_id;"
+        "query": "-- Branch L records nothing at all (defect 6), which is how a nightly job imported for nobody for\n-- months without anyone noticing. A shadow that is not recorded is not a measurement.\ninsert into public.integration_sync_runs\n  (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\nvalues ('aimfox', $4, $1, $2, now(), now(), $3::jsonb)\non conflict (n8n_execution_id) do nothing\nreturning id::text as run_id;"
       }
     },
     {
@@ -130,7 +251,26 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Collapses N per-client responses into ONE item, so every node downstream runs exactly once.\n// n8n preserves item order, so the i-th response belongs to the i-th client.\nconst clients = $('Read Clients').all().map((i) => i.json);\nconst responses = $input.all().map((i) => i.json ?? {});\n\n// Matched by name across the WHOLE list. Branch L reads campaigns[0] and nothing else, which is\n// why it imported for 0 of 9 clients on 2026-08-09 (defect 1).\nconst resolved = [];\nconst blocked = [];\nclients.forEach((c, i) => {\n  const raw = responses[i] ?? {};\n  if (raw.error || raw.status === 'fail') {\n    blocked.push({ client: c.client_name, reason: 'vendor call failed' });\n    return;\n  }\n  const all = raw.campaigns ?? [];\n  const found = all.find((x) => String(x?.name ?? '') === 'AutoConnect');\n  if (!found) { blocked.push({ client: c.client_name, reason: 'no AutoConnect campaign' }); return; }\n  if (found.state !== 'ACTIVE') { blocked.push({ client: c.client_name, reason: `AutoConnect is ${found.state}` }); return; }\n  resolved.push({ client_id: c.client_id, client_name: c.client_name, campaign_id: found.id });\n});\n\nreturn [{ json: {\n  ...$('Input').first().json,\n  clients_seen: clients.length,\n  resolved,\n  blocked,\n} }];"
+        "jsCode": "// Collapses N per-client responses into ONE item, so every node downstream runs exactly once.\n// n8n preserves item order, so the i-th response belongs to the i-th client.\nconst clients = $('Read Clients').all().map((i) => i.json);\nconst responses = $input.all().map((i) => i.json ?? {});\n\n// Matched by name across the WHOLE list. Branch L reads campaigns[0] and nothing else, which is\n// why it imported for 0 of 9 clients on 2026-08-09 (defect 1).\nconst resolved = [];\nconst blocked = [];\nclients.forEach((c, i) => {\n  const raw = responses[i] ?? {};\n  if (raw.error || raw.status === 'fail') {\n    blocked.push({ client: c.client_name, reason: 'vendor call failed' });\n    return;\n  }\n  const all = raw.campaigns ?? [];\n  const found = all.find((x) => String(x?.name ?? '') === 'AutoConnect');\n  if (!found) { blocked.push({ client: c.client_name, reason: 'no AutoConnect campaign' }); return; }\n  if (found.state !== 'ACTIVE') { blocked.push({ client: c.client_name, reason: `AutoConnect is ${found.state}` }); return; }\n  resolved.push({ client_id: c.client_id, client_name: c.client_name, campaign_id: found.id, api_key: c.api_key });\n});\n\nreturn [{ json: {\n  ...$('Input').first().json,\n  clients_seen: clients.length,\n  resolved,\n  blocked,\n} }];"
+      }
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000010",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        140
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 19
+            }
+          ]
+        }
       }
     },
     {
@@ -143,15 +283,71 @@
         0
       ],
       "parameters": {}
+    },
+    {
+      "id": "d1000000-0000-4000-a000-000000000011",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        -140
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "autoconnect-import",
+        "responseMode": "lastNode"
+      }
     }
   ],
   "connections": {
+    "Add To Audience": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Collect Imports",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "Build Plan": {
       "main": [
         [
           {
             "index": 0,
-            "node": "Record Run",
+            "node": "Has Imports?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collect Imports": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Merge Outcome",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Has Imports?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Plan Imports",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Merge Outcome",
             "type": "main"
           }
         ]
@@ -174,6 +370,39 @@
           {
             "index": 0,
             "node": "Resolve Campaigns",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Mark Invited": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Record Run",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge Outcome": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Mark Invited",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Plan Imports": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Add To Audience",
             "type": "main"
           }
         ]
@@ -223,7 +452,29 @@
         ]
       ]
     },
+    "Schedule": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Input",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "Start": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Input",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
       "main": [
         [
           {
