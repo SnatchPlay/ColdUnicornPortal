@@ -101,8 +101,14 @@ export interface MomRow {
   sqlLeads: number;
   meetings: number;
   won: number;
+  totalLeadsEb?: number;
+  totalLeadsAf?: number;
   sqlLeadsEb?: number;
   sqlLeadsAf?: number;
+  meetingsEb?: number;
+  meetingsAf?: number;
+  wonEb?: number;
+  wonAf?: number;
 }
 
 export interface ClientMetricsOverview {
@@ -137,6 +143,9 @@ export interface ClientMetricsPack {
   wowRows: WowRow[];
   momRows: MomRow[];
 }
+
+/** The clients-grid channel switch. Re-exported as `ChannelView` by the mega-table. */
+export type MetricsChannelView = "both" | "email" | "aimfox";
 
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
@@ -461,37 +470,129 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
 
   const momRows: MomRow[] = [0, 1, 2, 3, 4].map((i) => ({
     bucket: i === 0 ? "0" : `-${i}`,
-    totalLeads: g(s.mom_total,    i),
-    sqlLeads:   g(s.mom_sql,      i),
-    meetings:   g(s.mom_meetings, i),
-    won:        g(s.mom_won,      i),
-    sqlLeadsEb: g(s.mom_sql_eb,   i),
-    sqlLeadsAf: g(s.mom_sql_af,   i),
+    totalLeads:   g(s.mom_total,       i),
+    sqlLeads:     g(s.mom_sql,         i),
+    meetings:     g(s.mom_meetings,    i),
+    won:          g(s.mom_won,         i),
+    totalLeadsEb: g(s.mom_total_eb,    i),
+    totalLeadsAf: g(s.mom_total_af,    i),
+    sqlLeadsEb:   g(s.mom_sql_eb,      i),
+    sqlLeadsAf:   g(s.mom_sql_af,      i),
+    meetingsEb:   g(s.mom_meetings_eb, i),
+    meetingsAf:   g(s.mom_meetings_af, i),
+    wonEb:        g(s.mom_won_eb,      i),
+    wonAf:        g(s.mom_won_af,      i),
   }));
 
-  const threeDodTotal = [0, 1, 2].reduce((acc, i) => acc + g(s.threedod_total, i), 0);
-  const threeDodSql   = [0, 1, 2].reduce((acc, i) => acc + g(s.threedod_sql,   i), 0);
-
-  const overview: ClientMetricsOverview = {
-    scheduleToday:    s.schedule_today,
-    scheduleTomorrow: s.schedule_tomorrow,
-    scheduleDayAfter: s.schedule_day_after,
-    sentToday:        g(s.daily_sent, 0),
-    sentYesterday:    g(s.daily_sent, 1),
-    sentTwoDaysAgo:   g(s.daily_sent, 2),
-    threeDodTotal,
-    threeDodSql,
-    wowResponseRate:  wowRows[0]?.responseRate  ?? null,
-    wowHumanRate:     wowRows[0]?.humanRate     ?? null,
-    wowBounceRate:    wowRows[0]?.bounceRate     ?? null,
-    wowOooRate:       wowRows[0]?.oooRate        ?? null,
-    wowSql:           wowRows[0]?.sqlLeads       ?? 0,
-    momSql:           momRows[0]?.sqlLeads       ?? 0,
+  const overview = deriveOverview({ dodRows, threeDodRows, wowRows, momRows }, {
     latestProspectsCount: s.latest_prospects_count,
     aimfoxInviteLimit: s.aimfox_invite_limit ?? null,
     aimfoxInviteLimitRemaining: s.aimfox_invite_limit_remaining ?? null,
     aimfoxRemainingDb: s.aimfox_remaining_database_size ?? null,
+  });
+
+  return { overview, dodRows, threeDodRows, wowRows, momRows };
+}
+
+/** Facts the row bands cannot carry — they are per-client, not per-bucket. */
+type OverviewExtras = Pick<
+  ClientMetricsOverview,
+  "latestProspectsCount" | "aimfoxInviteLimit" | "aimfoxInviteLimitRemaining" | "aimfoxRemainingDb"
+>;
+
+/**
+ * Fold the row bands into the overview — shared by the summary path and the channel projection.
+ * Every number here is a restatement of a cell in the bands below it (3-DoD = the first three
+ * buckets, the WoW rates = the current week, …), and a second copy of that fold is how an overview
+ * starts disagreeing with the grid underneath it. (`createClientMetrics`, the raw path, still folds
+ * its own: it works from raw rows, not from these bands, and nothing renders it today.)
+ */
+function deriveOverview(
+  rows: Pick<ClientMetricsPack, "dodRows" | "threeDodRows" | "wowRows" | "momRows">,
+  extras: OverviewExtras,
+): ClientMetricsOverview {
+  const { dodRows, threeDodRows, wowRows, momRows } = rows;
+  const dodAt = (bucket: string) => dodRows.find((r) => r.bucket === bucket);
+  return {
+    scheduleToday:    dodAt("0")?.schedule  ?? 0,
+    scheduleTomorrow: dodAt("+1")?.schedule ?? 0,
+    scheduleDayAfter: dodAt("+2")?.schedule ?? 0,
+    sentToday:        dodAt("0")?.sent  ?? 0,
+    sentYesterday:    dodAt("-1")?.sent ?? 0,
+    sentTwoDaysAgo:   dodAt("-2")?.sent ?? 0,
+    threeDodTotal: threeDodRows.slice(0, 3).reduce((acc, r) => acc + r.totalLeads, 0),
+    threeDodSql:   threeDodRows.slice(0, 3).reduce((acc, r) => acc + r.sqlLeads,   0),
+    wowResponseRate: wowRows[0]?.responseRate ?? null,
+    wowHumanRate:    wowRows[0]?.humanRate    ?? null,
+    wowBounceRate:   wowRows[0]?.bounceRate   ?? null,
+    wowOooRate:      wowRows[0]?.oooRate      ?? null,
+    wowSql:          wowRows[0]?.sqlLeads     ?? 0,
+    momSql:          momRows[0]?.sqlLeads     ?? 0,
+    // Listed one by one, not spread: `extras` is sometimes a whole overview (the channel
+    // projection passes the unprojected one), and a spread would put the stale folds back.
+    latestProspectsCount: extras.latestProspectsCount,
+    aimfoxInviteLimit: extras.aimfoxInviteLimit,
+    aimfoxInviteLimitRemaining: extras.aimfoxInviteLimitRemaining,
+    aimfoxRemainingDb: extras.aimfoxRemainingDb,
   };
+}
+
+/**
+ * Narrow a metrics pack to one outbound channel for the clients grid.
+ *
+ * The grid's neutral bands (Schedule, Daily sent, 3-DoD, WoW, MoM) keep their columns, ids and
+ * positions in every view — only the numbers behind them change, so the EmailBison and Aimfox views
+ * are structurally identical. `"both"` returns the pack unchanged, so the default view pays nothing.
+ *
+ * Only meaningful on packs from createClientMetricsFromSummary(): the raw createClientMetrics() path
+ * has no sequencer dimension and leaves the per-channel fields undefined, which project to 0 here.
+ */
+export function projectMetricsToChannel(
+  pack: ClientMetricsPack,
+  view: MetricsChannelView,
+): ClientMetricsPack {
+  if (view === "both") return pack;
+  const email = view === "email";
+  /** The channel's own count, or 0 when this pack has no sequencer dimension (raw path). */
+  const pick = (eb: number | undefined, af: number | undefined) => (email ? eb : af) ?? 0;
+
+  // Schedule / Daily sent come from daily_stats, which has no sequencer column — they are already
+  // EmailBison. Only the Aimfox view swaps in the sequencer_daily_stats mirror.
+  const dodRows: DodRow[] = email
+    ? pack.dodRows
+    : pack.dodRows.map((r) => ({ ...r, schedule: r.aimfoxSchedule ?? null, sent: r.aimfoxSent ?? null }));
+
+  const threeDodRows: ThreeDodRow[] = pack.threeDodRows.map((r) => ({
+    ...r,
+    totalLeads: pick(r.totalLeadsEb, r.totalLeadsAf),
+    sqlLeads: pick(r.sqlLeadsEb, r.sqlLeadsAf),
+  }));
+
+  // Reply / bounce / OOO rates exist only for Bison, acceptance only for Aimfox. Blank the other
+  // channel's so no future column change can surface one under the wrong heading.
+  const wowRows: WowRow[] = pack.wowRows.map((r) => ({
+    ...r,
+    totalLeads: pick(r.totalLeadsEb, r.totalLeadsAf),
+    sqlLeads: pick(r.sqlLeadsEb, r.sqlLeadsAf),
+    responseRate: email ? r.responseRate : null,
+    humanRate: email ? r.humanRate : null,
+    bounceRate: email ? r.bounceRate : null,
+    oooRate: email ? r.oooRate : null,
+    negativeRate: email ? r.negativeRate : null,
+    acceptRate: email ? null : r.acceptRate,
+  }));
+
+  const momRows: MomRow[] = pack.momRows.map((r) => ({
+    ...r,
+    totalLeads: pick(r.totalLeadsEb, r.totalLeadsAf),
+    sqlLeads: pick(r.sqlLeadsEb, r.sqlLeadsAf),
+    meetings: pick(r.meetingsEb, r.meetingsAf),
+    won: pick(r.wonEb, r.wonAf),
+  }));
+
+  // Re-fold the overview so it agrees with the projected bands. The condition engine keeps running
+  // on the *unprojected* pack (see clients-page.tsx) — nothing here changes what a rule means.
+  const overview = deriveOverview({ dodRows, threeDodRows, wowRows, momRows }, pack.overview);
 
   return { overview, dodRows, threeDodRows, wowRows, momRows };
 }

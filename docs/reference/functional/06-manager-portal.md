@@ -113,15 +113,35 @@ Single dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in **one horizontally-s
 One mega-table per page — no tabs. Defined in [`src/app/pages/clients-page/mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx) (`MEGA_COLUMNS` constant). Two-level header bands: top-level **group band** + sub-level **sub band** + column-name header row. First 3 columns are CSS-sticky (left edge).
 
 Lead-count and Aimfox split: see [04-metrics §18](./04-metrics-catalog.md#18-per-channel--aimfox-split-manager-mega-table).
-Every blended column is now the **Total** series; `· EB` / `· AF` sub-bands add the EmailBison-only
-and Aimfox-only breakdown. Aimfox volume/capacity come from `sequencer_daily_stats`; a client with no
-Aimfox `client_sequencers` row shows "—" in every Aimfox column.
+In the `Both` view every blended column is the **Total** series and the `· EB` / `· AF` sub-bands sit
+beside it as the EmailBison-only and Aimfox-only breakdown. Aimfox volume/capacity come from
+`sequencer_daily_stats`; a client with no Aimfox `client_sequencers` row shows "—" in every Aimfox
+column.
 
 **Channel view switch** — a `ToggleGroup` in the filter bar (`Both` / `EmailBison` / `Aimfox`,
-persisted per-user in `user_table_preferences.channelView`) narrows the visible columns to one
-channel. Each column carries a `channel` tag (`"email"` / `"aimfox"` / undefined); `EmailBison` hides
-the `aimfox` columns, `Aimfox` hides the `email` columns, and shared columns (identity, Basic, blended
-Total metrics — `channel` undefined) always stay. It is a display filter only — no refetch.
+persisted per-user in `user_table_preferences.channelView`). It is a **projection**, not just a
+filter, and no refetch: outside `Both` the page runs each metrics pack through
+`projectMetricsToChannel` ([`client-metrics.ts`](../../../src/app/lib/client-metrics.ts)) before
+building rows, so the neutral bands keep their ids, widths and early positions and render the
+selected sequencer's numbers. A combined number is therefore only ever visible in `Both`, and the
+EmailBison and Aimfox views are structurally identical.
+
+Two column tags drive visibility ([`mega-table.tsx`](../../../src/app/pages/clients-page/mega-table.tsx)):
+
+- `channel: "email" | "aimfox"` — **channel-native**: the data has no counterpart in the other
+  channel (Bison reply rates; Aimfox acceptance + capacity). Hidden in the other channel's view.
+- `splitOnly: true` — a **Both-only comparison column**: the `· EB` / `· AF` splits and the
+  `(Aimfox)` mirror bands, which would duplicate the neutral band once it is projected.
+- untagged — neutral: identity, Basic, Custom and every projected metric band.
+
+The projection is applied at page level on purpose: `compareMega` sorts through
+`col.sortValue(row)` on `row.metrics`, so sorting follows the visible numbers. A sort bound to a
+column the switch hides is reset to the default Client sort (`isColumnInChannelView`).
+Outside `Both` each metric band's header gains a `· EB` / `· AF` suffix, and the per-bucket
+condition tint is dropped — see 04-metrics §18.5 and [12-hidden-rules](./12-hidden-rules.md).
+
+Layout in the `Both` view (a single-channel view drops the `splitOnly` rows and the other channel's
+native rows, and renders the rest projected):
 
 | Group band | Sub band | Columns |
 |-----------|----------|---------|
@@ -138,11 +158,13 @@ Total metrics — `channel` undefined) always stay. It is a display filter only 
 |  | WoW SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `wowRows[bucket].sqlLeads{,Eb,Af}` |
 |  | WoW Resp / Human / Bnc / OOO | 0/-1/-2/-3/-4 per metric — rates from `wowRows[bucket]` |
 |  | WoW Accept | 0/-1/-2/-3/-4 — `wowRows[bucket].acceptRate` (Aimfox invites accepted/sent) |
-| **Month over Month** | MoM Total | 0/-1/-2/-3/-4 — `momRows[bucket].totalLeads` |
+| **Month over Month** | MoM Total · (Total / EB / AF) | 0/-1/-2/-3/-4 — `momRows[bucket].totalLeads{,Eb,Af}` |
 |  | MoM SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `momRows[bucket].sqlLeads{,Eb,Af}` |
-|  | MoM Mtg / Won | 0/-1/-2/-3/-4 per metric — `momRows[bucket]` |
+|  | MoM Mtg / Won | 0/-1/-2/-3/-4 per metric — `momRows[bucket]`; split per channel in the payload (`meetingsEb/Af`, `wonEb/Af`) but with no side-by-side columns |
 
-Total ≈ 126 columns (was 61 before the per-channel/Aimfox split). Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
+156 built-in columns in `Both` (was 61 before the per-channel/Aimfox split); 81 in `EmailBison` and
+68 in `Aimfox` — the 13-column difference is exactly the reply-rate bands (20) against `WoW Accept`
+plus `Aimfox capacity` (7), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 

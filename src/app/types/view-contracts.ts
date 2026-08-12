@@ -388,8 +388,9 @@ export interface ClientMetricsSummary {
   // ── Per-channel lead splits (leads.sequencer_id, ADR-0012) ─────────────────────────────────
   // The blended fields above stay the "Total" series. These add the EmailBison-only (…_eb) and
   // Aimfox-only (…_af) breakdowns for the metrics the manager mega-table splits. Same 5-element
-  // bucket shape and window definitions as their blended counterparts. MoM total/meetings/won
-  // are intentionally NOT split — only MoM SQL was requested.
+  // bucket shape and window definitions as their blended counterparts — copied verbatim, which is
+  // what makes `…_eb[i] + …_af[i] === <blended>[i]` hold exactly (leads.sequencer_id is NOT NULL
+  // and only two sequencers exist).
   /** 3-DoD (MQL|preMQL) leads by day, EmailBison sequencer only */
   threedod_total_eb: number[];
   /** 3-DoD (MQL|preMQL) leads by day, Aimfox sequencer only */
@@ -406,10 +407,22 @@ export interface ClientMetricsSummary {
   wow_sql_eb: number[];
   /** WoW MQL leads by week, Aimfox only */
   wow_sql_af: number[];
+  /** MoM all-leads by month, EmailBison only */
+  mom_total_eb: number[];
+  /** MoM all-leads by month, Aimfox only */
+  mom_total_af: number[];
   /** MoM MQL leads by month, EmailBison only */
   mom_sql_eb: number[];
   /** MoM MQL leads by month, Aimfox only */
   mom_sql_af: number[];
+  /** MoM meeting_booked leads by month, EmailBison only */
+  mom_meetings_eb: number[];
+  /** MoM meeting_booked leads by month, Aimfox only */
+  mom_meetings_af: number[];
+  /** MoM won leads by month, EmailBison only */
+  mom_won_eb: number[];
+  /** MoM won leads by month, Aimfox only */
+  mom_won_af: number[];
 
   // ── Aimfox (LinkedIn) daily volume / acceptance / capacity ─────────────────────────────────
   // Sourced from sequencer_daily_stats, summed across the client's enabled LinkedIn profiles.

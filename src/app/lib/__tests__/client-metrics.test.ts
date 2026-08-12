@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createClientMetrics } from "../client-metrics";
+import {
+  createClientMetrics,
+  createClientMetricsFromSummary,
+  projectMetricsToChannel,
+} from "../client-metrics";
+import type { ClientMetricsSummary } from "../../types/view-contracts";
 
 function makeDailyStat(
   date: string,
@@ -132,5 +137,141 @@ describe("createClientMetrics", () => {
     expect(metrics.wowRows[0].bounceRate).toBeNull();
     expect(metrics.wowRows[0].oooRate).toBeNull();
     expect(metrics.wowRows[0].negativeRate).toBeNull();
+  });
+});
+
+// Blended = 10, EmailBison = 7, Aimfox = 3 across every lead-derived metric, so a projected value
+// identifies its channel unambiguously. Aimfox volume differs from Bison volume on purpose.
+function makeSummary(): ClientMetricsSummary {
+  const blended = [10, 10, 10, 10, 10];
+  const eb = [7, 7, 7, 7, 7];
+  const af = [3, 3, 3, 3, 3];
+  return {
+    client_id: "client-1",
+    daily_sent: [380, 395, 384, 300, 280],
+    schedule_today: 380,
+    schedule_tomorrow: 395,
+    schedule_day_after: 410,
+    wow_sent: [1000, 0, 0, 0, 0],
+    wow_human: [100, 0, 0, 0, 0],
+    wow_bounce: [50, 0, 0, 0, 0],
+    wow_ooo: [20, 0, 0, 0, 0],
+    wow_negative: [10, 0, 0, 0, 0],
+    wow_leads: blended,
+    wow_sql: blended,
+    mom_total: blended,
+    mom_sql: blended,
+    mom_meetings: blended,
+    mom_won: blended,
+    threedod_total: blended,
+    threedod_sql: blended,
+    latest_prospects_count: 4200,
+    threedod_total_eb: eb,
+    threedod_total_af: af,
+    threedod_sql_eb: eb,
+    threedod_sql_af: af,
+    wow_leads_eb: eb,
+    wow_leads_af: af,
+    wow_sql_eb: eb,
+    wow_sql_af: af,
+    mom_total_eb: eb,
+    mom_total_af: af,
+    mom_sql_eb: eb,
+    mom_sql_af: af,
+    mom_meetings_eb: eb,
+    mom_meetings_af: af,
+    mom_won_eb: eb,
+    mom_won_af: af,
+    aimfox_daily_sent: [40, 41, 42, 43, 44],
+    aimfox_schedule_today: 45,
+    aimfox_schedule_tomorrow: 46,
+    aimfox_schedule_day_after: 47,
+    aimfox_wow_sent: [200, 0, 0, 0, 0],
+    aimfox_wow_accepted: [50, null, null, null, null],
+    aimfox_invite_limit: 195,
+    aimfox_invite_limit_remaining: 8,
+    aimfox_remaining_database_size: 19_968,
+  };
+}
+
+describe("projectMetricsToChannel", () => {
+  const pack = createClientMetricsFromSummary(makeSummary());
+  const bucket = <T extends { bucket: string }>(rows: T[], name: string) => rows.find((r) => r.bucket === name)!;
+
+  it("returns the pack untouched for the Both view", () => {
+    // Same reference, not a deep copy: the default view must pay nothing for the switch existing.
+    expect(projectMetricsToChannel(pack, "both")).toBe(pack);
+  });
+
+  it("narrows every lead-derived band to EmailBison", () => {
+    const eb = projectMetricsToChannel(pack, "email");
+
+    expect(eb.threeDodRows.map((r) => r.totalLeads)).toEqual([7, 7, 7, 7, 7]);
+    expect(eb.threeDodRows.map((r) => r.sqlLeads)).toEqual([7, 7, 7, 7, 7]);
+    expect(eb.wowRows[0].totalLeads).toBe(7);
+    expect(eb.wowRows[0].sqlLeads).toBe(7);
+    expect(eb.momRows[0].totalLeads).toBe(7);
+    expect(eb.momRows[0].sqlLeads).toBe(7);
+    expect(eb.momRows[0].meetings).toBe(7);
+    expect(eb.momRows[0].won).toBe(7);
+
+    // Schedule / Daily sent come from daily_stats, which is EmailBison by construction — untouched.
+    expect(eb.dodRows).toBe(pack.dodRows);
+    expect(eb.overview.sentToday).toBe(380);
+    expect(eb.overview.scheduleDayAfter).toBe(410);
+
+    // Reply rates are Bison facts and stay; the Aimfox acceptance rate has no email meaning.
+    expect(eb.wowRows[0].humanRate).toBeCloseTo(0.1, 4);
+    expect(eb.wowRows[0].acceptRate).toBeNull();
+
+    expect(eb.overview.threeDodTotal).toBe(21); // buckets 0..-2
+    expect(eb.overview.wowSql).toBe(7);
+    expect(eb.overview.momSql).toBe(7);
+  });
+
+  it("narrows every lead-derived band to Aimfox and swaps in the LinkedIn volume", () => {
+    const af = projectMetricsToChannel(pack, "aimfox");
+
+    expect(af.threeDodRows.map((r) => r.totalLeads)).toEqual([3, 3, 3, 3, 3]);
+    expect(af.wowRows[0].sqlLeads).toBe(3);
+    expect(af.momRows[0].totalLeads).toBe(3);
+    expect(af.momRows[0].meetings).toBe(3);
+    expect(af.momRows[0].won).toBe(3);
+
+    expect(bucket(af.dodRows, "0").sent).toBe(40);
+    expect(bucket(af.dodRows, "-1").sent).toBe(41);
+    expect(bucket(af.dodRows, "0").schedule).toBe(45);
+    expect(bucket(af.dodRows, "+1").schedule).toBe(46);
+    expect(bucket(af.dodRows, "+2").schedule).toBe(47);
+    // The Bison band leaves schedule null on past days and sent null on future ones; the Aimfox
+    // mirror must keep those holes as "—" rather than inventing a 0.
+    expect(bucket(af.dodRows, "-1").schedule).toBeNull();
+    expect(bucket(af.dodRows, "+2").sent).toBeNull();
+    expect(af.overview.sentToday).toBe(40);
+    expect(af.overview.scheduleToday).toBe(45);
+
+    // No email reply rate may survive under an Aimfox heading; acceptance does.
+    expect(af.wowRows[0].responseRate).toBeNull();
+    expect(af.wowRows[0].humanRate).toBeNull();
+    expect(af.wowRows[0].bounceRate).toBeNull();
+    expect(af.wowRows[0].oooRate).toBeNull();
+    expect(af.overview.wowHumanRate).toBeNull();
+    expect(af.wowRows[0].acceptRate).toBeCloseTo(0.25, 4);
+
+    // Channel-agnostic facts survive untouched.
+    expect(af.overview.latestProspectsCount).toBe(4200);
+    expect(af.overview.aimfoxInviteLimitRemaining).toBe(8);
+  });
+
+  it("projects a raw pack (no sequencer dimension) to zeros instead of throwing", () => {
+    const raw = createClientMetrics(
+      [] as never,
+      [makeLead("2026-04-19", "MQL")] as never,
+      new Date("2026-04-19T12:00:00.000Z"),
+    );
+    const af = projectMetricsToChannel(raw, "aimfox");
+    expect(af.threeDodRows[0].totalLeads).toBe(0);
+    expect(af.momRows[0].won).toBe(0);
+    expect(bucket(af.dodRows, "0").sent).toBeNull();
   });
 });

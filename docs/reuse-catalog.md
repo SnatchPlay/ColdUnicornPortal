@@ -120,7 +120,7 @@ it.)
 |---|---|
 | Role scoping | [`lib/selectors.ts`](../src/app/lib/selectors.ts) — `scopeClients`, `scopeCampaigns`, `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeEmailAccounts` (mailboxes via `domain → client`), `scopeInvoices`, `getLeadStage`, `getRoleLabel`, `isInternalAdmin` |
 | Client KPIs / view models | [`lib/client-view-models.ts`](../src/app/lib/client-view-models.ts) — `getClientKpis`, `getDailySentSeries`, `getPipelineCounts`, `getCampaignPerformance`, `getConversionRates`, `getClientLeadRows`, `formatCompact`, `PIPELINE_STAGES` |
-| Heavy aggregations (DoD / 3-DoD / WoW / MoM) | [`lib/client-metrics.ts`](../src/app/lib/client-metrics.ts) — `createClientMetrics`, `sumInRange`, `valueByDayOffset`, `toRate`, `startOfWeek`, `startOfMonth` |
+| Heavy aggregations (DoD / 3-DoD / WoW / MoM) | [`lib/client-metrics.ts`](../src/app/lib/client-metrics.ts) — `createClientMetrics`, `createClientMetricsFromSummary`, `projectMetricsToChannel` (narrow a pack to EmailBison / Aimfox for the clients-grid channel switch), `sumInRange`, `valueByDayOffset`, `toRate`, `startOfWeek`, `startOfMonth` |
 | Dashboard momentum + trend lines | [`lib/dashboard-momentum.ts`](../src/app/lib/dashboard-momentum.ts) — `linearRegression`, `DASHBOARD_CHART_TOOLTIP` |
 | Timeframes | [`lib/timeframe.ts`](../src/app/lib/timeframe.ts) — `TimeframeValue`, `createDefaultTimeframe`, `filterByTimeframe`, `resolveTimeframeBounds`, `makePreviousRange`, `TIMEFRAME_PRESETS` |
 | Conditions engine | [`lib/conditions/`](../src/app/lib/conditions/) — `evaluator`, `metric-catalog`, `validation`, `mapper`, `types` ([ADR-0011](adr/0011-conditions-rules-engine.md)) |

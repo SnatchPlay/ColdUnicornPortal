@@ -8,7 +8,14 @@ import { SatisfactionHearts } from "../../components/satisfaction-hearts";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
-import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../../lib/client-metrics";
+import type {
+  ClientMetricsPack,
+  DodRow,
+  MetricsChannelView,
+  MomRow,
+  ThreeDodRow,
+  WowRow,
+} from "../../lib/client-metrics";
 import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
 import { dodCellKey, momCellKey, threeDodCellKey, wowCellKey } from "../../lib/conditions/client-condition-results";
 import { getCellCondition } from "../../lib/conditions/evaluator";
@@ -27,8 +34,15 @@ import type {
 
 export type SortDirection = "asc" | "desc";
 
-/** Channel view switch for the clients tab: show both channels, or filter to one. */
-export type ChannelView = "both" | "email" | "aimfox";
+/**
+ * Channel view switch for the clients tab: show both channels, or narrow to one.
+ *
+ * In a single-channel view the neutral metric bands (Schedule, Daily sent, 3-DoD, WoW, MoM) keep
+ * their columns and positions and render that channel's numbers — the page projects the metrics
+ * pack through `projectMetricsToChannel` before building rows. So a combined ("Total") number is
+ * only ever on screen in `both`, and the EmailBison and Aimfox views are structurally identical.
+ */
+export type ChannelView = MetricsChannelView;
 export const CHANNEL_VIEWS: ChannelView[] = ["both", "email", "aimfox"];
 
 export interface ClientMegaRow {
@@ -69,10 +83,25 @@ interface MegaColumn {
   align: Align;
   sticky?: boolean;
   /**
-   * Channel affinity for the clients-tab view switch. "email" = EmailBison-specific column,
-   * "aimfox" = Aimfox-specific column, undefined = shared (identity, blended Total, always shown).
+   * The column's data is native to one channel and has NO counterpart in the other — the Bison
+   * reply/bounce/OOO rates, the Aimfox acceptance rate and capacity. Hidden in the other channel's
+   * view. undefined = neutral: the column renders whatever the projected pack holds.
    */
   channel?: "email" | "aimfox";
+  /**
+   * A side-by-side comparison column: the "· EB" / "· AF" splits and the "(Aimfox)" mirror bands.
+   * In a single-channel view the neutral band already carries that channel's numbers, so these are
+   * duplicates — visible only when channelView === "both".
+   */
+  splitOnly?: true;
+  /**
+   * `projectMetricsToChannel` rewrites this cell's value outside the Both view — "always" for the
+   * lead counts (both channels have their own), "aimfoxOnly" for the daily_stats bands, which are
+   * already EmailBison and are only swapped in the Aimfox view. Declared here rather than
+   * re-derived from metric keys so that splitting one more metric cannot leave a cell tinted
+   * against a number it no longer shows. See `stripProjectedConditionKeys`.
+   */
+  projected?: "always" | "aimfoxOnly";
   /** Render the cell content (without condition wrapper). */
   render: (row: ClientMegaRow) => ReactNode;
   /** Sort comparator key — string or number. */
@@ -426,7 +455,7 @@ function buildColumns(): MegaColumn[] {
       id: `dod-sched-${b}`,
       group: "dodSched",
       sub: "Schedule",
-      channel: "email",
+      projected: "aimfoxOnly",
       label: b,
       width: 38,
       minWidth: 32,
@@ -440,14 +469,15 @@ function buildColumns(): MegaColumn[] {
   }
 
   // --- DoD Schedule (Aimfox) ---------------------------------------------
-  // LinkedIn invite schedule mirror of the Bison band. No condition keys — the condition engine
-  // only knows the blended (email) DoD cells; these are display-only. Missing Aimfox data → "—".
+  // LinkedIn invite schedule mirror of the Bison band, for side-by-side reading in the Both view.
+  // No condition keys — the condition engine only knows the blended (email) DoD cells; these are
+  // display-only. Missing Aimfox data → "—".
   for (const b of DOD_SCHED_BUCKETS) {
     out.push({
       id: `dod-sched-af-${b}`,
       group: "dodSchedAf",
       sub: "Schedule (Aimfox)",
-      channel: "aimfox",
+      splitOnly: true,
       label: b,
       width: 38,
       minWidth: 32,
@@ -464,7 +494,7 @@ function buildColumns(): MegaColumn[] {
       id: `dod-sent-${b}`,
       group: "dodSent",
       sub: "Daily sent",
-      channel: "email",
+      projected: "aimfoxOnly",
       label: b,
       width: 38,
       minWidth: 32,
@@ -483,7 +513,7 @@ function buildColumns(): MegaColumn[] {
       id: `dod-sent-af-${b}`,
       group: "dodSentAf",
       sub: "Daily sent (Aimfox)",
-      channel: "aimfox",
+      splitOnly: true,
       label: b,
       width: 38,
       minWidth: 32,
@@ -528,9 +558,10 @@ function buildColumns(): MegaColumn[] {
   });
 
   // --- 3-DoD (per channel: Total / EmailBison / Aimfox) -------------------
-  // Each metric splits into three sub-bands. The Total channel keeps its original column id and
-  // condition keys (so persisted widths / master-admin overrides / condition rules stay bound);
-  // the EB and AF channels are display-only additions with no condition tint.
+  // Each metric splits into three sub-bands. The Total band keeps its original column id and
+  // condition keys (so persisted widths / master-admin overrides / condition rules stay bound) and
+  // renders the projected channel outside the Both view; the EB and AF bands are Both-only,
+  // display-only comparison columns with no condition tint.
   const td3Bands: Array<{
     metric: string;
     metricLabel: string;
@@ -567,7 +598,7 @@ function buildColumns(): MegaColumn[] {
           id: isTotal ? `td3-${band.metric}-${b}` : `td3-${band.metric}-${ch.key}-${b}`,
           group: "td3",
           sub,
-          channel: ch.key === "eb" ? "email" : ch.key === "af" ? "aimfox" : undefined,
+          ...(isTotal ? { projected: "always" as const } : { splitOnly: true as const }),
           label: b,
           width: 32,
           minWidth: 28,
@@ -582,27 +613,31 @@ function buildColumns(): MegaColumn[] {
   }
 
   // --- WoW (lead counts per channel, rates, plus Aimfox acceptance) ------
-  // Total & SQL lead counts split into Total / EmailBison / Aimfox; the Total channel keeps its
-  // original id + condition key. Rate columns are unchanged. "Accept" is the new Aimfox invitation
-  // acceptance rate (accepted/sent), rendered like the other rates and shown as "—" when unmeasured.
+  // Total & SQL keep their original id + condition key and render the projected channel outside the
+  // Both view; the "· EB" / "· AF" columns are Both-only comparisons. The email reply rates and the
+  // Aimfox acceptance rate are channel-native — neither channel has the other's, so each is tagged
+  // and simply disappears in the other view. "Accept" is accepted/sent, "—" when unmeasured.
   const wowMetrics: Array<{
     key: string;
     label: string;
     conditionKey?: string;
+    channel?: "email" | "aimfox";
+    splitOnly?: true;
+    projected?: "always";
     format: "rate" | "num";
     pick: (row: WowRow) => number | null | undefined;
   }> = [
-    { key: "total",    label: "Total",      conditionKey: "wow_total_leads",         format: "num",  pick: (r) => r.totalLeads },
-    { key: "total-eb", label: "Total · EB", format: "num",  pick: (r) => r.totalLeadsEb },
-    { key: "total-af", label: "Total · AF", format: "num",  pick: (r) => r.totalLeadsAf },
-    { key: "sql",      label: "SQL",        conditionKey: "wow_sql",                 format: "num",  pick: (r) => r.sqlLeads },
-    { key: "sql-eb",   label: "SQL · EB",   format: "num",  pick: (r) => r.sqlLeadsEb },
-    { key: "sql-af",   label: "SQL · AF",   format: "num",  pick: (r) => r.sqlLeadsAf },
-    { key: "resp",     label: "Resp",       conditionKey: "wow_total_response_rate", format: "rate", pick: (r) => r.responseRate },
-    { key: "human",    label: "Human",      conditionKey: "wow_human_response_rate", format: "rate", pick: (r) => r.humanRate },
-    { key: "bnc",      label: "Bnc",        conditionKey: "wow_bounce_rate",         format: "rate", pick: (r) => r.bounceRate },
-    { key: "ooo",      label: "OOO",        conditionKey: "wow_ooo_rate",            format: "rate", pick: (r) => r.oooRate },
-    { key: "accept",   label: "Accept",     format: "rate", pick: (r) => r.acceptRate },
+    { key: "total",    label: "Total",      conditionKey: "wow_total_leads", projected: "always", format: "num",  pick: (r) => r.totalLeads },
+    { key: "total-eb", label: "Total · EB", splitOnly: true, format: "num",  pick: (r) => r.totalLeadsEb },
+    { key: "total-af", label: "Total · AF", splitOnly: true, format: "num",  pick: (r) => r.totalLeadsAf },
+    { key: "sql",      label: "SQL",        conditionKey: "wow_sql",         projected: "always", format: "num",  pick: (r) => r.sqlLeads },
+    { key: "sql-eb",   label: "SQL · EB",   splitOnly: true, format: "num",  pick: (r) => r.sqlLeadsEb },
+    { key: "sql-af",   label: "SQL · AF",   splitOnly: true, format: "num",  pick: (r) => r.sqlLeadsAf },
+    { key: "resp",     label: "Resp",       conditionKey: "wow_total_response_rate", channel: "email",  format: "rate", pick: (r) => r.responseRate },
+    { key: "human",    label: "Human",      conditionKey: "wow_human_response_rate", channel: "email",  format: "rate", pick: (r) => r.humanRate },
+    { key: "bnc",      label: "Bnc",        conditionKey: "wow_bounce_rate",         channel: "email",  format: "rate", pick: (r) => r.bounceRate },
+    { key: "ooo",      label: "OOO",        conditionKey: "wow_ooo_rate",            channel: "email",  format: "rate", pick: (r) => r.oooRate },
+    { key: "accept",   label: "Accept",     channel: "aimfox", format: "rate", pick: (r) => r.acceptRate },
   ];
 
   for (const m of wowMetrics) {
@@ -611,12 +646,9 @@ function buildColumns(): MegaColumn[] {
         id: `wow-${m.key}-${b}`,
         group: "wow",
         sub: `WoW ${m.label}`,
-        // Email-reply rates + "· EB" are EmailBison; acceptance + "· AF" are Aimfox; Total/SQL shared.
-        channel: m.key.endsWith("-eb") || ["resp", "human", "bnc", "ooo"].includes(m.key)
-          ? "email"
-          : m.key.endsWith("-af") || m.key === "accept"
-          ? "aimfox"
-          : undefined,
+        channel: m.channel,
+        splitOnly: m.splitOnly,
+        projected: m.projected,
         label: b,
         width: m.format === "rate" ? 40 : 32,
         minWidth: 28,
@@ -633,20 +665,26 @@ function buildColumns(): MegaColumn[] {
   }
 
   // --- MoM ----------------------------------------------------------------
-  // Only SQL splits per channel (per the team's request); Total / Meetings / Won stay blended.
-  // Existing ids + condition keys preserved; the EB/AF SQL columns are display-only.
+  // Every MoM metric is split server-side, so all four bands render the projected channel outside
+  // the Both view. Side-by-side "· EB" / "· AF" comparison columns exist for Total and SQL, the two
+  // the team reads that way; Mtg / Won get the projection but no extra Both columns (the grid is
+  // already ~130 wide — add them the day someone asks). Existing ids + condition keys preserved.
   const momMetrics: Array<{
     key: string;
     label: string;
     conditionKey?: string;
+    splitOnly?: true;
+    projected?: "always";
     pick: (row: MomRow) => number | null | undefined;
   }> = [
-    { key: "total",  label: "Total",    conditionKey: "mom_total_leads", pick: (r) => r.totalLeads },
-    { key: "sql",    label: "SQL",      conditionKey: "mom_sql",         pick: (r) => r.sqlLeads },
-    { key: "sql-eb", label: "SQL · EB", pick: (r) => r.sqlLeadsEb },
-    { key: "sql-af", label: "SQL · AF", pick: (r) => r.sqlLeadsAf },
-    { key: "mtg",    label: "Mtg",      conditionKey: "mom_meetings",    pick: (r) => r.meetings },
-    { key: "won",    label: "Won",      conditionKey: "mom_won",         pick: (r) => r.won },
+    { key: "total",    label: "Total",      conditionKey: "mom_total_leads", projected: "always", pick: (r) => r.totalLeads },
+    { key: "total-eb", label: "Total · EB", splitOnly: true, pick: (r) => r.totalLeadsEb },
+    { key: "total-af", label: "Total · AF", splitOnly: true, pick: (r) => r.totalLeadsAf },
+    { key: "sql",      label: "SQL",        conditionKey: "mom_sql",         projected: "always", pick: (r) => r.sqlLeads },
+    { key: "sql-eb",   label: "SQL · EB",   splitOnly: true, pick: (r) => r.sqlLeadsEb },
+    { key: "sql-af",   label: "SQL · AF",   splitOnly: true, pick: (r) => r.sqlLeadsAf },
+    { key: "mtg",      label: "Mtg",        conditionKey: "mom_meetings",    projected: "always", pick: (r) => r.meetings },
+    { key: "won",      label: "Won",        conditionKey: "mom_won",         projected: "always", pick: (r) => r.won },
   ];
   for (const m of momMetrics) {
     for (const b of MOM_BUCKETS) {
@@ -654,7 +692,8 @@ function buildColumns(): MegaColumn[] {
         id: `mom-${m.key}-${b}`,
         group: "mom",
         sub: `MoM ${m.label}`,
-        channel: m.key === "sql-eb" ? "email" : m.key === "sql-af" ? "aimfox" : undefined,
+        splitOnly: m.splitOnly,
+        projected: m.projected,
         label: b,
         width: 32,
         minWidth: 28,
@@ -686,6 +725,17 @@ export const MEGA_SECTIONS: string[] = (() => {
   return out;
 })();
 
+/**
+ * Does a built-in column survive this channel view? Used by the page to drop a sort that is bound
+ * to a column the switch hides — `compareMega` finds no match for it and silently sorts by nothing.
+ * Unknown ids (custom fields, `cf:<uuid>`) are never channel-tagged, so they always survive.
+ */
+export function isColumnInChannelView(columnId: string, channelView: ChannelView): boolean {
+  if (channelView === "both") return true;
+  const col = MEGA_COLUMNS.find((c) => c.id === columnId);
+  return col ? columnInChannelView(col, channelView) : true;
+}
+
 /** Section (sub) → group lookup. Each built-in section maps to exactly one
  * group; the synthetic "Custom" section maps to the custom group. Used when a
  * column is reassigned to another section so its group band stays consistent. */
@@ -709,6 +759,54 @@ function computeStickyOffsets(widths: number[]): Map<number, number> {
     cum += widths[i] ?? 0;
   }
   return m;
+}
+
+/** Bands that are just record-keeping — everything else states which channel it is showing. */
+const CHANNEL_AGNOSTIC_GROUPS = new Set<Group>(["cs", "basic", "custom"]);
+const CHANNEL_SUFFIX: Record<Exclude<ChannelView, "both">, string> = { email: " · EB", aimfox: " · AF" };
+/**
+ * A trailing channel qualifier a master admin typed into a section name ("Schedule (email)",
+ * "Linkedin capacity"). In a single-channel view the band is projected, so a stored "(email)" over
+ * Aimfox numbers is not just redundant — it is wrong. Drop it and let the suffix say the channel.
+ */
+const STORED_CHANNEL_QUALIFIER = /\s*\((?:e-?mail(?:bison)?|bison|linked-?in|aimfox)\)\s*$/i;
+
+/** Does this column survive the channel switch? The single definition of the rule. */
+function columnInChannelView(col: MegaColumn, channelView: ChannelView): boolean {
+  if (channelView === "both") return true;
+  if (col.splitOnly) return false;
+  return !col.channel || col.channel === channelView;
+}
+
+/**
+ * Does the projection rewrite this cell's value in this view?
+ * `projected` is declared on the column itself, so a newly split metric cannot be forgotten here.
+ */
+function isProjectedCell(col: MegaColumn, channelView: ChannelView): boolean {
+  if (channelView === "both") return false;
+  return col.projected === "always" || (col.projected === "aimfoxOnly" && channelView === "aimfox");
+}
+
+/**
+ * In a single-channel view a neutral metric cell shows that channel's number, while the condition
+ * rules keep being evaluated on the blended pack (their thresholds — min_sent, the KPIs — are
+ * contract targets on total/email volume, so re-pointing them at one channel would change what
+ * every rule means). Tinting a projected cell would therefore colour a number that is not on
+ * screen, so drop the per-bucket binding for every cell the projection rewrites. The plain
+ * `conditionKey` path (Basic columns, custom fields) is untouched — those values never move.
+ */
+function stripProjectedConditionKeys(col: MegaColumn, channelView: ChannelView): MegaColumn {
+  if (!isProjectedCell(col, channelView)) return col;
+  const next = { ...col };
+  delete next.dodBucket;
+  delete next.dodKind;
+  delete next.wowBucket;
+  delete next.wowMetricKey;
+  delete next.td3Bucket;
+  delete next.td3MetricKey;
+  delete next.momBucket;
+  delete next.momMetricKey;
+  return next;
 }
 
 function cellCondition(row: ClientMegaRow, col: MegaColumn): ConditionEvaluationResult | undefined {
@@ -1251,9 +1349,11 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     const builtInEntries = MEGA_COLUMNS.flatMap((col, defaultIdx) => {
       const override = overrideMap.get(col.id);
       if (override?.hidden) return [];
-      // Channel view switch: drop the other channel's columns. Shared columns (channel undefined)
-      // — identity, Basic, blended Total metrics — always stay visible.
-      if (channelView !== "both" && col.channel && col.channel !== channelView) return [];
+      // Channel view switch. Outside "both": the "· EB" / "· AF" splits and the "(Aimfox)" mirrors
+      // are duplicates of the neutral band (which now carries this channel's numbers), and a
+      // channel-native column has no meaning in the other channel's view. Everything else —
+      // identity, Basic, custom fields and the projected metric bands — always stays.
+      if (!columnInChannelView(col, channelView)) return [];
       const withNotes = col.id === "notes" && onNotesChange ? { ...col, render: notesCellRender(onNotesChange) } : col;
       const withHearts =
         withNotes.id === "name" && onSatisfactionChange
@@ -1264,7 +1364,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           ? { ...withHearts, render: statusCellRender(onStatusChange) }
           : withHearts;
       const labelled = override?.label_override ? { ...editable, label: override.label_override } : editable;
-      const homed = applySectionAssignment(labelled, overrideMap);
+      const untinted = stripProjectedConditionKeys(labelled, channelView);
+      const homed = applySectionAssignment(untinted, overrideMap);
       return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
     });
 
@@ -1302,9 +1403,16 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
     // Apply section (sub-band) name overrides. Stored under the synthetic key
     // `section:<original sub>`; every column sharing that sub maps to the same
     // new name, so the band stays contiguous in the boundary/segment logic.
+    // Then, outside the Both view, say which channel the band is showing — the neutral names
+    // ("MoM Total", "Daily sent") would otherwise read as "everything" while holding one channel.
     return ordered.map((col) => {
       const sectionLabel = overrideMap.get(`section:${col.sub}`)?.label_override;
-      return sectionLabel ? { ...col, sub: sectionLabel } : col;
+      const named = sectionLabel ?? col.sub;
+      const sub =
+        channelView !== "both" && !CHANNEL_AGNOSTIC_GROUPS.has(col.group)
+          ? `${named.replace(STORED_CHANNEL_QUALIFIER, "")}${CHANNEL_SUFFIX[channelView]}`
+          : named;
+      return sub === col.sub ? col : { ...col, sub };
     });
   }, [columnOverrides, customFields, customFieldValuesByClient, canEditCustomField, onCustomFieldValueChange, onNotesChange, canEditStatus, onStatusChange, onSatisfactionChange, channelView]);
 

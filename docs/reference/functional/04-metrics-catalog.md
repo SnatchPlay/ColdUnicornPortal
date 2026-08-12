@@ -808,13 +808,21 @@ an **EmailBison-only** (`…_eb`) and **Aimfox-only** (`…_af`) column beside i
 
 ### 18.1 Per-channel lead counts
 
-- **Where:** 3-DoD (TOTAL + SQL), WoW (Total + SQL) each gain `· EB` and `· AF` sub-bands; MoM
-  gains `SQL · EB` / `SQL · AF` only (MoM Total/Meetings/Won stay blended — only SQL was requested).
+- **What is split:** every lead-derived metric of the grid — 3-DoD (TOTAL + SQL), WoW (Total + SQL),
+  MoM (Total + SQL + Mtg + Won). Nothing lead-derived is blended-only any more.
+- **Where the split is *rendered* as its own column:** 3-DoD TOTAL/SQL, WoW Total/SQL and MoM
+  Total/SQL each gain a `· EB` and a `· AF` sub-band, and those bands exist **only in the Both view**
+  (§18.5). MoM Mtg / Won carry the split in the payload but have no side-by-side columns — they are
+  read through the channel switch instead. Add them the day someone asks; the data is already there.
 - **Formula:** identical `COUNT(*) FILTER (…)` windows as the blended metric, with an added
   `sequencer_id = <channel>` predicate (gateway query `leadChannelRows`, `GROUP BY client_id, sequencer_id`).
+  The windows are copied **verbatim** from `leadSummaryRows`, including the deliberate m0
+  `<= month-end` vs m1..m4 `< next-month-start` asymmetry — that is what makes the identity below hold.
 - **Note:** `Total` is a bare count over **all** sequencers. Today the only sequencers are EmailBison
-  and Aimfox, so `Total = EB + AF` exactly; the split query only becomes `Total ≥ EB + AF` if a future
-  sequencer is added. EB and AF are strict per-sequencer counts, never `Total − other`.
+  and Aimfox, and `leads.sequencer_id` is `NOT NULL`, so `Total = EB + AF` exactly; the split query
+  only becomes `Total ≥ EB + AF` if a future sequencer is added. EB and AF are strict per-sequencer
+  counts, never `Total − other`. Verified 2026-08-12 against production: 33 clients × 5 months × 3
+  MoM metrics = 495 buckets, 0 mismatches.
 
 ### 18.2 Aimfox daily volume & schedule
 
@@ -847,8 +855,53 @@ an **EmailBison-only** (`…_eb`) and **Aimfox-only** (`…_af`) column beside i
 - Both are `null` (—) for a client with no Aimfox `client_sequencers` row.
 
 **Update cadence:** every 2 hours, driven by the `aimfox-daily-metrics` n8n workflow — no portal-side
-freshness change beyond the mega-table's existing refetch. **Conditions:** the per-channel/Aimfox
-columns are display-only; the condition engine still tints only the blended (Total) cells.
+freshness change beyond the mega-table's existing refetch.
+
+### 18.5 Channel view projection (Both / EmailBison / Aimfox)
+
+The switch is a **display projection**, not a refetch. The page narrows each client's
+`ClientMetricsPack` to the selected channel through `projectMetricsToChannel`
+([`client-metrics.ts`](../../../src/app/lib/client-metrics.ts)) before building the grid rows, so the
+neutral bands keep their columns, ids, widths and positions and simply hold different numbers.
+
+Two consequences that define the whole design:
+
+1. **A combined number is only ever on screen in `Both`.** In a single-channel view the neutral
+   `3-DoD TOTAL leads` / `WoW SQL` / `MoM Total` band shows that sequencer's count, and the `· EB` /
+   `· AF` comparison columns disappear (they would be duplicates).
+2. **The EmailBison and Aimfox views are structurally identical** — same sections, same order, same
+   early position — apart from the channel-native columns neither channel can mirror.
+
+| Band | `both` | `email` | `aimfox` |
+|---|---|---|---|
+| Schedule, Daily sent | Bison | Bison | Aimfox (`sequencer_daily_stats`) |
+| Schedule (Aimfox), Daily sent (Aimfox) | ✓ | — | — |
+| 3-DoD TOTAL/SQL, WoW Total/SQL, MoM Total/SQL/Mtg/Won | blended | EB | AF |
+| `· EB` / `· AF` comparison bands | ✓ | — | — |
+| WoW Resp / Human / Bnc / OOO | ✓ | ✓ | — |
+| WoW Accept, Aimfox capacity (Rem DB, Inv left) | ✓ | — | ✓ |
+| Customer Success, Basic, Custom | ✓ | ✓ | ✓ |
+
+**Parity gaps, and why they are irreducible:** `daily_stats` has no `sequencer_id` — it is
+EmailBison by construction — so the reply / bounce / OOO rates simply do not exist for LinkedIn;
+symmetrically, `invites_accepted`, `remaining_database_size` and `invite_limit_remaining` have no
+email analogue. In the Aimfox view those four rate bands are replaced by `WoW Accept` +
+`Aimfox capacity`. `latest_prospects_count` (Basic → **Added**) is also Bison-derived and stays
+neutral in all three views.
+
+**Headers name the channel.** Outside `Both`, every metric band's header gets a `· EB` / `· AF`
+suffix (applied after any master-admin `section:<sub>` rename), so a neutral name can never be
+misread as "everything". A trailing channel qualifier the admin typed into the stored name is
+stripped first — production has `section:Schedule → "Schedule (email)"`, which in the Aimfox view
+would otherwise read "Schedule (email) · AF" over LinkedIn numbers.
+
+**Conditions:** rules are always evaluated on the **blended** pack — their thresholds (`min_sent`,
+the KPIs) are contract targets on total/email volume, and a display switch must not change what a
+rule means. Because a projected cell would then be tinted against a number that is not on screen,
+the per-bucket condition binding is dropped outside `Both` (`stripProjectedConditionKeys` in
+`mega-table.tsx`). Basic-column and custom-field tints are unaffected — those values never move. In
+the EmailBison view the DoD band and the four reply-rate bands keep their tint, because the
+projection leaves those values alone.
 
 ---
 
