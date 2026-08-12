@@ -1890,9 +1890,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     `);
 
     // Per-channel lead split (ADR-0012 sequencer ids). One row per (client, sequencer) for the
-    // two channels the mega-table splits; the blended Total stays in leadSummaryRows above. Only
-    // the metrics the team asked to split are computed here (3-DoD total+sql, WoW leads+sql, MoM
-    // sql) — MoM total/meetings/won stay blended by design. Windows copy leadSummaryRows exactly.
+    // two channels the mega-table splits; the blended Total stays in leadSummaryRows above. Every
+    // lead-derived metric of the grid is split here (3-DoD total+sql, WoW leads+sql, MoM
+    // total+sql+meetings+won), because in the EmailBison / Aimfox views the neutral bands render
+    // the selected channel's numbers. Windows copy leadSummaryRows *verbatim* — that is what makes
+    // eb + af = blended hold exactly (note the deliberate m0 `<= month-end` vs m1..m4 `< next-month`
+    // asymmetry: it must be copied, not "fixed").
     const leadChannelRows = await rawQuery<Record<string, unknown>>(tx, sql`
       SELECT
         client_id,
@@ -1921,7 +1924,22 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date            AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                                           AS mom_sql_m1,
         (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int                      AS mom_sql_m2,
         (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int                      AS mom_sql_m3,
-        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int                      AS mom_sql_m4
+        (COUNT(*) FILTER (WHERE qualification::text = 'MQL' AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int                      AS mom_sql_m4,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE)::date                                AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_total_m0,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE)::date AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_mtg_m0,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE)::date AND created_at::date <= (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date))::int AS mom_won_m0,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date            AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                                           AS mom_total_m1,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                      AS mom_mtg_m1,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date AND created_at::date <  date_trunc('month', CURRENT_DATE)::date))::int                      AS mom_won_m1,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int                      AS mom_total_m2,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int AS mom_mtg_m2,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date))::int AS mom_won_m2,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int                     AS mom_total_m3,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int AS mom_mtg_m3,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '2 months')::date))::int AS mom_won_m3,
+        (COUNT(*) FILTER (WHERE created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date           AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int                     AS mom_total_m4,
+        (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_mtg_m4,
+        (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_won_m4
       FROM leads
       WHERE sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid
          OR sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid
@@ -2043,8 +2061,14 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         wow_leads_af:       [toInt(af.wow_leads_w0), toInt(af.wow_leads_w1), toInt(af.wow_leads_w2), toInt(af.wow_leads_w3), toInt(af.wow_leads_w4)],
         wow_sql_eb:         [toInt(eb.wow_sql_w0),   toInt(eb.wow_sql_w1),   toInt(eb.wow_sql_w2),   toInt(eb.wow_sql_w3),   toInt(eb.wow_sql_w4)],
         wow_sql_af:         [toInt(af.wow_sql_w0),   toInt(af.wow_sql_w1),   toInt(af.wow_sql_w2),   toInt(af.wow_sql_w3),   toInt(af.wow_sql_w4)],
+        mom_total_eb:       [toInt(eb.mom_total_m0), toInt(eb.mom_total_m1), toInt(eb.mom_total_m2), toInt(eb.mom_total_m3), toInt(eb.mom_total_m4)],
+        mom_total_af:       [toInt(af.mom_total_m0), toInt(af.mom_total_m1), toInt(af.mom_total_m2), toInt(af.mom_total_m3), toInt(af.mom_total_m4)],
         mom_sql_eb:         [toInt(eb.mom_sql_m0),   toInt(eb.mom_sql_m1),   toInt(eb.mom_sql_m2),   toInt(eb.mom_sql_m3),   toInt(eb.mom_sql_m4)],
         mom_sql_af:         [toInt(af.mom_sql_m0),   toInt(af.mom_sql_m1),   toInt(af.mom_sql_m2),   toInt(af.mom_sql_m3),   toInt(af.mom_sql_m4)],
+        mom_meetings_eb:    [toInt(eb.mom_mtg_m0),   toInt(eb.mom_mtg_m1),   toInt(eb.mom_mtg_m2),   toInt(eb.mom_mtg_m3),   toInt(eb.mom_mtg_m4)],
+        mom_meetings_af:    [toInt(af.mom_mtg_m0),   toInt(af.mom_mtg_m1),   toInt(af.mom_mtg_m2),   toInt(af.mom_mtg_m3),   toInt(af.mom_mtg_m4)],
+        mom_won_eb:         [toInt(eb.mom_won_m0),   toInt(eb.mom_won_m1),   toInt(eb.mom_won_m2),   toInt(eb.mom_won_m3),   toInt(eb.mom_won_m4)],
+        mom_won_af:         [toInt(af.mom_won_m0),   toInt(af.mom_won_m1),   toInt(af.mom_won_m2),   toInt(af.mom_won_m3),   toInt(af.mom_won_m4)],
         // ── Aimfox daily volume / acceptance / capacity (summed across profiles) ─────────────
         aimfox_daily_sent:  [toInt(ax.af_sent_d0),   toInt(ax.af_sent_d1),   toInt(ax.af_sent_d2),   toInt(ax.af_sent_d3),   toInt(ax.af_sent_d4)],
         aimfox_schedule_today:     toInt(ax.af_sched_today),

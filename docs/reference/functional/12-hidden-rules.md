@@ -108,6 +108,27 @@ Two SECURITY DEFINER helpers exist with the same name in different schemas. RLS 
 
 [client-metrics.ts:195-202](../../../src/app/lib/client-metrics.ts#L195-L202) вЂ” `threeDodTotal` increments for `qualification в€€ {preMQL, MQL}`; `sql` (= MQL leads) increments only for `MQL`. A lead at preMQL counts toward the "total" bucket but not toward the "SQL" bucket вЂ” by design.
 
+### Clients-grid condition tint is a `Both`-view feature
+
+`stripProjectedConditionKeys` in [mega-table.tsx](../../../src/app/pages/clients-page/mega-table.tsx)
+— in the EmailBison / Aimfox views the neutral metric bands render one sequencer's numbers
+(`projectMetricsToChannel`), but the condition rules are still evaluated on the **blended** pack,
+because their thresholds (`min_sent`, `kpi_leads`, `monthly_sql_kpi`) are contract targets on
+total/email volume and a display switch must not change what a rule means. Tinting a projected cell
+would therefore colour a number that is not on screen, so the per-bucket binding
+(`td3Bucket`/`wowBucket`/`momBucket`, and `dodBucket` in the Aimfox view) is dropped there. Plain
+`conditionKey` tints — Basic columns and `cf:<id>` custom fields — survive in all three views, and
+the EmailBison view keeps its DoD and reply-rate tints because those values are not projected.
+
+### `daily_stats` has no sequencer dimension — every WoW rate is EmailBison
+
+[03-data-model §daily_stats](./03-data-model.md) — the table is keyed `(client_id, report_date)`
+only. Schedule, Daily sent and the WoW Resp / Human / Bnc / OOO rates are therefore Bison facts by
+construction, not blended ones, and there is no LinkedIn equivalent anywhere in the schema
+(`sequencer_daily_stats` carries invites sent/accepted/limits only). That is why the Aimfox view
+shows `WoW Accept` + `Aimfox capacity` in their place instead of the same columns with different
+numbers, and why `latest_prospects_count` (Basic → **Added**) stays neutral in every channel view.
+
 ### ~~Reply scope filter on lead pages~~ — REMOVED 2026-07-22
 
 The `replyScope` filter (`ooo` → `qualification === "OOO"`, `active` → `!== "OOO"`, `all` → no

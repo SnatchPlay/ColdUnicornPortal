@@ -7,7 +7,11 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { cn } from "../components/ui/utils";
 import { repository, RepositoryError } from "../data/repository";
 import { logAfterRaf2, markInteractionStart, markPoint, measureAfterRaf2, measureBetween, timeSyncOp } from "../lib/perf-mark";
-import { createClientMetricsFromSummary, type ClientMetricsPack } from "../lib/client-metrics";
+import {
+  createClientMetricsFromSummary,
+  projectMetricsToChannel,
+  type ClientMetricsPack,
+} from "../lib/client-metrics";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { SatisfactionHearts, satisfactionLabel } from "../components/satisfaction-hearts";
@@ -40,6 +44,7 @@ import {
   ClientsMegaTable,
   CHANNEL_VIEWS,
   MEGA_COLUMNS,
+  isColumnInChannelView,
   statusBadgeClass,
   type ChannelView,
   type ClientMegaRow,
@@ -49,6 +54,9 @@ import { createSelectionStore } from "./clients-page/selection-store";
 import { useTablePreferences } from "../lib/use-table-preferences";
 
 const PAGE_SIZE = 50;
+
+/** Fallback sort: the Client column, A→Z. Also where the channel switch lands a stale sort key. */
+const DEFAULT_MEGA_SORT: MegaSortState = { key: "name", direction: "asc" };
 // Manual satisfaction rating, not the condition engine: "1".."3" are heart counts and "unrated"
 // is `satisfaction IS NULL`, which is where every client starts — without its own chip a brand-new
 // client would be unreachable from this filter.
@@ -291,8 +299,14 @@ const EMPTY_METRICS_SUMMARY: ClientMetricsSummary = {
   wow_leads_af:        [0, 0, 0, 0, 0],
   wow_sql_eb:          [0, 0, 0, 0, 0],
   wow_sql_af:          [0, 0, 0, 0, 0],
+  mom_total_eb:        [0, 0, 0, 0, 0],
+  mom_total_af:        [0, 0, 0, 0, 0],
   mom_sql_eb:          [0, 0, 0, 0, 0],
   mom_sql_af:          [0, 0, 0, 0, 0],
+  mom_meetings_eb:     [0, 0, 0, 0, 0],
+  mom_meetings_af:     [0, 0, 0, 0, 0],
+  mom_won_eb:          [0, 0, 0, 0, 0],
+  mom_won_af:          [0, 0, 0, 0, 0],
   aimfox_daily_sent:   [0, 0, 0, 0, 0],
   aimfox_schedule_today:     0,
   aimfox_schedule_tomorrow:  0,
@@ -1048,7 +1062,7 @@ export function ClientsPage() {
   // Was `{ key: "health" }`, which no column ever defined — `compareMega` found no match and
   // returned 0, so the documented "worst first" default silently did nothing. Triage now lives in
   // the satisfaction filter chips, so the default sort is simply the Client column.
-  const [sort, setSort] = useState<MegaSortState>({ key: "name", direction: "asc" });
+  const [sort, setSort] = useState<MegaSortState>(DEFAULT_MEGA_SORT);
 
   // Per-user layout: column widths, filters and sort, stored in Postgres so the grid looks
   // the same on any browser. The name search is deliberately *not* persisted — a stale
@@ -1076,15 +1090,20 @@ export function ClientsPage() {
     if (typeof tablePrefs.managerFilter === "string") {
       setManagerFilter(tablePrefs.managerFilter);
     }
-    if (CHANNEL_VIEWS.includes(tablePrefs.channelView as ChannelView)) {
-      setChannelView(tablePrefs.channelView as ChannelView);
-    }
-    // A stored sort key must still name a real column. Anyone who used the grid before the health
-    // rollup was removed has `"health"` saved here — restoring it would sort by nothing at all.
+    // Only set it when something was actually stored — an unconditional setter would revert a
+    // switch the user clicked while the preferences round-trip was still in flight.
+    const storedView = CHANNEL_VIEWS.includes(tablePrefs.channelView as ChannelView)
+      ? (tablePrefs.channelView as ChannelView)
+      : null;
+    if (storedView) setChannelView(storedView);
+    // A stored sort key must still name a real column *that the restored channel view shows*.
+    // Anyone who used the grid before the health rollup was removed has `"health"` saved here, and
+    // a layout saved before this view existed can pair `aimfox` with an EmailBison-only column —
+    // either way, restoring it would sort by nothing at all.
     if (tablePrefs.sort && typeof tablePrefs.sort.key === "string") {
       const key = tablePrefs.sort.key;
       const known = key.startsWith("cf:") || MEGA_COLUMNS.some((c) => c.id === key);
-      if (known) {
+      if (known && isColumnInChannelView(key, storedView ?? "both")) {
         setSort({ key, direction: tablePrefs.sort.direction === "desc" ? "desc" : "asc" });
       }
     }
@@ -1135,9 +1154,13 @@ export function ClientsPage() {
   const handleChannelViewChange = useCallback(
     (next: ChannelView) => {
       setChannelView(next);
-      updateTablePrefs({ channelView: next });
+      // A sort bound to a column this view hides would silently do nothing — compareMega finds no
+      // matching column and returns 0. Fall back to the default Client sort instead.
+      const keepsSort = isColumnInChannelView(sort.key, next);
+      if (!keepsSort) setSort(DEFAULT_MEGA_SORT);
+      updateTablePrefs(keepsSort ? { channelView: next } : { channelView: next, sort: DEFAULT_MEGA_SORT });
     },
-    [updateTablePrefs],
+    [sort.key, updateTablePrefs],
   );
 
   const handleClearFilters = useCallback(() => {
@@ -1211,13 +1234,18 @@ export function ClientsPage() {
         return {
           client,
           managerName,
-          metrics,
+          // Narrow the numbers to the selected channel here, at page level, and NOT inside the
+          // table: compareMega sorts through col.sortValue(row) on row.metrics, so a projection
+          // applied any deeper would let the sort disagree with what is rendered. The condition
+          // packs above stay on the blended metrics on purpose — a display switch must not change
+          // what a rule means (see stripProjectedConditionKeys in mega-table).
+          metrics: projectMetricsToChannel(metrics, channelView),
           conditionPack,
           sequencerCreds: credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS,
         };
       }),
     );
-  }, [conditionPackByClientId, credsByClientId, managerById, metricsByClientId, scopedClients]);
+  }, [channelView, conditionPackByClientId, credsByClientId, managerById, metricsByClientId, scopedClients]);
 
   const customFieldById = useMemo(
     () => new Map(clientCustomFields.map((f) => [f.id, f] as const)),
@@ -1582,13 +1610,13 @@ export function ClientsPage() {
               >
                 {/* flex-none so each item sizes to its own label — the base ToggleGroupItem uses
                     flex-1 (equal widths), which squeezes the long "EmailBison" past its cell. */}
-                <ToggleGroupItem value="both" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Both channels">
+                <ToggleGroupItem value="both" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Both channels, combined and side by side">
                   Both
                 </ToggleGroupItem>
-                <ToggleGroupItem value="email" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="EmailBison columns only">
+                <ToggleGroupItem value="email" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="EmailBison numbers only">
                   EmailBison
                 </ToggleGroupItem>
-                <ToggleGroupItem value="aimfox" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Aimfox columns only">
+                <ToggleGroupItem value="aimfox" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Aimfox numbers only">
                   Aimfox
                 </ToggleGroupItem>
               </ToggleGroup>

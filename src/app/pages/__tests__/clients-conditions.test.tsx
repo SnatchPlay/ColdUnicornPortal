@@ -138,6 +138,16 @@ function makeEmptySummary(clientId: string) {
     mom_meetings: [0, 0, 0, 0, 0], mom_won: [0, 0, 0, 0, 0],
     threedod_total: [0, 0, 0, 0, 0], threedod_sql: [0, 0, 0, 0, 0],
     latest_prospects_count: 0,
+    // Per-channel splits (04-metrics §18) — kept in the fixture so a test can set one without
+    // tripping the excess-property check, and so this copy does not drift from the contract.
+    threedod_total_eb: [0, 0, 0, 0, 0], threedod_total_af: [0, 0, 0, 0, 0],
+    threedod_sql_eb: [0, 0, 0, 0, 0], threedod_sql_af: [0, 0, 0, 0, 0],
+    wow_leads_eb: [0, 0, 0, 0, 0], wow_leads_af: [0, 0, 0, 0, 0],
+    wow_sql_eb: [0, 0, 0, 0, 0], wow_sql_af: [0, 0, 0, 0, 0],
+    mom_total_eb: [0, 0, 0, 0, 0], mom_total_af: [0, 0, 0, 0, 0],
+    mom_sql_eb: [0, 0, 0, 0, 0], mom_sql_af: [0, 0, 0, 0, 0],
+    mom_meetings_eb: [0, 0, 0, 0, 0], mom_meetings_af: [0, 0, 0, 0, 0],
+    mom_won_eb: [0, 0, 0, 0, 0], mom_won_af: [0, 0, 0, 0, 0],
   };
 }
 
@@ -228,6 +238,52 @@ describe("clients condition surfaces", () => {
 
     const cell = screen.getByText("3.0%").closest("div");
     expect(cell?.className).toContain("cond-cell-danger");
+  });
+
+  // A neutral metric cell shows the selected channel's number while the rules keep running on the
+  // blended pack, so the tint would judge a value that is not on screen. It is dropped instead.
+  it("drops metric-cell tint outside the Both view but keeps the Basic-column tint", async () => {
+    const td3Rule = makeConditionRule({
+      key: "three_dod_total",
+      name: "3-DoD TOTAL",
+      surface: "clients_3dod",
+      metric_key: "three_dod_total",
+      column_key: "three_dod_total",
+      branches: [
+        { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 100 } }, label: "Too many", message: "Too many." },
+      ],
+    });
+    const inboxesRule = makeConditionRule({
+      key: "inboxes",
+      name: "Inboxes",
+      surface: "clients_overview",
+      metric_key: "inboxes",
+      column_key: "inboxes",
+      branches: [
+        { severity: "danger", when: { left: { metric: "value" }, op: "lte", right: { value: 10 } }, label: "Too few", message: "Too few." },
+      ],
+    });
+    mockedRepo.loadClientsOverview.mockResolvedValue(
+      makeClientsOverview({ conditionRules: [td3Rule, inboxesRule] }) as never,
+    );
+    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(wrapSummaries([{
+      ...makeEmptySummary("client-1"),
+      threedod_total: [101, 0, 0, 0, 0],
+      threedod_total_eb: [71, 0, 0, 0, 0],
+      threedod_total_af: [31, 0, 0, 0, 0],
+    }]) as never);
+
+    await renderPage();
+
+    const tinted = (text: string) =>
+      screen.getAllByText(text).some((el) => el.closest("div")?.className.includes("cond-cell-danger"));
+
+    expect(tinted("101")).toBe(true);
+    expect(tinted("8")).toBe(true); // inboxes_count = 8, a Basic column
+
+    fireEvent.click(screen.getByRole("radio", { name: "EmailBison numbers only" }));
+    expect(tinted("71")).toBe(false);
+    expect(tinted("8")).toBe(true);
   });
 
   it("shows DoD danger highlight when value is below 80% of min sent", async () => {
