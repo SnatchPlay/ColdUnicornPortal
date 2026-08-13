@@ -425,6 +425,20 @@ one token per provisioning attempt.
   `unsaved` and drops the toggle, so the drawer's Save bar is never armed by a hidden field.
   Two buttons: **Check** (`dry_run: true`) and **Set up** (`dry_run: false`, confirmed first).
   Internal roles only; a `client` never sees the clients page at all.
+- Client drawer — the **workspace id** inside each card, which can be given either way: **From
+  list** is the same `WorkspacePicker` the New client sheet uses (`requestWorkspaceSetup` with
+  `clientId: null`, lazy, unclaimed workspaces only), and **Type it** is the plain input. Two modes
+  rather than one because the listing is not complete here the way it is for a new client: it
+  filters out workspaces another client already claimed, and it is a live vendor round trip that
+  can fail — so an id that cannot be picked still has to be typeable. A client with no id yet opens
+  on the list, one that already has an id opens on the input showing it. Either way the value lands
+  in the same draft field and is saved by `upsertClientSequencer` on the drawer's Save; picking
+  claims nothing on its own — **Check** and **Set up** remain the only calls to the vendor.
+  A run carries that field's id **whether or not it has been saved**: the payload's `workspace_id`
+  is the click's own pick, else a candidate chip picked earlier in this card's life, else the field.
+  Without the last fallback, choosing a workspace and pressing Check before Save sent no id, so the
+  workflow resolved by name from scratch and answered `needs_selection` again — ignoring the answer
+  the operator had just given it. An empty field still sends `null` and resolution runs as before.
 
 ## Dashboard metrics
 

@@ -177,7 +177,7 @@ Opens on row click. Draft pattern: local `draft` state deviates from `selectedCl
 Sections (top → bottom):
 
 1. **Header** — name, status pill, manager, contract amount + due.
-2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): EmailBison workspace ID + API key, Aimfox API key; CRM status from `crm_config` (read-only badge).
+2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): per-vendor workspace ID (picked from the vendor's own list or typed) + API key; CRM status from `crm_config` (read-only badge).
 3. **Client configuration** — editable form (includes the **Customer satisfaction** hearts, §2.7).
 4. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
 5. **User access management** — invite + map client portal users.
@@ -191,8 +191,9 @@ Editable fields — **Credentials & IDs** section:
 
 | Field | Control | Source column | Who |
 |-------|---------|---------------|-----|
-| EmailBison workspace ID | text input | `client_sequencers.external_workspace_id` (emailbison row) | manager + admin |
+| EmailBison workspace ID | **From list** (dropdown of the vendor's unclaimed workspaces) or **Type it** (text input) | `client_sequencers.external_workspace_id` (emailbison row) | manager + admin |
 | EmailBison API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (emailbison row) | manager + admin |
+| Aimfox workspace ID | **From list** / **Type it**, same control | `client_sequencers.external_workspace_id` (aimfox row) | manager + admin |
 | Aimfox API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (aimfox row) | manager + admin |
 | CRM status | read-only badge | `clients.crm_config` | — |
 

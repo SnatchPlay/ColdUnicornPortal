@@ -2,9 +2,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { repository } from "../../data/repository";
 import { cn } from "../../components/ui/utils";
+import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import type { ClientSequencerRecord, WorkspaceSetupState, WorkspaceSetupStep } from "../../types/core";
 import type { WorkspaceSetupResult } from "../../types/view-contracts";
 import type { ClientSequencerCreds } from "./client-drawer";
+import { SEQUENCER_TITLES, WorkspacePicker, type SequencerKey } from "./workspace-picker";
 
 /**
  * The **Credentials & IDs** section of the client drawer: one card per sequencer carrying both the
@@ -27,8 +29,6 @@ import type { ClientSequencerCreds } from "./client-drawer";
  * "unknown", it is "missing"**. Audytel sat in exactly that gap while three of its leads were
  * dropped, and nothing anywhere said so.
  */
-
-const SEQUENCER_LABELS = { emailbison: "EmailBison", aimfox: "Aimfox" } as const;
 
 // Fixed order, not `Object.entries` order. The workflows emit keys in their own sequence and the
 // two vendors do not agree (Aimfox has `labels`, Bison has `tags`), so reading the object's order
@@ -214,6 +214,86 @@ function SecretInput({
   );
 }
 
+/**
+ * The workspace id, entered either way the operator can honestly enter it.
+ *
+ * The New client sheet only ever offers the list, and that is right there: before the client row
+ * exists every workspace it could claim is unclaimed, so the list is complete by construction. In
+ * the drawer it is not. The listing filters out workspaces another client already claimed, and it is
+ * a live vendor round trip that can fail or return nothing — so an id that cannot be picked still
+ * has to be typeable. Hence two modes rather than replacing the input: this is the screen where a
+ * connector gets repaired, and a repair screen that can only offer the happy path is not one.
+ *
+ * Both modes write the same draft field, so the drawer's Save bar and the card's "unsaved" pill work
+ * exactly as they did. Picking here claims nothing by itself — it records which workspace is this
+ * client's; Check and Set up are still what talk to the vendor.
+ */
+function WorkspaceIdField({
+  sequencerKey,
+  value,
+  onChange,
+  placeholder,
+}: {
+  sequencerKey: SequencerKey;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  // A client that already has an id is being read, not connected: show it as the plain string it is
+  // rather than behind a dropdown that — the workspace being claimed — cannot list it back.
+  const [mode, setMode] = useState<"list" | "manual">(value ? "manual" : "list");
+
+  return (
+    <div className="space-y-1.5">
+      {/* Two cards sit side by side in a half-width drawer, so the label is kept off its own second
+          line: a wrapped "Workspace / ID" pushed the toggle out of line between the two vendors. */}
+      <div className="flex items-center justify-between gap-2 whitespace-nowrap">
+        <FieldLabel>Workspace ID</FieldLabel>
+        <ToggleGroup
+          type="single"
+          value={mode}
+          onValueChange={(next) => {
+            if (next) setMode(next as "list" | "manual");
+          }}
+          variant="outline"
+          className="shrink-0 border border-white/10"
+        >
+          <ToggleGroupItem
+            value="list"
+            className="h-6 flex-none whitespace-nowrap border-0 px-2 text-[10px] uppercase tracking-[0.12em]"
+          >
+            From list
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="manual"
+            className="h-6 flex-none whitespace-nowrap border-0 px-2 text-[10px] uppercase tracking-[0.12em]"
+          >
+            Type it
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+      {mode === "list" ? (
+        <WorkspacePicker
+          sequencerKey={sequencerKey}
+          label={null}
+          chosen={value ? { workspace_id: value, name: null } : null}
+          onChoose={(choice) => onChange(choice?.workspace_id ?? "")}
+          triggerClassName="rounded-xl px-3 py-2"
+          emptyHint={`Every ${SEQUENCER_TITLES[sequencerKey]} workspace already belongs to a client — including this one, if it is already connected. Type the id to set it anyway.`}
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
+        />
+      )}
+    </div>
+  );
+}
+
 /** Read-only value with reveal + copy. Used for CRM status, which the portal does not edit. */
 function MaskedField({ label, value, mask = false }: { label: string; value: string | null; mask?: boolean }) {
   const [shown, setShown] = useState(!mask);
@@ -273,15 +353,18 @@ function SequencerCard({
   sequencerKey,
   fields,
   dirty,
+  draftWorkspaceId,
 }: {
   label: string;
   row: ClientSequencerRecord | null;
   clientId: string;
-  sequencerKey: "emailbison" | "aimfox";
+  sequencerKey: SequencerKey;
   /** The credential inputs for this vendor — the card stays vendor-agnostic. */
   fields: React.ReactNode;
   /** True when the draft's credentials for this vendor differ from what is stored. */
   dirty: boolean;
+  /** The workspace id currently in the drawer's draft — saved or not. See `run`. */
+  draftWorkspaceId: string;
 }) {
   const [busy, setBusy] = useState<"check" | "apply" | null>(null);
   const [open, setOpen] = useState(false);
@@ -310,6 +393,13 @@ function SequencerCard({
    * dry run — correctly, since creating it would make the client connected. So nothing is stored,
    * and a subsequent Set up sent without the id would resolve from scratch and land right back in
    * `needs_selection`. Holding the pick for the life of the card is what closes that loop.
+   *
+   * The draft's own workspace id is the last fallback, and it is what makes the field above and
+   * these buttons one control rather than two. Without it, choosing a workspace and pressing Check
+   * before Save sent no id at all: the workflow resolved by name from scratch and answered
+   * `needs_selection` again — the card ignoring the answer the operator had just given it. Order is
+   * most-recent-intent first: this click, then a chip picked earlier in this card's life, then the
+   * field. An empty field is not an id, so it stays `null` and the workflow resolves as before.
    */
   const run = async (mode: "check" | "apply", workspaceId?: string) => {
     if (mode === "apply") {
@@ -320,7 +410,7 @@ function SequencerCard({
       );
       if (!confirmed) return;
     }
-    const effectiveWorkspaceId = workspaceId ?? picked;
+    const effectiveWorkspaceId = workspaceId ?? picked ?? (draftWorkspaceId.trim() || null);
     if (workspaceId) setPicked(workspaceId);
     setBusy(mode);
     try {
@@ -588,23 +678,21 @@ export function SequencerConnections({
 
       <div className="grid gap-3 md:grid-cols-2">
         <SequencerCard
-          label={SEQUENCER_LABELS.emailbison}
+          label={SEQUENCER_TITLES.emailbison}
           row={creds.emailbison}
           clientId={clientId}
           sequencerKey="emailbison"
           dirty={bisonDirty}
+          draftWorkspaceId={externalWorkspaceId}
           fields={
             <div className="space-y-3">
-              <label className="block space-y-1.5">
-                <FieldLabel>Workspace ID</FieldLabel>
-                <input
-                  type="text"
-                  value={externalWorkspaceId}
-                  onChange={(event) => onChange({ externalWorkspaceId: event.target.value })}
-                  placeholder="e.g. 12345"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-                />
-              </label>
+              <WorkspaceIdField
+                key={`${clientId}-emailbison`}
+                sequencerKey="emailbison"
+                value={externalWorkspaceId}
+                onChange={(value) => onChange({ externalWorkspaceId: value })}
+                placeholder="e.g. 12345"
+              />
               <label className="block space-y-1.5">
                 <FieldLabel>API key</FieldLabel>
                 <SecretInput
@@ -617,27 +705,25 @@ export function SequencerConnections({
           }
         />
         <SequencerCard
-          label={SEQUENCER_LABELS.aimfox}
+          label={SEQUENCER_TITLES.aimfox}
           row={creds.aimfox}
           clientId={clientId}
           sequencerKey="aimfox"
           dirty={aimfoxDirty}
+          draftWorkspaceId={aimfoxWorkspaceId}
           fields={
             <div className="space-y-3">
               {/* This field exists because `needs_selection` is not an edge case: provisioning
                   matches on an exact name, and a live dry run on 2026-08-09 put Fab.Marketingu in
                   that state with three candidates. Without somewhere to put the chosen id, the
                   card would list the answers and offer no way to give one. */}
-              <label className="block space-y-1.5">
-                <FieldLabel>Workspace ID</FieldLabel>
-                <input
-                  type="text"
-                  value={aimfoxWorkspaceId}
-                  onChange={(event) => onChange({ aimfoxWorkspaceId: event.target.value })}
-                  placeholder="Resolved by provisioning — or paste one to claim it"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none"
-                />
-              </label>
+              <WorkspaceIdField
+                key={`${clientId}-aimfox`}
+                sequencerKey="aimfox"
+                value={aimfoxWorkspaceId}
+                onChange={(value) => onChange({ aimfoxWorkspaceId: value })}
+                placeholder="Resolved by provisioning — or paste one to claim it"
+              />
               <label className="block space-y-1.5">
                 <FieldLabel>API key</FieldLabel>
                 <SecretInput
