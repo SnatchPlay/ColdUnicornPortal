@@ -17,16 +17,18 @@ function mapError(reason: unknown): string {
  * Per-page loader for DomainsPage (Phase 7). Stale guard prevents slow
  * in-flight responses from overwriting a newer state.
  */
-export function useDomainsPage() {
+export function useDomainsPage(options?: { includeArchived?: boolean }) {
   const [data, setData] = useState<DomainsPagePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadIdRef = useRef(0);
+  // Archived rows are hidden unless the page asks for them (migration 20260813).
+  const includeArchived = options?.includeArchived === true;
 
   function load() {
     const id = ++loadIdRef.current;
     setLoading(true);
-    repository.loadDomainsPage()
+    repository.loadDomainsPage({ includeArchived })
       .then((result) => {
         if (id !== loadIdRef.current) return;
         setData(result);
@@ -41,7 +43,7 @@ export function useDomainsPage() {
       });
   }
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [includeArchived]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { data, loading, error, refresh: () => { load(); } };
 }

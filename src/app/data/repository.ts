@@ -57,6 +57,7 @@ import type {
   TablePreferencesPayload,
 } from "../types/view-contracts";
 import type {
+  ArchivableEntity,
   LeadMeetingInput,
   LeadOfferInput,
   LeadTaskInput,
@@ -67,6 +68,7 @@ import type {
   OrmGatewayRequest,
   OrmGatewayResponseMap,
   SequencerCredentialInput,
+  SetEntityArchivedResult,
 } from "./orm-gateway-contract";
 
 type RepositoryOperation = "select" | "insert" | "update" | "upsert" | "delete";
@@ -117,6 +119,9 @@ const ORM_ACTION_META: Record<OrmGatewayAction, { table: string; operation: Repo
   createConditionRule: { table: "condition_rules", operation: "insert" },
   updateConditionRule: { table: "condition_rules", operation: "update" },
   deleteConditionRule: { table: "condition_rules", operation: "delete" },
+  // Archive/restore is an UPDATE of the tombstone columns, not a DELETE — see the migration
+  // 20260813_entity_archival header. The table is resolved per entity by the gateway.
+  setEntityArchived: { table: "entity", operation: "update" },
   upsertClientUserMapping: { table: "client_users", operation: "upsert" },
   deleteClientUserMapping: { table: "client_users", operation: "delete" },
   upsertEmailExcludeDomain: { table: "email_exclude_list", operation: "upsert" },
@@ -579,7 +584,7 @@ export interface Repository {
   loadAdminDashboardOverview(): Promise<AdminDashboardOverview>;
   loadManagerDashboardOverview(managerId: string, params?: ManagerDashboardParams): Promise<ManagerDashboardOverview>;
   loadClientDashboard(clientId: string): Promise<ClientDashboardPayload>;
-  loadClientsOverview(): Promise<ClientsOverviewPayload>;
+  loadClientsOverview(options?: { includeArchived?: boolean }): Promise<ClientsOverviewPayload>;
   loadClientsStats(): Promise<ClientsStatsPayload>;
   loadClientsMetricsSummary(): Promise<ClientsMetricsSummaryPayload>;
   loadLeadsList(params: LeadsListParams): Promise<LeadsListResponse>;
@@ -588,10 +593,10 @@ export interface Repository {
   loadLeadsFilterOptions(): Promise<LeadsFilterOptions>;
   loadAnalyticsOverview(): Promise<AnalyticsOverviewPayload>;
   loadAdminSettings(): Promise<AdminSettingsPayload>;
-  loadDomainsPage(): Promise<DomainsPagePayload>;
-  loadEmailAccountsPage(): Promise<EmailAccountsPagePayload>;
+  loadDomainsPage(options?: { includeArchived?: boolean }): Promise<DomainsPagePayload>;
+  loadEmailAccountsPage(options?: { includeArchived?: boolean }): Promise<EmailAccountsPagePayload>;
   loadEmailAccountWarming(emailAccountId: string): Promise<EmailAccountWarmingPayload>;
-  loadInvoicesPage(): Promise<InvoicesPagePayload>;
+  loadInvoicesPage(options?: { includeArchived?: boolean }): Promise<InvoicesPagePayload>;
   loadBlacklistPage(): Promise<BlacklistPagePayload>;
   loadCampaignsList(params: CampaignsListParams): Promise<CampaignsListResponse>;
   loadCampaignStats(campaignId?: string): Promise<CampaignStatsResponse>;
@@ -639,6 +644,16 @@ export interface Repository {
     patch: Partial<Omit<ConditionRuleRecord, "id" | "created_at" | "updated_at">>,
   ): Promise<ConditionRuleRecord>;
   deleteConditionRule(ruleId: string): Promise<void>;
+  /**
+   * Archive (soft delete) or restore one row. The portal's delete for clients, campaigns, leads,
+   * domains, invoices and mailboxes — a hard DELETE is blocked by the ingestion FKs and would be
+   * undone by re-ingestion (migration 20260813_entity_archival).
+   */
+  setEntityArchived(
+    entity: ArchivableEntity,
+    id: string,
+    archived: boolean,
+  ): Promise<SetEntityArchivedResult>;
   sendInvite(payload: InviteRequest): Promise<{ inviteId: string | null }>;
   listInvites(): Promise<InviteRecord[]>;
   resendInvite(inviteId: string): Promise<InviteRecord>;
@@ -762,8 +777,10 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadClientDashboard", { clientId });
   },
 
-  async loadClientsOverview() {
-    const result = await invokeOrmGatewaySelectWithRetry("loadClientsOverview", {});
+  async loadClientsOverview(options) {
+    const result = await invokeOrmGatewaySelectWithRetry("loadClientsOverview", {
+      includeArchived: options?.includeArchived === true,
+    });
     if (import.meta.env.DEV) {
       const sizeOf = (v: unknown) => { try { return JSON.stringify(v).length; } catch { return 0; } };
       const sections: Record<string, { bytes: number; rows: number }> = {
@@ -836,20 +853,20 @@ export const repository: Repository = {
     return invokeOrmGatewaySelectWithRetry("loadAdminSettings", {});
   },
 
-  async loadDomainsPage() {
-    return invokeOrmGatewaySelectWithRetry("loadDomainsPage", {});
+  async loadDomainsPage(options) {
+    return invokeOrmGatewaySelectWithRetry("loadDomainsPage", { includeArchived: options?.includeArchived === true });
   },
 
-  async loadEmailAccountsPage() {
-    return invokeOrmGatewaySelectWithRetry("loadEmailAccountsPage", {});
+  async loadEmailAccountsPage(options) {
+    return invokeOrmGatewaySelectWithRetry("loadEmailAccountsPage", { includeArchived: options?.includeArchived === true });
   },
 
   async loadEmailAccountWarming(emailAccountId: string) {
     return invokeOrmGatewayAction("loadEmailAccountWarming", { emailAccountId });
   },
 
-  async loadInvoicesPage() {
-    return invokeOrmGatewaySelectWithRetry("loadInvoicesPage", {});
+  async loadInvoicesPage(options) {
+    return invokeOrmGatewaySelectWithRetry("loadInvoicesPage", { includeArchived: options?.includeArchived === true });
   },
 
   async loadBlacklistPage() {
@@ -960,6 +977,10 @@ export const repository: Repository = {
       updated_at: new Date().toISOString(),
     };
     return invokeOrmGatewayAction("updateConditionRule", { ruleId, patch: payload });
+  },
+
+  async setEntityArchived(entity, id, archived) {
+    return invokeOrmGatewayAction("setEntityArchived", { entity, id, archived });
   },
 
   async deleteConditionRule(ruleId) {

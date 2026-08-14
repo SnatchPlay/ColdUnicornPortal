@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { AppRole, LeadCustomFieldRecord, LeadHighlight } from "../types/core";
 import type { LeadsListRow } from "../types/view-contracts";
+import { ArchivedBadge } from "../components/archive-controls";
 import { getLeadStage } from "./selectors";
 import { PIPELINE_STAGES } from "./client-view-models";
 import { formatDate, getFullName } from "./format";
@@ -109,6 +110,14 @@ export function buildLeadReportColumns(options: BuildLeadReportColumnsOptions): 
     minWidth: 130,
     serverSortField: "lead",
     value: (row) => getFullName(row.first_name, row.last_name) || "—",
+    // Archived leads only reach a list when "Show archived" is on, and then the row must say so —
+    // otherwise a restored-vs-archived row is indistinguishable (migration 20260813).
+    render: (row) => (
+      <span className="inline-flex items-center">
+        {getFullName(row.first_name, row.last_name) || "—"}
+        <ArchivedBadge archivedAt={row.archived_at} />
+      </span>
+    ),
   });
 
   if (options.showClient) {

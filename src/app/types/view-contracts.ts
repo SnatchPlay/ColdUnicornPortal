@@ -566,6 +566,8 @@ export interface LeadsListParams {
   page: number;
   /** Default 50, max 100. */
   pageSize: number;
+  /** Include archived leads (soft-deleted). Default false — archived rows are hidden everywhere. */
+  includeArchived?: boolean;
 }
 
 /** Response from loadLeadsList. */
@@ -814,6 +816,8 @@ export interface CampaignsListParams {
   sortDir: "asc" | "desc";
   page: number;
   pageSize: number;
+  /** Include archived campaigns (soft-deleted). Default false. */
+  includeArchived?: boolean;
 }
 
 /** Response from loadCampaignsList. */

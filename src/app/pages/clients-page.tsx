@@ -15,6 +15,7 @@ import {
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
 import { SatisfactionHearts, satisfactionLabel } from "../components/satisfaction-hearts";
+import { ShowArchivedToggle } from "../components/archive-controls";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
 import { toConditionRule } from "../lib/conditions/mapper";
@@ -234,6 +235,12 @@ function useClientsOverview() {
   const shellInFlightRef = useRef(false);
   const statsInFlightRef = useRef(false);
 
+  // Archived clients are hidden by default (migration 20260813). The flag is mirrored into a ref so
+  // `load` keeps a stable identity — the mount effect depends on it, and putting the flag in its
+  // deps would turn every unrelated re-render of the toggle into a page refetch.
+  const [showArchived, setShowArchivedState] = useState(false);
+  const showArchivedRef = useRef(false);
+
   const loadStats = useCallback(async () => {
     if (statsInFlightRef.current) return;
     statsInFlightRef.current = true;
@@ -266,7 +273,7 @@ function useClientsOverview() {
     setStatsLoaded(false);
     markPoint("clients:fetch:start");
     try {
-      const shellResult = await repository.loadClientsOverview();
+      const shellResult = await repository.loadClientsOverview({ includeArchived: showArchivedRef.current });
       markPoint("clients:fetch:end");
       measureBetween("clients:fetch:start", "clients:fetch:end", "[perf][clients] shell fetch round-trip");
       // Merge shell with existing summaries (or empty on first load) so the table
@@ -464,12 +471,20 @@ function useClientsOverview() {
     [],
   );
 
+  const setShowArchived = useCallback((next: boolean) => {
+    showArchivedRef.current = next;
+    setShowArchivedState(next);
+    void load();
+  }, [load]);
+
   return {
     data,
     loading,
     statsLoaded,
     statsLoading,
     error,
+    showArchived,
+    setShowArchived,
     refresh: load,
     createClient,
     updateClient,
@@ -833,6 +848,8 @@ export function ClientsPage() {
     statsLoaded,
     statsLoading,
     error,
+    showArchived,
+    setShowArchived,
     refresh,
     createClient,
     updateClient,
@@ -1213,6 +1230,9 @@ export function ClientsPage() {
 
   const canEditAssignments = identity ? isInternalAdmin(identity.role) : false;
   const canInviteUsers = identity ? isInternalAdmin(identity.role) || identity.role === "manager" : false;
+  // clients_update_scoped = can_manage_client(id): admin tier + the assigned manager. A manager only
+  // ever receives their own clients, so role !== "client" is the whole UI-side rule.
+  const canArchiveClients = identity ? identity.role !== "client" : false;
   // Inline status edit mirrors the drawer's status field, which is open to any internal user
   // (managers manage their own clients' lifecycle). RLS remains the write gate.
   const canEditStatus = identity ? identity.role !== "client" : false;
@@ -1414,11 +1434,20 @@ export function ClientsPage() {
     />
   );
 
+  const clientsToolbar = (
+    <div className="flex items-center gap-2">
+      {canArchiveClients ? (
+        <ShowArchivedToggle value={showArchived} onChange={setShowArchived} disabled={loading} />
+      ) : null}
+      {createClientButton}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {scopedClients.length === 0 ? (
         <>
-          <div className="flex justify-end">{createClientButton}</div>
+          <div className="flex justify-end">{clientsToolbar}</div>
           <EmptyState
             title="No clients assigned"
             description="The current identity does not have any visible clients."
@@ -1428,7 +1457,7 @@ export function ClientsPage() {
         <Surface
           title="Client PDCA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current filter${statsLoading ? " · loading metrics…" : ""}`}
-          actions={createClientButton}
+          actions={clientsToolbar}
         >
           {/* ── Filter bar — single row: search · status · health · manager ─── */}
           <div className="mb-4">
@@ -1618,6 +1647,8 @@ export function ClientsPage() {
           sequencerCreds={selectedClientCreds}
           canEditAssignments={canEditAssignments}
           canInviteUsers={canInviteUsers}
+          canArchive={canArchiveClients}
+          onArchived={() => { closeClient(); void refresh(); }}
           onClose={closeClient}
           onSave={() => {
             void handleSave();

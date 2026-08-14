@@ -1,4 +1,4 @@
-﻿import { and, asc, desc, eq, gte, ne, sql } from "npm:drizzle-orm@0.45.2";
+﻿import { and, asc, desc, eq, gte, isNull, ne, sql } from "npm:drizzle-orm@0.45.2";
 import { inArray } from "npm:drizzle-orm@0.45.2";
 import { drizzle } from "npm:drizzle-orm@0.45.2/postgres-js";
 import postgres from "npm:postgres@3.4.9";
@@ -17,6 +17,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+/**
+ * The six tables `setEntityArchived` can tombstone. Keyed by the contract's ArchivableEntity, which
+ * the request validator has already checked against its closed list — so this lookup can never be
+ * indexed with an arbitrary string from the wire.
+ */
+const ARCHIVABLE_TABLES = {
+  client: schema.clients,
+  campaign: schema.campaigns,
+  lead: schema.leads,
+  domain: schema.domains,
+  invoice: schema.invoices,
+  emailAccount: schema.emailAccounts,
+} as const;
 
 const CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90;
 const DAILY_STATS_WINDOW_DAYS = 180;
@@ -158,6 +172,7 @@ function toClientRecord(row: typeof schema.clients.$inferSelect) {
     lost_reason: row.lostReason,
     notes: row.notes,
     satisfaction: row.satisfaction,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -185,6 +200,7 @@ function toCampaignRecord(row: typeof schema.campaigns.$inferSelect) {
     start_date: row.startDate,
     gender_target: row.genderTarget,
     sequencer_id: row.sequencerId,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -233,6 +249,7 @@ function toLeadRecord(row: typeof schema.leads.$inferSelect) {
     conclusion: row.conclusion,
     concluded_at: row.concludedAt,
     final_outcome: row.finalOutcome,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -253,6 +270,7 @@ function toDomainRecord(row: typeof schema.domains.$inferSelect) {
     winnr_created_at: row.winnrCreatedAt,
     last_synced_at: row.lastSyncedAt,
     missing_since: row.missingSince,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -277,6 +295,7 @@ function toEmailAccountRecord(row: typeof schema.emailAccounts.$inferSelect) {
     missing_since: row.missingSince,
     created_at: row.createdAt,
     updated_at: row.updatedAt,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -304,6 +323,7 @@ function toInvoiceRecord(row: typeof schema.invoices.$inferSelect) {
     amount: normalizeNumeric(row.amount) ?? 0,
     status: row.status,
     updated_at: row.updatedAt,
+    archived_at: row.archivedAt,
   };
 }
 
@@ -1142,6 +1162,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             notification_emails: schema.clients.notificationEmails,
           })
           .from(schema.clients)
+          // Archived clients never appear in a picker (migration 20260813).
+          .where(isNull(schema.clients.archivedAt))
           .orderBy(desc(schema.clients.createdAt)),
       ),
       timedQuery(
@@ -1170,12 +1192,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
     const [clientCountRows, activeCampaignCountRows, noManagerCountRows, pipelineGroupRows, momentumRows, managerCapacityRows, latestDateRows, clientsWithLeadsRows, activeClientsWithSentRows] =
       await Promise.all([
-        rawQuery<{ count: number; active_count: number }>(tx, sql`SELECT COUNT(*)::int AS count, COUNT(CASE WHEN status = 'Active' THEN 1 END)::int AS active_count FROM clients`),
-        rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM campaigns WHERE status = 'active'`),
+        rawQuery<{ count: number; active_count: number }>(tx, sql`SELECT COUNT(*)::int AS count, COUNT(CASE WHEN status = 'Active' THEN 1 END)::int AS active_count FROM clients WHERE archived_at IS NULL`),
+        rawQuery<{ count: number }>(tx, sql`SELECT COUNT(*)::int AS count FROM campaigns WHERE status = 'active' AND archived_at IS NULL`),
         rawQuery<{ count: number }>(tx, sql`
           SELECT COUNT(*)::int AS count FROM clients
-          WHERE manager_id IS NULL
-          OR manager_id NOT IN (SELECT id FROM users WHERE role = 'manager')
+          WHERE archived_at IS NULL AND (manager_id IS NULL
+          OR manager_id NOT IN (SELECT id FROM users WHERE role = 'manager'))
         `),
         rawQuery<{
           qualification: string | null;
@@ -1187,7 +1209,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         }>(tx, sql`
           SELECT qualification, meeting_booked, meeting_held, offer_sent, won, COUNT(*)::int AS count
           FROM leads
-          WHERE created_at >= ${since21d}
+          WHERE created_at >= ${since21d} AND archived_at IS NULL
           GROUP BY qualification, meeting_booked, meeting_held, offer_sent, won
         `),
         rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
@@ -1210,9 +1232,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             COUNT(DISTINCT CASE WHEN camp.status = 'active' THEN camp.id END)::int AS active_campaigns_count,
             COUNT(DISTINCT l.id)::int AS leads_count
           FROM users u
-          LEFT JOIN clients c ON c.manager_id = u.id
-          LEFT JOIN campaigns camp ON camp.client_id = c.id
-          LEFT JOIN leads l ON l.client_id = c.id
+          LEFT JOIN clients c ON c.manager_id = u.id AND c.archived_at IS NULL
+          LEFT JOIN campaigns camp ON camp.client_id = c.id AND camp.archived_at IS NULL
+          LEFT JOIN leads l ON l.client_id = c.id AND l.archived_at IS NULL
           WHERE u.role IN ('manager', 'admin')
           GROUP BY u.id, u.first_name, u.last_name, u.role
           ORDER BY clients_count DESC
@@ -1224,7 +1246,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             gs.d::text AS date,
             COUNT(DISTINCT l.client_id)::int AS count
           FROM generate_series(${since21d}::date, CURRENT_DATE, '1 day'::interval) AS gs(d)
-          LEFT JOIN leads l ON DATE(l.created_at) = gs.d
+          LEFT JOIN leads l ON DATE(l.created_at) = gs.d AND l.archived_at IS NULL
           GROUP BY gs.d
           ORDER BY gs.d ASC
         `),
@@ -1234,7 +1256,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             COUNT(DISTINCT ds.client_id)::int AS count
           FROM generate_series(${since21d}::date, CURRENT_DATE, '1 day'::interval) AS gs(d)
           LEFT JOIN daily_stats ds ON ds.report_date = gs.d AND ds.emails_sent > 0
-          LEFT JOIN clients c ON c.id = ds.client_id AND c.status = 'Active'
+          LEFT JOIN clients c ON c.id = ds.client_id AND c.status = 'Active' AND c.archived_at IS NULL
           GROUP BY gs.d
           ORDER BY gs.d ASC
         `),
@@ -1277,9 +1299,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
     // Scoped client IDs subquery: the manager's clients, optionally narrowed to one client.
     // Factories (fresh fragment per call) so the same subquery/condition can be embedded repeatedly.
+    // `archived_at IS NULL` sits in the shared factory on purpose: it is the one place every metric,
+    // chart and list on this page resolves its client set through, so an archived client drops out of
+    // all of them at once (migration 20260813).
     const scopedClientIds = () => clientFilter
-      ? sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND id = ${clientFilter}`
-      : sql`SELECT id FROM clients WHERE manager_id = ${managerId}`;
+      ? sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND id = ${clientFilter} AND archived_at IS NULL`
+      : sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND archived_at IS NULL`;
     const campStatusCond = () => statusFilter ? sql`AND camp.status = ${statusFilter}` : sql``;
     // Date-range conditions. `column` is the timestamp/date expression to compare (e.g. created_at, cds.report_date).
     const dateCond = (column: string) => {
@@ -1302,7 +1327,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         rawQuery<{ assigned_clients_count: number; campaigns_count: number }>(tx, sql`
           SELECT
             (SELECT COUNT(*)::int FROM (${scopedClientIds()}) AS sc) AS assigned_clients_count,
-            (SELECT COUNT(*)::int FROM campaigns camp WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}) AS campaigns_count
+            (SELECT COUNT(*)::int FROM campaigns camp WHERE camp.client_id IN (${scopedClientIds()}) AND camp.archived_at IS NULL${campStatusCond()}) AS campaigns_count
         `),
         rawQuery<{
           qualification: string | null;
@@ -1314,7 +1339,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         }>(tx, sql`
           SELECT qualification, meeting_booked, meeting_held, offer_sent, won, COUNT(*)::int AS count
           FROM leads
-          WHERE client_id IN (${scopedClientIds()})${dateCond("created_at")}
+          WHERE client_id IN (${scopedClientIds()}) AND archived_at IS NULL${dateCond("created_at")}
           GROUP BY qualification, meeting_booked, meeting_held, offer_sent, won
         `),
         rawQuery<{ date: string; sent: number; replies: number; positive: number }>(tx, sql`
@@ -1354,8 +1379,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             COUNT(DISTINCT CASE WHEN l.qualification = 'MQL'${leadDateCaseCond()} THEN l.id END)::int AS mql_count,
             COUNT(DISTINCT CASE WHEN l.won = true${leadDateCaseCond()} THEN l.id END)::int AS won_count
           FROM clients c
-          LEFT JOIN campaigns camp ON camp.client_id = c.id
-          LEFT JOIN leads l ON l.client_id = c.id
+          LEFT JOIN campaigns camp ON camp.client_id = c.id AND camp.archived_at IS NULL
+          LEFT JOIN leads l ON l.client_id = c.id AND l.archived_at IS NULL
           WHERE c.id IN (${scopedClientIds()})
           GROUP BY c.id, c.name, c.status, c.kpi_leads, c.kpi_meetings
           ORDER BY c.name
@@ -1370,7 +1395,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             COALESCE(SUM(cds.reply_count), 0)::int AS replies
           FROM campaigns camp
           LEFT JOIN campaign_daily_stats cds ON cds.campaign_id = camp.id${dateCond("cds.report_date")}
-          WHERE camp.client_id IN (${scopedClientIds()})${campStatusCond()}
+          WHERE camp.client_id IN (${scopedClientIds()}) AND camp.archived_at IS NULL${campStatusCond()}
           GROUP BY camp.id, camp.name, camp.client_id, camp.status
         `),
         rawQuery<Record<string, unknown>>(tx, sql`
@@ -1395,12 +1420,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
             SELECT lead_id, COUNT(*)::int AS reply_count, MAX(received_at) AS last_reply_at
             FROM replies GROUP BY lead_id
           ) r ON r.lead_id = l.id
-          WHERE l.client_id IN (${scopedClientIds()})${dateCond("l.created_at")}
+          WHERE l.client_id IN (${scopedClientIds()}) AND l.archived_at IS NULL${dateCond("l.created_at")}
           ORDER BY COALESCE(l.updated_at, l.created_at) DESC
           LIMIT 10
         `),
         rawQuery<{ id: string; name: string }>(tx, sql`
-          SELECT id, name FROM clients WHERE manager_id = ${managerId} ORDER BY name
+          SELECT id, name FROM clients WHERE manager_id = ${managerId} AND archived_at IS NULL ORDER BY name
         `),
       ]);
 
@@ -1499,7 +1524,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         status: schema.campaigns.status,
         database_size: schema.campaigns.databaseSize,
       }).from(schema.campaigns).where(
-        and(eq(schema.campaigns.clientId, clientId), eq(schema.campaigns.type, "outreach"))
+        and(eq(schema.campaigns.clientId, clientId), eq(schema.campaigns.type, "outreach"), isNull(schema.campaigns.archivedAt))
       ).orderBy(desc(schema.campaigns.createdAt)),
 
       tx.select({
@@ -1512,7 +1537,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         meeting_held: schema.leads.meetingHeld,
         offer_sent: schema.leads.offerSent,
         won: schema.leads.won,
-      }).from(schema.leads).where(eq(schema.leads.clientId, clientId)).orderBy(desc(schema.leads.createdAt)),
+      }).from(schema.leads).where(and(eq(schema.leads.clientId, clientId), isNull(schema.leads.archivedAt))).orderBy(desc(schema.leads.createdAt)),
 
       rawQuery<{
         campaign_id: string;
@@ -1528,6 +1553,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         FROM campaign_daily_stats cds
         JOIN campaigns c ON c.id = cds.campaign_id
         WHERE c.client_id = ${clientId}
+        AND c.archived_at IS NULL
         AND cds.report_date >= ${campaignStatsSince}
         ORDER BY cds.report_date DESC
       `),
@@ -1596,8 +1622,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
     const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows, setupStateRows] =
       await Promise.all([
-        // Full client rows for the mega-table and drawer.
-        tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt)),
+        // Full client rows for the mega-table and drawer. Archived clients are excluded unless the
+        // page asks for them ("Show archived"), which is the only way to reach Restore.
+        payload.includeArchived
+          ? tx.select().from(schema.clients).orderBy(desc(schema.clients.createdAt))
+          : tx.select().from(schema.clients).where(isNull(schema.clients.archivedAt)).orderBy(desc(schema.clients.createdAt)),
 
         // User lites — same projection as shell.
         tx.select({
@@ -1709,7 +1738,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         qualification: schema.leads.qualification,
         meeting_booked: schema.leads.meetingBooked,
         won: schema.leads.won,
-      }).from(schema.leads).orderBy(desc(schema.leads.createdAt)),
+      }).from(schema.leads).where(isNull(schema.leads.archivedAt)).orderBy(desc(schema.leads.createdAt)),
 
       // 180-day daily stats — only the 10 DailyStatInput fields.
       tx.select({
@@ -1886,6 +1915,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_mtg_m4,
         (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_won_m4
       FROM leads
+      WHERE archived_at IS NULL
       GROUP BY client_id
     `);
 
@@ -1941,8 +1971,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         (COUNT(*) FILTER (WHERE meeting_booked = true        AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_mtg_m4,
         (COUNT(*) FILTER (WHERE won = true                   AND created_at::date >= date_trunc('month', CURRENT_DATE - INTERVAL '4 months')::date AND created_at::date <  date_trunc('month', CURRENT_DATE - INTERVAL '3 months')::date))::int AS mom_won_m4
       FROM leads
-      WHERE sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid
-         OR sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid
+      WHERE archived_at IS NULL
+        AND (sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid
+          OR sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid)
       GROUP BY client_id, sequencer_id
     `);
 
@@ -2133,6 +2164,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
     // Build dynamic WHERE fragments (applied in both count and data queries).
     const baseWhereParts: ReturnType<typeof sql>[] = [];
+    // Archived leads are hidden from the list AND from the stage counts — an archived lead is "as if
+    // deleted" (migration 20260813), so it must not inflate a stage badge it is no longer listed in.
+    if (!p.includeArchived) baseWhereParts.push(sql`l.archived_at IS NULL`);
     if (p.clientId) baseWhereParts.push(sql`l.client_id = ${p.clientId}`);
     if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
     if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
@@ -2214,7 +2248,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
         l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
         l.external_blacklist_id, l.external_domain_blacklist_id,
-        l.source, l.reply_text, l.client_note, l.highlight,
+        l.source, l.reply_text, l.client_note, l.highlight, l.archived_at,
         -- coldunicorn_note is internal-only: never expose it to the client role. We resolve the
         -- caller role via a public.users self-lookup (RLS returns only the caller own row).
         -- NOTE: do NOT call private.current_app_role() here - the authenticated role has no USAGE
@@ -2283,6 +2317,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       client_note: r.client_note ? String(r.client_note) : null,
       coldunicorn_note: r.coldunicorn_note ? String(r.coldunicorn_note) : null,
       highlight: r.highlight ? String(r.highlight) : null,
+      archived_at: r.archived_at ? toIsoString(r.archived_at) : null,
       // JOINed fields
       clientName: String(r.client_name ?? ""),
       campaignName: r.campaign_name ? String(r.campaign_name) : null,
@@ -2372,6 +2407,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     `;
 
     const baseWhereParts: ReturnType<typeof sql>[] = [];
+    // Same rule as loadLeadsList: archived leads are out of both the page and the stage counts.
+    if (!p.includeArchived) baseWhereParts.push(sql`l.archived_at IS NULL`);
     if (p.clientId) baseWhereParts.push(sql`l.client_id = ${p.clientId}`);
     if (p.campaignId) baseWhereParts.push(sql`l.campaign_id = ${p.campaignId}`);
     if (p.dateFrom) baseWhereParts.push(sql`l.created_at >= ${p.dateFrom}`);
@@ -2433,7 +2470,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         l.message_title, l.message_number, l.response_time_hours, l.response_time_label,
         l.meeting_booked, l.meeting_held, l.offer_sent, l.won,
         l.external_blacklist_id, l.external_domain_blacklist_id,
-        l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id,
+        l.source, l.reply_text, l.client_note, l.highlight, l.sequencer_id, l.archived_at,
         l.linkedin_invitation_sent_at, l.contact_made_at, l.contact_method,
         l.negotiation_started_at, l.concluded_at, l.final_outcome,
         -- coldunicorn_note + conclusion are internal-only; nulled for the client role in TS via isClient.
@@ -2600,6 +2637,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       coldunicorn_note: isClient ? null : str(r.coldunicorn_note),
       highlight: str(r.highlight),
       sequencer_id: String(r.sequencer_id),
+      archived_at: r.archived_at ? toIsoString(r.archived_at) : null,
       linkedin_invitation_sent_at: r.linkedin_invitation_sent_at ? toIsoString(r.linkedin_invitation_sent_at) : null,
       contact_made_at: r.contact_made_at ? toIsoString(r.contact_made_at) : null,
       contact_method: str(r.contact_method),
@@ -2674,7 +2712,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const tClients0 = performance.now();
     const clientsLiteRows = await rawQuery<{ id: string; name: string }>(tx, sql`
       SELECT DISTINCT c.id, c.name FROM clients c
-      JOIN leads l ON l.client_id = c.id
+      JOIN leads l ON l.client_id = c.id AND l.archived_at IS NULL
+      WHERE c.archived_at IS NULL
       ORDER BY c.name
     `);
     const clientsMs = performance.now() - tClients0;
@@ -2682,7 +2721,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const tCampaigns0 = performance.now();
     const campaignsLiteRows = await rawQuery<{ id: string; name: string; client_id: string }>(tx, sql`
       SELECT DISTINCT camp.id, camp.name, camp.client_id FROM campaigns camp
-      JOIN leads l ON l.campaign_id = camp.id
+      JOIN leads l ON l.campaign_id = camp.id AND l.archived_at IS NULL
+      WHERE camp.archived_at IS NULL
       ORDER BY camp.name
     `);
     const campaignsMs = performance.now() - tCampaigns0;
@@ -2750,6 +2790,8 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     );
 
     const whereParts: ReturnType<typeof sql>[] = [];
+    // Archived campaigns are out of the list and out of totalCount unless explicitly asked for.
+    if (!p.includeArchived) whereParts.push(sql`camp.archived_at IS NULL`);
     if (p.clientId) whereParts.push(sql`camp.client_id = ${p.clientId}`);
     if (p.status) whereParts.push(sql`camp.status = ${p.status}`);
     if (p.search) {
@@ -2781,7 +2823,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         camp.id, camp.created_at, camp.updated_at, camp.client_id,
         camp.external_id, camp.type, camp.name, camp.status,
         camp.database_size, camp.positive_responses, camp.start_date,
-        camp.gender_target, camp.sequencer_id,
+        camp.gender_target, camp.sequencer_id, camp.archived_at,
         c.name AS client_name
       FROM campaigns camp
       JOIN clients c ON c.id = camp.client_id
@@ -2809,6 +2851,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       start_date: r.start_date ? String(r.start_date) : null,
       gender_target: r.gender_target ? String(r.gender_target) : null,
       sequencer_id: String(r.sequencer_id ?? ""),
+      archived_at: r.archived_at ? toIsoString(r.archived_at) : null,
       clientName: String(r.client_name ?? ""),
     }));
 
@@ -2843,6 +2886,9 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
                unique_open_count, positive_replies_count
         FROM campaign_daily_stats
         WHERE report_date >= ${since90d}
+          -- An archived campaign is gone from the campaign list, so its sends must not keep
+          -- feeding the client page charts either (migration 20260813). Set-based, per ADR-0006.
+          AND campaign_id IN (SELECT id FROM campaigns WHERE archived_at IS NULL)
         ORDER BY campaign_id, report_date ASC
       `);
     }
@@ -2896,10 +2942,10 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         kpi_leads: schema.clients.kpiLeads,
         kpi_meetings: schema.clients.kpiMeetings,
         contracted_amount: schema.clients.contractedAmount,
-      }).from(schema.clients).orderBy(asc(schema.clients.name)),
+      }).from(schema.clients).where(isNull(schema.clients.archivedAt)).orderBy(asc(schema.clients.name)),
 
       // Full campaign rows (all 12 campaign fields are used in the portfolio + filter dropdown).
-      tx.select().from(schema.campaigns).orderBy(asc(schema.campaigns.name)),
+      tx.select().from(schema.campaigns).where(isNull(schema.campaigns.archivedAt)).orderBy(asc(schema.campaigns.name)),
 
       // Lead GROUPS — server-side aggregate instead of row-level projections.
       // Replaces 3973 × 9-field rows (~1108KB) with ~200–400 × 5-field groups (~15–25KB).
@@ -2914,7 +2960,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           (l.created_at AT TIME ZONE 'UTC')::date::text AS date,
           COUNT(*)::int            AS count
         FROM leads l
-        WHERE l.created_at >= ${leadsSince}::timestamptz
+        WHERE l.created_at >= ${leadsSince}::timestamptz AND l.archived_at IS NULL
         GROUP BY l.client_id, l.campaign_id, l.qualification,
                  (l.created_at AT TIME ZONE 'UTC')::date
         ORDER BY date DESC
@@ -2977,7 +3023,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
     const [clientRows, conditionRuleRows, columnOverrideRows, customFieldRows] = await Promise.all([
       // Full client rows — needed by ConditionRuleBuilder client-selector.
-      tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
+      tx.select().from(schema.clients).where(isNull(schema.clients.archivedAt)).orderBy(asc(schema.clients.name)),
 
       // Condition rules — full records for the rule editor.
       tx.select().from(schema.conditionRules).orderBy(asc(schema.conditionRules.priority), asc(schema.conditionRules.createdAt)),
@@ -3014,10 +3060,17 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
   if (payload.action === "loadDomainsPage" || payload.action === "loadEmailAccountsPage") {
     const t0 = performance.now();
+    // Archived domains/mailboxes are hidden unless the page asks for them. The client list is NOT
+    // filtered: the page scopes its rows through it (scopeDomains / scopeEmailAccounts), so dropping
+    // an archived client here would take that client's *live* domains and mailboxes off the page
+    // with it. Archiving a client hides the client, never its infrastructure. The page filters
+    // archived clients out of the "link to client" dropdown instead, where the rule actually is
+    // "not assignable"; `archived_at` rides along on the record so it can.
+    const withArchived = payload.includeArchived === true;
     const [clientRows, domainRows, emailAccountRows] = await Promise.all([
       tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
-      tx.select().from(schema.domains).orderBy(desc(schema.domains.updatedAt)),
-      tx.select().from(schema.emailAccounts).orderBy(asc(schema.emailAccounts.emailAddress)),
+      tx.select().from(schema.domains).where(withArchived ? undefined : isNull(schema.domains.archivedAt)).orderBy(desc(schema.domains.updatedAt)),
+      tx.select().from(schema.emailAccounts).where(withArchived ? undefined : isNull(schema.emailAccounts.archivedAt)).orderBy(asc(schema.emailAccounts.emailAddress)),
     ]);
     console.log(
       `[PERF][orm-gateway] ${payload.action}: ${(performance.now() - t0).toFixed(1)}ms ` +
@@ -3041,9 +3094,13 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
 
   if (payload.action === "loadInvoicesPage") {
     const t0 = performance.now();
+    // Same rule as the domains page: the client list is a lookup the page scopes invoices through
+    // (scopeInvoices), so filtering archived clients out of it would hide their *live* invoices and
+    // silently move the "Scope total". Only the invoices themselves are filtered.
+    const withArchivedInvoices = payload.includeArchived === true;
     const [clientRows, invoiceRows] = await Promise.all([
       tx.select().from(schema.clients).orderBy(asc(schema.clients.name)),
-      tx.select().from(schema.invoices).orderBy(desc(schema.invoices.issueDate)),
+      tx.select().from(schema.invoices).where(withArchivedInvoices ? undefined : isNull(schema.invoices.archivedAt)).orderBy(desc(schema.invoices.issueDate)),
     ]);
     console.log(
       `[PERF][orm-gateway] loadInvoicesPage: ${(performance.now() - t0).toFixed(1)}ms ` +
@@ -3087,6 +3144,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       const owned = await safeRawSelect(tx, sql`
         SELECT 1 FROM campaigns
         WHERE id = ${payload.campaignId} AND client_id = ${payload.clientId} AND type = 'ooo_followup'
+          AND archived_at IS NULL
       `);
       if (!owned[0]) {
         fail(400, "That campaign is not an OOO follow-up campaign for this client.");
@@ -3164,7 +3222,12 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       `),
       tx.select({ id: schema.campaigns.id, name: schema.campaigns.name })
         .from(schema.campaigns)
-        .where(and(eq(schema.campaigns.clientId, clientId), eq(schema.campaigns.type, "ooo_followup")))
+        .where(and(
+          eq(schema.campaigns.clientId, clientId),
+          eq(schema.campaigns.type, "ooo_followup"),
+          // An archived campaign must never be offered as a routing target (migration 20260813).
+          isNull(schema.campaigns.archivedAt),
+        ))
         .orderBy(asc(schema.campaigns.name)),
     ]);
 
@@ -3361,6 +3424,44 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const rows = await tx.update(schema.invoices).set(patch).where(eq(schema.invoices.id, payload.invoiceId)).returning();
     if (!rows[0]) fail(404, "Invoice record was not found.");
     return toInvoiceRecord(rows[0]);
+  }
+
+  if (payload.action === "setEntityArchived") {
+    // The portal's delete (migration 20260813_entity_archival): a tombstone, not a DELETE. There is
+    // deliberately no role check here — archiving is an UPDATE, so the table's own UPDATE policy is
+    // the gate (can_manage_client for five of the six, is_admin_user() for invoices). A caller who
+    // may not manage the row updates zero rows and falls into the 404 below, which is the same
+    // answer RLS gives everywhere else in this file.
+    const table = ARCHIVABLE_TABLES[payload.entity];
+    const archivedAt = payload.archived ? new Date().toISOString() : null;
+    const rows = await tx
+      .update(table)
+      .set({ archivedAt, archivedBy: archivedAt === null ? null : await callerUserId(tx) })
+      .where(eq(table.id, payload.id))
+      .returning({ id: table.id, archivedAt: table.archivedAt });
+    if (!rows[0]) {
+      fail(404, `No such ${payload.entity}, or you may not ${payload.archived ? "archive" : "restore"} it.`);
+    }
+
+    // Archiving an OOO follow-up campaign must take its routing rules down with it (ADR-0015).
+    // `resolve_ooo_routing` already refuses an archived target (20260813 §4), so n8n is safe either
+    // way — but leaving the rule marked *active* would tell the operator that returning contacts are
+    // still being routed somewhere when they are in fact landing in `skipped / routing_missing`.
+    // Deactivate, never delete: a past episode stays explainable by the configuration that produced
+    // it. Restoring the campaign deliberately does NOT re-arm the rule — the operator re-saves it in
+    // the routing editor, which is also what re-runs the skipped-episode recovery.
+    let deactivatedOooRoutes = 0;
+    if (payload.entity === "campaign" && payload.archived) {
+      const routes = await rawQuery<{ id: string }>(
+        tx,
+        sql`UPDATE client_ooo_routing SET is_active = false, updated_at = now()
+             WHERE campaign_id = ${payload.id} AND is_active
+             RETURNING id`,
+      );
+      deactivatedOooRoutes = routes.length;
+    }
+
+    return { entity: payload.entity, id: rows[0].id, archived_at: rows[0].archivedAt, deactivatedOooRoutes };
   }
 
   if (payload.action === "createClient") {

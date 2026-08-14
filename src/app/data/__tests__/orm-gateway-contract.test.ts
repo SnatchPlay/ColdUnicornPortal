@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "vitest";
-import { parseOrmGatewayRequest } from "../orm-gateway-contract";
+import { ARCHIVABLE_ENTITIES, parseOrmGatewayRequest } from "../orm-gateway-contract";
 
 describe("parseOrmGatewayRequest", () => {
   it("rejects missing action", () => {
@@ -126,5 +126,70 @@ describe("parseOrmGatewayRequest", () => {
     });
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("updateProfileAvatar");
+  });
+
+  // setEntityArchived — the portal's delete (migration 20260813_entity_archival). The entity name
+  // selects a table in the handler, so the closed-list check is the load-bearing part of this
+  // contract: an unknown value must never reach ARCHIVABLE_TABLES.
+  it("accepts setEntityArchived for every archivable entity", () => {
+    for (const entity of ARCHIVABLE_ENTITIES) {
+      const parsed = parseOrmGatewayRequest({ action: "setEntityArchived", entity, id: "row-1", archived: true });
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok && parsed.value.action === "setEntityArchived") {
+        expect(parsed.value.entity).toBe(entity);
+        expect(parsed.value.archived).toBe(true);
+      }
+    }
+  });
+
+  it("rejects setEntityArchived with an entity outside the closed list", () => {
+    for (const entity of ["reply", "user", "daily_stats", "leads; drop table", "", null]) {
+      const parsed = parseOrmGatewayRequest({ action: "setEntityArchived", entity, id: "row-1", archived: true });
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("setEntityArchived.entity");
+    }
+  });
+
+  it("rejects setEntityArchived without an id or with a non-boolean archived flag", () => {
+    const noId = parseOrmGatewayRequest({ action: "setEntityArchived", entity: "lead", archived: true });
+    expect(noId.ok).toBe(false);
+
+    for (const archived of ["true", 1, null, undefined]) {
+      const parsed = parseOrmGatewayRequest({ action: "setEntityArchived", entity: "lead", id: "l1", archived });
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("archived");
+    }
+  });
+
+  it("defaults includeArchived to false on the list actions that support it", () => {
+    for (const action of ["loadClientsOverview", "loadDomainsPage", "loadEmailAccountsPage", "loadInvoicesPage"] as const) {
+      const parsed = parseOrmGatewayRequest({ action });
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok && "includeArchived" in parsed.value) expect(parsed.value.includeArchived).toBe(false);
+    }
+
+    const optedIn = parseOrmGatewayRequest({ action: "loadInvoicesPage", includeArchived: true });
+    expect(optedIn.ok).toBe(true);
+    if (optedIn.ok && optedIn.value.action === "loadInvoicesPage") expect(optedIn.value.includeArchived).toBe(true);
+
+    // Only a real `true` opts in — a truthy string must not widen the list.
+    const truthyString = parseOrmGatewayRequest({ action: "loadInvoicesPage", includeArchived: "yes" });
+    expect(truthyString.ok).toBe(true);
+    if (truthyString.ok && truthyString.value.action === "loadInvoicesPage") {
+      expect(truthyString.value.includeArchived).toBe(false);
+    }
+  });
+
+  it("passes includeArchived through the leads list params", () => {
+    const off = parseOrmGatewayRequest({ action: "loadLeadsList", params: { sortField: "lead", sortDir: "asc" } });
+    expect(off.ok).toBe(true);
+    if (off.ok && off.value.action === "loadLeadsList") expect(off.value.params.includeArchived).toBe(false);
+
+    const on = parseOrmGatewayRequest({
+      action: "loadLeadsList",
+      params: { sortField: "lead", sortDir: "asc", includeArchived: true },
+    });
+    expect(on.ok).toBe(true);
+    if (on.ok && on.value.action === "loadLeadsList") expect(on.value.params.includeArchived).toBe(true);
   });
 });

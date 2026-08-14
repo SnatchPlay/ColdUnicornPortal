@@ -5,6 +5,7 @@ import { LightweightSheet } from "../components/ui/lightweight-sheet";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { formatDate } from "../lib/format";
 import { DomainsSectionTabs } from "../components/domains-tabs";
+import { ArchiveButton, ArchivedBadge, ShowArchivedToggle } from "../components/archive-controls";
 import { scopeClients, scopeDomains, sortClientsAlpha } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
 import { useDomainsPage } from "../lib/use-domains";
@@ -114,9 +115,14 @@ function ClientLinkCell({
         <SelectItem value={CLIENT_UNLINKED} className="text-neutral-400 focus:bg-[#1a1a1a] focus:text-white">
           Unlinked
         </SelectItem>
-        {clients.map((client) => (
+        {/* An archived client is not assignable — but the one this domain is ALREADY linked to has
+            to stay in the list, or Radix renders the trigger blank because the current value has no
+            matching item, and the operator cannot tell what the domain is linked to. */}
+        {clients
+          .filter((client) => !client.archived_at || client.id === domain.client_id)
+          .map((client) => (
           <SelectItem key={client.id} value={client.id} className="text-white focus:bg-[#1a1a1a] focus:text-white">
-            {client.name}
+            {client.name}{client.archived_at ? " (archived)" : ""}
           </SelectItem>
         ))}
       </SelectContent>
@@ -145,6 +151,9 @@ const DOMAIN_COLUMNS: {
   { key: "winnr", label: "Winnr status", sortKey: "winnr", width: 130, minWidth: 110, render: (d) => d.winnr_status ?? "—" },
   { key: "created", label: "Created", width: 120, minWidth: 100, render: (d) => formatDate(d.winnr_created_at) },
   { key: "synced", label: "Last synced", width: 130, minWidth: 100, render: (d) => formatDate(d.last_synced_at) },
+  // Row action. Rendered by the body via a `key === "actions"` special case, like the client cell —
+  // the archive control needs page state (refresh) that this static registry has no access to.
+  { key: "actions", label: "", width: 96, minWidth: 88, align: "right", render: () => null },
 ];
 
 // ── CreateDomainSheetHost ──────────────────────────────────────────────────────────────────────
@@ -317,7 +326,12 @@ const CreateDomainSheetHost = memo(function CreateDomainSheetHost({
 
 export function DomainsPage() {
   const { identity } = useAuth();
-  const { data, loading, error, refresh } = useDomainsPage();
+  // Archived domains are hidden by default (migration 20260813).
+  const [showArchived, setShowArchived] = useState(false);
+  const { data, loading, error, refresh } = useDomainsPage({ includeArchived: showArchived });
+  // domains_update_scoped = can_manage_client(client_id) — admin tier + the assigned manager. The
+  // page itself is already internal-only (the client shell gets a banner instead).
+  const canArchive = identity ? identity.role !== "client" : false;
   const clients = data?.clients ?? EMPTY_CLIENTS;
   const domains = data?.domains ?? EMPTY_DOMAINS;
   const [query, setQuery] = useState("");
@@ -326,7 +340,8 @@ export function DomainsPage() {
     direction: "asc",
   });
   const domainColumns = useResizableColumns({
-    storageKey: "table:domains:columns:v5",
+    // v6: the actions column changed the column count, so stored v5 widths no longer line up.
+    storageKey: "table:domains:columns:v6",
     defaultWidths: DOMAIN_COLUMNS.map((c) => c.width),
     minWidths: DOMAIN_COLUMNS.map((c) => c.minWidth),
   });
@@ -341,6 +356,9 @@ export function DomainsPage() {
   );
   const scopedDomains = useMemo(() => (identity ? scopeDomains(identity, clients, domains) : []), [clients, domains, identity]);
   const clientNameById = useMemo(() => new Map(scopedClients.map((c) => [c.id, c.name])), [scopedClients]);
+  // The full list stays the label source (an archived client's live domains still show its name);
+  // only what a new domain can be created against is narrowed.
+  const assignableClients = useMemo(() => scopedClients.filter((c) => !c.archived_at), [scopedClients]);
   const clientLabel = useCallback(
     (d: DomainRecord) => (d.client_id === null ? "Unlinked" : clientNameById.get(d.client_id) ?? "Unknown client"),
     [clientNameById],
@@ -435,7 +453,7 @@ export function DomainsPage() {
         subtitle="Domain inventory with warmup and campaign verification controls for scoped clients."
         actions={
           <CreateDomainSheetHost
-            scopedClients={scopedClients}
+            scopedClients={assignableClients}
             onCreateDomain={handleCreateDomainStable}
           />
         }
@@ -451,12 +469,15 @@ export function DomainsPage() {
       ) : (
         <Surface title="Domain list" subtitle={`${sortedDomains.length} domains in current scope`}>
           <div className="mb-4">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search domain, DNS provider, or tag"
-              className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:max-w-md"
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search domain, DNS provider, or tag"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:max-w-md"
+              />
+              {canArchive ? <ShowArchivedToggle value={showArchived} onChange={setShowArchived} disabled={loading} /> : null}
+            </div>
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-border">
@@ -498,6 +519,22 @@ export function DomainsPage() {
                       >
                         {column.key === "client" ? (
                           <ClientLinkCell domain={domain} clients={scopedClients} onLink={handleLinkClient} />
+                        ) : column.key === "actions" ? (
+                          canArchive ? (
+                            <ArchiveButton
+                              entity="domain"
+                              id={domain.id}
+                              name={domain.domain_name}
+                              archivedAt={domain.archived_at}
+                              onDone={refresh}
+                              variant="icon"
+                            />
+                          ) : null
+                        ) : column.key === "domain" ? (
+                          <span className="inline-flex min-w-0 items-center">
+                            <span className="truncate">{domain.domain_name}</span>
+                            <ArchivedBadge archivedAt={domain.archived_at} />
+                          </span>
                         ) : (
                           column.render(domain, clientLabel(domain))
                         )}
