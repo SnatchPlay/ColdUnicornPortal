@@ -266,7 +266,14 @@ workflows:
       production:
         remoteWorkflowId: UXpSOrgsN2TxjXUu
     lastRepositorySync: 2026-07-22
-    lastValidation: 2026-07-22 repaired and executed — 16 clients, 390 campaigns
+    lastValidation: >-
+      2026-07-22 repaired and executed — 16 clients, 390 campaigns.
+      2026-08-14 the OOO follow-up campaigns are classified by name at INSERT. `ooo_followup` was
+      not a value this workflow could emit, so every one of them arrived misclassified — as
+      `nurture` (unroutable), or as client-visible `outreach` for 25 of them — until 20260722g
+      repaired 52 rows by hand. Proven offline (3 vendor types × 7 production names, lookalikes
+      excluded) and by executing the generated SQL twice against Postgres; type survives an update
+      that moves status and both counters. Not yet deployed.
 
   - id: bison-campaign-daily-stats
     name: "Bison campaign daily stats"
@@ -463,9 +470,11 @@ workflows:
   # section C). Its canonical set is NOT the Aimfox one: measured across all 16 Active Bison
   # workspaces, the tags we create are preMQL + OOO only. MQL sits at 7/16 and is not a gap — the
   # Bison MQL path runs off the built-in `Interested` tag, so creating MQL would add a second,
-  # less-wired route. The three OOO automation campaigns are reported and never created: their
-  # sequence copy does not exist in usable form, and creating them blind already gave Bent Iron PL
-  # six campaigns instead of three.
+  # less-wired route. The three OOO automation campaigns ARE created, as DRAFTS — name and type,
+  # then a schedule, and nothing else. What was blocked was never the campaign but its copy:
+  # POST /campaigns/v1.1/{id}/sequence-steps is never called, a manager writes the sequence and
+  # starts the campaign, and a draft with no sequence cannot send. `state` still excludes the step
+  # so that `configured` never means "ready to send".
   - id: bison-workspace-setup
     name: "[SETUP] Bison workspace · resolve, key, webhooks, tags"
     domain: ops

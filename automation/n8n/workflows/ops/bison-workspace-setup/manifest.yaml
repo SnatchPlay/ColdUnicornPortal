@@ -40,35 +40,51 @@ reads:
     - "Bison API · GET /api/workspaces/v1.1 (master key) — resolve a workspace by name; returns data[].{id,name,personal_team,main,parent_id}"
     - "Bison API · GET /api/webhook-url — current webhook set, compared on url + events"
     - "Bison API · GET /api/tags — current tag set, compared on name"
-    - "Bison API · GET /api/campaigns — the three OOO automation campaigns, compared on name (report only)"
+    - "Bison API · GET /api/campaigns — the three OOO automation campaigns, compared on name; the vendor `status` is carried into the report so a draft is not read as a sending campaign"
 
 # Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
-# scripts/n8n/lib/business-rules.mjs. Neither table is one of the ADR-0015 ingestion tables, and
-# neither carries a business invariant an RPC would be protecting. The two credential-sync
-# workflows write client_sequencers the same way.
+# scripts/n8n/lib/business-rules.mjs. None of the three is an ADR-0015 ingestion table, and none
+# carries a business invariant an RPC would be protecting. The two credential-sync workflows write
+# client_sequencers the same way.
+#
+# `campaigns` is a SECOND writer to a table bison-campaign-sync owns, and the split is deliberate:
+#   * this workflow seeds the row for a campaign IT created, and only `type` is its business
+#     (`ooo_followup` — see the Record node's comment for why the sync cannot be relied on for it);
+#   * bison-campaign-sync remains the steady-state owner of `name`, `status`, `database_size` and
+#     `positive_responses`, and its ON CONFLICT list does not include `type`, so the two never
+#     fight over the same column.
+# The write is bounded to the external_ids this run created — never to a campaign it did not make.
 writes:
   tables:
     - client_sequencers
     - integration_sync_runs
+    - campaigns
   tablesWritten:
     - client_sequencers
     - integration_sync_runs
+    - campaigns
   rpcs: []
   external:
     - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens (node: Mint Key) — only when the connector row holds no key. Unlike Aimfox there is no token-list endpoint to fall back on, so storing the result is not a nicety: a minted key that is not written down is lost for good."
     - "Bison API · POST /api/webhook-url (node: Create Missing) — only for a url+events pair that is absent"
     - "Bison API · POST /api/tags (node: Create Missing) — only for a name that is absent, and only preMQL and OOO"
+    - "Bison API · POST /api/campaigns (node: Create Missing) — only for an OOO automation campaign absent by name. Body is { name, type: reply_followup } and nothing else, so the campaign is born a DRAFT."
+    - "Bison API · POST /api/campaigns/{id}/schedule (node: Create Schedule) — only for a campaign this run created, never for one that already existed: its hours are the client's. Mon-Fri 09:00-17:00 Europe/Warsaw."
 
-# Exactly two nodes issue a POST — Mint Key and Create Missing — and a dry run cannot reach either.
+# Exactly three nodes issue a POST — Mint Key, Create Missing and Create Schedule — and a dry run
+# cannot reach any of them.
 # dry_run safety is structural, not a flag inside an HTTP node: Plan Writes returns an EMPTY array on
 # a dry run, and n8n does not execute a node with no input items. There is nothing to write with, so
-# nothing is written. `dry_run` is read as true for anything except an explicit false — a missing
-# field has to mean "do not touch", never "write into a client's system".
+# nothing is written. Create Schedule sits one node further downstream behind the same guard: its
+# planner is fed by Collect Creates, which only runs after Plan Writes produced items.
+# `dry_run` is read as true for anything except an explicit false — a missing field has to mean
+# "do not touch", never "write into a client's system".
 
-# NOT written, deliberately: POST /api/campaigns and its /schedule + /sequence-steps children.
-# The canonical copy for the three OOO automation campaigns does not exist in usable form, and
-# creating them blind is what left Bent Iron PL with six campaigns instead of three. Step 6
-# reports and does not create. See the process document, "The OOO campaign triple".
+# NOT written, deliberately: POST /api/campaigns/v1.1/{id}/sequence-steps.
+# The campaign is safe to create; its COPY is not ours to write. All three sequence bodies on the
+# old canvas are byte-identical, in feminine Polish, with a hardcoded {PANIEKAMILU}. A manager
+# writes the sequence in Bison and starts the campaign; until then it is a draft, and a draft with
+# no sequence cannot send a message. See the process document, "The OOO campaign triple".
 
 credentials:
   - alias: "Bison Master"

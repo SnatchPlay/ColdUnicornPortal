@@ -1,17 +1,19 @@
 # bison-workspace-setup
 
 **Logical ID:** `bison-workspace-setup` · **Domain:** `ops` · **Criticality:** high
-**Remote (production):** `c82kKnHaREUMvPBR` — **inactive**
+**Remote (production):** `c82kKnHaREUMvPBR` — **active** (verified against the instance 2026-08-14;
+this line read `inactive` until then, stale since the webhook went live on 2026-08-08)
 **Business process:** [Workspace provisioning](../../../../../docs/reference/processes/ops/workspace-provisioning.md)
-**Status:** read and write halves built (21 nodes). Inactive, and called by hand until ADR-0018
-gives the gateway its webhook. A `dry_run` run writes nothing, anywhere — structurally
+**Status:** read and write halves built (27 nodes), campaign drafts included since 2026-08-14. A
+`dry_run` run writes nothing, anywhere — structurally, not by a flag.
 **Sibling:** [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md) — same contract, same
 shape, different vendor
 
 ## Business purpose
 
 Bring one client's Bison workspace from "exists at the vendor" to "fully wired", by adding **only
-what is missing**: the workspace key, two webhooks, two tags.
+what is missing**: the workspace key, two webhooks, two tags, and the three OOO campaigns **as
+drafts**.
 
 It replaces the Bison half of `8uRWXHe9FIfglq1u` ("My workflow 6") — a hand-run canvas with
 workspace `13` hardcoded into every URL, no notion of what already exists, and no error handling.
@@ -32,8 +34,9 @@ sequencers. Two differences matter to a caller:
 
 ## Flow
 
-21 nodes — the same shape as [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md), minus
-its `List Tokens` and plus a `List Campaigns`.
+27 nodes — the same shape as [`aimfox-workspace-setup`](../aimfox-workspace-setup/README.md), minus
+its `List Tokens`, plus a `List Campaigns` and a schedule branch that is this vendor's answer to
+Aimfox's `Apply Activation`.
 
 ```
 Start (executeWorkflowTrigger) ─┐
@@ -43,10 +46,16 @@ Webhook  (POST /webhook/workspace-setup-bison) ─┴→ Input
        └─ yes → Need Mint? ─┬─ yes → Mint Key ─┐
                             └─ no ─────────────┴→ Effective Key
                 → List Webhooks ─ List Tags ─ List Campaigns ─ Build Result ─ Has Work?
-                     ├─ yes → Plan Writes ─ Create Missing ─ Collect Creates ─┐
-                     └─ no ──────────────────────────────────────────────────┴→ Merge Outcomes
+                     ├─ yes → Plan Writes ─ Create Missing ─ Collect Creates ─ Needs Schedules?
+                     │             ├─ yes → Plan Schedules ─ Create Schedule ─ Collect Schedules ─┐
+                     │             └─ no ──────────────────────────────────────────────────────┐ │
+                     └─ no ────────────────────────────────────────────────────────────────────┴─┴→ Merge Outcomes
                           → Record → Final Result
 ```
+
+`Needs Schedules?` is not a second dry-run guard — nothing reaches it on a dry run. It exists
+because a schedule needs a campaign **id**, which is knowable only from that campaign's own create
+response, so the call cannot be planned in `Plan Writes` alongside the webhooks and tags.
 
 `Read Claimed` collects every `external_workspace_id` already stored for `emailbison`, so
 `Resolve Workspace` can subtract them from the candidate list. `List Campaigns` paginates on
@@ -60,8 +69,10 @@ page 1 of 3.
 items.** So `Create Missing` never runs — not because it was asked politely not to, but because
 there is nothing to write with. `Need Mint?` guards `Mint Key` the same way.
 
-Exactly two nodes issue a POST, `Mint Key` and `Create Missing`, and both sit downstream of one of
-those guards. `pnpm n8n:deploy` prints the POST inventory on every deploy.
+Exactly three nodes issue a POST — `Mint Key`, `Create Missing` and `Create Schedule` — and each
+sits downstream of one of those guards. `Create Schedule` is two nodes further down the same dead
+branch: its planner is fed by `Collect Creates`, which cannot run when `Plan Writes` produced
+nothing. `pnpm n8n:deploy` prints the POST inventory on every deploy.
 
 `dry_run` is read as **true for anything except an explicit `false`**.
 
@@ -83,8 +94,37 @@ and says why.
 
 ## What `Record` writes, and what it refuses to
 
-One statement. `INSERT … SELECT … WHERE` creates the connector row **only** when this is not a dry
-run, or when the row already exists:
+One statement, three CTEs: the connector row, the audit row, and the campaigns this run created.
+
+### The campaign rows, and why provisioning writes them at all
+
+A campaign created here would otherwise reach `public.campaigns` only through
+[`bison-campaign-sync`](../../ingestion/bison-campaign-sync/workflow.json), which maps Bison's
+`reply_followup` to **`nurture`** — and `type` is not in that statement's `ON CONFLICT` update
+list, so whatever type a row is born with, it keeps. A `nurture` row is invisible to
+`updateClientOooRouting`, which requires `type = 'ooo_followup'`
+([orm-gateway/index.ts:3146](../../../../../supabase/functions/orm-gateway/index.ts#L3146)), so a
+freshly provisioned client would end up with three campaigns its own routing editor cannot offer.
+
+The same insert-only behaviour is what makes seeding here durable: the sync keeps `name` and
+`status` fresh afterwards and never reverts the type. The two writers own different columns and
+cannot fight.
+
+`ON CONFLICT (external_id) DO UPDATE SET type` rather than `DO NOTHING` because the sync runs
+hourly and may reach the row first. These external ids are ours by construction — this run just
+created them — so forcing the type is bounded to what provisioning made.
+
+It also removes a dependency that would have been easy to miss: `bison-campaign-sync` only reads
+clients whose `status = 'Active'`, so a client provisioned before being marked Active would not have
+seen its campaigns catalogued at all.
+
+`$9` is `[]` on a dry run, twice over — `Collect Creates` cannot have executed, and the parameter
+builder blanks it anyway.
+
+### The connector row
+
+`INSERT … SELECT … WHERE` creates it **only** when this is not a dry run, or when the row already
+exists:
 
 - creating a connector where none existed would mark the client as connected, and a *check* must
   never do that;
@@ -96,10 +136,18 @@ run, or when the row already exists:
 
 ## `state` deliberately ignores the campaign step
 
-`state` is computed from `key`, `webhooks` and `tags` only. Campaigns are reported but never
-created, so folding them in would leave four clients permanently `partial` behind a **Set up**
-button that cannot fix them — a status that lies about what pressing it would do. The finding is not
-lost: it stays in `steps.campaigns`, which the portal renders as its own line.
+`state` is computed from `key`, `webhooks` and `tags` only — and it stays that way now that the
+step creates, for a different reason than before.
+
+The old reason was that **Set up** could not fix a `missing` campaign, so folding it in would leave
+four clients permanently `partial` behind a button that does nothing. The new reason is the mirror
+image: a created campaign is a **draft**, so folding it in would let `configured` mean "ready to
+send" the moment provisioning finished, while nothing can send until a manager writes the sequence.
+OOO routing pointed at a draft fails silently — that is the FortumEnergia shape, and `configured`
+is exactly the word that would stop someone checking.
+
+Neither reading is lost: the verdict stays in `steps.campaigns`, which the portal renders as its
+own line with the vendor status in brackets.
 
 ## Two triggers, one input
 
@@ -180,26 +228,51 @@ Four steps, first hit wins — identical to Aimfox except for the endpoint:
 An inexact match is never assumed. Assigning the wrong workspace is invisible downstream: the leads
 simply appear for someone else.
 
-## Campaigns are reported, never created
+## Campaigns are created as drafts, and their copy is not
 
 The three `OOO automation | general / male / female` campaigns are canon for 12 of the 16 Active
-clients. This workflow still will not create them, for two independent reasons:
+clients, and this workflow creates the ones that are missing. Two calls, in this order:
 
-**Four of the sixteen Active clients do not have the triple**, and the catalogue disagrees with the
-vendor about all of it — see the Verified section. Creating campaigns blind on top of that is how a
-workspace ends up with a set nobody can reconcile.
+```
+POST /api/campaigns              { "name": "OOO automation | general", "type": "reply_followup" }  → data.id
+POST /api/campaigns/{id}/schedule  Mon-Fri 09:00-17:00 Europe/Warsaw
+```
 
-**The copy is not ours to write.** All three `sequence-steps` bodies on the old canvas are
-byte-identical (1931 characters each), in feminine Polish (`Pani`, `wróciła Pani`), with a
-hardcoded `{PANIEKAMILU}` placeholder. The male/female split exists in the campaign name only. The
-real variants are business content and have to come from the client-facing source of truth, not
-from an agent.
+**The third call is never made.** `POST /api/campaigns/v1.1/{id}/sequence-steps` is where the copy
+lives, and the copy is not ours to write: all three bodies on the old canvas are byte-identical
+(1931 characters each), in feminine Polish (`Pani`, `wróciła Pani`), with a hardcoded
+`{PANIEKAMILU}` placeholder — the male/female split exists in the campaign name only. The real
+variants are business content and come from the client-facing source of truth.
 
-So step `campaigns` reports `ok` or `missing` and never `created`.
+That separation is what makes creating the campaign safe rather than reckless, and it is the whole
+correction to the earlier reading of this file. **A campaign with no sequence is a `draft` and
+cannot send a message.** What the old canvas got wrong was not creating campaigns; it was creating
+them *with the wrong copy already attached*, twice into `general`, unconditionally. Making the
+container and leaving the content to a manager is the opposite of that.
+
+So the handover is explicit: provisioning leaves three drafts with hours set, a manager writes the
+three sequences in Bison and starts each campaign.
+
+**The status is reported, not just the name.** `steps.campaigns.present` reads
+`OOO automation | general (draft)` — the bare name is what a sending campaign looks like too, and
+the difference is the one thing a manager has to act on. Bent Iron PL's `939 general archived` is
+the same problem from the other side: present, and not going to send anything either.
+
+**A campaign that already exists is never touched**, whatever its status, and its schedule is never
+overwritten — the hours belong to the client (invariant 5). Only a campaign this run created gets a
+schedule. Duplicates at the vendor are still reported and never resolved by creating more.
+
+`state` still ignores this step — see below.
 
 ## What it must never do
 
-- Create anything outside the canonical set — no `MQL`, no `NRR`, no campaigns.
+- Create anything outside the canonical set — no `MQL`, no `NRR`, no campaign other than the three.
+- Write a **sequence**. `POST /api/campaigns/v1.1/{id}/sequence-steps` is the manager's call, not
+  this workflow's, and a campaign that has one can send.
+- **Start** a campaign. Aimfox activates `AutoConnect` because that campaign's content is a
+  connection request the vendor composes; a Bison campaign's content is copy nobody has written
+  yet, so activation here would mean sending blank.
+- Touch a campaign that already exists, or its schedule.
 - Delete anything, ever.
 - Return `api_key` to its caller.
 - Run against a workspace resolved by a fuzzy name match.
@@ -220,6 +293,9 @@ Acceptance criteria live in the
 | UniTalk (`36`) | webhook step `ok` despite the differing name — the url + events proof |
 | a client without `MQL` (9 of 16) | still `configured`; `MQL` is not in the canonical set |
 | any target, run twice | second run creates nothing |
+| FortumEnergia (`125`), `dry_run: false` | three campaigns created, each `draft` with a schedule and **no sequence**; `state` still `configured` |
+| Bent Iron PL (`73`) | campaigns `ok` — `general (archived)` counts as present and is not re-created |
+| any target after a creation, run again | `campaigns: ok`, three `(draft)` in `present`, no POST |
 
 ## Verified
 
@@ -257,8 +333,27 @@ Eleven `pending` follow-ups for Fortum carry `routing_key = 'general'`. Nothing 
 phase A enrols from the ARM sheet, and the Supabase branch is shadow-only — so it is a loaded gun,
 not a fired one, and it goes live with phase B.
 
-Not yet proven: the write path (it does not exist), `state: needs_selection`, and
+Not yet proven against a vendor: the write path, `state: needs_selection`, and
 `state: client_not_found`.
+
+### The campaign branch, proven offline
+
+**2026-08-14** — the four code nodes on the campaign path (`Build Result`, `Plan Writes`,
+`Collect Creates`, `Merge Outcomes`) plus the three new ones were run out of the committed artifact
+against stubbed n8n globals, eight scenarios, no vendor call. It is a simulation and says nothing
+about what Bison answers; what it does prove is the branch logic, which is where the old canvas's
+three defects lived.
+
+| Scenario | Result |
+|---|---|
+| `dry_run`, no OOO campaigns (Fortum shape) | nothing planned at all — `Has Work?` false |
+| `dry_run: false`, none present | 3 × `POST /campaigns`, then 3 × `/schedule`; `present` all `(draft)`; `state` unchanged |
+| Bent Iron PL: female+male `active`, general `archived` | `ok`, no POST — an archived campaign counts as present |
+| re-run right after a creation | `ok`, no POST — idempotent (invariant 3) |
+| duplicate `general` at the vendor | reported as `×2 (active, draft)`, no POST |
+| vendor rejects `\| male` | step `failed`, that one still `missing`, the other two created and scheduled, `state` untouched |
+| schedule POST fails | step stays `created`; the error says `created, schedule not set: …` — the draft exists and a manager can set the hours |
+| fully wired workspace, `dry_run: false` | nothing planned |
 
 ### The webhook path, proven live
 
@@ -288,3 +383,11 @@ caller produces, and it must not provision anything.
   through a shared `describe()` rather than as `[object Object]`, and a vendor response is scored on
   `statusCode` alone — Bison, like Aimfox, puts its own word in `status`. Still inactive and never
   run with `dry_run: false`.
+- **2026-08-14** — iteration 3: campaign **drafts**, 23 nodes → 27. Owner's decision that the
+  manager writes the sequence and starts the campaign, which splits what had been treated as one
+  blocked step into two: creating the campaign (safe, automated here) and writing its copy (not
+  ours, never automated). `Plan Writes` gained a campaign branch, `Collect Creates` now returns
+  `created_ids`, and a new `Needs Schedules? → Plan Schedules → Create Schedule → Collect Schedules`
+  branch sets the hours on what this run created. The old canvas's body — `{ name, type }` and a
+  Mon-Fri 09:00-17:00 Europe/Warsaw schedule — was read back off `8uRWXHe9FIfglq1u` over the REST
+  API rather than guessed. `state` still excludes the step, for the inverted reason.

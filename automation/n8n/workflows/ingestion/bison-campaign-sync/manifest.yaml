@@ -61,6 +61,12 @@ idempotency:
   notes: >-
     Genuinely idempotent, but `type` is set on INSERT only. That is what protects the ooo_followup
     reclassification from being overwritten on every run — do not "fix" it into the UPDATE clause.
+    Since 2026-08-14 the OOO follow-up campaigns are classified by NAME at insert time, before
+    typeMap is consulted: the vendor's `type` never identified them, and neither branch of typeMap
+    could produce ooo_followup, so every one of them used to arrive misclassified — as `nurture`
+    (unroutable) or, for 25 of them, as client-visible `outreach`. The name list is the 7 spellings
+    measured in production on 2026-08-12. Insert-time only, so no backfill and no interference with
+    20260722g or with the row bison-workspace-setup seeds when it provisions a campaign.
 
 retryPolicy:
   notes: >-
