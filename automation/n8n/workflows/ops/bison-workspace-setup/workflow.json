@@ -11,7 +11,7 @@
         -152
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\n// State BEFORE any write. Either returned as is, or merged with what was actually created.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\n\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\n// Each list can arrive as several items — /api/campaigns is paginated through links.next.\nconst collect = (nodeName) => {\n  let items;\n  try { items = $(nodeName).all(); } catch (e) { return { rows: [], error: describe(e) }; }\n  const rows = [];\n  let error = null;\n  for (const item of items) {\n    const j = item.json ?? {};\n    if (j.error) { error = describe(j.message ?? j.error); continue; }\n    if (Array.isArray(j.data)) rows.push(...j.data);\n    else if (Array.isArray(j)) rows.push(...j);\n  }\n  return { rows, error };\n};\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'minted' ? step('created', ['minted and stored'])\n  : step('missing', [], ['api_key'],\n      key.mint_error ?? (isDryRun()\n        ? 'no key stored; Bison has no token-list endpoint, so nothing can be reused'\n        : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst webhooks = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Webhooks');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((w) => hookKey(w.events, w.url));\n  const missing = CANON_WEBHOOKS.map((c) => hookKey(c.events, c.url)).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst tags = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Tags');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((t) => String(t?.name ?? '').trim()).filter(Boolean);\n  const missing = CANON_TAGS.filter((n) => !present.includes(n));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst campaigns = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Campaigns');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const names = rows.map((c) => String(c?.name ?? '').trim());\n  // Duplicates are reported explicitly — otherwise they are visible only at the vendor.\n  const present = CANON_CAMPAIGNS\n    .map((n) => ({ n, count: names.filter((x) => x === n).length }))\n    .filter((x) => x.count > 0)\n    .map((x) => (x.count > 1 ? `${x.n} ×${x.count}` : x.n));\n  const missing = CANON_CAMPAIGNS.filter((n) => !names.includes(n));\n  const dup = present.some((p) => p.includes(' ×'));\n  return step(\n    missing.length ? 'missing' : 'ok',\n    present,\n    missing,\n    dup ? 'duplicate OOO campaigns at the vendor — reported, never resolved by creating more' : null,\n  );\n})();\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: { key: keyStep, webhooks, tags, campaigns },\n} }];"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\n// State BEFORE any write. Either returned as is, or merged with what was actually created.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\n\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\n// Each list can arrive as several items — /api/campaigns is paginated through links.next.\nconst collect = (nodeName) => {\n  let items;\n  try { items = $(nodeName).all(); } catch (e) { return { rows: [], error: describe(e) }; }\n  const rows = [];\n  let error = null;\n  for (const item of items) {\n    const j = item.json ?? {};\n    if (j.error) { error = describe(j.message ?? j.error); continue; }\n    if (Array.isArray(j.data)) rows.push(...j.data);\n    else if (Array.isArray(j)) rows.push(...j);\n  }\n  return { rows, error };\n};\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'minted' ? step('created', ['minted and stored'])\n  : step('missing', [], ['api_key'],\n      key.mint_error ?? (isDryRun()\n        ? 'no key stored; Bison has no token-list endpoint, so nothing can be reused'\n        : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst webhooks = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Webhooks');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((w) => hookKey(w.events, w.url));\n  const missing = CANON_WEBHOOKS.map((c) => hookKey(c.events, c.url)).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst tags = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Tags');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((t) => String(t?.name ?? '').trim()).filter(Boolean);\n  const missing = CANON_TAGS.filter((n) => !present.includes(n));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst campaigns = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Campaigns');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  // The vendor status is carried into `present`, not just the name. A campaign we created is a\n  // DRAFT until a manager writes its sequence and starts it, and \"OOO automation | general\" alone\n  // reads as if it were sending. Bent Iron PL's `939 general archived` is the same problem from\n  // the other side: present, and not going to send anything either.\n  const found = rows.map((c) => ({\n    name: String(c?.name ?? '').trim(),\n    status: String(c?.status ?? 'unknown').trim() || 'unknown',\n  }));\n  // Duplicates are reported explicitly — otherwise they are visible only at the vendor.\n  const present = CANON_CAMPAIGNS\n    .map((n) => ({ n, hits: found.filter((f) => f.name === n) }))\n    .filter((x) => x.hits.length > 0)\n    .map((x) => (x.hits.length > 1\n      ? `${x.n} ×${x.hits.length} (${x.hits.map((h) => h.status).join(', ')})`\n      : `${x.n} (${x.hits[0].status})`));\n  const missing = CANON_CAMPAIGNS.filter((n) => !found.some((f) => f.name === n));\n  const dup = present.some((p) => p.includes(' ×'));\n  return step(\n    missing.length ? 'missing' : 'ok',\n    present,\n    missing,\n    dup ? 'duplicate OOO campaigns at the vendor — reported, never resolved by creating more' : null,\n  );\n})();\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: { key: keyStep, webhooks, tags, campaigns },\n} }];"
       }
     },
     {
@@ -24,7 +24,20 @@
         -224
       ],
       "parameters": {
-        "jsCode": "// Fold N vendor responses back into one item. n8n preserves item order, so the i-th response\n// belongs to the i-th planned element.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The status field is the vendor's, not HTTP, and Number('ok') is NaN — reading\n  // it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\nreturn [{ json: { created, failed } }];"
+        "jsCode": "// Fold N vendor responses back into one item. n8n preserves item order, so the i-th response\n// belongs to the i-th planned element.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The status field is the vendor's, not HTTP, and Number('ok') is NaN — reading\n  // it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\n// A campaign's id is knowable only from its own create response, and the schedule call needs it.\n// Same index correspondence the loop above relies on. Bison answers { data: { id } }.\nconst created_ids = {};\nplanned.forEach((p, i) => {\n  if (p.kind !== 'campaign') return;\n  const r = results[i] ?? {};\n  const id = r.data?.id ?? r.id ?? null;\n  if (id) created_ids[p.identity] = String(id);\n});\n\nreturn [{ json: { created, failed, created_ids } }];"
+      }
+    },
+    {
+      "id": "b2000000-0000-4000-a000-00000000000f",
+      "name": "Collect Schedules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3504,
+        -320
+      ],
+      "parameters": {
+        "jsCode": "// Fold N schedule responses back into one item, the same index correspondence Collect Creates\n// relies on.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Schedules').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst scheduled = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The status field is the vendor's, not HTTP, and Number('ok') is NaN — reading\n  // it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else scheduled.push(p.identity);\n});\nreturn [{ json: { scheduled, failed } }];"
       }
     },
     {
@@ -37,6 +50,34 @@
         -224
       ],
       "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Effective Key').first().json.api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{ $json.url }}"
+      }
+    },
+    {
+      "id": "b2000000-0000-4000-a000-00000000000e",
+      "name": "Create Schedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3280,
+        -320
+      ],
       "onError": "continueRegularOutput",
       "parameters": {
         "headerParameters": {
@@ -75,11 +116,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3280,
+        4176,
         -152
       ],
       "parameters": {
-        "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst out = $('Merge Outcomes').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: {\n  ...out,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
+        "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst out = $('Merge Outcomes').first().json;\nconst rec = $json ?? {};\nconst failed = Boolean(rec.error);\nreturn [{ json: {\n  ...out,\n  // Workflow state, not a result field — the contract is additionalProperties:false. Same reason\n  // aimfox-workspace-setup strips activate_campaign_id here.\n  created_campaigns: undefined,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
       }
     },
     {
@@ -97,7 +138,7 @@
           "conditions": [
             {
               "id": "b2000000-0000-4000-a000-00000000000f",
-              "leftValue": "={{ (() => { const s = $json.steps ?? {}; if ($json.dry_run !== false) return false; return ['webhooks','tags'].some(k => (s[k]?.missing ?? []).length > 0); })() }}",
+              "leftValue": "={{ (() => { const s = $json.steps ?? {}; if ($json.dry_run !== false) return false; return ['webhooks','tags','campaigns'].some(k => (s[k]?.missing ?? []).length > 0); })() }}",
               "operator": {
                 "operation": "true",
                 "singleValue": true,
@@ -238,11 +279,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2832,
+        3728,
         -152
       ],
       "parameters": {
-        "jsCode": "// One shape for Record and for the response. Runs both after creation and around it.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'tags']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n}\n\n// campaigns is deliberately NOT part of state. Provisioning does not own it and cannot create\n// it, so a permanent \"partial\" on four clients would mean a Set up button that fixes nothing.\n// The finding is not lost — it stays in steps.campaigns and shows in the portal as its own row.\nconst decided = [steps.key, steps.webhooks, steps.tags];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\nreturn [{ json: { ...base, state, steps } }];"
+        "jsCode": "// One shape for Record and for the response. Runs both after creation and around it.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'tags', 'campaigns']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n  // A campaign we just made is a draft, and `present` is the only line that says so. Without this\n  // the card shows the name bare, which is how the list reads for a campaign that is actually\n  // sending — the one distinction a manager has to act on.\n  const madeNow = steps.campaigns.created ?? [];\n  if (madeNow.length) {\n    steps.campaigns.present = [...(steps.campaigns.present ?? []), ...madeNow.map((n) => `${n} (draft)`)];\n  }\n}\n\n// The schedule is a second call on the campaign's own id, so it can only fail after the campaign\n// exists. That is not a failed step: the draft is there and a manager can set the hours in the UI.\n// It is recorded as an error on the step and nothing more.\nif ($('Collect Schedules').isExecuted) {\n  const { failed: scheduleFailed = [] } = $('Collect Schedules').first().json ?? {};\n  if (scheduleFailed.length) {\n    const st = steps.campaigns;\n    st.error = [st.error, `created, schedule not set: ${scheduleFailed.join('; ')}`].filter(Boolean).join('; ');\n  }\n}\n\n// campaigns is deliberately NOT part of state, even now that it creates. A draft campaign has no\n// sequence and sends nothing, so folding it in would let `configured` mean \"ready to send\" when it\n// is not — and OOO routing pointed at a draft fails silently, which is the FortumEnergia shape.\n// The finding is not lost: it stays in steps.campaigns and shows in the portal as its own row.\nconst decided = [steps.key, steps.webhooks, steps.tags];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\n// Carried to Record and stripped again in Final Result — it is workflow state, not part of the\n// result contract (which is additionalProperties:false). Empty on a dry run by construction:\n// Collect Creates cannot have run.\nconst created_campaigns = $('Collect Creates').isExecuted\n  ? Object.entries($('Collect Creates').first().json?.created_ids ?? {})\n      .map(([name, external_id]) => ({ external_id: String(external_id), name }))\n  : [];\n\nreturn [{ json: { ...base, state, steps, created_campaigns } }];"
       }
     },
     {
@@ -302,6 +343,39 @@
       }
     },
     {
+      "id": "b2000000-0000-4000-a000-00000000000c",
+      "name": "Needs Schedules?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2832,
+        -224
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b2000000-0000-4000-a000-000000000010",
+              "leftValue": "={{ Object.keys($json.created_ids ?? {}).length > 0 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {
+          "caseSensitive": true,
+          "leftValue": "",
+          "typeValidation": "strict",
+          "version": 3
+        }
+      }
+    },
+    {
       "id": "b1000000-0000-4000-a000-00000000000b",
       "name": "Needs Selection",
       "type": "n8n-nodes-base.code",
@@ -315,6 +389,19 @@
       }
     },
     {
+      "id": "b2000000-0000-4000-a000-00000000000d",
+      "name": "Plan Schedules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        -320
+      ],
+      "parameters": {
+        "jsCode": "// One item per campaign this run actually created. Never for one that already existed: its hours\n// are the client's, and overwriting them is outside the canonical set (invariant 5).\n// An empty array means Create Schedule does not execute — the same structural guard Plan Writes\n// uses for dry runs, and the reason a dry run can never reach this branch at all.\n//\n// Mon-Fri 09:00-17:00 Europe/Warsaw is the house convention, copied verbatim from the old canvas\n// (8uRWXHe9FIfglq1u, all three Create Campaign Schedule nodes). It is a starting point a manager\n// changes in the Bison UI along with the sequence, not a claim about this client's hours.\nconst SCHEDULE = {\n  monday: true, tuesday: true, wednesday: true, thursday: true, friday: true,\n  saturday: false, sunday: false,\n  start_time: '09:00', end_time: '17:00',\n  timezone: 'Europe/Warsaw',\n  save_as_template: false,\n};\n\nconst { created_ids = {} } = $json;\nreturn Object.entries(created_ids).map(([identity, id]) => ({ json: {\n  identity,\n  campaign_id: id,\n  url: `https://go.gheads.com/api/campaigns/${id}/schedule`,\n  body: SCHEDULE,\n} }));"
+      }
+    },
+    {
       "id": "b2000000-0000-4000-a000-000000000006",
       "name": "Plan Writes",
       "type": "n8n-nodes-base.code",
@@ -324,7 +411,7 @@
         -224
       ],
       "parameters": {
-        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// One item per MISSING element. An empty array means Create Missing does not execute at all —\n// that, not a flag, is how dry-run safety works here.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://go.gheads.com/api/webhook-url',\n      body: { name: c.name, url: c.url, events: c.events } } });\n  }\n}\nfor (const name of CANON_TAGS) {\n  if ((s.tags?.missing ?? []).includes(name)) {\n    out.push({ json: { kind: 'tag', identity: name, url: 'https://go.gheads.com/api/tags', body: { name } } });\n  }\n}\n// Campaigns are NEVER planned here. Their copy on the old canvas is byte-identical across three\n// campaigns, in feminine Polish, with a hardcoded {PANIEKAMILU} — business content, not ours.\nreturn out;"
+        "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// One item per MISSING element. An empty array means Create Missing does not execute at all —\n// that, not a flag, is how dry-run safety works here.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://go.gheads.com/api/webhook-url',\n      body: { name: c.name, url: c.url, events: c.events } } });\n  }\n}\nfor (const name of CANON_TAGS) {\n  if ((s.tags?.missing ?? []).includes(name)) {\n    out.push({ json: { kind: 'tag', identity: name, url: 'https://go.gheads.com/api/tags', body: { name } } });\n  }\n}\n// Campaigns are created as DRAFTS: name + type, nothing else. What was blocked was never the\n// campaign, it was POST /campaigns/v1.1/{id}/sequence-steps — the copy on the old canvas is\n// byte-identical across all three, in feminine Polish, with a hardcoded {PANIEKAMILU}. That call\n// is not made here and must not be: a manager writes the sequence and starts the campaign.\n// A draft with no sequence sends nothing, so creating one cannot produce a message.\nfor (const name of CANON_CAMPAIGNS) {\n  if ((s.campaigns?.missing ?? []).includes(name)) {\n    out.push({ json: { kind: 'campaign', identity: name, url: 'https://go.gheads.com/api/campaigns',\n      body: { name, type: 'reply_followup' } } });\n  }\n}\nreturn out;"
       }
     },
     {
@@ -348,7 +435,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3056,
+        3952,
         -152
       ],
       "alwaysOutputData": true,
@@ -356,9 +443,9 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => {\n  const r = $json;\n  const key = $('Effective Key').first().json ?? {};\n  const start = $('Input').first().json;\n  const dry = r.dry_run !== false;\n  return [\n    r.client_id,\n    JSON.stringify({ state: r.state, steps: r.steps, resolved: r.resolved, dry_run: r.dry_run, sequencer: r.sequencer }),\n    dry ? '' : (key.key_to_store ?? ''),\n    r.resolved?.workspace_id ?? '',\n    dry,\n    String($execution.id),\n    r.state === 'configured' || r.state === 'partial' ? 'success' : 'failed',\n    JSON.stringify({ client_id: r.client_id, workspace_id: r.resolved?.workspace_id ?? null,\n                     requested_by: start.requested_by ?? null, dry_run: dry, state: r.state, steps: r.steps }),\n  ];\n})() }}"
+          "queryReplacement": "={{ (() => {\n  const r = $json;\n  const key = $('Effective Key').first().json ?? {};\n  const start = $('Input').first().json;\n  const dry = r.dry_run !== false;\n  return [\n    r.client_id,\n    JSON.stringify({ state: r.state, steps: r.steps, resolved: r.resolved, dry_run: r.dry_run, sequencer: r.sequencer }),\n    dry ? '' : (key.key_to_store ?? ''),\n    r.resolved?.workspace_id ?? '',\n    dry,\n    String($execution.id),\n    r.state === 'configured' || r.state === 'partial' ? 'success' : 'failed',\n    JSON.stringify({ client_id: r.client_id, workspace_id: r.resolved?.workspace_id ?? null,\n                     requested_by: start.requested_by ?? null, dry_run: dry, state: r.state, steps: r.steps }),\n    // Belt and braces: created_campaigns is already empty on a dry run because Collect Creates\n    // cannot have executed. The guard states the rule at the boundary rather than relying on it.\n    JSON.stringify(dry ? [] : (r.created_campaigns ?? [])),\n  ];\n})() }}"
         },
-        "query": "-- One statement: connector row + audit. INSERT ... SELECT ... WHERE is what keeps a dry run from\n-- creating a connector row -- the guard is \"not a dry run, or the row already exists\".\n-- Creating a connector where there was none would make the client connected.\nwith upserted as (\n  insert into public.client_sequencers\n    (client_id, sequencer_id, api_key, external_workspace_id, setup_state, setup_checked_at)\n  select $1::uuid, '00000000-0000-4000-a000-000000000002'::uuid, nullif($3, ''), nullif($4, ''), $2::jsonb, now()\n   where $5::boolean = false\n      or exists (select 1 from public.client_sequencers\n                  where client_id = $1::uuid and sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid)\n  on conflict (client_id, sequencer_id) do update\n     set setup_state           = excluded.setup_state,\n         setup_checked_at      = now(),\n         -- a Bison key cannot be re-read at the vendor, so storing a freshly minted one is the only\n         -- chance not to lose it; an empty value means leave it alone\n         api_key               = coalesce(excluded.api_key, public.client_sequencers.api_key),\n         -- a stored workspace is never overwritten: it is what the client is claimed by\n         external_workspace_id = coalesce(public.client_sequencers.external_workspace_id,\n                                          excluded.external_workspace_id),\n         updated_at            = now()\n  returning id\n), audited as (\n  insert into public.integration_sync_runs\n    (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\n  values ('bison', 'workspace_setup', $6, $7, now(), now(), $8::jsonb)\n  on conflict (n8n_execution_id) do nothing\n  returning id\n)\nselect (select count(*) from upserted) as connector_rows,\n       (select count(*) from audited)  as audit_rows;"
+        "query": "-- One statement: connector row + audit + the campaigns this run created. INSERT ... SELECT ... WHERE is what keeps a dry run from\n-- creating a connector row -- the guard is \"not a dry run, or the row already exists\".\n-- Creating a connector where there was none would make the client connected.\nwith upserted as (\n  insert into public.client_sequencers\n    (client_id, sequencer_id, api_key, external_workspace_id, setup_state, setup_checked_at)\n  select $1::uuid, '00000000-0000-4000-a000-000000000002'::uuid, nullif($3, ''), nullif($4, ''), $2::jsonb, now()\n   where $5::boolean = false\n      or exists (select 1 from public.client_sequencers\n                  where client_id = $1::uuid and sequencer_id = '00000000-0000-4000-a000-000000000002'::uuid)\n  on conflict (client_id, sequencer_id) do update\n     set setup_state           = excluded.setup_state,\n         setup_checked_at      = now(),\n         -- a Bison key cannot be re-read at the vendor, so storing a freshly minted one is the only\n         -- chance not to lose it; an empty value means leave it alone\n         api_key               = coalesce(excluded.api_key, public.client_sequencers.api_key),\n         -- a stored workspace is never overwritten: it is what the client is claimed by\n         external_workspace_id = coalesce(public.client_sequencers.external_workspace_id,\n                                          excluded.external_workspace_id),\n         updated_at            = now()\n  returning id\n), audited as (\n  insert into public.integration_sync_runs\n    (provider, sync_type, n8n_execution_id, status, started_at, finished_at, metadata)\n  values ('bison', 'workspace_setup', $6, $7, now(), now(), $8::jsonb)\n  on conflict (n8n_execution_id) do nothing\n  returning id\n), catalogued as (\n  -- The campaigns this run created at the vendor, classified correctly at birth.\n  -- Without this they reach public.campaigns only through bison-campaign-sync, which maps Bison's\n  -- `reply_followup` to `nurture` -- and `type` is not in that statement's ON CONFLICT update\n  -- list, so the first classification is permanent. A `nurture` row is invisible to\n  -- updateClientOooRouting (orm-gateway, `type = 'ooo_followup'`), which would leave a freshly\n  -- provisioned client with three campaigns the routing editor cannot offer.\n  -- That same insert-only behaviour is what makes seeding here durable: the sync keeps name and\n  -- status fresh afterwards and never reverts the type.\n  insert into public.campaigns\n    (client_id, external_id, type, name, status, start_date)\n  select $1::uuid, x.external_id, 'ooo_followup'::public.campaign_type, x.name,\n         'draft'::public.campaign_status, current_date\n    from jsonb_to_recordset($9::jsonb) as x(external_id text, name text)\n  on conflict (external_id) do update\n     -- The sync runs on a schedule and may have reached the row first, typing it `nurture`. These\n     -- ids are ours by construction -- this run just created them -- so forcing the type is bounded\n     -- to what provisioning made, and never touches a campaign it did not create.\n     set type       = 'ooo_followup'::public.campaign_type,\n         updated_at = now()\n  returning id\n)\nselect (select count(*) from upserted)   as connector_rows,\n       (select count(*) from audited)    as audit_rows,\n       (select count(*) from catalogued) as campaign_rows;"
       }
     },
     {
@@ -488,6 +575,17 @@
         [
           {
             "index": 0,
+            "node": "Needs Schedules?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collect Schedules": {
+      "main": [
+        [
+          {
+            "index": 0,
             "node": "Merge Outcomes",
             "type": "main"
           }
@@ -500,6 +598,17 @@
           {
             "index": 0,
             "node": "Collect Creates",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Create Schedule": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Collect Schedules",
             "type": "main"
           }
         ]
@@ -624,6 +733,35 @@
           {
             "index": 0,
             "node": "Effective Key",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Needs Schedules?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Plan Schedules",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Merge Outcomes",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Plan Schedules": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Create Schedule",
             "type": "main"
           }
         ]

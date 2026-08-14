@@ -24,7 +24,7 @@
       "type": "boolean"
     },
     "state": {
-      "description": "configured = the whole canonical set is present. partial = some elements were missing (and were created unless dry_run). missing = the workspace resolved but nothing was wired. needs_selection = the workspace could not be resolved unambiguously and a human must choose. client_not_found = the client_id matched no client with an enabled connector — a caller error, reported out loud rather than allowed to end the run silently. Computed from key, webhooks and tags only: campaigns are reported but never created, so folding them in would leave four clients permanently `partial` behind a button that cannot fix them.",
+      "description": "configured = the whole canonical set is present. partial = some elements were missing (and were created unless dry_run). missing = the workspace resolved but nothing was wired. needs_selection = the workspace could not be resolved unambiguously and a human must choose. client_not_found = the client_id matched no client with an enabled connector — a caller error, reported out loud rather than allowed to end the run silently. Computed from key, webhooks and tags only, and campaigns stay out of it even though the workflow now creates them: a created campaign is a DRAFT with no sequence, so folding it in would let `configured` mean \"ready to send\" while nothing can send. OOO routing pointed at a draft fails silently — the FortumEnergia shape.",
       "enum": [
         "configured",
         "partial",
@@ -110,7 +110,7 @@
           "$ref": "#/$defs/step"
         },
         "campaigns": {
-          "description": "Reports only. The three OOO automation campaigns are never created by this workflow: their sequence copy does not exist in a usable form (all three bodies on the old canvas are the same feminine-Polish text with a hardcoded {PANIEKAMILU} placeholder), and creating them blind already produced six campaigns for Bent Iron PL. `outcome` is therefore `ok` or `missing`, never `created`.",
+          "description": "The three OOO automation campaigns, created as DRAFTS (POST /api/campaigns with a name and type: reply_followup, then POST /api/campaigns/{id}/schedule). What was blocked was never the campaign — it was POST /api/campaigns/v1.1/{id}/sequence-steps, whose copy does not exist in a usable form (all three bodies on the old canvas are the same feminine-Polish text with a hardcoded {PANIEKAMILU} placeholder). That call is never made here: a manager writes the sequence and starts the campaign, and a draft with no sequence sends nothing. Each entry in `present` carries the vendor status in brackets — `OOO automation | general (draft)` — because the name alone reads identically for a campaign that is actually sending and one that never will be.",
           "$ref": "#/$defs/step"
         }
       }

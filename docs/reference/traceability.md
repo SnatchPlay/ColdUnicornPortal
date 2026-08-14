@@ -123,8 +123,8 @@ green, and it is an instance-config plus Apps-Script change, not a graph change.
 [ADR-0016](../adr/0016-repository-as-automation-source-of-truth.md)
 
 Bringing one client's Aimfox or Bison workspace from "exists at the vendor" to "fully wired". Two
-workflows, one contract, one portal surface. Everything below is read-only so far: no write node
-exists on either side yet.
+workflows, one contract, one portal surface. Both write halves exist; only Aimfox's has run against
+a vendor with `dry_run: false`.
 
 | # | Rule | Tables | RPC | Gateway action | Portal surface | Metric | n8n workflow | Test | State |
 |---|---|---|---|---|---|---|---|---|---|
@@ -132,7 +132,9 @@ exists on either side yet.
 | 2 | A workspace is never assigned on a guess | `client_sequencers` | — | — | — | — | resolution is explicit → stored → **exact** name → `needs_selection` | `70393` (Bent Iron PL) before/after the `stored` fix | ✅ |
 | 3 | Provisioning is idempotent — read before every write | — | — | — | — | — | both workflows | ✅ Aimfox `70489` created FortumEnergia's missing `preMQL`; `70490`, same input, created nothing | ✅ Aimfox · ⚠️ Bison write path never exercised — no Active workspace is missing a canonical tag |
 | 4 | A webhook is identified by `url` + `events`, never by name | — | — | — | — | — | both workflows | proven twice independently: Aimfox GIC `Manual Tag`, Bison UniTalk `Reply Classification` | ✅ |
-| 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL`; Bison: `preMQL` + `OOO` | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
+| 5 | The canonical set is closed, and differs per vendor | — | — | — | — | — | Aimfox: `preMQL` + `MQL` + `AutoConnect`; Bison: `preMQL` + `OOO` + the three `OOO automation` campaigns | measured 2026-08-07 — 9 Aimfox workspaces, 16 Active Bison; Bison `MQL` 7/16 and not a gap | ✅ |
+| 9 | Provisioning creates containers, never content | — | — | — | — | — | Bison creates a campaign as a `draft` + schedule; `sequence-steps` is never POSTed and no campaign is started | offline run of the committed code nodes, 8 scenarios, 2026-08-14 | ⚠️ never run against a vendor |
+| 10 | A campaign provisioning created is routable the moment it exists | `campaigns.type` | — | `loadClientOooRouting` / `upsertClientOooRouting` (unchanged) | OOO routing editor | — | `Record` seeds `type = 'ooo_followup'`; the sync owns `name`/`status` and never touches `type` | `created_campaigns` payload asserted offline 2026-08-14 (`[]` on dry run, 2 of 3 after a vendor rejection) | ⚠️ never written against a database |
 | 6 | The result the portal shows is the result of a real run | `client_sequencers.setup_state` | — | rides on `loadClientsOverview` ✅ (no new action needed) | Clients page **Workspaces** column + drawer section ✅ | — | `dry_run` returns the same `steps` as a live run | screenshotted in both roles 2026-08-08; migration live since PR #28 and a post-merge run returned `recorded: true` | ✅ |
 | 7 | A master key never leaves n8n | — | — | `requestWorkspaceSetup` ✅ built | Перевірити / Налаштувати ✅ built | — | gateway calls n8n, never a vendor; result stripped of `api_key`/`token` at the boundary | contract forbids it (`additionalProperties: false`) + explicit delete in the handler; a live response was scanned for `api_key`/`token` and had none | ⚠️ webhook is UNAUTHENTICATED by decision — knownViolations, review 2026-11-30 |
 | 8 | No terminal path is silent | — | — | — | — | — | `client_not_found` + `alwaysOutputData` on Resolve Client | added after a run ended `success` with no output | ✅ |
@@ -145,6 +147,9 @@ in the [process document](processes/ops/workspace-provisioning.md):
 | Finding | Where it belongs |
 |---|---|
 | `public.campaigns` keeps campaigns the vendor no longer has — `bison-campaign-sync` is `INSERT … ON CONFLICT DO UPDATE` with no removal path, so Bent Iron PL shows six OOO campaigns where workspace 73 has three | [Bison ingestion](processes/outreach/bison-ingestion.md) |
+| ~~`bison-campaign-sync` could never write `ooo_followup`~~ — **fixed 2026-08-14.** The string was absent from the workflow, so every OOO campaign arrived as `nurture` (unroutable) or `outreach` (client-visible, 25 of them). Now classified by name at insert time, in the sync, and seeded directly by `bison-workspace-setup` for the campaigns it creates. `type` stays out of the `ON CONFLICT` list on both sides | [Bison ingestion](processes/outreach/bison-ingestion.md) |
+| `typeMap[c.type] \|\| 'outreach'` — an unrecognised Bison campaign type still defaults to the one type clients can see. No longer affects OOO campaigns (name match wins), so this is about everything else; `nurture` is the right default. Open | [Bison ingestion](processes/outreach/bison-ingestion.md) |
+| `campaigns.positive_responses` is overwritten hourly from Bison's `interested`, while [04-metrics-catalog §](functional/04-metrics-catalog.md) calls it user-editable and the gateway accepts a patch for it. A portal edit survives at most an hour. Open | [Bison ingestion](processes/outreach/bison-ingestion.md) |
 | `client_ooo_routing` has three rows pointing at another client's campaign — all FortumEnergia → GIC. 11 pending follow-ups, nothing sent (phase A enrols from the sheet), live at phase B | [OOO follow-ups](processes/outreach/ooo-followups.md) |
 
 ---

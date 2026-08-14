@@ -1,10 +1,12 @@
 # Process · Workspace provisioning (Aimfox and Bison)
 
 **Domain:** ops · **Owner:** automation · **Status:** **live.** Both workflows are active and
-provisioning is reachable from the portal. Two gaps remain and are recorded, not hidden: the
-webhooks are unauthenticated by decision (security finding 11, review 2026-11-30), and the Bison
-write path has never had anything to create — no Active workspace is missing a canonical tag, so it
-will run for real the first time a new client is onboarded.
+provisioning is reachable from the portal. Three gaps remain and are recorded, not hidden: the
+webhooks are unauthenticated by decision (security finding 11, review 2026-11-30); the Bison write
+path has never had anything to create — no Active workspace is missing a canonical tag or a
+campaign, so it will run for real the first time a new client is onboarded; and
+`bison-campaign-sync` types a new OOO campaign `nurture` rather than `ooo_followup` (see *The OOO
+campaign triple*).
 **Governing ADRs:** [ADR-0012](../../../adr/0012-multi-sequencer-model.md) (per-client vendor
 credentials live in `client_sequencers`),
 [ADR-0016](../../../adr/0016-repository-as-automation-source-of-truth.md) (this document wins over
@@ -21,7 +23,9 @@ may trigger the workflow, and nothing else outbound)
 
 A client cannot receive a single lead until their sending workspace is wired to us. "Wired" is not
 one fact but five: the workspace is identified, an API key exists and is stored, the webhooks point
-at our endpoints, the qualification labels/tags exist, and the campaigns we depend on exist.
+at our endpoints, the qualification labels/tags exist, and the campaigns we depend on exist. The
+fifth is where the two vendors part company — on Bison the campaign is created and left as a draft
+for a manager to fill in, because its content is copy we do not own.
 
 Today this is a manual operation performed by editing a hardcoded n8n canvas
 (`8uRWXHe9FIfglq1u`). It has no notion of "already done", so it can only be run once per client,
@@ -75,7 +79,7 @@ Measured across all 9 wired Aimfox workspaces on 2026-08-07.
 | webhook | `url` + `events` | `[tag_attached, tag_removed]` → `/webhook/bison-replies-hub` | **16/16** |
 | tag | `name` | `preMQL` | **16/16** |
 | tag | `name` | `OOO` | **16/16** |
-| campaign | `name` | `OOO automation \| general`, `\| male`, `\| female` — type `reply_followup`, each with a schedule and a sequence | see below |
+| campaign | `name` | `OOO automation \| general`, `\| male`, `\| female` — type `reply_followup`, each with a schedule. The **sequence** is not part of the canonical set | see below |
 
 ### `MQL` is not a Bison tag we create
 
@@ -96,17 +100,45 @@ Ten further tags sit at 16/16 (`Automated Reply`, `Barracuda`, `Custom Mail Serv
 `Interested`, `Meeting Booked`, `Mimecast`, `Outlook`, `Proofpoint`, `Zoho`). These are Bison's own
 ESP-detection and classification tags, not ours. `NRR` is at 3/16 and is likewise not created here.
 
-### The OOO campaign triple is the part that is not safe to automate yet
+### The OOO campaign triple: the container is ours, the copy is not
 
-The three `OOO automation | …` campaigns are canon for 12 of the 16 Active Bison clients. Creating
-them is still out of scope, and the first runs of the workflow on 2026-08-07 sharpened why.
+The three `OOO automation | …` campaigns are canon for 12 of the 16 Active Bison clients.
+Provisioning creates the missing ones **as drafts**, since 2026-08-14, and never writes their copy.
 
-**The sequence copy is not ours to author.** All three `sequence-steps` bodies on the old canvas
-are byte-identical (1931 characters each), written in feminine Polish (`Pani`, `wróciła Pani`), and
-carry a hardcoded `{PANIEKAMILU}` placeholder. So the male/female split exists in the campaign name
-only; the copy behind all three is the same female-gendered text. Whatever the intended male and
-general variants are, they are not in the canvas and cannot be invented here — the copy is business
-content and must come from the client-facing source of truth.
+This is a correction to the earlier reading of this section, not a reversal of the reason behind it.
+The reason was always the copy, and the copy is a **separate vendor call**:
+
+```
+POST /api/campaigns                            { name, type: "reply_followup" }   ← ours
+POST /api/campaigns/{id}/schedule              Mon-Fri 09:00-17:00 Europe/Warsaw  ← ours
+POST /api/campaigns/v1.1/{id}/sequence-steps   the message                        ← NOT ours
+```
+
+**A campaign with no sequence is a `draft` and cannot send anything.** Treating the first two calls
+as blocked by the third conflated a container with its content, and the cost of that was concrete:
+provisioning left every new client three campaigns short, and OOO routing had nothing of its own to
+point at — which is how FortumEnergia's routing came to point at GIC's campaigns.
+
+**The sequence copy is still not ours to author.** All three `sequence-steps` bodies on the old
+canvas are byte-identical (1931 characters each), written in feminine Polish (`Pani`, `wróciła
+Pani`), and carry a hardcoded `{PANIEKAMILU}` placeholder. So the male/female split exists in the
+campaign name only; the copy behind all three is the same female-gendered text. Whatever the
+intended male and general variants are, they are not in the canvas and cannot be invented here — the
+copy is business content and must come from the client-facing source of truth.
+
+**So the handover is explicit.** Provisioning leaves three drafts with hours set. A **manager**
+writes the three sequences in Bison and starts each campaign. Nothing in the platform starts a
+Bison campaign, and provisioning must not either: starting one whose sequence nobody has written
+would mean sending blank.
+
+**The status is reported, never just the name.** `steps.campaigns.present` reads
+`OOO automation | general (draft)`, because a bare name looks identical for a campaign that is
+sending and one that never will be, and that difference is the manager's whole to-do list.
+
+**A campaign that already exists is never touched**, whatever its status, and an existing schedule
+is never overwritten — the hours are the client's (invariant 5). Only a campaign this run created
+gets one. This is also what keeps the numbers below from becoming a duplication problem: Bent Iron
+PL's `general` is `archived`, counts as present, and is not re-created.
 
 **Four of sixteen Active clients do not have the triple**, and the gaps are not what the catalogue
 says:
@@ -118,8 +150,50 @@ says:
 | FortumEnergia | 125 | 0 | **0** — confirmed, execution `70465`: 4 campaigns, none OOO |
 | Bent Iron PL | 73 | **6** | **3** — confirmed, execution `70464`: 32 campaigns, one of each |
 
-Consequence: `bison-workspace-setup` **reports** which of the three campaigns are missing and does
-not create them. Step `campaigns` stays `missing` until the three real copy variants exist.
+Consequence: `bison-workspace-setup` creates the missing campaigns as drafts and reports the vendor
+status of every one it found. What stays outstanding for these four is the **copy**, which is a
+manager's task and not a provisioning state.
+
+`state` does not include the campaign step, and did not change when the step started creating. The
+old reason was that **Set up** could not fix a missing campaign; the new one is its mirror — a draft
+is not a sending campaign, so counting it would let `configured` mean "ready to send" when nothing
+can send yet. `configured` is exactly the word that stops someone checking.
+
+### Provisioning also catalogues what it created
+
+A campaign created at the vendor is not yet a campaign the portal can route to, and the gap is not
+cosmetic. `bison-campaign-sync` maps the vendor's `reply_followup` to `campaign_type = 'nurture'`,
+while [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) and
+[`20260722g`](../../../../supabase/migrations/20260722g_ooo_campaigns_and_routing_seed.sql) say an
+OOO campaign is `ooo_followup`. `type` is **not** in the sync's `ON CONFLICT` update list, so a row
+keeps whatever type it was born with, forever. A `nurture` row is invisible to
+`updateClientOooRouting`, which requires `type = 'ooo_followup'`
+([orm-gateway/index.ts:3146](../../../../supabase/functions/orm-gateway/index.ts#L3146)) — so a
+freshly provisioned client would have three campaigns and an empty routing dropdown.
+
+So `Record` writes them itself, in the same statement as the connector row and the audit row, typed
+`ooo_followup` and `draft`. The ownership split is explicit and the two writers never touch the same
+column:
+
+| Column | Owner |
+|---|---|
+| `type` | **provisioning**, once, at creation. The sync never updates it |
+| `name`, `status`, `database_size`, `positive_responses` | `bison-campaign-sync`, hourly |
+| the row's existence | whichever gets there first — `ON CONFLICT (external_id)` on both sides |
+
+The write is bounded to the external ids **this run created**. It never reclassifies a campaign
+provisioning did not make.
+
+The general defect is closed too, in the sync rather than here:
+[`bison-campaign-sync`](../../../../automation/n8n/workflows/ingestion/bison-campaign-sync/README.md)
+now classifies an OOO campaign **by name** at insert time, so one created by hand in Bison also
+arrives `ooo_followup`. Its name list includes the older `OOO campaign automation …` spelling that
+`20260722g` could only catch by `external_id`. That fix stays insert-time: `type` must not move into
+the sync's `ON CONFLICT` list, or the sync would start overwriting a classification it does not own.
+
+The two changes agree by construction and cannot undo each other — provisioning writes the type when
+it creates the campaign, the sync writes the same type if it gets there first, and neither updates
+`type` on an existing row.
 
 ### Bent Iron PL's six campaigns are a stale catalogue, not six campaigns
 
@@ -233,9 +307,10 @@ already present reports `ok` and does nothing.
                          else mint one; either way upsert the connector row
 4. webhooks              vendor list → compare on url + events → create only what is missing
 5. labels / tags         vendor list → compare on name → create only what is missing
-6. campaigns             Aimfox: hand off to aimfox-campaign-sync
-                         Bison:  vendor list → compare on name → REPORT what is missing
-                                 (creating them is blocked on real copy — see the canonical set)
+6. campaigns             Aimfox: create AutoConnect if absent, then activate it
+                         Bison:  vendor list → compare on name → create what is missing as a
+                                 DRAFT + schedule. The sequence is never written and the campaign
+                                 is never started — a manager does both (see the canonical set)
 7. record                setup_state on client_sequencers + a row in integration_sync_runs
 ```
 
@@ -311,11 +386,19 @@ outcome, so a failure at step 5 still leaves steps 1–4 recorded as done.
    guest in it.
 6. **Creating a webhook or a campaign is irreversible in effect.** Not because the vendor forbids
    deletion, but because a duplicate immediately produces duplicate business records. Treat step 4
-   and step 6 as write-once.
+   and step 6 as write-once. A campaign found by name is present whatever its status — `draft`,
+   `archived` or `active` — and is never re-created, never re-scheduled and never started.
 7. **Master keys never leave n8n.** They are not stored in Postgres, never returned to the browser,
    and never written into a workflow parameter ([security §8](../../n8n/security.md)).
 8. **The portal never calls a vendor.** It asks n8n to do it ([ADR-0008](../../../adr/0008-orm-gateway-edge-function.md),
    [CLAUDE.md §7](../../../../CLAUDE.md)).
+9. **Provisioning creates containers, never content.** Added 2026-08-14 with the Bison campaign
+   drafts, and appended rather than slotted next to invariant 5 because 1–8 are cited by number
+   from both contracts, both READMEs and `view-contracts.ts`. It may create a campaign and set its
+   hours; it must never write a sequence, a subject or a body, and must never start a campaign that
+   has no sequence. Copy is business content and comes from the client-facing source of truth —
+   this is the rule the old canvas broke by shipping the same feminine-Polish body into all three
+   campaigns.
 
 ## Data ownership
 
@@ -324,7 +407,9 @@ outcome, so a failure at step 5 still leaves steps 1–4 recorded as done.
 | workspace id, workspace key | `client_sequencers` (`external_workspace_id`, `api_key`) |
 | what is wired, and when we last looked | `client_sequencers.setup_state`, `setup_checked_at` |
 | who ran provisioning and what happened | `integration_sync_runs` (`sync_type = 'workspace_setup'`) |
-| webhooks, labels/tags, campaigns | the vendor — we hold no mirror of them beyond `setup_state` |
+| webhooks and labels/tags | the vendor — we hold no mirror of them beyond `setup_state` |
+| a created campaign's `campaigns.type` | **provisioning**, written once so OOO routing can see it |
+| that campaign's `name`, `status`, counters | `bison-campaign-sync`, hourly |
 
 `setup_state` is a **cache of the last look**, not a source of truth. It is only as fresh as the
 last run. Nothing may make a business decision from it; it exists to render a status.
@@ -392,7 +477,7 @@ Every step has a read endpoint, which is what makes invariant 3 achievable witho
 | Bison | `GET /api/workspaces/v1.1` (master) | `POST /api/workspaces/v1.1/{id}/api-tokens` (master) |
 | Bison | `GET /api/webhook-url` | `POST /api/webhook-url` |
 | Bison | `GET /api/tags` | `POST /api/tags` |
-| Bison | `GET /api/campaigns` | `POST /api/campaigns` + `/schedule` + `/sequence-steps` |
+| Bison | `GET /api/campaigns` | `POST /api/campaigns` + `POST /api/campaigns/{id}/schedule`. **`POST /api/campaigns/v1.1/{id}/sequence-steps` is never called** — that is the manager's, and it is what turns a draft into something that can send |
 
 Both `GET /api/v2/workspaces` and `GET /api/v2/workspaces/{id}/tokens` answer 500 to a
 workspace-scoped key — the routes exist and require the master.
@@ -481,7 +566,7 @@ is broken so the female branch cannot complete. It must not be run again as-is.
 ## Acceptance criteria
 
 1. Running provisioning against an already-wired workspace creates nothing, and the vendor's
-   webhook/label lists are byte-identical before and after.
+   webhook/label/campaign lists are byte-identical before and after.
 2. Running it twice in a row produces an identical result the second time.
 3. `dry_run` against FortumEnergia reports the missing `preMQL` label; against GIC, the missing `MQL`.
 4. A client whose name does not match any workspace terminates in `needs_selection`, and the
@@ -489,6 +574,11 @@ is broken so the female branch cannot complete. It must not be run again as-is.
 5. Natalia Kobielska's workspace — key and webhooks present, no client — provisions to `configured`
    without creating a second webhook.
 6. No `api_key` value appears in any gateway response.
+7. A Bison workspace missing all three OOO campaigns ends the run with three campaigns at the
+   vendor, each `draft`, each with hours and **none with a sequence** — and `state` is decided by
+   the key, webhook and tag steps alone, exactly as it was before.
+8. A campaign that already exists is not re-created and its schedule is not rewritten, whatever its
+   status. Bent Iron PL's `archived` general is the test case.
 
 ## Related ADRs
 
