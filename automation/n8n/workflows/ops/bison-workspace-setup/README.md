@@ -391,3 +391,13 @@ caller produces, and it must not provision anything.
   branch sets the hours on what this run created. The old canvas's body — `{ name, type }` and a
   Mon-Fri 09:00-17:00 Europe/Warsaw schedule — was read back off `8uRWXHe9FIfglq1u` over the REST
   API rather than guessed. `state` still excludes the step, for the inverted reason.
+- **2026-08-14, later** — first real `dry_run: false` run (execution `76026`, client
+  `5af80810…`, workspace 13) created the three OOO drafts (Bison ids 1049/1050/1051) and then died
+  on `Needs Schedules?` with `Cannot read properties of undefined (reading 'caseSensitive')`. The
+  node had been hand-authored with its filter `options` block one level too high — on the node's
+  own `options` instead of inside `conditions` — and at `typeVersion` 2.2 while the other three IF
+  nodes are 2.3. `IfV2` reads `conditions.options` when it resolves the filter, so the node throws
+  before it ever evaluates anything; the expression was never the problem. Fixed to match the
+  siblings. Cost of the failure: `Plan Schedules` and `Record` never ran, so those three drafts
+  carry **no schedule** and the run was never written back — a re-run will see them as existing and
+  will not re-schedule them, since only campaigns created *in that run* reach the schedule branch.

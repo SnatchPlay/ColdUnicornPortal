@@ -116,7 +116,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4176,
+        3280,
         -152
       ],
       "parameters": {
@@ -279,7 +279,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3728,
+        2832,
         -152
       ],
       "parameters": {
@@ -346,7 +346,7 @@
       "id": "b2000000-0000-4000-a000-00000000000c",
       "name": "Needs Schedules?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
+      "typeVersion": 2.3,
       "position": [
         2832,
         -224
@@ -365,14 +365,15 @@
               },
               "rightValue": ""
             }
-          ]
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
         },
-        "options": {
-          "caseSensitive": true,
-          "leftValue": "",
-          "typeValidation": "strict",
-          "version": 3
-        }
+        "options": {}
       }
     },
     {
@@ -435,7 +436,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3952,
+        3056,
         -152
       ],
       "alwaysOutputData": true,
