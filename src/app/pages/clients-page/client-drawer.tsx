@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useDeferredMount } from "../../lib/use-deferred-mount";
 import { measureAfterRaf2 } from "../../lib/perf-mark";
 import { Plus, X } from "lucide-react";
+import { ArchiveButton } from "../../components/archive-controls";
 import { Banner, EmptyState } from "../../components/app-ui";
 import { SatisfactionHearts, satisfactionLabel } from "../../components/satisfaction-hearts";
 import { OooRoutingEditor } from "./ooo-routing-editor";
@@ -281,6 +282,10 @@ export interface ClientDrawerProps {
   isDraftDirty: boolean;
   canEditAssignments: boolean;
   canInviteUsers: boolean;
+  /** Archive/restore control visibility — false for the client role (RLS blocks it anyway). */
+  canArchive: boolean;
+  /** Called after a successful archive/restore: close the drawer and reload the page. */
+  onArchived: () => void;
   /** The client's connector rows, already loaded by the page — carries setup_state (ADR-0018 §6). */
   sequencerCreds: ClientSequencerCreds;
   onClose: () => void;
@@ -314,6 +319,8 @@ export function ClientDrawer({
   isDraftDirty,
   canEditAssignments,
   canInviteUsers,
+  canArchive,
+  onArchived,
   sequencerCreds,
   onClose,
   onSave,
@@ -399,6 +406,18 @@ export function ClientDrawer({
             >
               {isSavingDraft ? "Saving..." : "Save changes"}
             </button>
+            {canArchive ? (
+              <div className="ml-auto">
+                <ArchiveButton
+                  entity="client"
+                  id={client.id}
+                  name={client.name}
+                  archivedAt={client.archived_at}
+                  onDone={onArchived}
+                  disabled={isSavingDraft}
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Phase 2: deferred sections — mount after overlay has painted */}

@@ -73,6 +73,10 @@ export const leads = pgTable("leads", {
 	// uq_leads_origin_reply) — one contact never yields two leads, one reply never yields two leads.
 	sourceSequencerContactId: uuid("source_sequencer_contact_id"),
 	originReplyId: uuid("origin_reply_id"),
+	// 20260813 — soft delete. Non-null = archived: excluded from every list, picker and aggregate,
+	// row and children kept. Written only by the gateway's setEntityArchived action.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	index("idx_leads_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
 	index("idx_leads_qualification").using("btree", table.qualification.asc().nullsLast().op("enum_ops")),
@@ -161,6 +165,9 @@ export const campaigns = pgTable("campaigns", {
 	genderTarget: varchar("gender_target", { length: 10 }),
 	// ADR-0012: sequencer attribution. DB default = EmailBison (fixed load-bearing UUID).
 	sequencerId: uuid("sequencer_id").default(sql`'00000000-0000-4000-a000-000000000002'::uuid`).notNull(),
+	// 20260813 — soft delete, see leads.archivedAt.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -229,6 +236,9 @@ export const clients = pgTable("clients", {
 	lostReason: text("lost_reason"),
 	notes: text(),
 	satisfaction: smallint(),
+	// 20260813 — soft delete, see leads.archivedAt.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	foreignKey({
 			columns: [table.managerId],
@@ -304,6 +314,9 @@ export const invoices = pgTable("invoices", {
 	amount: numeric().notNull(),
 	status: text(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	// 20260813 — soft delete, see leads.archivedAt. Gated by invoices_update_admin: admin tier only.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -450,6 +463,10 @@ export const domains = pgTable("domains", {
 	winnrCreatedAt: timestamp("winnr_created_at", { withTimezone: true, mode: 'string' }),
 	lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: 'string' }),
 	missingSince: timestamp("missing_since", { withTimezone: true, mode: 'string' }),
+	// 20260813 — soft delete, see leads.archivedAt. The Winnr sync keeps updating an archived
+	// domain's columns; it never clears the tombstone.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	foreignKey({
 			columns: [table.clientId],
@@ -490,6 +507,10 @@ export const emailAccounts = pgTable("email_accounts", {
 	rawPayload: jsonb("raw_payload").default({}).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// 20260813 — soft delete, see leads.archivedAt. Same caveat as domains: the Winnr sync still
+	// refreshes an archived mailbox, archiving only hides it from the portal.
+	archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+	archivedBy: uuid("archived_by"),
 }, (table) => [
 	index("email_accounts_domain_id_idx").using("btree", table.domainId.asc().nullsLast()),
 	index("email_accounts_warming_status_idx").using("btree", table.warmingStatus.asc().nullsLast()),
@@ -498,6 +519,9 @@ export const emailAccounts = pgTable("email_accounts", {
 	foreignKey({ columns: [table.domainId], foreignColumns: [domains.id], name: "email_accounts_domain_id_fkey" }).onDelete("cascade"),
 	unique("email_accounts_winnr_email_user_id_key").on(table.winnrEmailUserId),
 	pgPolicy("email_accounts_select_scoped", { as: "permissive", for: "select", to: ["authenticated"], using: emailAccountSelect }),
+	// 20260813 — the only writable thing here is the archive tombstone; every other column stays
+	// ingestion-owned. Set-based through domains → clients via can_manage_client (ADR-0006).
+	pgPolicy("email_accounts_update_scoped", { as: "permissive", for: "update", to: ["authenticated"] }),
 ]);
 
 export const emailAccountWarmingDaily = pgTable("email_account_warming_daily", {

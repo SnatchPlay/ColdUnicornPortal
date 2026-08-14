@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { DomainsSectionTabs } from "../components/domains-tabs";
+import { ArchiveButton, ArchivedBadge, ShowArchivedToggle } from "../components/archive-controls";
 import { formatDate } from "../lib/format";
 import { scopeDomains, scopeEmailAccounts } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -44,11 +45,16 @@ const ACCOUNT_COLUMNS: {
   { key: "domain", label: "Domain", sortKey: "domain", width: 240, minWidth: 160, render: (_a, d) => d },
   { key: "created", label: "Created", width: 120, minWidth: 100, render: (a) => formatDate(a.winnr_created_at) },
   { key: "synced", label: "Last synced", width: 130, minWidth: 100, render: (a) => formatDate(a.last_synced_at) },
+  // Row action — rendered by the body, which owns the refresh callback this registry cannot see.
+  { key: "actions", label: "", width: 96, minWidth: 88, render: () => null },
 ];
 
 export function EmailAccountsPage() {
   const { identity } = useAuth();
-  const { data, loading, error, refresh } = useEmailAccountsPage();
+  // Archived mailboxes are hidden by default (migration 20260813). Archiving a mailbox is a
+  // portal-side hide: the Winnr sync keeps refreshing the row, it just never clears the tombstone.
+  const [showArchived, setShowArchived] = useState(false);
+  const { data, loading, error, refresh } = useEmailAccountsPage({ includeArchived: showArchived });
   const clients = data?.clients ?? EMPTY_CLIENTS;
   const domains = data?.domains ?? EMPTY_DOMAINS;
   const emailAccounts = data?.emailAccounts ?? EMPTY_ACCOUNTS;
@@ -57,7 +63,8 @@ export function EmailAccountsPage() {
   const [sort, setSort] = useState<{ key: AccountSortKey; direction: SortDirection }>({ key: "email", direction: "asc" });
 
   const columns = useResizableColumns({
-    storageKey: "table:email-accounts:columns:v4",
+    // v5: the actions column changed the column count, so stored v4 widths no longer line up.
+    storageKey: "table:email-accounts:columns:v5",
     defaultWidths: ACCOUNT_COLUMNS.map((c) => c.width),
     minWidths: ACCOUNT_COLUMNS.map((c) => c.minWidth),
   });
@@ -137,13 +144,14 @@ export function EmailAccountsPage() {
         />
       ) : (
         <Surface title="Mailbox list" subtitle={`${sortedAccounts.length} mailboxes in current scope`}>
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search email, name, or domain"
               className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm outline-none sm:max-w-md"
             />
+            <ShowArchivedToggle value={showArchived} onChange={setShowArchived} disabled={loading} />
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-border">
@@ -181,7 +189,23 @@ export function EmailAccountsPage() {
                         key={column.key}
                         className={`truncate text-sm ${column.key === "email" ? "text-white" : "text-neutral-300"}`}
                       >
-                        {column.render(account, domainName(account))}
+                        {column.key === "actions" ? (
+                          <ArchiveButton
+                            entity="emailAccount"
+                            id={account.id}
+                            name={account.email_address}
+                            archivedAt={account.archived_at}
+                            onDone={refresh}
+                            variant="icon"
+                          />
+                        ) : column.key === "email" ? (
+                          <span className="inline-flex min-w-0 items-center">
+                            <span className="truncate">{account.email_address}</span>
+                            <ArchivedBadge archivedAt={account.archived_at} />
+                          </span>
+                        ) : (
+                          column.render(account, domainName(account))
+                        )}
                       </span>
                     ))}
                   </div>

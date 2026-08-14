@@ -5,6 +5,7 @@ import type { SelectionStore } from "./selection-store";
 import type { ClientSequencerCreds } from "./client-drawer";
 import type { ClientSequencerRecord } from "../../types/core";
 import { SatisfactionHearts } from "../../components/satisfaction-hearts";
+import { ArchivedBadge } from "../../components/archive-controls";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
@@ -1044,7 +1045,12 @@ function LinkCell({
 function nameCellRender(onSatisfactionChange?: (clientId: string, next: SatisfactionLevel | null) => void) {
   return (row: ClientMegaRow) => (
     <div className="flex flex-col gap-0.5 min-w-0">
-      <span className="truncate text-sm text-foreground">{row.client.name}</span>
+      <span className="flex min-w-0 items-center text-sm text-foreground">
+        <span className="truncate">{row.client.name}</span>
+        {/* Only reachable with "Show archived" on — without the marker an archived row is
+            indistinguishable from a live one (migration 20260813). */}
+        <ArchivedBadge archivedAt={row.client.archived_at} />
+      </span>
       <div className="flex items-center gap-1.5 min-w-0">
         <SatisfactionHearts
           size="sm"

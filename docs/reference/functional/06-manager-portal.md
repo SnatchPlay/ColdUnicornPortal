@@ -250,6 +250,12 @@ Filters (except the search box) persist per-user in `user_table_preferences` und
 `clients:mega`. A stored sort key that no longer names a real column (e.g. the old `"health"`) is
 ignored on load.
 
+**Show archived** sits next to *New client* and re-runs `loadClientsOverview` with `includeArchived`
+(it is not a client-side filter — archived clients never reach the page otherwise). Archived rows carry
+an `Archived` badge in the name cell, and the drawer's **Archive** button becomes **Restore**.
+
+**Archive (the delete button).** Every list on this page hides archived rows; a **Show archived** toggle brings them back with an `Archived` badge, and the drawer's button flips to **Restore**. Archiving is a tombstone, never a `DELETE` — see [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
+
 ### 2.6 Condition highlighting (cells only)
 
 Rule results are loaded from `condition_rules` and evaluated at runtime per client. **There is no
@@ -299,6 +305,11 @@ Editable lead workspace. Change qualification, mark milestones (meeting booked/h
 - Campaign filter (Select).
 - Pipeline stage chips (same as client pipeline; click to filter).
 - URL state contract: `q`, `campaign`, `stage`, `sort`, `dir`, `range`, `from`, `to`, `page`.
+- **Show archived** toggle (next to the stage chips, internal roles only). It is a server param
+  (`LeadsListParams.includeArchived`), so the stage counts move with it — an archived lead is out of
+  both the page and its stage badge. The drawer carries the Archive/Restore button.
+
+**Archive (the delete button).** Every list on this page hides archived rows; a **Show archived** toggle brings them back with an `Archived` badge, and the drawer's button flips to **Restore**. Archiving is a tombstone, never a `DELETE` — see [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
 
 > The OOO qualification filter (`All leads` / `Non-OOO only` / `OOO only`) and its `replyScope`
 > URL param were **removed** (2026-07-22) together with migration `20260722z`: OOO is no longer a
@@ -357,6 +368,11 @@ File: [`src/app/pages/campaigns-page.tsx`](../../../src/app/pages/campaigns-page
 - Status Select.
 - Client Select (only meaningful for admin; manager sees their assigned subset).
 - Timeframe picker (DateRangeButton).
+- **Show archived** toggle (server param `CampaignsListParams.includeArchived`; archived campaigns also
+  drop out of `totalCount` and stop feeding the client-page charts). The drawer carries the
+  Archive/Restore button.
+
+**Archive (the delete button).** Every list on this page hides archived rows; a **Show archived** toggle brings them back with an `Archived` badge, and the drawer's button flips to **Restore**. Archiving is a tombstone, never a `DELETE` — see [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
 
 ### 4.2 Table
 
@@ -453,6 +469,11 @@ Read-only: `client`, `setup_email`, `purchase_date`, `winnr_status`, and the per
 
 Save: `repository.updateDomain`. RLS: `domains_update_scoped` via `can_access_client`.
 
+**Archive.** The domains table has a trailing action column with **Archive** / **Restore**, and a
+**Show archived** toggle beside the search box (server param — archived domains are not fetched
+otherwise). The mailbox sub-page has the same pair. Archiving a domain or a mailbox is a portal-side
+hide: the Winnr sync keeps refreshing the row and never clears the tombstone. [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
+
 ### 6.4 Create domain Sheet
 
 "New domain" button in `PageHeader` actions. Required fields: `client_id`, `domain_name`, `setup_email`, `purchase_date`. Optional: `status`. (`exchange_date` / `exchange_cost` were dropped in `20260720f`.)
@@ -482,6 +503,9 @@ File: [`src/app/pages/invoices-page.tsx`](../../../src/app/pages/invoices-page.t
 ### 7.3 Drawer (editable)
 
 - `issue_date`, `amount`, `status` вЂ” editable.
+- **Archive** / **Restore**, next to Save — admin tier only, on the same `canEditInvoices` gate as the
+  other controls, because `invoices_update_admin` is `is_admin_user()` and a manager's archive would be
+  rejected by RLS. The **Show archived** toggle sits with the list filters. [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
 - Save: `repository.updateInvoice`.
 - RLS: `invoices_update_admin` policy name; the production SQL allows managers too per `mutation-ownership-matrix.md`.
 

@@ -18,16 +18,18 @@ function mapError(reason: unknown): string {
  * in-flight response can never overwrite a newer one. Warming history is loaded lazily per mailbox
  * via repository.loadEmailAccountWarming(id), not in this payload.
  */
-export function useEmailAccountsPage() {
+export function useEmailAccountsPage(options?: { includeArchived?: boolean }) {
   const [data, setData] = useState<EmailAccountsPagePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadIdRef = useRef(0);
+  // Archived rows are hidden unless the page asks for them (migration 20260813).
+  const includeArchived = options?.includeArchived === true;
 
   function load() {
     const id = ++loadIdRef.current;
     setLoading(true);
-    repository.loadEmailAccountsPage()
+    repository.loadEmailAccountsPage({ includeArchived })
       .then((result) => {
         if (id !== loadIdRef.current) return;
         setData(result);
@@ -42,7 +44,7 @@ export function useEmailAccountsPage() {
       });
   }
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [includeArchived]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { data, loading, error, refresh: () => { load(); } };
 }

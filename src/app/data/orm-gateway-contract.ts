@@ -119,6 +119,8 @@ export interface LoadClientDashboardPayload {
 
 export interface LoadClientsOverviewPayload {
   action: "loadClientsOverview";
+  /** Include archived clients (soft-deleted). Default false — see {@link SetEntityArchivedPayload}. */
+  includeArchived?: boolean;
 }
 
 /** Separate heavy-stats request — deferred until after shell renders. */
@@ -165,10 +167,14 @@ export interface LoadAdminSettingsPayload {
 
 export interface LoadDomainsPagePayload {
   action: "loadDomainsPage";
+  /** Include archived domains and mailboxes. Default false. */
+  includeArchived?: boolean;
 }
 
 export interface LoadEmailAccountsPagePayload {
   action: "loadEmailAccountsPage";
+  /** Include archived domains and mailboxes. Default false. */
+  includeArchived?: boolean;
 }
 
 export interface LoadEmailAccountWarmingPayload {
@@ -178,6 +184,8 @@ export interface LoadEmailAccountWarmingPayload {
 
 export interface LoadInvoicesPagePayload {
   action: "loadInvoicesPage";
+  /** Include archived invoices. Default false. */
+  includeArchived?: boolean;
 }
 
 export interface LoadBlacklistPagePayload {
@@ -364,6 +372,45 @@ export interface UpdateConditionRulePayload {
 export interface DeleteConditionRulePayload {
   action: "deleteConditionRule";
   ruleId: string;
+}
+
+/**
+ * The six entities the portal can archive (soft delete). Config entities (condition rules, custom
+ * fields, blacklist domains, client↔user mappings) keep their existing hard `delete*` actions —
+ * they carry no history and no ingestion path, so a tombstone would buy nothing.
+ */
+export const ARCHIVABLE_ENTITIES = ["client", "campaign", "lead", "domain", "invoice", "emailAccount"] as const;
+export type ArchivableEntity = (typeof ARCHIVABLE_ENTITIES)[number];
+
+/**
+ * Archive or restore one row (migration `20260813_entity_archival`). This is the portal's delete:
+ * hard `DELETE` is impossible on these tables (RESTRICT FKs to the ingested counters) and would be
+ * undone by re-ingestion anyway — see the migration header.
+ *
+ * Permission is the table's existing UPDATE policy, not a new rule: `can_manage_client` for
+ * clients/campaigns/leads/domains/mailboxes (so the client role is write-blocked in Postgres) and
+ * `is_admin_user()` for invoices. A caller who may not manage the row sees zero updated rows and
+ * gets a 404.
+ */
+export interface SetEntityArchivedPayload {
+  action: "setEntityArchived";
+  entity: ArchivableEntity;
+  id: string;
+  /** true = archive, false = restore. */
+  archived: boolean;
+}
+
+export interface SetEntityArchivedResult {
+  entity: ArchivableEntity;
+  id: string;
+  /** ISO timestamp when archived, `null` after a restore. */
+  archived_at: string | null;
+  /**
+   * How many `client_ooo_routing` rules were deactivated because they pointed at the campaign just
+   * archived (ADR-0015). Always 0 for every other entity and for a restore. Surfaced in the toast:
+   * the operator has to learn that returning OOO contacts now have nowhere to go.
+   */
+  deactivatedOooRoutes: number;
 }
 
 export interface UpsertClientUserMappingPayload {
@@ -606,6 +653,7 @@ export type OrmGatewayRequest =
   | CreateConditionRulePayload
   | UpdateConditionRulePayload
   | DeleteConditionRulePayload
+  | SetEntityArchivedPayload
   | UpsertClientUserMappingPayload
   | DeleteClientUserMappingPayload
   | UpsertEmailExcludeDomainPayload
@@ -684,6 +732,7 @@ export interface OrmGatewayResponseMap {
   createConditionRule: ConditionRuleRecord;
   updateConditionRule: ConditionRuleRecord;
   deleteConditionRule: { ok: true };
+  setEntityArchived: SetEntityArchivedResult;
   upsertClientUserMapping: ClientUserRecord;
   deleteClientUserMapping: { ok: true };
   upsertEmailExcludeDomain: EmailExcludeRecord;
@@ -786,7 +835,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadClientsOverview") {
-    return { ok: true, value: { action } };
+    return { ok: true, value: { action, includeArchived: payload.includeArchived === true } };
   }
 
   if (action === "loadClientsStats") {
@@ -822,6 +871,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
           sortDir: p.sortDir === "asc" ? "asc" : "desc",
           page: Math.max(1, Math.trunc(page)),
           pageSize,
+          includeArchived: p.includeArchived === true,
         } as LeadsListParams,
       },
     };
@@ -852,6 +902,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
           sortDir: p.sortDir === "asc" ? "asc" : "desc",
           page: Math.max(1, Math.trunc(page)),
           pageSize,
+          includeArchived: p.includeArchived === true,
         } as LeadsListParams,
       },
     };
@@ -877,11 +928,11 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadDomainsPage") {
-    return { ok: true, value: { action } };
+    return { ok: true, value: { action, includeArchived: payload.includeArchived === true } };
   }
 
   if (action === "loadEmailAccountsPage") {
-    return { ok: true, value: { action } };
+    return { ok: true, value: { action, includeArchived: payload.includeArchived === true } };
   }
 
   if (action === "loadEmailAccountWarming") {
@@ -892,7 +943,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
   }
 
   if (action === "loadInvoicesPage") {
-    return { ok: true, value: { action } };
+    return { ok: true, value: { action, includeArchived: payload.includeArchived === true } };
   }
 
   if (action === "loadBlacklistPage") {
@@ -921,6 +972,7 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
           sortDir: p.sortDir === "asc" ? "asc" : "desc",
           page: Math.max(1, Math.trunc(page)),
           pageSize,
+          includeArchived: p.includeArchived === true,
         } as CampaignsListParams,
       },
     };
@@ -1119,6 +1171,24 @@ export function parseOrmGatewayRequest(payload: unknown): OrmGatewayParseResult 
       return { ok: false, error: "deleteConditionRule requires ruleId." };
     }
     return { ok: true, value: { action, ruleId: String(payload.ruleId) } };
+  }
+
+  if (action === "setEntityArchived") {
+    if (!hasStringField(payload, "id")) {
+      return { ok: false, error: "setEntityArchived requires id." };
+    }
+    // The entity name selects a table in the handler, so it is checked against the closed list here
+    // rather than cast — an unknown value must never reach the table lookup.
+    if (!isString(payload.entity) || !ARCHIVABLE_ENTITIES.includes(payload.entity as ArchivableEntity)) {
+      return { ok: false, error: `setEntityArchived.entity must be one of: ${ARCHIVABLE_ENTITIES.join(", ")}.` };
+    }
+    if (typeof payload.archived !== "boolean") {
+      return { ok: false, error: "setEntityArchived requires a boolean archived flag." };
+    }
+    return {
+      ok: true,
+      value: { action, entity: payload.entity as ArchivableEntity, id: String(payload.id), archived: payload.archived },
+    };
   }
 
   if (action === "upsertClientUserMapping") {

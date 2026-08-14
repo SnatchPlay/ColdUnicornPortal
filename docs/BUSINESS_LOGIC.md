@@ -522,6 +522,37 @@ These are real product gaps to be addressed when prioritised. They are *in scope
 
 Append-only. Each entry: date, decision, rationale, references.
 
+### Decision (2026-08-13): The portal can delete clients, campaigns, leads, domains, invoices and mailboxes — as an **archive**, never a hard delete
+
+Operators asked for delete buttons on the entity lists. They now exist on all six surfaces, and what
+they do is set a tombstone (`archived_at` / `archived_by`): the row leaves every list, picker,
+dashboard and aggregate, and stays in the database with all its children.
+
+- **Why not a hard delete.** Two independent blockers, either one sufficient: (1) the FKs from the
+  ingested counters are RESTRICT (`daily_stats.client_id`, and `campaigns`/`leads`/`domains` on
+  `clients`), so `DELETE FROM clients` fails — and relaxing them to CASCADE would destroy the history
+  every metric is derived from; (2) leads are promoted from `sequencer_contacts` by n8n RPCs
+  ([ADR-0015](adr/0015-sequencer-contacts-and-ooo-followups.md)) and domains/mailboxes are Winnr-synced,
+  so a deleted row returns on the next run or leaves dangling references. The product already answered
+  this question the same way for user accounts (deactivate, never hard-delete — decision of 2026-06-18).
+- **Permissions are inherited, not invented.** Archiving is an UPDATE of two columns, so it rides on
+  each table's existing UPDATE policy: admin tier plus the assigned manager for
+  clients/campaigns/leads/domains (**the client role is write-blocked in Postgres**), admin-only for
+  invoices. The only new policy is `email_accounts_update_scoped`, which makes the tombstone the single
+  portal-writable column on an ingestion-only table.
+- **Archived means "as if deleted", not "hidden in one place".** Every list, picker and aggregate in
+  the gateway filters it out — including stage counts, dashboard metrics and the client-page charts.
+  A "Show archived" toggle on each page brings the rows back so they can be restored.
+- **What archiving does NOT do:** archiving a client does not archive its campaigns, leads or stats;
+  it only hides the client. Cascading archival was considered and rejected — it would silently move
+  historical numbers in the aggregate views on a single click.
+- **n8n is unaffected** — it writes through `service_role`; a sync keeps refreshing an archived
+  domain/mailbox and never clears the tombstone.
+- References: migration [`20260813_entity_archival.sql`](../supabase/migrations/20260813_entity_archival.sql),
+  [09-mutations-rls §2.19](reference/functional/09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival),
+  [03-data-model §5](reference/functional/03-data-model.md#5-migrations-of-note),
+  [`components/archive-controls.tsx`](../src/app/components/archive-controls.tsx).
+
 ### Decision (2026-07-21): System boundary extended with a public aggregate lead counter (ADR-0014)
 
 The agency marketing website (Webflow) shows social-proof counters of leads received - yesterday,

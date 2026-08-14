@@ -16,6 +16,7 @@ import { DateRangeButton } from "../components/portal-ui";
 import { Banner, ChartTextSummary, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
+import { ArchiveButton, ArchivedBadge, ShowArchivedToggle } from "../components/archive-controls";
 import { repository } from "../data/repository";
 import { formatDate, formatNumber } from "../lib/format";
 import { useCampaignsList, useCampaignStats } from "../lib/use-campaigns";
@@ -320,6 +321,10 @@ function InternalCampaignsPage() {
   useDevRenderCount("InternalCampaignsPage");
   const { identity } = useAuth();
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  // Archived campaigns are hidden by default (migration 20260813).
+  const [showArchived, setShowArchived] = useState(false);
+  // campaigns_update_scoped = can_manage_client(client_id) — admin tier + the assigned manager.
+  const canArchive = identity ? identity.role !== "client" : false;
   const [loadPage, setLoadPage] = useState(1);
   const [accumulatedRows, setAccumulatedRows] = useState<CampaignListRow[]>([]);
   const [query, setQuery] = useState("");
@@ -349,7 +354,8 @@ function InternalCampaignsPage() {
     sortDir: campaignSort.direction,
     page: loadPage,
     pageSize: 200,
-  }), [clientFilterId, statusFilter, committedSearch, campaignSort.key, campaignSort.direction, loadPage]);
+    includeArchived: showArchived,
+  }), [clientFilterId, statusFilter, committedSearch, campaignSort.key, campaignSort.direction, loadPage, showArchived]);
 
   const { data, loading, error, refresh } = useCampaignsList(listParams);
   // clientsLite comes from ShellDataProvider (already loaded on app boot) — no extra request needed.
@@ -397,7 +403,9 @@ function InternalCampaignsPage() {
   );
 
   // Accumulate rows across pages; reset on filter/sort change.
-  const filterKey = JSON.stringify({ clientFilterId, statusFilter, committedSearch, campaignSort });
+  // `showArchived` belongs here with the other filters: it changes what page 1 contains, so without
+  // it the toggle would append an archived-inclusive page N onto the existing accumulation.
+  const filterKey = JSON.stringify({ clientFilterId, statusFilter, committedSearch, campaignSort, showArchived });
   useEffect(() => {
     if (!data) return;
     if (loadPage === 1) setAccumulatedRows(data.rows);
@@ -602,6 +610,11 @@ function InternalCampaignsPage() {
               </div>
             )}
           </div>
+          {canArchive ? (
+            <div className="mt-3 flex justify-end">
+              <ShowArchivedToggle value={showArchived} onChange={setShowArchived} disabled={loading} />
+            </div>
+          ) : null}
         </Surface>
       )}
 
@@ -685,7 +698,10 @@ function InternalCampaignsPage() {
                       {/* Desktop table row */}
                       <div className="hidden min-w-[1200px] items-center gap-3 [grid-template-columns:var(--campaign-table-columns)] md:grid">
                         <div>
-                          <p className="text-sm">{campaign.name}</p>
+                          <p className="text-sm">
+                            {campaign.name}
+                            <ArchivedBadge archivedAt={campaign.archived_at} />
+                          </p>
                           <p className="mt-1 text-xs text-muted-foreground">{campaign.external_id}</p>
                         </div>
                         <p className="text-sm text-muted-foreground">{campaign.type}</p>
@@ -756,6 +772,18 @@ function InternalCampaignsPage() {
                 >
                   {isSavingDraft ? "Saving..." : "Save changes"}
                 </button>
+                {canArchive ? (
+                  <div className="ml-auto">
+                    <ArchiveButton
+                      entity="campaign"
+                      id={selectedCampaign.id}
+                      name={selectedCampaign.name}
+                      archivedAt={selectedCampaign.archived_at}
+                      onDone={() => { setSelectedCampaignId(null); refresh(); }}
+                      disabled={isSavingDraft}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {/* Phase 2: deferred form + chart */}

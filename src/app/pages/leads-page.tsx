@@ -12,6 +12,7 @@ import {
   type LeadDrawerData,
 } from "../components/portal-ui";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { ArchiveButton, ShowArchivedToggle } from "../components/archive-controls";
 import { LeadEditForm } from "../components/lead-edit-form";
 import { LeadConclusionEditor } from "../components/lead-conclusion-editor";
 import { LeadMeetingsEditor } from "../components/lead-meetings-editor";
@@ -302,6 +303,8 @@ function InternalLeadsPage() {
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => parseTimeframeFromParams(searchParams));
   const [currentPage, setCurrentPage] = useState(() => parsePage(searchParams.get("page")));
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  // Archived leads are hidden by default (migration 20260813); this is the only way back to them.
+  const [showArchived, setShowArchived] = useState(false);
   const [viewMode, setViewMode] = useState<"pdca" | "crm" | "combined">("pdca");
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -333,7 +336,8 @@ function InternalLeadsPage() {
     sortDir: leadSort.direction,
     page: currentPage,
     pageSize: PAGE_SIZE,
-  }), [clientFilter, campaignFilter, stageFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage]);
+    includeArchived: showArchived,
+  }), [clientFilter, campaignFilter, stageFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage, showArchived]);
 
   // View switcher (ADR-0013): PDCA = existing report; CRM = banded CRM table; combined = union, calm.
   const isCrmView = viewMode !== "pdca";
@@ -351,6 +355,9 @@ function InternalLeadsPage() {
   const { tasks: leadTasks, loading: loadingTasks, reload: reloadTasks } = useLeadTasks(viewMode === "crm" ? selectedLeadId : null);
 
   const showClientColumn = identity ? isInternalAdmin(identity.role) : false;
+  // Archiving is an UPDATE on leads, and leads_update_scoped already blocks the client role in
+  // Postgres — this gate only keeps the control off a surface where it could never work.
+  const canArchive = identity ? identity.role !== "client" : false;
   const baseReportColumns = useMemo(
     () => buildLeadReportColumns({ role: identity?.role, showClient: showClientColumn }),
     [identity?.role, showClientColumn],
@@ -785,7 +792,17 @@ function InternalLeadsPage() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Stage</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Stage</p>
+              {canArchive ? (
+                // Resets the page like every other filter: the row count changes, so page N may not
+                // exist on the other side of the toggle.
+                <ShowArchivedToggle
+                  value={showArchived}
+                  onChange={(next) => { setShowArchived(next); setCurrentPage(1); }}
+                />
+              ) : null}
+            </div>
             <div className="flex flex-wrap gap-1">
               <button
                 onClick={() => handleStageFilterChange("all")}
@@ -929,6 +946,18 @@ function InternalLeadsPage() {
                 <button onClick={() => { void saveDraft(); }} disabled={!isDraftDirty || isSavingDraft} className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50">
                   {isSavingDraft ? "Saving..." : "Save changes"}
                 </button>
+                {canArchive ? (
+                  <div className="ml-auto">
+                    <ArchiveButton
+                      entity="lead"
+                      id={selectedLead.id}
+                      name={getFullName(selectedLead.first_name, selectedLead.last_name)}
+                      archivedAt={selectedLead.archived_at}
+                      onDone={() => { setSelectedLeadId(null); refresh(); }}
+                      disabled={isSavingDraft}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {/* Phase 2: deferred heavy content */}

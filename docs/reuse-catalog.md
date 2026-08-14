@@ -56,6 +56,7 @@ If you add a reusable building block, add it to this file in the same change.
 | [`lead-report-table.tsx`](../src/app/components/lead-report-table.tsx) | `LeadReportTable`, `LeadReportSort` — the shared leads grid |
 | [`lead-custom-columns-manager.tsx`](../src/app/components/lead-custom-columns-manager.tsx) | `LeadCustomColumnsManager` |
 | [`crm-integration-card.tsx`](../src/app/components/crm-integration-card.tsx) | `CrmIntegrationCard` (legacy CRM — [ADR-0010](adr/0010-legacy-crm-integration.md)) |
+| [`archive-controls.tsx`](../src/app/components/archive-controls.tsx) | **`ArchiveButton` / `ShowArchivedToggle` / `ArchivedBadge`** — the portal's delete UI for clients, campaigns, leads, domains, invoices and mailboxes. One component for all six surfaces: confirmation wording, the toast and the error path must not drift. Do **not** hand-roll a delete control; do not add a hard-delete for these entities ([09 §2.19](reference/functional/09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival)) |
 | [`app-shell.tsx`](../src/app/components/app-shell.tsx) | `AppShell` — sidebar, `NAV_BY_ROLE`, impersonation controls, gradient canvas, contrast toggle |
 | [`app-error-boundary.tsx`](../src/app/components/app-error-boundary.tsx) | `AppErrorBoundary` — already wraps the routed surface; do not duplicate |
 | [`pages/clients-page/mega-table.tsx`](../src/app/pages/clients-page/mega-table.tsx) | The clients mega-table (its own subsystem) |
@@ -165,6 +166,9 @@ Search here before writing any n8n tooling, contract or process document
   ([ADR-0010](adr/0010-legacy-crm-integration.md)).
 - Re-declaring date helpers, percentage helpers, or chart tooltip styles. They exist.
 - A second lead drawer. Compose `LeadConversation` / `LeadMetaSection` / `LeadEditForm`.
+- A hard `DELETE` (or a second delete control) for clients, campaigns, leads, domains, invoices or
+  mailboxes. The portal's delete is `setEntityArchived` + `archive-controls.tsx`
+  ([09 §2.19](reference/functional/09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival)).
 - Service-role keys or `DATABASE_URL` anywhere the browser can reach them.
 - A second n8n client, sanitizer or secret scanner — extend `scripts/n8n/lib/`.
 - Credentials, `pinData` or real personal data in a committed workflow artifact or fixture.

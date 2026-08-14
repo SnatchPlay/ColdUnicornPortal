@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Banner, EmptyState, InlineLinkButton, LoadingState, PageHeader, Surface } from "../components/app-ui";
+import { ArchiveButton, ArchivedBadge, ShowArchivedToggle } from "../components/archive-controls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { formatDate, formatMoney, formatNumber } from "../lib/format";
 import { isInternalAdmin, scopeClients, scopeInvoices } from "../lib/selectors";
@@ -71,7 +72,9 @@ const EMPTY_INVOICES: InvoiceRecord[] = [];
 
 export function InvoicesPage() {
   const { identity } = useAuth();
-  const { data, loading, error, refresh } = useInvoicesPage();
+  // Archived invoices are hidden by default (migration 20260813).
+  const [showArchived, setShowArchived] = useState(false);
+  const { data, loading, error, refresh } = useInvoicesPage({ includeArchived: showArchived });
   const clients = data?.clients ?? EMPTY_CLIENTS;
   const invoices = data?.invoices ?? EMPTY_INVOICES;
 
@@ -274,6 +277,9 @@ export function InvoicesPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+              {canEditInvoices ? (
+                <ShowArchivedToggle value={showArchived} onChange={setShowArchived} disabled={loading} />
+              ) : null}
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border">
@@ -326,7 +332,10 @@ export function InvoicesPage() {
                         </div>
                         {/* Desktop table row */}
                         <div className="hidden min-w-[1100px] items-center gap-3 [grid-template-columns:var(--invoices-table-columns)] md:grid">
-                          <span className="truncate text-sm text-white">{clientName}</span>
+                          <span className="inline-flex min-w-0 items-center text-sm text-white">
+                            <span className="truncate">{clientName}</span>
+                            <ArchivedBadge archivedAt={invoice.archived_at} />
+                          </span>
                           <span className="text-sm text-neutral-300">{formatDate(invoice.issue_date)}</span>
                           <span className="text-sm text-neutral-300">{formatMoney(invoice.amount)}</span>
                           <span className="text-xs uppercase tracking-[0.14em] text-neutral-400">{invoice.status ?? "unset"}</span>
@@ -372,6 +381,18 @@ export function InvoicesPage() {
                     >
                       {isSavingDraft ? "Saving..." : "Save changes"}
                     </button>
+                    {/* invoices_update_admin is `is_admin_user()` — a manager can read invoices but
+                        cannot archive one, so this rides on the same canEditInvoices gate. */}
+                    <div className="ml-auto">
+                      <ArchiveButton
+                        entity="invoice"
+                        id={selectedInvoice.id}
+                        name={`${scopedClients.find((item) => item.id === selectedInvoice.client_id)?.name ?? "invoice"} · ${formatDate(selectedInvoice.issue_date)}`}
+                        archivedAt={selectedInvoice.archived_at}
+                        onDone={() => { setSelectedInvoiceId(null); refresh(); }}
+                        disabled={isSavingDraft}
+                      />
+                    </div>
                   </div>
                 )}
 

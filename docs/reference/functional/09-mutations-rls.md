@@ -297,6 +297,62 @@ rejected — an older gateway build, say — the table keeps working off the cac
 
 ---
 
+### 2.19 `setEntityArchived(entity, id, archived)` — the portal's delete (migration `20260813_entity_archival`)
+
+Archives (soft-deletes) or restores one row of `clients`, `campaigns`, `leads`, `domains`, `invoices`
+or `email_accounts`. There is **no hard-delete action for these six** and there will not be one: their
+FKs to the ingested counters are RESTRICT (`daily_stats.client_id`, [03 §6](03-data-model.md#6-integrity-rules-observed)),
+and leads/domains/mailboxes are re-created by ingestion, so a `DELETE` either fails or is undone on the
+next n8n run. This mirrors the answer the product already gives for user accounts — deactivate, never
+hard-delete.
+
+- **Write:** `archived_at` (`now()` / `NULL`) + `archived_by` (caller, cleared on restore). Nothing else.
+- **RLS:** none added for five of the six — archiving is an UPDATE, so it inherits the table's existing
+  UPDATE policy, which is exactly the intended permission model: `can_manage_client` for
+  clients/campaigns/leads/domains (**client role write-blocked in Postgres**), `is_admin_user()` for
+  invoices (**managers cannot archive an invoice**, matching §4). `email_accounts` had SELECT but no
+  UPDATE policy, so the migration adds **`email_accounts_update_scoped`** — set-based through
+  domains → clients via `can_manage_client`, unlinked domains admin-only (ADR-0006).
+- **Failure mode:** a caller who may not manage the row updates zero rows and gets a `404` — the same
+  answer RLS gives everywhere else in this file, not a distinct "forbidden" path.
+- **Read side:** archived rows are excluded from **every** list, picker, dashboard and aggregate in the
+  gateway — an archived row is "as if deleted". The escape hatch is `includeArchived` on
+  `loadClientsOverview` / `loadLeadsList` / `loadLeadCrmList` / `loadCampaignsList` / `loadDomainsPage` /
+  `loadEmailAccountsPage` / `loadInvoicesPage`, which powers the "Show archived" toggle and Restore.
+  The filtering lives in the gateway, never in RLS: whoever may restore a row must still be able to see it.
+- **Not filtered on purpose:** `loadLeadDetail` and single-campaign `loadCampaignStats` (you must be able
+  to open what you archived), and the ingestion tables themselves — archiving a client does **not**
+  archive its campaigns, leads or stats, it only hides the client.
+- **n8n:** unaffected. It writes through `service_role`, which bypasses RLS; a Winnr sync keeps refreshing
+  an archived domain/mailbox and never clears the tombstone. That is intended — archiving a synced entity
+  means "hide it from the portal".
+- **Column grants, not just policies:** a policy answers "which rows", never "which columns", and
+  Supabase's default grants give `authenticated` UPDATE on every column. So the migration also does
+  `revoke update on public.email_accounts from authenticated, anon` +
+  `grant update (archived_at, archived_by)` — otherwise the new policy would have handed every
+  manager a PostgREST PATCH over the ingestion-owned mailbox columns (`warming_status`,
+  `raw_payload`, …). Verified as `authenticated`: writing `archived_at` succeeds, writing
+  `warming_status` / `raw_payload` fails with `42501`.
+- **Archiving an `ooo_followup` campaign takes its routing down with it** (ADR-0015). Two layers:
+  `resolve_ooo_routing` now requires `campaigns.archived_at IS NULL` (the invariant lives in the
+  database, per CLAUDE.md §5a rule 4 — verified: the rule re-activated by hand still resolves to
+  NULL), and the gateway deactivates the matching `client_ooo_routing` rows in the same transaction
+  so the editor stops showing a rule that routes nowhere. The count comes back as
+  `deactivatedOooRoutes` and the UI raises a **warning** toast, never a bare success. Restoring the
+  campaign does not re-arm the rules — the operator re-saves them, which is also what re-runs
+  `recover_skipped_ooo_followups`.
+- **Archiving a client does not hide its live infrastructure.** `loadDomainsPage` /
+  `loadEmailAccountsPage` / `loadInvoicesPage` return the **unfiltered** client list on purpose: the
+  pages scope their rows through it (`scopeDomains` / `scopeEmailAccounts` / `scopeInvoices`), so
+  filtering archived clients out there would take that client's live domains, mailboxes and invoices
+  off the page and silently move the invoices "Scope total". Archived clients are dropped from the
+  *pickers* instead (`clientsLite`, the New-domain sheet, the domains "link to client" dropdown —
+  which keeps the already-linked client visible, marked `(archived)`, so the Select is never blank).
+- **UI:** one shared control, [`components/archive-controls.tsx`](../../../src/app/components/archive-controls.tsx)
+  (`ArchiveButton` / `ShowArchivedToggle` / `ArchivedBadge`), used by all six surfaces.
+
+---
+
 ## 3. Edge functions
 
 Four functions are deployed. **The `verify_jwt` column is load-bearing — read it before assuming a
@@ -422,6 +478,12 @@ Canonical authorization per entity, **verified against `pg_policies` on the live
 | Invite edge functions | ✖ | ✖ | ✓ | enforced inside the function |
 
 "Assigned" = the record's `client_id` is among clients where `clients.manager_id = auth.uid()`.
+
+**Archiving** (`archived_at` / `archived_by`, migration `20260813_entity_archival`, §2.19) adds no row to
+this matrix: it is an UPDATE of two columns on `clients`, `campaigns`, `leads`, `domains`, `invoices` and
+`email_accounts`, so it inherits each table's write predicate above verbatim. The one new policy is
+`email_accounts_update_scoped` (set-based `can_manage_client` through `domains`), which makes the archive
+tombstone the only portal-writable column on an otherwise ingestion-only table.
 
 > **Resolved 2026-07-14:** invoice writes are admin-only in RLS (`invoices_insert/update/delete_admin` = `private.is_admin_user()` = `super_admin | admin | master_admin`), so the Invoices drawer now hides its edit controls for managers and renders read-only ([invoices-page.tsx](../../../src/app/pages/invoices-page.tsx), `canEditInvoices`). Managers keep SELECT via `invoices_select_scoped` = `can_access_client(client_id)`. We gated the UI rather than widening RLS — invoices are billing records and admin-only writes are the intended boundary. Regression test: `hides invoice edit controls from managers` in [modules-ops.test.tsx](../../../src/app/pages/__tests__/modules-ops.test.tsx).
 

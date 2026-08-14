@@ -255,7 +255,7 @@ Maps an OOO episode to a follow-up campaign, per explicit routing key (ADR-0015,
 
 `uq_client_ooo_routing_active` — partial UNIQUE on `(client_id, routing_key) WHERE is_active`: at most **one active** rule per client and key. Superseded rules are deactivated, never deleted, so a past follow-up stays explainable by the configuration that produced it.
 
-Resolution (`public.resolve_ooo_routing`): specific key → `general` → **NULL**. NULL means *no routing*, surfaced as `skipped / routing_missing`; it is never treated as an implicit `general`.
+Resolution (`public.resolve_ooo_routing`): specific key → `general` → **NULL**. NULL means *no routing*, surfaced as `skipped / routing_missing`; it is never treated as an implicit `general`. Since [`20260813`](../../../supabase/migrations/20260813_entity_archival.sql) the function also joins `campaigns` and requires `archived_at IS NULL`: **an archived target campaign resolves to NULL**, so archiving an `ooo_followup` campaign in the portal cannot leave n8n enrolling returning contacts into it. The gateway additionally deactivates the routing rules that pointed at it, so the editor stops claiming the key is routed; restoring the campaign does **not** re-arm them.
 
 RLS: all four policies scoped by `private.can_manage_client(client_id)`. Managed in the client drawer (`OooRoutingEditor`); saving also runs `public.recover_skipped_ooo_followups`.
 
@@ -809,6 +809,20 @@ Adds `clients_insert_internal`, `campaigns_insert_internal`, `leads_insert_inter
 
 `users_update_self` (`auth.uid() = id`, using + with check) — the policy behind `updateProfileName` / `updateProfileAvatar` through the gateway.
 
+### `supabase/migrations/20260813_entity_archival.sql`
+
+Adds **`archived_at timestamptz` + `archived_by uuid → users(id)`** to `clients`, `campaigns`, `leads`,
+`domains`, `invoices` and `email_accounts` — the portal's soft delete. A non-null `archived_at` means the
+row is excluded from every list, picker, dashboard and aggregate in the gateway, while the row and all its
+children stay. Hard delete is impossible on these tables by design (§6 below) and would be undone by
+re-ingestion, so archiving is the only delete the portal offers; the exception list of what is *not*
+filtered is in [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival).
+
+- Partial indexes `idx_leads_client_active` / `idx_campaigns_client_active` on `(client_id) WHERE archived_at IS NULL` — the two hot tables; the other four are small enough to filter on the existing scan.
+- Written **only** by the gateway's `setEntityArchived` action; the `map*Patch` whitelists do not accept `archived_at`.
+- **New policy `email_accounts_update_scoped`** — set-based through `domains` → `clients` via `private.can_manage_client`, unlinked domains admin-only. The other five tables need no policy change: archiving is an UPDATE and inherits `clients_update_scoped` / `campaigns_update_scoped` / `leads_update_scoped` / `domains_update_scoped` / `invoices_update_admin`.
+- **Measured** on the local stack as the `authenticated` role (61 clients / 5 286 leads / 2 092 mailboxes), `EXPLAIN (ANALYZE, BUFFERS)`, same query with and without the predicate: leads stage counts 12.6→10.6 ms (Seq Scan → Bitmap Index Scan on the new partial index), clients overview 2.21→2.04 ms, mailbox list 30.6→27.5 ms; identical row counts. Nine permission cases (manager / client-role / admin × lead, client, mailbox, invoice) were probed inside BEGIN/ROLLBACK and all matched the table above. Evidence is inline in the migration header.
+
 ---
 
 ## 6. Integrity rules observed
@@ -817,7 +831,7 @@ Adds `clients_insert_internal`, `campaigns_insert_internal`, `leads_insert_inter
 - `campaigns_external_id_key` and `replies_external_id_key` ensure idempotent ingestion upserts.
 - `daily_stats` and `campaign_daily_stats` both have unique composite keys over (`*_id`, `report_date`) — no duplicate rows per day.
 - `condition_rules.key` is unique, allowing idempotent seed upserts without duplicate rule identities.
-- FK cascades: only `client_users.*` cascade on delete. Everywhere else (`campaigns.client_id`, `leads.client_id`, `daily_stats.client_id` RESTRICT, `domains.client_id`, …) deletes are intentionally blocked; cleanup must happen in ingestion.
+- FK cascades: only `client_users.*` cascade on delete. Everywhere else (`campaigns.client_id`, `leads.client_id`, `daily_stats.client_id` RESTRICT, `domains.client_id`, …) deletes are intentionally blocked; cleanup must happen in ingestion. This is why the portal's delete is `archived_at`, not `DELETE` (`20260813_entity_archival`, [09 §2.19](09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival)).
 - `inboxes_active` on `campaign_daily_stats` is **not null** without a default — ingestion MUST supply it.
 - Several `varchar(length)` columns (`phone_number 50`, `message_title 500`, `country 100`) are the only places lengths are enforced at the column level; text columns are unbounded.
 

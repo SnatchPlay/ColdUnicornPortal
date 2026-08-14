@@ -130,6 +130,13 @@ export interface ClientRecord {
   lost_reason: string | null;
   notes: string | null;
   satisfaction: SatisfactionLevel | null;
+  /**
+   * Soft-delete tombstone (migration `20260813_entity_archival`). Non-null = archived: the row is
+   * hidden from every list, picker and aggregate, and only comes back through `includeArchived`.
+   * Optional on the type so the `create*` payloads (`Omit<Record, "id" | …>`) stay constructible —
+   * the gateway always sends it on reads.
+   */
+  archived_at?: string | null;
 }
 
 export interface ClientUserRecord {
@@ -219,6 +226,8 @@ export interface CampaignRecord {
   gender_target: string | null;
   /** ADR-0012: owning sequencer. Set at creation (DB default = EmailBison); immutable via portal. */
   sequencer_id: string;
+  /** Soft-delete tombstone — see {@link ClientRecord.archived_at}. */
+  archived_at?: string | null;
 }
 
 export interface LeadRecord {
@@ -275,6 +284,8 @@ export interface LeadRecord {
   // NOTE: the ADR-0015 provenance columns (`source_sequencer_contact_id`, `origin_reply_id`) exist
   // in the database and in the drizzle schema but are deliberately NOT projected here — no portal
   // surface reads them, and the OOO view resolves the linked lead from the contact side instead.
+  /** Soft-delete tombstone — see {@link ClientRecord.archived_at}. */
+  archived_at?: string | null;
 }
 
 // --- OOO model (ADR-0015, migrations 20260722*) ------------------------------------------------
@@ -434,6 +445,9 @@ export interface DomainRecord {
   winnr_created_at: string | null;
   last_synced_at: string | null;
   missing_since: string | null;
+  /** Soft-delete tombstone — see {@link ClientRecord.archived_at}. The Winnr sync keeps refreshing
+   *  an archived domain; archiving only hides it from the portal. */
+  archived_at?: string | null;
 }
 
 export interface InvoiceRecord {
@@ -444,6 +458,8 @@ export interface InvoiceRecord {
   amount: number;
   status: string | null;
   updated_at: string | null;
+  /** Soft-delete tombstone — see {@link ClientRecord.archived_at}. Admin tier only (RLS). */
+  archived_at?: string | null;
 }
 
 /**
@@ -471,6 +487,9 @@ export interface EmailAccountRecord {
   missing_since: string | null;
   created_at: string;
   updated_at: string;
+  /** Soft-delete tombstone — see {@link ClientRecord.archived_at}. The Winnr sync keeps refreshing
+   *  an archived mailbox; archiving only hides it from the portal. */
+  archived_at?: string | null;
 }
 
 /** One day of a mailbox's warming history (from /v1/warming/{id}/metrics). Ingestion-only. */
