@@ -110,7 +110,7 @@ function sectionHeaders(): string[] {
 }
 
 function switchChannel(
-  view: "Both channels, combined and side by side" | "EmailBison numbers only" | "Aimfox numbers only",
+  view: "Both channels, combined and side by side" | "Email numbers only" | "LinkedIn numbers only",
 ) {
   fireEvent.click(screen.getByRole("radio", { name: view }));
 }
@@ -155,13 +155,13 @@ describe("clients grid channel view", () => {
   it("renders the neutral bands with the selected sequencer's numbers and no combined total", async () => {
     await renderPage();
 
-    switchChannel("EmailBison numbers only");
+    switchChannel("Email numbers only");
     expect(screen.queryByText("101")).not.toBeInTheDocument();
     expect(screen.getAllByText("71").length).toBeGreaterThan(0);
     expect(screen.queryByText("31")).not.toBeInTheDocument();
     expect(screen.getAllByText("500").length).toBeGreaterThan(0); // Bison daily sent
 
-    switchChannel("Aimfox numbers only");
+    switchChannel("LinkedIn numbers only");
     expect(screen.queryByText("101")).not.toBeInTheDocument();
     expect(screen.queryByText("71")).not.toBeInTheDocument();
     expect(screen.getAllByText("31").length).toBeGreaterThan(0);
@@ -173,9 +173,9 @@ describe("clients grid channel view", () => {
   it("gives the EmailBison and Aimfox views the same structure", async () => {
     await renderPage();
 
-    switchChannel("EmailBison numbers only");
+    switchChannel("Email numbers only");
     const email = sectionHeaders();
-    switchChannel("Aimfox numbers only");
+    switchChannel("LinkedIn numbers only");
     const aimfox = sectionHeaders();
 
     // Drop the "· EB" / "· AF" the header suffix adds, so what is left is the band's own name.
@@ -216,12 +216,12 @@ describe("clients grid channel view", () => {
 
     await renderPage();
 
-    switchChannel("EmailBison numbers only");
+    switchChannel("Email numbers only");
     fireEvent.click(screen.getByRole("button", { name: "Sort by 3-DoD TOTAL leads · EB 0" }));
     expect(within(screen.getAllByRole("button", { name: /Open details for/i })[0]).getByText("Acme")).toBeInTheDocument();
 
     // Same column, same descending sort — only the projected numbers changed, so the order flips.
-    switchChannel("Aimfox numbers only");
+    switchChannel("LinkedIn numbers only");
     expect(screen.getByRole("button", { name: "Sort by 3-DoD TOTAL leads · AF 0" })).toBeInTheDocument();
     expect(within(screen.getAllByRole("button", { name: /Open details for/i })[0]).getByText("Bravo")).toBeInTheDocument();
   });
@@ -230,9 +230,9 @@ describe("clients grid channel view", () => {
     await renderPage();
 
     // "WoW Accept" is Aimfox-native; it does not exist in the EmailBison view.
-    switchChannel("Aimfox numbers only");
+    switchChannel("LinkedIn numbers only");
     fireEvent.click(screen.getByRole("button", { name: "Sort by WoW Accept · AF 0" }));
-    switchChannel("EmailBison numbers only");
+    switchChannel("Email numbers only");
 
     // The gateway write is debounced; the layout cache is written synchronously, so assert there.
     const cached = JSON.parse(window.localStorage.getItem("table-prefs:clients:mega") ?? "{}");

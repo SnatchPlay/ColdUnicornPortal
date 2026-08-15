@@ -1,6 +1,15 @@
 import { formatDate } from "./format";
 
-export type TimeframePreset = "7d" | "21d" | "30d" | "90d" | "mtd" | "qtd" | "ytd" | "all" | "custom";
+export type TimeframePreset =
+  | "7d"
+  | "mtd"
+  | "last_month"
+  | "qtd"
+  | "last_quarter"
+  | "ytd"
+  | "last_year"
+  | "all"
+  | "custom";
 
 export interface TimeframeValue {
   preset: TimeframePreset;
@@ -8,16 +17,41 @@ export interface TimeframeValue {
   customEnd: string | null;
 }
 
+// Typed as never-"custom" because getPresetBounds takes it as a fallback and cannot resolve a custom
+// range without the dates that only a TimeframeValue carries.
+export const DEFAULT_TIMEFRAME_PRESET: Exclude<TimeframePreset, "custom"> = "mtd";
+
+// `mtd` / `qtd` / `ytd` keep their keys — only their labels moved from "… to Date" to "Current …",
+// so nothing persisted and no shared link changes meaning. The rolling `21d` / `30d` / `90d` presets
+// were retired on 2026-08-14; see normalizeTimeframePreset for what happens to the stragglers.
 export const TIMEFRAME_PRESETS: Array<{ key: Exclude<TimeframePreset, "custom">; label: string }> = [
-  { key: "7d", label: "Last 7 Days" },
-  { key: "21d", label: "Last 21 Days" },
-  { key: "30d", label: "Last 30 Days" },
-  { key: "90d", label: "Last 90 Days" },
-  { key: "mtd", label: "Month to Date" },
-  { key: "qtd", label: "Quarter to Date" },
-  { key: "ytd", label: "Year to Date" },
-  { key: "all", label: "All Time" },
+  { key: "7d", label: "Last 7 days" },
+  { key: "mtd", label: "Current month" },
+  { key: "last_month", label: "Last month" },
+  { key: "qtd", label: "Current quarter" },
+  { key: "last_quarter", label: "Last quarter" },
+  { key: "ytd", label: "Current year" },
+  { key: "last_year", label: "Last year" },
+  { key: "all", label: "All time" },
 ];
+
+/**
+ * Anything this does not recognise degrades to the default preset. The values that matter are the
+ * retired `21d` / `30d` / `90d`, which still live in bookmarked URLs (`?range=30d`). Degrading them
+ * is deliberate: the failure mode worth engineering against is falling through to
+ * `{start: null, end: null}`, which silently widens a 30-day window to all time and makes every
+ * number on the page bigger for no visible reason.
+ *
+ * Call this wherever a preset enters the app from outside — URL params, stored layouts — rather than
+ * comparing `timeframe.preset` yourself.
+ */
+export function normalizeTimeframePreset(value: unknown): TimeframePreset {
+  if (value === "custom") return "custom";
+  if (typeof value === "string" && TIMEFRAME_PRESETS.some((preset) => preset.key === value)) {
+    return value as TimeframePreset;
+  }
+  return DEFAULT_TIMEFRAME_PRESET;
+}
 
 function toStartOfDay(value: Date) {
   const date = new Date(value);
@@ -52,42 +86,58 @@ function parseUnknownDate(value: string | null | undefined) {
   return Number.isFinite(date.getTime()) ? date : null;
 }
 
-function getPresetBounds(preset: Exclude<TimeframePreset, "custom">, now = new Date()) {
+/**
+ * A period that has already closed: whole months, quarters or years.
+ * `new Date(y, m, 0)` is the last day of month `m - 1`, and month indexes outside 0..11 roll into the
+ * neighbouring year, so January → previous December and Q1 → previous Q4 need no special-casing.
+ */
+function closedPeriod(year: number, startMonth: number, months: number) {
+  return {
+    start: new Date(year, startMonth, 1),
+    end: toEndOfDay(new Date(year, startMonth + months, 0)),
+  };
+}
+
+function getPresetBounds(
+  preset: Exclude<TimeframePreset, "custom">,
+  now = new Date(),
+): { start: Date | null; end: Date | null } {
   const today = toStartOfDay(now);
+  const year = today.getFullYear();
+  const month = today.getMonth();
   switch (preset) {
     case "7d":
       return { start: addDays(today, -6), end: toEndOfDay(today) };
-    case "21d":
-      return { start: addDays(today, -20), end: toEndOfDay(today) };
-    case "30d":
-      return { start: addDays(today, -29), end: toEndOfDay(today) };
-    case "90d":
-      return { start: addDays(today, -89), end: toEndOfDay(today) };
     case "mtd":
-      return { start: new Date(today.getFullYear(), today.getMonth(), 1), end: toEndOfDay(today) };
-    case "qtd": {
-      const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
-      return { start: new Date(today.getFullYear(), quarterStartMonth, 1), end: toEndOfDay(today) };
-    }
+      return { start: new Date(year, month, 1), end: toEndOfDay(today) };
+    case "last_month":
+      return closedPeriod(year, month - 1, 1);
+    case "qtd":
+      return { start: new Date(year, Math.floor(month / 3) * 3, 1), end: toEndOfDay(today) };
+    case "last_quarter":
+      return closedPeriod(year, Math.floor(month / 3) * 3 - 3, 3);
     case "ytd":
-      return { start: new Date(today.getFullYear(), 0, 1), end: toEndOfDay(today) };
+      return { start: new Date(year, 0, 1), end: toEndOfDay(today) };
+    case "last_year":
+      return closedPeriod(year - 1, 0, 12);
     case "all":
-    default:
       return { start: null, end: null };
   }
 }
 
 export function createDefaultTimeframe(): TimeframeValue {
   return {
-    preset: "21d",
+    preset: DEFAULT_TIMEFRAME_PRESET,
     customStart: null,
     customEnd: null,
   };
 }
 
 export function resolveTimeframeBounds(timeframe: TimeframeValue, now = new Date()) {
-  if (timeframe.preset !== "custom") {
-    return getPresetBounds(timeframe.preset, now);
+  // Every consumer routes through here, so this is the one place a retired preset has to be caught.
+  const preset = normalizeTimeframePreset(timeframe.preset);
+  if (preset !== "custom") {
+    return getPresetBounds(preset, now);
   }
 
   const startDate = parseUnknownDate(timeframe.customStart);
@@ -123,8 +173,14 @@ export function filterByTimeframe<T>(
 }
 
 export function getTimeframeLabel(timeframe: TimeframeValue) {
-  if (timeframe.preset !== "custom") {
-    return TIMEFRAME_PRESETS.find((preset) => preset.key === timeframe.preset)?.label ?? "Last 30 Days";
+  const preset = normalizeTimeframePreset(timeframe.preset);
+  if (preset !== "custom") {
+    // The `??` is unreachable — normalizeTimeframePreset only returns keys from this table — but
+    // deriving the fallback from the table keeps the label out of a second, drift-prone literal.
+    return (
+      TIMEFRAME_PRESETS.find((entry) => entry.key === preset)?.label ??
+      TIMEFRAME_PRESETS.find((entry) => entry.key === DEFAULT_TIMEFRAME_PRESET)!.label
+    );
   }
 
   if (timeframe.customStart && timeframe.customEnd) {
@@ -136,5 +192,5 @@ export function getTimeframeLabel(timeframe: TimeframeValue) {
   if (timeframe.customEnd) {
     return `Until ${formatDate(timeframe.customEnd, { day: "numeric", month: "short" })}`;
   }
-  return "Custom Range";
+  return "Custom range";
 }

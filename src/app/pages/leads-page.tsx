@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDeferredMount } from "../lib/use-deferred-mount";
 import { logAfterRaf2, markInteractionStart, measureAfterRaf2 } from "../lib/perf-mark";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
-import { Search, X } from "lucide-react";
+import { Download, Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -45,11 +45,9 @@ import { LeadCustomColumnsManager } from "../components/lead-custom-columns-mana
 import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export";
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
 import {
-  TIMEFRAME_PRESETS,
-  createDefaultTimeframe,
   getTimeframeLabel,
+  normalizeTimeframePreset,
   resolveTimeframeBounds,
-  type TimeframePreset,
   type TimeframeValue,
 } from "../lib/timeframe";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -104,21 +102,15 @@ function buildPageWindow(currentPage: number, totalPages: number) {
   return pages;
 }
 
-function isValidTimeframePreset(value: string | null): value is TimeframePreset {
-  if (!value) return false;
-  if (value === "custom") return true;
-  return TIMEFRAME_PRESETS.some((preset) => preset.key === value);
-}
-
 function parseTimeframeFromParams(searchParams: URLSearchParams): TimeframeValue {
-  const range = searchParams.get("range");
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-  if (isValidTimeframePreset(range)) {
-    if (range === "custom") return { preset: "custom", customStart: from, customEnd: to };
-    return { preset: range, customStart: null, customEnd: null };
+  // A missing, retired (`?range=30d`) or junk preset lands on the default — see
+  // normalizeTimeframePreset. The URL is rewritten from state afterwards, so the stale value does
+  // not survive the visit.
+  const preset = normalizeTimeframePreset(searchParams.get("range"));
+  if (preset === "custom") {
+    return { preset, customStart: searchParams.get("from"), customEnd: searchParams.get("to") };
   }
-  return createDefaultTimeframe();
+  return { preset, customStart: null, customEnd: null };
 }
 
 function writeTimeframeToParams(params: URLSearchParams, timeframe: TimeframeValue) {
@@ -132,6 +124,42 @@ function writeTimeframeToParams(params: URLSearchParams, timeframe: TimeframeVal
 // ── CreateLeadSheetHost ────────────────────────────────────────────────────────────────────────
 // Owns the "is sheet open" boolean so that opening/closing New Lead does NOT re-render
 // InternalLeadsPage or the lead list. Receives only stable props.
+
+type LeadViewMode = "pdca" | "crm" | "combined";
+
+const LEAD_VIEW_MODES = [
+  { key: "pdca", label: "PDCA" },
+  { key: "crm", label: "CRM" },
+  { key: "combined", label: "Combined" },
+] as const;
+
+/** Which of the three lead tables is on screen. Active option: `.rainbow-active` (theme.css §rainbow). */
+function ViewModeSwitcher({
+  value,
+  onChange,
+}: {
+  value: LeadViewMode;
+  onChange: (next: LeadViewMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs">
+      {LEAD_VIEW_MODES.map((mode) => (
+        <button
+          key={mode.key}
+          type="button"
+          onClick={() => onChange(mode.key)}
+          aria-pressed={value === mode.key}
+          className={cn(
+            "rounded-lg px-3 py-1.5 transition",
+            value === mode.key ? "rainbow-active" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface CreateLeadSheetHostProps {
   clientsLite: Array<{ id: string; name: string }>;
@@ -305,7 +333,7 @@ function InternalLeadsPage() {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   // Archived leads are hidden by default (migration 20260813); this is the only way back to them.
   const [showArchived, setShowArchived] = useState(false);
-  const [viewMode, setViewMode] = useState<"pdca" | "crm" | "combined">("pdca");
+  const [viewMode, setViewMode] = useState<LeadViewMode>("pdca");
   const [draft, setDraft] = useState<LeadDraft | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
@@ -697,25 +725,13 @@ function InternalLeadsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Manage columns and New lead sit in the header's otherwise-empty right half: they are opened
+          a handful of times a day, and moving them out buys the toolbar a whole row back at 1440px,
+          where the sidebar leaves only ~1030px to lay out. */}
       <PageHeader
         title="Leads"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
-            <button
-              onClick={() => void handleExportReport("csv")}
-              disabled={rows.length === 0 || exporting}
-              className="rounded-full border border-[#242424] bg-[#0f0f0f] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              {exporting ? "Exporting…" : "Export CSV"}
-            </button>
-            <button
-              onClick={() => void handleExportReport("xlsx")}
-              disabled={rows.length === 0 || exporting}
-              className="rounded-full border border-[#242424] bg-[#0f0f0f] px-4 py-2 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              Export XLSX
-            </button>
             {showClientColumn ? (
               <LeadCustomColumnsManager
                 clientsLite={clientsLite}
@@ -732,42 +748,45 @@ function InternalLeadsPage() {
         }
       />
 
-      <Surface
-        title="Lead filters"
-        subtitle={`Current timeframe: ${timeframeLabel}`}
-        actions={
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs">
-            {([["pdca", "PDCA"], ["crm", "CRM"], ["combined", "Combined"]] as const).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setViewMode(mode)}
-                aria-pressed={viewMode === mode}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 transition",
-                  viewMode === mode ? "bg-sky-500/15 text-sky-200" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className={`grid gap-4 ${clientsLite.length > 1 ? "xl:grid-cols-[1fr_180px_220px_180px]" : "xl:grid-cols-[1fr_260px_220px]"}`}>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+      {/* Row 1 is "what am I looking at", row 2 is "narrow it down". The stage chips wrap onto their
+          own line whenever the viewport cannot hold all eight beside the selects, which is most of
+          the time — they are the one group that cannot shrink without losing its counts. */}
+      <Surface className="p-3 sm:p-4">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewModeSwitcher value={viewMode} onChange={setViewMode} />
+
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
               <input
                 value={query}
                 onChange={(event) => handleQueryChange(event.target.value)}
                 placeholder="Search by name, email, company, title, country"
-                className="w-full rounded-md border border-[#242424] bg-[#080808] px-11 py-3 text-sm text-white outline-none transition placeholder:text-neutral-400 focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15"
+                className="h-9 w-full rounded-md border border-[#242424] bg-[#080808] pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-neutral-400 focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15"
               />
             </div>
+
+            <DateRangeButton value={timeframe} onChange={handleTimeframeChange} />
+
+            {/* Mapped, not copy-pasted: the two buttons previously drifted, so only CSV showed the
+                "Exporting…" state while an XLSX export was running. */}
+            {(["csv", "xlsx"] as const).map((format) => (
+              <button
+                key={format}
+                onClick={() => void handleExportReport(format)}
+                disabled={rows.length === 0 || exporting}
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-[#242424] bg-[#0f0f0f] px-3 text-sm text-neutral-300 transition hover:border-[#3a3a3a] hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <Download className="h-4 w-4" />
+                {exporting ? "Exporting…" : format.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             {clientsLite.length > 1 ? (
               <Select value={clientFilter} onValueChange={handleClientFilterChange}>
-                <SelectTrigger aria-label="Filter leads by client" className="h-auto rounded-md border-[#242424] bg-[#080808] px-4 py-3 text-sm text-white">
+                <SelectTrigger aria-label="Filter leads by client" className="h-9 w-[180px] rounded-md border-[#242424] bg-[#080808] px-3 text-sm text-white">
                   <SelectValue placeholder="All clients" />
                 </SelectTrigger>
                 <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
@@ -779,7 +798,7 @@ function InternalLeadsPage() {
               </Select>
             ) : null}
             <Select value={campaignFilter} onValueChange={handleCampaignFilterChange}>
-              <SelectTrigger aria-label="Filter leads by campaign" className="h-auto rounded-md border-[#242424] bg-[#080808] px-4 py-3 text-sm text-white">
+              <SelectTrigger aria-label="Filter leads by campaign" className="h-9 w-[200px] rounded-md border-[#242424] bg-[#080808] px-3 text-sm text-white">
                 <SelectValue placeholder="All campaigns" />
               </SelectTrigger>
               <SelectContent className="max-h-72 rounded-xl border-[#242424] bg-[#050505] text-white">
@@ -789,48 +808,46 @@ function InternalLeadsPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Stage</p>
-              {canArchive ? (
-                // Resets the page like every other filter: the row count changes, so page N may not
-                // exist on the other side of the toggle.
-                <ShowArchivedToggle
-                  value={showArchived}
-                  onChange={(next) => { setShowArchived(next); setCurrentPage(1); }}
-                />
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-1">
+            <span aria-hidden className="hidden h-5 w-px bg-white/10 sm:block" />
+
+            <button
+              onClick={() => handleStageFilterChange("all")}
+              className={cn(
+                "h-8 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
+                stageFilter === "all"
+                  ? "border-border bg-[#2a2a2a] text-white"
+                  : "border-border bg-transparent text-muted-foreground hover:bg-[#1a1a1a] hover:text-white",
+              )}
+            >
+              All ({totalCount})
+            </button>
+            {PIPELINE_STAGES.map((stage) => (
               <button
-                onClick={() => handleStageFilterChange("all")}
+                key={stage.key}
+                onClick={() => handleStageFilterChange(stage.key)}
                 className={cn(
-                  "h-8 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
-                  stageFilter === "all"
+                  "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
+                  stageFilter === stage.key
                     ? "border-border bg-[#2a2a2a] text-white"
                     : "border-border bg-transparent text-muted-foreground hover:bg-[#1a1a1a] hover:text-white",
                 )}
               >
-                All ({totalCount})
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stage.color }} />
+                {stage.label} ({stageCounts[stage.key] ?? 0})
               </button>
-              {PIPELINE_STAGES.map((stage) => (
-                <button
-                  key={stage.key}
-                  onClick={() => handleStageFilterChange(stage.key)}
-                  className={cn(
-                    "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs transition-colors",
-                    stageFilter === stage.key
-                      ? "border-border bg-[#2a2a2a] text-white"
-                      : "border-border bg-transparent text-muted-foreground hover:bg-[#1a1a1a] hover:text-white",
-                  )}
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stage.color }} />
-                  {stage.label} ({stageCounts[stage.key] ?? 0})
-                </button>
-              ))}
-            </div>
+            ))}
+
+            {canArchive ? (
+              // Resets the page like every other filter: the row count changes, so page N may not
+              // exist on the other side of the toggle.
+              <div className="ml-auto">
+                <ShowArchivedToggle
+                  value={showArchived}
+                  onChange={(next) => { setShowArchived(next); setCurrentPage(1); }}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </Surface>

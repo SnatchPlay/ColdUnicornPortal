@@ -61,7 +61,13 @@ export const CONDITION_SURFACES: { id: ConditionSurface; label: string }[] = [
 const NUMERIC_OPS: ConditionOperator[] = ["lt", "lte", "gt", "gte", "between", "eq", "neq"];
 const PERCENT_OPS: ConditionOperator[] = NUMERIC_OPS;
 const BOOLEAN_OPS: ConditionOperator[] = ["eq", "neq"];
-const ENUM_OPS: ConditionOperator[] = ["eq", "neq", "in", "not_in"];
+// `is_blank` / `not_blank` belong here as much as they do in TEXT_OPS: "no option chosen yet" is a
+// real and common thing to colour, and a droplist column is where it happens most. The builder
+// already renders right-operand-less operators (condition-rule-builder's `requiresRight`) and
+// validation already knows them, so this was purely a gap in the preset list — and the gap pushed
+// the seeded Setup rule into spelling emptiness as `not_in [<every option>]`, which then broke the
+// day somebody added a new option.
+const ENUM_OPS: ConditionOperator[] = ["eq", "neq", "in", "not_in", "is_blank", "not_blank"];
 const TEXT_OPS: ConditionOperator[] = ["is_blank", "not_blank", "starts_with", "eq", "neq"];
 
 export const OPERATORS_BY_VALUE_TYPE: Record<MetricValueType, ConditionOperator[]> = {

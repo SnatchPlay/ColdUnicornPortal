@@ -303,6 +303,44 @@
 [data-color-theme="contrast"] .sev-badge-warning { border-color: #F9F909; background-color: rgba(249,249,9,0.15); color: #F9F909; font-weight: 700; }
 [data-color-theme="contrast"] .sev-badge-critical{ border-color: #ff00ff; background-color: rgba(255,0,255,0.15); color: #ff66ff; font-weight: 700; }
 
+/* --- House rainbow ------------------------------------------------------------------------
+   The app-canvas image (src/imports/backgrounds/gradient-top.jpg) rotated onto the horizontal axis,
+   so a small element still reads as *that* gradient. A token rather than a one-off because the next
+   "make this one obvious" should extend it instead of inventing a second rainbow.
+
+   Deliberately has NO [data-color-theme="contrast"] override, unlike every other block here: that
+   axis encodes status, and this is a selected-state marker with no status meaning. --- */
+:root {
+  --rainbow-sweep: linear-gradient(
+    90deg,
+    #0b2be0 0%,
+    #1a6ef5 14%,
+    #17c8e8 30%,
+    #0d3a44 44%,
+    #07090b 54%,
+    #2a1004 64%,
+    #ff5a0a 76%,
+    #ff3c14 84%,
+    #d94ab4 92%,
+    #a63bdd 100%
+  );
+}
+
+/* Active option of a segmented control. The 40% black scrim is load-bearing: white on the raw cyan
+   stop (#17c8e8) is ~1.9:1, scrimmed it clears 4.5:1. Layered as a second background-image so the
+   gradient needs no extra DOM node and no inline style (CLAUDE.md §5). */
+.rainbow-active {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)),
+    var(--rainbow-sweep);
+  background-size: 180% 100%;
+  background-position: 50% 50%;
+  color: #ffffff;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
 /* --- Client status badges — lifecycle order: Onboarding → Active → On hold → Offboarding →
    Inactive, with Subscription off to the side. The hue ramp is the lifecycle: lime → emerald →
    amber → orange → red. Subscription is deliberately off-ramp (pink) because it is not a health

@@ -281,7 +281,7 @@ describe("clients condition surfaces", () => {
     expect(tinted("101")).toBe(true);
     expect(tinted("8")).toBe(true); // inboxes_count = 8, a Basic column
 
-    fireEvent.click(screen.getByRole("radio", { name: "EmailBison numbers only" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Email numbers only" }));
     expect(tinted("71")).toBe(false);
     expect(tinted("8")).toBe(true);
   });
@@ -312,46 +312,9 @@ describe("clients condition surfaces", () => {
     expect(highlighted).toBeTruthy();
   });
 
-  it("keeps an unrated client only under All and Not rated", async () => {
-    mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ conditionRules: [], satisfaction: null }) as never,
-    );
-    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
-      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
-    );
-
-    await renderPage();
-    expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
-
-    // Every client starts unrated; without its own chip this row would be unreachable.
-    fireEvent.click(screen.getByRole("radio", { name: /Not rated \(1\)/i }));
-    expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
-
-    // Anchored: an unanchored /Happy/ also matches the "Unhappy" chip.
-    fireEvent.click(screen.getByRole("radio", { name: /^Happy \(0\)/i }));
-    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
-  });
-
-  it("filters by satisfaction rating", async () => {
-    mockedRepo.loadClientsOverview.mockResolvedValue(
-      makeClientsOverview({ conditionRules: [], satisfaction: 2 }) as never,
-    );
-    mockedRepo.loadClientsMetricsSummary.mockResolvedValue(
-      makeMetricsSummaryPayload({ sentToday: 100, scheduleToday: 100, bounceCount: 0 }) as never,
-    );
-
-    await renderPage();
-
-    fireEvent.click(screen.getByRole("radio", { name: /^Neutral \(1\)/i }));
-    expect(screen.getByRole("button", { name: "Open details for Acme" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("radio", { name: /^Unhappy \(0\)/i }));
-    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("radio", { name: /Not rated \(0\)/i }));
-    expect(screen.queryByRole("button", { name: "Open details for Acme" })).not.toBeInTheDocument();
-  });
-
+  // The satisfaction filter chips were removed from the filter bar on 2026-08-14 (the space went to
+  // the grid). The hearts survive only as the inline rating in the Client column, so this is now the
+  // page's only satisfaction radiogroup — which is why the exact-name query below is unambiguous.
   it("writes a satisfaction rating from the grid's Client cell", async () => {
     mockedRepo.loadClientsOverview.mockResolvedValue(
       makeClientsOverview({ conditionRules: [], satisfaction: null }) as never,

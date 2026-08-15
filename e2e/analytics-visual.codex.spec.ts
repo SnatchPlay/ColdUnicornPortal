@@ -194,6 +194,12 @@ async function seed(page: Page, options: { role?: "master_admin" | "client" } = 
   });
 }
 
+// KNOWN STALE (not run in CI — .github/workflows/ci.yml runs `pnpm test:run` only).
+// The fixtures below hardcode April/May 2026 dates while the default timeframe is relative to today,
+// so the chart-summary assertions in this file and in "client dashboard timeframe filters monthly
+// panels" only held while the wall clock sat inside that window. The 2026-08-14 preset change
+// (default 21 days → current month) updated the button labels here but could not re-baseline the
+// numbers; re-basing means deriving the fixture dates from `new Date()` rather than editing counts.
 test("master admin analytics visual state", async ({ page }) => {
   await seed(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -208,8 +214,8 @@ test("master admin analytics visual state", async ({ page }) => {
   await expect(page.getByText(/Showing 12 of 24 client groups/)).toBeVisible();
   await expect(page.getByText("Client 01").first()).toBeVisible();
 
-  await page.getByRole("button", { name: /Last 30 Days/i }).click();
-  await page.getByRole("button", { name: "Last 7 Days" }).click();
+  await page.getByRole("button", { name: /Current month/i }).click();
+  await page.getByRole("button", { name: "Last 7 days" }).click();
   await expect(page.getByText(/Days without activity rows are rendered as 0/)).toHaveCount(0);
 
   await page.screenshot({ path: path.join("test-results", "analytics-admin-statistics.png"), fullPage: true });
@@ -226,8 +232,8 @@ test("client dashboard timeframe filters monthly panels", async ({ page }) => {
   await expect(page.getByText("Monthly sent chart with 2 months and total 240 emails.")).toBeAttached();
   await expect(page.getByText("Monthly prospects chart with 2 months and total 40 prospects added.")).toBeAttached();
 
-  await page.getByRole("button", { name: /Last 30 Days/i }).click();
-  await page.getByRole("button", { name: "Last 7 Days" }).click();
+  await page.getByRole("button", { name: /Current month/i }).click();
+  await page.getByRole("button", { name: "Last 7 days" }).click();
 
   await expect(page.getByText("Monthly leads chart with 1 month and total 2 leads.")).toBeAttached();
   await expect(page.getByText("Monthly sent chart with 1 month and total 140 emails.")).toBeAttached();

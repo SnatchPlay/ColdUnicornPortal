@@ -574,7 +574,7 @@ Server returns scoped campaigns (status-filtered) with total `sent`/`reply` from
 
 ### 12.6 Campaign momentum (Sent / Replies / Positive)
 
-Daily series over the **selected timeframe** (default last 30 days; falls back to 21 days only if no range is sent) from `campaign_daily_stats` joined to scoped + status-filtered campaigns, grouped by `report_date`: `sent = SUM(sent_count)`, `replies = SUM(reply_count)`, `positive = SUM(positive_replies_count)`. Same payload shape as the Admin dashboard `campaignMomentum21d` (which stays fixed at 21 days). See [08 §4](./08-charts-catalog.md#4-manager-dashboard-surfaces).
+Daily series over the **selected timeframe** (the picker defaults to the current month; the server falls back to 21 days only if no range is sent at all) from `campaign_daily_stats` joined to scoped + status-filtered campaigns, grouped by `report_date`: `sent = SUM(sent_count)`, `replies = SUM(reply_count)`, `positive = SUM(positive_replies_count)`. Same payload shape as the Admin dashboard `campaignMomentum21d` (which stays fixed at 21 days). See [08 §4](./08-charts-catalog.md#4-manager-dashboard-surfaces).
 
 ### 12.7 Internal Statistics summary and manager breakdown
 

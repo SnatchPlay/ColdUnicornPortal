@@ -124,7 +124,10 @@ describe("client page hook-order regression coverage", () => {
   it("applies the dashboard timeframe to client monthly charts", async () => {
     // Fake only Date so waitFor / act still use real timers internally.
     vi.useFakeTimers({ toFake: ["Date"] });
-    // System time: May 5. 21-day window = Apr 14–May 5, covering both Apr 28 and May 4 data.
+    // System time: May 5, so the default month-to-date window is May 1–5 and covers only the May 4
+    // row. The switch below is to "Last month" rather than "Last 7 days" on purpose: on May 5 a
+    // 7-day window resolves to the same rows as month-to-date, so the assertion would pass without
+    // the timeframe doing anything.
     vi.setSystemTime(new Date("2026-05-05T12:00:00.000Z"));
 
     mockedRepo.loadClientDashboard.mockResolvedValue({
@@ -146,15 +149,17 @@ describe("client page hook-order regression coverage", () => {
     renderPage(ClientDashboardPage);
     await act(async () => {});
 
-    expect(screen.getByText("Monthly leads chart with 2 months and total 7 leads.")).toBeInTheDocument();
-    expect(screen.getByText("Monthly sent chart with 2 months and total 170 emails.")).toBeInTheDocument();
-    expect(screen.getByText("Monthly prospects chart with 2 months and total 40 prospects added.")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Last 21 Days/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Last 7 Days" }));
-
     expect(screen.getByText("Monthly leads chart with 1 month and total 2 leads.")).toBeInTheDocument();
     expect(screen.getByText("Monthly sent chart with 1 month and total 70 emails.")).toBeInTheDocument();
     expect(screen.getByText("Monthly prospects chart with 1 month and total 40 prospects added.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Current month/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Last month" }));
+
+    expect(screen.getByText("Monthly leads chart with 1 month and total 5 leads.")).toBeInTheDocument();
+    expect(screen.getByText("Monthly sent chart with 1 month and total 100 emails.")).toBeInTheDocument();
+    // 0, not 80: "prospects added" is a day-over-day delta computed across the whole series before
+    // the timeframe filter, and April 28 is the first row, so it has no predecessor to grow from.
+    expect(screen.getByText("Monthly prospects chart with 1 month and total 0 prospects added.")).toBeInTheDocument();
   });
 });
