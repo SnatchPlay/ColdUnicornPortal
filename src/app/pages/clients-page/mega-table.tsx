@@ -149,13 +149,17 @@ function provisioningWord(row: ClientSequencerRecord | null): string {
   return PROVISIONING_WORDS[provisioningState(row)] ?? provisioningState(row);
 }
 
-/** Higher = more wrong. Summed across both sequencers so one sort surfaces the worst clients. */
+/**
+ * Higher = more wrong. Summed across both sequencers so one sort surfaces the worst clients.
+ *
+ * Deliberately 4-level while the mark is 2-colour (see ProvisioningMark): an absent connector is not
+ * evidence of a fault and must not outrank a run that actually found something wrong, and that
+ * distinction is the only reason to sort this column.
+ */
 function provisioningRank(row: ClientSequencerRecord | null): number {
   switch (provisioningState(row)) {
     case "configured":
       return 0;
-    // Same reasoning as the colour: an absent connector is not evidence of a fault, so it must not
-    // outrank a run that actually found something wrong.
     case "never":
     case "no_connector":
       return 1;
@@ -168,23 +172,21 @@ function provisioningRank(row: ClientSequencerRecord | null): number {
 }
 
 function ProvisioningMark({ letter, row }: { letter: string; row: ClientSequencerRecord | null }) {
-  const state = provisioningState(row);
-  // "No connector" is MUTED, not red. Most clients are deliberately single-channel — 43 of 56 have
-  // EmailBison and 2 have Aimfox — so colouring every missing connector as a fault paints a wall of
-  // red across a column nobody would then read. We cannot tell "not on this channel" from "should
-  // be and isn't" without knowing which channels the client bought, and a status column must not
-  // assert a defect it cannot establish. Red is kept for states a run actually reported as broken.
-  // The drawer says "not connected at all" in words for whoever opens it.
-  const tone =
-    state === "configured"
-      ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
-      : state === "partial" || state === "needs_selection"
-        ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
-        : state === "never" || state === "no_connector"
-          ? "border-white/15 bg-white/5 text-white/40"
-          : "border-red-400/40 bg-red-500/15 text-red-100";
+  // Two states by request: green = wired and working, muted = anything else. Note this drops the
+  // amber ("partly configured", "workspace not chosen") and red ("not wired") tones a setup run
+  // reports, so a broken workspace now looks the same as a channel the client never bought — the
+  // trade the column was asked for, since it is read as a 56-row sweep of "is this channel live?".
+  // The tooltip still names the exact state and provisioningRank still sorts on all four.
+  const isConfigured = provisioningState(row) === "configured";
   return (
-    <span className={cn("inline-flex h-4 w-4 items-center justify-center rounded border text-[9px] font-bold", tone)}>
+    <span
+      className={cn(
+        "inline-flex h-4 w-4 items-center justify-center rounded border text-[9px] font-bold",
+        isConfigured
+          ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
+          : "border-white/15 bg-white/5 text-white/40",
+      )}
+    >
       {letter}
     </span>
   );
@@ -307,22 +309,26 @@ function buildColumns(): MegaColumn[] {
     minWidth: 64,
     align: "center",
     defaultDirection: "asc",
-    // Two letters, EmailBison then Aimfox. The point of this column is the sweep: 56 clients at a
-    // glance is what would have surfaced Audytel (no connector), Fortum and GIC (missing label)
-    // months before somebody went looking by hand. The drawer carries the detail.
+    // Two letters, E(mail) then L(inkedIn) — the channels as the team names them, not the vendors.
+    // The point of this column is the sweep: 56 clients at a glance is what would have surfaced
+    // Audytel (no connector), Fortum and GIC (missing label) months before somebody went looking by
+    // hand. The drawer carries the detail.
+    //
+    // A third mark splitting LinkedIn into "invitations only" (Li) and "full campaign" (Lf) is
+    // wanted but not buildable yet: nothing in the data distinguishes them today.
     render: (row) => (
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex gap-1">
-            <ProvisioningMark letter="B" row={row.sequencerCreds.emailbison} />
-            <ProvisioningMark letter="A" row={row.sequencerCreds.aimfox} />
+            <ProvisioningMark letter="E" row={row.sequencerCreds.emailbison} />
+            <ProvisioningMark letter="L" row={row.sequencerCreds.aimfox} />
           </span>
         </TooltipTrigger>
         <TooltipContent>
           <span className="text-xs">
-            EmailBison: {provisioningWord(row.sequencerCreds.emailbison)}
+            Email: {provisioningWord(row.sequencerCreds.emailbison)}
             <br />
-            Aimfox: {provisioningWord(row.sequencerCreds.aimfox)}
+            LinkedIn: {provisioningWord(row.sequencerCreds.aimfox)}
           </span>
         </TooltipContent>
       </Tooltip>

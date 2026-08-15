@@ -14,7 +14,6 @@ import {
 } from "../lib/client-metrics";
 import { DevProfiler, useDevRenderCount } from "../lib/react-profiler-dev";
 import { isInternalAdmin, scopeClients } from "../lib/selectors";
-import { SatisfactionHearts, satisfactionLabel } from "../components/satisfaction-hearts";
 import { ShowArchivedToggle } from "../components/archive-controls";
 import { buildClientConditionContext } from "../lib/conditions/client-condition-context";
 import { evaluateClientConditions } from "../lib/conditions/client-condition-results";
@@ -64,11 +63,14 @@ const PAGE_SIZE = 50;
 
 /** Fallback sort: the Client column, A→Z. Also where the channel switch lands a stale sort key. */
 const DEFAULT_MEGA_SORT: MegaSortState = { key: "name", direction: "asc" };
-// Manual satisfaction rating, not the condition engine: "1".."3" are heart counts and "unrated"
-// is `satisfaction IS NULL`, which is where every client starts — without its own chip a brand-new
-// client would be unreachable from this filter.
-const SATISFACTION_FILTERS = ["all", "1", "2", "3", "unrated"] as const;
-type SatisfactionFilter = (typeof SATISFACTION_FILTERS)[number];
+
+// The channel switch reads Email / LinkedIn but stores the vendor keys the projection is built on
+// (`ChannelView`) — renaming those would invalidate every saved layout for a label change.
+const CHANNEL_VIEW_CHIPS: Array<{ value: ChannelView; label: string; ariaLabel: string }> = [
+  { value: "both", label: "Both", ariaLabel: "Both channels, combined and side by side" },
+  { value: "email", label: "Email", ariaLabel: "Email numbers only" },
+  { value: "aimfox", label: "LinkedIn", ariaLabel: "LinkedIn numbers only" },
+];
 
 // Radix <Select> forbids an empty-string item value, so the "no owner" choice needs a sentinel.
 // It maps to `manager_id = null` on submit.
@@ -84,10 +86,15 @@ const CLIENTS_TABLE_PREFS_KEY = "clients:mega";
 interface ClientsTablePreferences extends Record<string, unknown> {
   /** Column width in px, keyed by column id. */
   widths: Record<string, number>;
-  satisfactionFilter: string;
   statusFilter: string[];
-  managerFilter: string;
-  /** Clients-tab channel view switch: "both" | "email" | "aimfox". */
+  // Layouts saved before 2026-08-14 also carry `satisfactionFilter` / `managerFilter` from the two
+  // filters that were removed. Nothing reads them; `update()` shallow-merges, so they are carried
+  // along on every save until the row is rewritten. Harmless — but never reuse those key names.
+  /**
+   * Clients-tab channel view switch: "both" | "email" | "aimfox". The stored values keep the
+   * vendor names even though the switch now reads Both / Email / LinkedIn — renaming them would
+   * invalidate every saved layout for a label change.
+   */
   channelView: ChannelView;
   sort: MegaSortState;
 }
@@ -105,12 +112,6 @@ interface CreateClientDraft {
   contractDueDate: string;
 }
 
-
-function matchesSatisfactionFilter(filter: SatisfactionFilter, value: SatisfactionLevel | null): boolean {
-  if (filter === "all") return true;
-  if (filter === "unrated") return value === null;
-  return value === Number(filter);
-}
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -973,14 +974,9 @@ export function ClientsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{ tone: "info" | "warning" | "danger"; text: string } | null>(null);
-  const [satisfactionFilter, setSatisfactionFilter] = useState<SatisfactionFilter>("all");
   const [nameSearch, setNameSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["Active"]));
-  const [managerFilter, setManagerFilter] = useState("all");
   const [channelView, setChannelView] = useState<ChannelView>("both");
-  // Was `{ key: "health" }`, which no column ever defined — `compareMega` found no match and
-  // returned 0, so the documented "worst first" default silently did nothing. Triage now lives in
-  // the satisfaction filter chips, so the default sort is simply the Client column.
   const [sort, setSort] = useState<MegaSortState>(DEFAULT_MEGA_SORT);
 
   // Per-user layout: column widths, filters and sort, stored in Postgres so the grid looks
@@ -996,18 +992,9 @@ export function ClientsPage() {
     if (!prefsLoaded || prefsAppliedRef.current) return;
     prefsAppliedRef.current = true;
 
-    if (
-      tablePrefs.satisfactionFilter &&
-      SATISFACTION_FILTERS.includes(tablePrefs.satisfactionFilter as SatisfactionFilter)
-    ) {
-      setSatisfactionFilter(tablePrefs.satisfactionFilter as SatisfactionFilter);
-    }
     if (Array.isArray(tablePrefs.statusFilter)) {
       const valid = tablePrefs.statusFilter.filter((s): s is string => CLIENT_STATUSES.includes(s as never));
       setStatusFilter(new Set(valid));
-    }
-    if (typeof tablePrefs.managerFilter === "string") {
-      setManagerFilter(tablePrefs.managerFilter);
     }
     // Only set it when something was actually stored — an unconditional setter would revert a
     // switch the user clicked while the preferences round-trip was still in flight.
@@ -1041,14 +1028,6 @@ export function ClientsPage() {
     [updateTablePrefs],
   );
 
-  const handleSatisfactionFilterChange = useCallback(
-    (next: SatisfactionFilter) => {
-      setSatisfactionFilter(next);
-      updateTablePrefs({ satisfactionFilter: next });
-    },
-    [updateTablePrefs],
-  );
-
   const handleStatusToggle = useCallback(
     (status: string) => {
       setStatusFilter((prev) => {
@@ -1058,14 +1037,6 @@ export function ClientsPage() {
         updateTablePrefs({ statusFilter: [...next] });
         return next;
       });
-    },
-    [updateTablePrefs],
-  );
-
-  const handleManagerFilterChange = useCallback(
-    (next: string) => {
-      setManagerFilter(next);
-      updateTablePrefs({ managerFilter: next });
     },
     [updateTablePrefs],
   );
@@ -1085,14 +1056,12 @@ export function ClientsPage() {
   const handleClearFilters = useCallback(() => {
     setNameSearch("");
     setStatusFilter(new Set());
-    setManagerFilter("all");
-    setSatisfactionFilter("all");
-    updateTablePrefs({ satisfactionFilter: "all", statusFilter: [], managerFilter: "all" });
+    updateTablePrefs({ statusFilter: [] });
   }, [updateTablePrefs]);
 
   const scopedClients = useMemo(() => (identity ? scopeClients(identity, clients) : []), [clients, identity]);
   // Assignable owners for a client: CS Managers *and* admins (any internal, non-client user).
-  // Named `managerUsers` because it feeds the "Manager" picker/filter and the manager-name lookup.
+  // Named `managerUsers` because it feeds the drawer's "Manager" picker and the manager-name lookup.
   const managerUsers = useMemo(
     () =>
       users
@@ -1180,28 +1149,12 @@ export function ClientsPage() {
   const filteredMegaRows = useMemo(
     () =>
       sortedMegaRows.filter((row) => {
-        if (!matchesSatisfactionFilter(satisfactionFilter, row.client.satisfaction)) return false;
         if (nameSearchTrimmed && !row.client.name.toLowerCase().includes(nameSearchTrimmed)) return false;
         if (statusFilter.size > 0 && !statusFilter.has(row.client.status)) return false;
-        if (managerFilter !== "all" && row.client.manager_id !== managerFilter) return false;
         return true;
       }),
-    [satisfactionFilter, nameSearchTrimmed, statusFilter, managerFilter, sortedMegaRows],
+    [nameSearchTrimmed, statusFilter, sortedMegaRows],
   );
-
-  const satisfactionFilterCounts = useMemo(() => {
-    const counts = new Map<SatisfactionFilter, number>(SATISFACTION_FILTERS.map((f) => [f, 0]));
-    counts.set("all", sortedMegaRows.length);
-    for (const row of sortedMegaRows) {
-      for (const filter of SATISFACTION_FILTERS) {
-        if (filter === "all") continue;
-        if (matchesSatisfactionFilter(filter, row.client.satisfaction)) {
-          counts.set(filter, (counts.get(filter) ?? 0) + 1);
-        }
-      }
-    }
-    return counts;
-  }, [sortedMegaRows]);
 
   const visibleMegaRows = useMemo(
     () => filteredMegaRows.slice(0, visibleRowsCount),
@@ -1279,7 +1232,7 @@ export function ClientsPage() {
     if (selectedClientId && !scopedClients.some((c) => c.id === selectedClientId)) {
       closeClient();
     }
-  }, [scopedClients, selectedClientId, satisfactionFilter, nameSearchTrimmed, statusFilter, managerFilter, closeClient]);
+  }, [scopedClients, selectedClientId, nameSearchTrimmed, statusFilter, closeClient]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1455,13 +1408,12 @@ export function ClientsPage() {
         </>
       ) : (
         <Surface
-          title="Client PDCA grid"
+          title="Client PDCrmA grid"
           subtitle={`${visibleMegaRows.length} of ${filteredMegaRows.length} clients in current filter${statsLoading ? " · loading metrics…" : ""}`}
           actions={clientsToolbar}
         >
-          {/* ── Filter bar — single row: search · status · health · manager ─── */}
-          <div className="mb-4">
-            <div className="flex flex-wrap items-center gap-2">
+          {/* ── Filter bar — single row: search · status · channel ─── */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
               <input
                 type="search"
                 value={nameSearch}
@@ -1493,43 +1445,6 @@ export function ClientsPage() {
 
               <ToggleGroup
                 type="single"
-                value={satisfactionFilter}
-                onValueChange={(value) => {
-                  if (!value) return;
-                  handleSatisfactionFilterChange(value as SatisfactionFilter);
-                }}
-                variant="outline"
-                className="flex-nowrap rounded-xl border border-border bg-black/10 p-1"
-                aria-label="Satisfaction filter"
-              >
-                {SATISFACTION_FILTERS.map((filter) => {
-                  const count = satisfactionFilterCounts.get(filter) ?? 0;
-                  const level = Number(filter);
-                  return (
-                    <ToggleGroupItem
-                      key={filter}
-                      value={filter}
-                      className="h-6 shrink-0 gap-1 px-1.5 text-[11px]"
-                      aria-label={
-                        filter === "all"
-                          ? `All (${count})`
-                          : `${filter === "unrated" ? "Not rated" : satisfactionLabel(level as SatisfactionLevel)} (${count})`
-                      }
-                    >
-                      {filter === "all" || filter === "unrated" ? (
-                        <span>{filter === "all" ? "All" : "Not rated"}</span>
-                      ) : (
-                        <SatisfactionHearts size="sm" value={level as SatisfactionLevel} />
-                      )}
-                      <span>({count})</span>
-                    </ToggleGroupItem>
-                  );
-                })}
-              </ToggleGroup>
-
-              {/* Channel view switch: show both channels' columns, or narrow to EmailBison / Aimfox. */}
-              <ToggleGroup
-                type="single"
                 value={channelView}
                 onValueChange={(value) => {
                   if (!value) return;
@@ -1540,35 +1455,20 @@ export function ClientsPage() {
                 aria-label="Channel view"
               >
                 {/* flex-none so each item sizes to its own label — the base ToggleGroupItem uses
-                    flex-1 (equal widths), which squeezes the long "EmailBison" past its cell. */}
-                <ToggleGroupItem value="both" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Both channels, combined and side by side">
-                  Both
-                </ToggleGroupItem>
-                <ToggleGroupItem value="email" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="EmailBison numbers only">
-                  EmailBison
-                </ToggleGroupItem>
-                <ToggleGroupItem value="aimfox" className="h-6 flex-none whitespace-nowrap px-3 text-[11px]" aria-label="Aimfox numbers only">
-                  Aimfox
-                </ToggleGroupItem>
+                    flex-1 (equal widths), which squeezes the longest label past its cell. */}
+                {CHANNEL_VIEW_CHIPS.map((chip) => (
+                  <ToggleGroupItem
+                    key={chip.value}
+                    value={chip.value}
+                    className="h-6 flex-none whitespace-nowrap px-3 text-[11px]"
+                    aria-label={chip.ariaLabel}
+                  >
+                    {chip.label}
+                  </ToggleGroupItem>
+                ))}
               </ToggleGroup>
 
-              {canEditAssignments && managerUsers.length > 0 && (
-                <Select value={managerFilter} onValueChange={handleManagerFilterChange}>
-                  <SelectTrigger className="h-8 w-[136px] rounded-lg border-white/15 bg-black/30 text-xs text-white">
-                    <SelectValue placeholder="All managers" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All managers</SelectItem>
-                    {managerUsers.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.first_name} {m.last_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-
-              {(nameSearch || statusFilter.size > 0 || managerFilter !== "all" || satisfactionFilter !== "all") && (
+              {(nameSearch || statusFilter.size > 0) && (
                 <button
                   type="button"
                   onClick={handleClearFilters}
@@ -1577,7 +1477,6 @@ export function ClientsPage() {
                   Clear
                 </button>
               )}
-            </div>
           </div>
 
           <DevProfiler id="ClientsMegaTable">

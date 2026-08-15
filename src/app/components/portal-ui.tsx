@@ -9,6 +9,7 @@ import {
   TIMEFRAME_PRESETS,
   createDefaultTimeframe,
   getTimeframeLabel,
+  normalizeTimeframePreset,
   type TimeframeValue,
 } from "../lib/timeframe";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -35,6 +36,9 @@ export function DateRangeButton({
   const [open, setOpen] = useState(false);
   const timeframe = value ?? internalValue;
   const setTimeframe = onChange ?? setInternalValue;
+  // Which chip lights up. Normalised so a retired preset that reached state some other way still
+  // highlights the chip whose window is actually being applied, rather than lighting none.
+  const activePreset = normalizeTimeframePreset(timeframe.preset);
 
   const selectPreset = (preset: TimeframeValue["preset"]) => {
     setTimeframe({ ...timeframe, preset });
@@ -65,7 +69,7 @@ export function DateRangeButton({
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Timeframe</p>
         <div className="grid grid-cols-2 gap-2">
           {TIMEFRAME_PRESETS.map((preset) => {
-            const active = timeframe.preset === preset.key;
+            const active = activePreset === preset.key;
             return (
               <button
                 key={preset.key}
@@ -85,12 +89,12 @@ export function DateRangeButton({
             onClick={() => selectPreset("custom")}
             className={cn(
               "col-span-2 rounded-xl border px-3 py-2 text-left text-xs transition",
-              timeframe.preset === "custom"
+              activePreset === "custom"
                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                 : "border-[#242424] bg-[#0f0f0f] text-neutral-300 hover:border-[#3a3a3a] hover:text-white",
             )}
           >
-            Custom Range
+            Custom range
           </button>
         </div>
 

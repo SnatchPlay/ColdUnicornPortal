@@ -268,8 +268,28 @@ is written `value * 100 >= cell.sql_leads * 251`.
 are ≥ 2.51x that *same day's* SQL leads (`cell.sql_leads`), and leaves it uncoloured otherwise. Its
 `base_filter` (`value > 0`) keeps empty days uncoloured — without it `0 >= 2.51 * 0` would hold.
 
-`setup_type_colour` colours the **Setup** custom droplist: `One` → danger (red), `BiS1` / `BiS2` →
-good (green). The field id is environment-specific, so the migration resolves it by name.
+`setup_type_colour` colours the **Setup** custom droplist. Since migration
+`20260814_setup_colour_rules.sql`: `BiS1` / `BiS2` → good (green), `One` → warning (yellow),
+**nothing set → danger (red)**. The v1 rule (20260714) left an unset Setup uncoloured, which is
+exactly the client somebody needs to see. A value that is neither blank nor one of the three known
+options — a fourth setup type someone adds later — is deliberately left **uncoloured**, not red; see
+the blockquote below. The field id is environment-specific, so the migration resolves it by name.
+
+> **Why the "nothing set" branch is `is_blank` and not `not_in ["One","BiS1","BiS2"]`.** `not_in`
+> works — it is true for `null` / `undefined` / `""` because the candidate list does not contain them
+> — but it copies the droplist's option list into the rule body. The day a master_admin adds a fourth
+> setup type, every client on it is coloured red for "not chosen". `is_blank` has no such coupling.
+>
+> The reason `not_in` was tempting is that `ENUM_OPS` ([`metric-catalog.ts`](../../../src/app/lib/conditions/metric-catalog.ts))
+> did not offer `is_blank` for droplist metrics, which would have locked the rule into the
+> `super_admin`-only Raw JSON tab. That was a gap in a preset list, not a real constraint — the
+> builder's `requiresRight` and the validator's `OPERATORS_WITHOUT_RIGHT` already handled
+> right-operand-less operators — so the same change widened `ENUM_OPS` with `is_blank` / `not_blank`.
+> **Any droplist rule can now say "is empty" from the guided builder.**
+>
+> Branch order matters: branches evaluate in array order, first match wins, so the two positive
+> branches come first and the catch-all is last.
+
 
 `mom_meetings_vs_meeting_kpi` is graded the same way against `monthly_meeting_kpi`.
 

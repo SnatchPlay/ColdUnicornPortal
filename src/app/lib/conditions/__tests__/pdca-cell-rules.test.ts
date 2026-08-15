@@ -122,9 +122,16 @@ const RULES: ConditionRule[] = [
         message: "",
       },
       {
-        severity: "danger",
+        severity: "warning",
         when: { left: { metric: `custom.${SETUP_FIELD}` }, op: "eq", right: { value: "One" } },
         label: "one",
+        message: "",
+      },
+      // "Nothing set" is is_blank, not not_in over the option list — see the 20260814 migration.
+      {
+        severity: "danger",
+        when: { left: { metric: `custom.${SETUP_FIELD}` }, op: "is_blank" },
+        label: "not chosen",
         message: "",
       },
     ],
@@ -274,13 +281,27 @@ describe("PDCA grid cell-colour rules", () => {
     expect(severityAt(pack, "mom:0:mom_sql")).toBeNull();
   });
 
-  it("colours the Setup droplist: One = danger, BiS1 / BiS2 = good", () => {
+  it("colours the Setup droplist: nothing set = danger, One = warning, BiS1 / BiS2 = good", () => {
     const severityFor = (value: string | null) =>
       severityAt(evaluateClientConditions(context(100, value), RULES, metrics(), CLIENT), `cf:${SETUP_FIELD}`);
 
-    expect(severityFor("One")).toBe("danger");
     expect(severityFor("BiS1")).toBe("good");
     expect(severityFor("BiS2")).toBe("good");
-    expect(severityFor(null)).toBeNull();
+    expect(severityFor("One")).toBe("warning");
+    expect(severityFor(null)).toBe("danger");
+    expect(severityFor("")).toBe("danger");
+    // A newly added droplist option is NOT "not chosen". This is why the danger branch is is_blank
+    // and not `not_in [<every option>]`: the latter would paint every client on a fourth setup type
+    // red the moment a master_admin added it.
+    expect(severityFor("BiS3")).toBeNull();
+  });
+
+  it("colours a client with no custom-field row at all as danger", () => {
+    // The production shape: `client_custom_field_values` has no row, so `custom` is an empty object
+    // and the metric resolves to undefined rather than null.
+    const ctx = { ...context(100, null), custom: {} } as unknown as ClientConditionContext;
+    const pack = evaluateClientConditions(ctx, RULES, metrics(), CLIENT);
+
+    expect(severityAt(pack, `cf:${SETUP_FIELD}`)).toBe("danger");
   });
 });

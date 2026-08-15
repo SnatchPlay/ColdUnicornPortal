@@ -57,6 +57,11 @@ badges, yes-pills (§6). It does not touch surfaces, borders, typography, or cha
 
 > **DO** add new status colors to *both* the base rule and its `[data-color-theme="contrast"]`
 > override. A status color that exists only in one branch is a bug for colorblind users.
+>
+> The rule is about **status**. Colour that carries no good/warning/danger meaning — decoration, or a
+> selected-state marker such as `.rainbow-active` (§2.3a) — is deliberately exempt: the high-contrast
+> palette has nothing to say about it, and forcing an override would only invent a second look for
+> the same non-signal.
 
 ---
 
@@ -106,6 +111,27 @@ paired with a matching `*-500/2x` border and `*-400` foreground.
 | purple | `#0d0714` | `violet-500/25` | `violet-400` | `KpiTile` only |
 | indigo | `#08071a` | `indigo-500/20` | `indigo-400` | `KpiTile` only |
 | neutral | `#080808` | `#242424` | white | `MetricCard` only |
+
+### 2.3a The house rainbow (`--rainbow-sweep` / `.rainbow-active`)
+
+Defined once in [`theme.css`](../../src/styles/theme.css), the only gradient token in the system.
+It reproduces the app-canvas image ([`gradient-top.jpg`](../../src/imports/backgrounds/gradient-top.jpg),
+applied in `app-shell.tsx` — see §4.3) as a horizontal CSS sweep, so a small element can carry *that*
+gradient rather than a second, unrelated one:
+
+```
+deep blue #0b2be0 → #1a6ef5 → cyan #17c8e8 → near-black #07090b → orange #ff5a0a → #ff3c14 → magenta #d94ab4 → violet #a63bdd
+```
+
+`.rainbow-active` layers a **40% black scrim** over it as a second `background-image`, plus white
+text, `font-weight: 600` and a text shadow. The scrim is not decoration: white on the raw cyan stop
+is about 1.9:1, and scrimmed it clears 4.5:1 while the orange stop goes well past it. Layering it as
+a background rather than an overlay element keeps the gradient free of an extra DOM node and of an
+inline `style` (CLAUDE.md §5).
+
+Used by the PDCA / CRM / Combined switcher on the leads page, where the active option changes which
+table the page renders. Reach for it for a *selection* that reframes the screen — not for status,
+and not as a general accent; the tinted surfaces in §2.3 are still the answer there.
 
 ### 2.4 Text
 
@@ -407,7 +433,8 @@ across 11 files**, including the primitives themselves. The real, enforceable ru
 - Use `cn()` for every conditional class.
 - Use `#050505` for panels, `#242424` for borders, `#1a1a1a` for rows/chips.
 - Add `drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]` to text on the gradient canvas or on tinted KPI tiles.
-- Add both the base **and** the `[data-color-theme="contrast"]` rule for any new status color.
+- Add both the base **and** the `[data-color-theme="contrast"]` rule for any new status color (decoration such as `.rainbow-active` is exempt — §1.2).
+- Reuse `--rainbow-sweep` / `.rainbow-active` (§2.3a) instead of authoring a second gradient.
 - Add a `ChartTextSummary` next to every new chart.
 - Register any new chart in [08-charts-catalog.md](./functional/08-charts-catalog.md) in the same change.
 

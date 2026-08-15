@@ -32,7 +32,7 @@ A `Surface title="Filters"` at the top, above the metric cards (3 controls):
 
 - **Client** Select — `All clients` (default) or one of the manager's clients (`filterClients` from the payload). Scopes the entire dashboard to that client.
 - **Campaign status** Select — `Active` (default), `Launching`, `Stopped`, `Completed`, `Draft`, or `All statuses`. Restricts the campaign-based surfaces (campaigns metric, watchlist, momentum charts).
-- **Date range** — `DateRangeButton` (same presets as Analytics: 7d/30d/90d/MTD/QTD/YTD/All + custom). Default `Last 30 Days`. Drives **all period-sensitive metrics**: MQL/preMQL counts (`leads.created_at` in range), momentum series and watchlist totals (`campaign_daily_stats.report_date` in range), and portfolio MQL/won counts. `Assigned clients` and the campaign count are structural (not date-scoped). The lead queue is limited to leads created in the range.
+- **Date range** — `DateRangeButton` (the shared preset list, [`lib/timeframe.ts`](../../../src/app/lib/timeframe.ts): Last 7 days · Current month · Last month · Current quarter · Last quarter · Current year · Last year · All time · Custom range). Default `Current month`. The rolling `21d` / `30d` / `90d` presets were retired on 2026-08-14; a stored or bookmarked one degrades to the default via `normalizeTimeframePreset`, never to All time. Drives **all period-sensitive metrics**: MQL/preMQL counts (`leads.created_at` in range), momentum series and watchlist totals (`campaign_daily_stats.report_date` in range), and portfolio MQL/won counts. `Assigned clients` and the campaign count are structural (not date-scoped). The lead queue is limited to leads created in the range.
 
 Changing any filter re-fetches the dashboard (`repository.loadManagerDashboardOverview(managerId, { clientId, campaignStatus, dateFrom, dateTo })`) with a `loadIdRef` stale guard ([CLAUDE.md §2.3](../../../CLAUDE.md)). The Filters subtitle shows the active period and a "Refreshing…" hint during in-flight reloads.
 
@@ -106,7 +106,7 @@ File: [`src/app/pages/clients-page.tsx`](../../../src/app/pages/clients-page.tsx
 
 ### 2.1 Purpose
 
-Single dense PDCA grid covering DoD, 3-DoD, WoW, and MoM in **one horizontally-scrolled table** modelled after the team's working Google Sheets. Row click opens an editable detail drawer holding non-statistical client configuration (credentials, contacts, setup notes, issues timeline).
+Single dense PDCrmA grid covering DoD, 3-DoD, WoW, and MoM in **one horizontally-scrolled table** modelled after the team's working Google Sheets. Row click opens an editable detail drawer holding non-statistical client configuration (credentials, contacts, setup notes, issues timeline).
 
 ### 2.2 Mega-table layout
 
@@ -118,8 +118,13 @@ beside it as the EmailBison-only and Aimfox-only breakdown. Aimfox volume/capaci
 `sequencer_daily_stats`; a client with no Aimfox `client_sequencers` row shows "—" in every Aimfox
 column.
 
-**Channel view switch** — a `ToggleGroup` in the filter bar (`Both` / `EmailBison` / `Aimfox`,
-persisted per-user in `user_table_preferences.channelView`). It is a **projection**, not just a
+**Channel view switch** — a `ToggleGroup` in the filter bar, labelled `Both` / `Email` / `LinkedIn`
+and persisted per-user in `user_table_preferences.channelView`. The **stored values stay
+`both` / `email` / `aimfox`**: they are the vendor keys the projection is built on, and renaming them
+would invalidate every saved layout for a label change. The grid's own section names (`Schedule
+(Aimfox)`, `Aimfox capacity`, the `· EB` / `· AF` suffixes) still carry the vendor names — `col.sub`
+doubles as the persistence key for master-admin section renames and `colsection:` overrides, so
+relabelling them needs a display-only `sectionLabel` first. It is a **projection**, not just a
 filter, and no refetch: outside `Both` the page runs each metrics pack through
 `projectMetricsToChannel` ([`client-metrics.ts`](../../../src/app/lib/client-metrics.ts)) before
 building rows, so the neutral bands keep their ids, widths and early positions and render the
@@ -146,7 +151,7 @@ native rows, and renders the rest projected):
 | Group band | Sub band | Columns |
 |-----------|----------|---------|
 | **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
-| **Basic** | Basic | Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
+| **Basic** | Basic | Status, Workspaces, Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
 | **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
 | **DoD Schedule (Aimfox)** | Schedule (Aimfox) | +2, +1, 0 — `dodRows[bucket].aimfoxSchedule` |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
@@ -164,7 +169,21 @@ native rows, and renders the rest projected):
 
 156 built-in columns in `Both` (was 61 before the per-channel/Aimfox split); 81 in `EmailBison` and
 68 in `Aimfox` — the 13-column difference is exactly the reply-rate bands (20) against `WoW Accept`
-plus `Aimfox capacity` (7), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage lives in the satisfaction filter, §2.5.)
+plus `Aimfox capacity` (7), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage is the inline satisfaction rating, §2.7.)
+
+**Workspaces (Basic band).** Two letter marks per client — `E` (EmailBison) and `L` (Aimfox), the
+channels as the team names them rather than the vendors. Written by the setup workflows into
+`client_sequencers.setup_state` (ADR-0018 §6) and read here. **Two colours only** (2026-08-14): green
+when the state is `configured`, muted otherwise. The column answers one question at a sweep — is this
+channel live? — and since most clients are deliberately single-channel (43 of 56 on EmailBison, 2 on
+Aimfox), colouring every unbought channel amber or red would drown the answer. The precise state
+(`partly configured`, `not wired`, `workspace not chosen`, `no connector`, `never checked`) stays in
+the hover tooltip and in the drawer. **Sorting is still 4-level** (`provisioningRank`, worst first on
+descending) — collapsing it would rank a benign "no connector" identically to a workspace a run
+reported broken, which is the only reason to sort this column at all.
+
+A third mark splitting LinkedIn into invitations-only (`Li`) and full-campaign (`Lf`) is wanted but
+not yet buildable: nothing in the data distinguishes them.
 
 Cell highlighting is driven by the existing `condition_rules` engine: `getCellCondition(allResults, conditionKey)` for static columns, `dodCellKey(bucket, kind)` for DoD per-bucket. Each tinted cell is wrapped in a `Tooltip` exposing rule, value, threshold, message.
 
@@ -239,12 +258,13 @@ Save calls `repository.updateClient(clientId, patch)` directly from the page ([c
 - Status filter chips (any subset of the `client_status` enum; empty = all). The chip order follows
   the `CLIENT_STATUSES` tuple in [`types/core.ts`](../../../src/app/types/core.ts): Onboarding,
   Active, On hold, Offboarding, Inactive, Subscription.
-- Manager filter (admin only sees non-trivial values; for managers the dropdown is redundant).
-- One segmented **satisfaction filter** (`ToggleGroup`) with live counts, based on
-  `clients.satisfaction`:
-  - `All`
-  - `♥` / `♥♥` / `♥♥♥` (satisfaction = 1 / 2 / 3)
-  - `Not rated` (`satisfaction IS NULL` — where every client starts)
+- Channel view switch (§2.2).
+
+The **manager filter** and the segmented **satisfaction filter** were removed on 2026-08-14 — the
+grid is 156 columns wide and the horizontal space was worth more than either control. Satisfaction
+survives as the inline rating in the Client cell (§2.7); manager assignment survives in the drawer.
+Layouts saved before that date still carry `satisfactionFilter` / `managerFilter` keys; nothing reads
+them, which is why no preferences migration was needed.
 
 Filters (except the search box) persist per-user in `user_table_preferences` under
 `clients:mega`. A stored sort key that no longer names a real column (e.g. the old `"health"`) is
@@ -278,7 +298,8 @@ read-only where no change handler is passed, an accessible radiogroup of buttons
 
 - **Grid:** hearts sit under the client name in the sticky Client cell, inline-editable for any
   internal user (`identity.role !== "client"`), same gate as the inline Status cell. Clicking the
-  already-selected level clears back to NULL.
+  already-selected level clears back to NULL. This is the **only** satisfaction control on the page
+  since the filter chips were removed (§2.5).
 - **Drawer:** the same control in the Client configuration section, saved through the draft's
   Save/Cancel like every other field.
 - Both paths write via the `updateClient` gateway action (§09-mutations); the value is range-checked
@@ -299,11 +320,29 @@ File: [`src/app/pages/leads-page.tsx`](../../../src/app/pages/leads-page.tsx) (r
 
 Editable lead workspace. Change qualification, mark milestones (meeting booked/held, offer sent, won), write comments, view full reply history.
 
-### 3.2 Filters
+### 3.2 Toolbar and filters
 
-- `PortalSearch`-style search on name / email / company / title / country.
-- Campaign filter (Select).
-- Pipeline stage chips (same as client pipeline; click to filter).
+One `Surface`, two rows, directly under the `PageHeader` — restructured on 2026-08-14 from four
+vertical bands (header actions · a `Lead filters` Surface heading · a filter grid · the stage chips),
+which cost roughly 180px of height above the table for no information the controls did not carry.
+
+- **`PageHeader` actions** — the custom-columns manager (admin only) and **New lead**. They live in
+  the header's otherwise-empty right half because they are opened a handful of times a day, and
+  moving them out of the toolbar buys a whole row back at 1440px, where the sidebar leaves only
+  ~1030px to lay out.
+- **Row 1** — the PDCA / CRM / Combined view switcher, search on name / email / company / title /
+  country, `DateRangeButton`, and the `CSV` / `XLSX` exports (icon + label, matching
+  [`client-leads-page.tsx`](../../../src/app/pages/client-leads-page.tsx)).
+- **Row 2** — client filter (admin only), campaign filter, the pipeline stage chips with live counts,
+  and **Show archived** pushed to the right edge. The chips wrap onto their own line whenever the
+  viewport cannot hold all eight beside the selects, which is most of the time.
+
+The view switcher is local state, deliberately **not** in the URL contract below. Its active option
+carries the house rainbow (`.rainbow-active`, [`theme.css`](../../../src/styles/theme.css)) rather
+than a tint: the choice changes which table the page renders, and a 15%-alpha fill read as
+decoration next to the ordinary filter chips.
+
+
 - URL state contract: `q`, `campaign`, `stage`, `sort`, `dir`, `range`, `from`, `to`, `page`.
 - **Show archived** toggle (next to the stage chips, internal roles only). It is a server param
   (`LeadsListParams.includeArchived`), so the stage counts move with it — an archived lead is out of

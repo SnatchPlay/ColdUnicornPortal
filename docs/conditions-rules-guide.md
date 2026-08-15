@@ -175,7 +175,7 @@ When master_admin adds a custom column (text / checkbox / droplist) in Settings 
 |-------------------|-----------|-------------------|------------------|
 | `text` | `text` | `is_blank, not_blank, starts_with, eq, neq` | text input |
 | `checkbox` | `boolean` | `eq, neq` | Yes / No toggle |
-| `droplist` | `enum` | `eq, neq, in, not_in` | option dropdown / multi-select |
+| `droplist` | `enum` | `eq, neq, in, not_in, is_blank, not_blank` | option dropdown / multi-select |
 
 Custom-field values are loaded into the context as `custom.<fieldId>` and colour the column whose id is `cf:<fieldId>` (handled automatically; you don't see these strings in the builder).
 
@@ -200,6 +200,12 @@ Master admin added a text column "Trial ends" with values like `"2026-06-01"`. P
 ### 7.4 Setup stage check (droplist)
 
 Master admin added a droplist "Setup stage" with options `Active / Paused / At risk / Lost`. Pick metric **"Setup stage"** → operator `is one of` → tick `At risk` and `Lost` → severity `Danger`. Both troubled stages turn the cell red.
+
+**Colouring "nothing chosen yet".** Pick the droplist metric → operator **`is empty`** → severity
+`Danger`. Put that branch **last**, because branches evaluate top to bottom and the first match wins.
+This is how the live `Setup` rule paints an unfilled cell red. Resist the tempting alternative
+(`is none of` with every option ticked): it silently turns red the day someone adds a new option to
+the droplist. See [14-condition-rules §Setup](reference/functional/14-condition-rules.md).
 
 ---
 
