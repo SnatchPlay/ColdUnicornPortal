@@ -117,6 +117,38 @@
       }
     },
     {
+      "id": "e7f8a9b0-0001-4c50-9d63-9e4f2a5b6001",
+      "name": "[S] Lusha Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2016,
+        704
+      ],
+      "notes": "fullResponse IS set here, unlike the branch-L node it replaces - that node left it off while its consumer read $json.body.results, so its Lusha result never resolved and country always came from the Aimfox fallback. Reveals phones only; country still comes from Aimfox, which is what branch L effectively produced anyway. onError because credits are exhausted (B4): a 402 must cost the phone, never the lead.",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\n  \"contacts\": [\n    {\n      \"linkedinUrl\": \"https://www.linkedin.com/in/{{ $('[S] GET lead info Aimfox').first().json.lead.public_identifier }}\"\n    }\n  ],\n  \"reveal\": [\n    \"phones\"\n  ],\n  \"options\": {\n    \"includePartialProfiles\": false\n  }\n}",
+        "method": "POST",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.lusha.com/v3/contacts/search-and-enrich"
+      }
+    },
+    {
       "id": "S7-promote",
       "name": "[S] promote_contact_to_lead",
       "type": "n8n-nodes-base.postgres",
@@ -129,9 +161,9 @@
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => { const w = $('Webhook').item.json.body.event.lead || {}; const lead = $('[S] GET lead info Aimfox').first().json.lead || {}; const exp = Array.isArray(lead.current_experience) && lead.current_experience.length ? lead.current_experience[0] : {}; const email = lead.email || lead.contact_info?.email || w.email || null; const linkedinUrl = lead.public_identifier ? 'https://www.linkedin.com/in/' + lead.public_identifier : ''; const loc = String(lead.location?.name || '').trim(); const country = !loc ? '' : (loc.includes(',') ? loc.split(',').pop().trim() : loc); return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($('[S] Resolve campaign').first().json.campaign_id || ''), String(email || ''), String(lead.first_name || ''), String(lead.last_name || ''), String(exp.job_title || ''), String(exp.company?.name || ''), '', (() => { const ns = (Array.isArray(lead.labels) ? lead.labels : []).map(l => typeof l === 'string' ? l : l?.name).filter(Boolean).map(v => String(v).trim().toLowerCase()); if (ns.includes('mql') || ns.includes('interested')) return 'MQL'; if (ns.includes('premql') || ns.includes('pre-mql')) return 'preMQL'; return ''; })(), linkedinUrl, country ]; })() }}"
+          "queryReplacement": "={{ (() => { const w = $('Webhook').item.json.body.event.lead || {}; const lead = $('[S] GET lead info Aimfox').first().json.lead || {}; const exp = Array.isArray(lead.current_experience) && lead.current_experience.length ? lead.current_experience[0] : {}; const email = lead.email || lead.contact_info?.email || w.email || null; const linkedinUrl = lead.public_identifier ? 'https://www.linkedin.com/in/' + lead.public_identifier : ''; const loc = String(lead.location?.name || '').trim(); const lushaPhone = (() => { try { const r = $('[S] Lusha Enrichment').first().json; const b = Array.isArray(r) ? r[0] : r; return String(b?.body?.results?.[0]?.phones?.[0]?.number || '').trim(); } catch (e) { return ''; } })(); const country = !loc ? '' : (loc.includes(',') ? loc.split(',').pop().trim() : loc); return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($('[S] Resolve campaign').first().json.campaign_id || ''), String(email || ''), String(lead.first_name || ''), String(lead.last_name || ''), String(exp.job_title || ''), String(exp.company?.name || ''), '', (() => { const ns = (Array.isArray(lead.labels) ? lead.labels : []).map(l => typeof l === 'string' ? l : l?.name).filter(Boolean).map(v => String(v).trim().toLowerCase()); if (ns.includes('mql') || ns.includes('interested')) return 'MQL'; if (ns.includes('premql') || ns.includes('pre-mql')) return 'preMQL'; return ''; })(), linkedinUrl, country, lushaPhone, lushaPhone ? 'Lusha' : '' ]; })() }}"
         },
-        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'qualification', nullif($10, ''),\n           'linkedin_url', nullif($11, ''),\n           'country',      nullif($12, '')\n         ))) as result;"
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'qualification', nullif($10, ''),\n           'linkedin_url', nullif($11, ''),\n           'country',      nullif($12, ''),\n           'phone_number', nullif($13, ''),\n           'phone_source', nullif($14, '')\n         ))) as result;"
       }
     },
     {
@@ -1466,12 +1498,23 @@
         ]
       ]
     },
-    "[S] Resolve campaign": {
+    "[S] Lusha Enrichment": {
       "main": [
         [
           {
             "index": 0,
             "node": "[S] promote_contact_to_lead",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Lusha Enrichment",
             "type": "main"
           }
         ]

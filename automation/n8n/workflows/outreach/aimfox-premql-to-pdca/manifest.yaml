@@ -30,7 +30,7 @@ reads:
     - "Aimfox API · GET /leads/{id}, /accounts/{id}/leads/{id}/conversation, /accounts/{id}/conversations/{urn} (branch L AND branch S each make their own calls)"
     - "Google Sheets · CS PDCA — client row: sheet id (col_4)"
     - "Google Sheets · <client>/Leads — does this lead already exist?"
-    - "Lusha · POST /v3/contacts/search-and-enrich"
+    - "Lusha · POST /v3/contacts/search-and-enrich — branch S only since 2026-08-18; branch L's node is disabled"
     - "OpenAI · POST /v1/responses (gpt-5-mini) — which current-experience company does the reply mention?"
 
 writes:
@@ -61,7 +61,7 @@ credentials:
     usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, Update row in sheet, Create Record, Get Table ID"
   - alias: "Lusha"
     type: httpHeaderAuth
-    usedBy: "Lusha Enrichment"
+    usedBy: "[S] Lusha Enrichment — the branch-L node of the same name still holds the credential but is DISABLED since 2026-08-18"
   - alias: "UniTalk"
     type: httpHeaderAuth
     usedBy: "HTTP Request (notification)"
@@ -84,9 +84,28 @@ transition:
     campaign -> promote_contact_to_lead. Campaign attribution (task B) turned out to be resolvable
     here: the lead profile response's `lead.origins[0].id` is the same Aimfox campaign UUID
     aimfox-campaign-sync catalogs (verified against a real execution — same id and name appeared in
-    both), so campaign_id is populated, not NULL. No Lusha/phone duplication in branch S — phone_number
-    stays NULL (not measured) rather than doubling vendor cost for a field this workflow doesn't need
-    to attribute a lead.
+    both), so campaign_id is populated, not NULL.
+
+    2026-08-18 — PHONE ADDED, and the old note that used to sit here ("no Lusha/phone duplication in
+    branch S; phone_number stays NULL rather than doubling vendor cost") no longer applies: there is
+    no duplication to avoid, because branch L's Lusha node is now disabled. `[S] Lusha Enrichment`
+    runs between [S] Resolve campaign and the RPC, and phone_number + phone_source go through
+    promote_contact_to_lead. One Lusha call per lead, on the side that survives the Sheets shutdown.
+
+    Found while wiring it, and worth knowing before anyone "restores" the old node: branch L's Lusha
+    call NEVER WORKED. It left `fullResponse` off while its only consumer, `Edit Fields`, read
+    `$json.body.results[0].location.country` — a path that only exists when fullResponse is on. So
+    `lushaCountry` was always undefined and country always came from the Aimfox fallback. The credits
+    were spent and the result was discarded. The branch-S node sets fullResponse, so its phone does
+    resolve.
+
+    Country therefore stays where it already was — derived from `lead.location.name` — because that is
+    what branch L effectively produced too. Only `phones` is revealed; branch L also asked for
+    `emails`, which branch S takes from Aimfox, and Lusha bills per revealed datapoint. onError is set
+    because credits are exhausted (defect B4): a 402 must cost the phone, never the lead.
+
+    Verified in a rolled-back transaction on a real unpromoted Aimfox Interested reply: created=true,
+    phone_number='+48 987 654 321', phone_source='Lusha', with country and linkedin_url unaffected.
     2026-08-05: branch S now also sends what the run already fetched and was dropping — linkedin_url
     and country to promote_contact_to_lead, message_subject and sequence_step to upsert_reply, and the
     contact's identity taken from the Aimfox profile instead of the webhook body (whose email is always

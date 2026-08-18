@@ -187,12 +187,15 @@ execution.
 >   (branch L also asked for emails, which branch S takes from Aimfox, and Lusha bills per revealed
 >   datapoint) and carries `onError` so a 402 costs the phone and never the lead. Proven in a
 >   rolled-back transaction: `phone_number='+48 123 456 789'`, `phone_source='Lusha'`.
-> - **`aimfox-premql-to-pdca` — left off, deliberately.** Its Lusha result fed exactly one field,
->   `country`, and branch L's own expression already fell back to the Aimfox location when Lusha had
->   nothing. Branch S computes `country` from that same Aimfox location and passes it as `$12` today,
->   so the only thing Lusha added was an occasional refinement — and it never carried a phone there at
->   all. Not worth a credit per lead. Say so if that refinement is wanted; the node is one `disabled`
->   flag away from returning, this time on branch S.
+> - **`aimfox-premql-to-pdca` — same treatment, on request.** `[S] Lusha Enrichment` added, phone
+>   through the RPC, verified the same way (`phone_number='+48 987 654 321'`, `phone_source='Lusha'`).
+>
+>   Found while wiring it: **branch L's Lusha call there never worked.** It left `fullResponse` off
+>   while its only consumer read `$json.body.results[0].location.country` — a path that exists only
+>   when fullResponse is on. So `lushaCountry` was always undefined, `country` always came from the
+>   Aimfox fallback, and every credit that node spent bought nothing. The branch-S node sets
+>   fullResponse, so its phone actually resolves. Country stays derived from the Aimfox location,
+>   because that is what branch L effectively produced anyway.
 >
 > Deploying this needed `disabled` to become a movable node-level key — it is not a parameter, so no
 > allowlist could carry it and a node could only be switched off by hand in the UI.
