@@ -92,6 +92,8 @@
         480
       ],
       "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,

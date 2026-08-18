@@ -11,6 +11,9 @@
         464,
         304
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -95,6 +98,9 @@
         1360,
         208
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -126,6 +132,9 @@
         1584,
         208
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -466,6 +475,9 @@
         400
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -534,6 +546,9 @@
         1808,
         400
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -565,6 +580,9 @@
         2032,
         400
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,

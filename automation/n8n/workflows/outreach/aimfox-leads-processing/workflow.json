@@ -60,6 +60,9 @@
         352,
         -16
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -125,6 +128,9 @@
         -16
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -193,6 +199,9 @@
         -112
       ],
       "notes": "Branch-L terminal. onError so a Sheets/notification failure cannot fail the run after branch S has already written through the RPCs (E5 / Wave 3).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput",
       "parameters": {
         "columns": {

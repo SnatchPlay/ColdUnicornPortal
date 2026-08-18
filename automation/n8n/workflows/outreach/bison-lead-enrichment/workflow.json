@@ -231,6 +231,9 @@
         784,
         96
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -383,6 +386,9 @@
         288
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -485,6 +491,9 @@
         96
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -643,6 +652,9 @@
         288
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput",
       "parameters": {
         "documentId": {
@@ -771,6 +783,9 @@
         1680,
         -112
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,

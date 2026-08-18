@@ -534,6 +534,9 @@
         -288,
         64
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -569,6 +572,9 @@
         3072,
         -176
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -763,6 +769,9 @@
         -176
       ],
       "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
@@ -1035,6 +1044,9 @@
         -176
       ],
       "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
@@ -1307,6 +1319,9 @@
         -176
       ],
       "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput",
       "parameters": {
         "columns": {

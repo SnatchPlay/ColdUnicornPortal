@@ -81,7 +81,11 @@ function describeDrift(local, remote) {
     // `onError: continueRegularOutput` from a node reads as "no drift" — while changing whether a
     // Sheets error costs one row or aborts the Supabase branch behind it. `pnpm n8n:deploy
     // --node-settings` can move these, so CI has to be able to see them move.
-    for (const key of ["onError", "retryOnFail", "maxTries", "waitBetweenTries", "alwaysOutputData", "executeOnce"]) {
+    // `disabled` belongs here for a reason found the hard way on 2026-08-18: a Slack alert blamed a
+    // node the artifact recorded as disabled, and proving the instance agreed needed a hand-written
+    // REST call, because this loop did not compare the one key that decides whether a node runs at
+    // all. `--node-settings` can move it, so CI has to be able to see it move.
+    for (const key of ["disabled", "onError", "retryOnFail", "maxTries", "waitBetweenTries", "alwaysOutputData", "executeOnce"]) {
       if (JSON.stringify(localNode[key] ?? null) === JSON.stringify(remoteNode[key] ?? null)) continue;
       const show = (value) => (value === undefined ? "(unset)" : JSON.stringify(value));
       differences.push(`node ${key} changed: "${name}" ${show(localNode[key])} → ${show(remoteNode[key])}`);

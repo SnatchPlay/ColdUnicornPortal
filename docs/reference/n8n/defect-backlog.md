@@ -144,6 +144,29 @@ failure is still distinguishable from "already blacklisted".
 > building. And this workflow has **no `errorWorkflow` bound** ([E1](#e1)), so its failure ratio
 > collapsing is not evidence that nothing is wrong; it is the same silence as before, now quieter.
 
+> **Measured again 2026-08-18, and the fix worked exactly as far as it reached.** Failures by day and
+> by node, over the seven days to 2026-08-18:
+>
+> | Day | `[113]` 422 | `[294]` 422 | Sheets transient |
+> |---|---|---|---|
+> | 08-11 | 16 | 6 | — |
+> | 08-12 | 12 | 2 | 1 |
+> | 08-13 | 20 | 3 | — |
+> | 08-14 | 16 | 1 | 1 |
+> | 08-15 | — | 7 | — |
+> | 08-17 | — | 21 | — |
+> | 08-18 | — | — | 1 |
+>
+> `[113]` stops dead on 08-15 and `[294]` stops dead on 08-18 — each on the day its `onError`
+> landed. That is the cleanest evidence in this document that a deploy did what it claimed.
+>
+> It also makes the shape unmistakable: **the abort does not disappear, it walks down the limb.**
+> Three nodes in, the cause is no longer even the same (Bison 422 → Google Sheets 503), but the
+> consequence is identical — the domain limb at `y=400` never runs, because the email limb at
+> `y=208` died somewhere. Every node between a fan-out point and the end of the first limb is a
+> single point of failure for every later limb. Guarding one is not a fix; guarding the limb is.
+> Hence [E3b](#e3b).
+
 ### B3 · Zoho CRM child — expired OAuth token, 100% failure, invisible {#b3}
 
 `am3gYNrZSTbrkRFa` — **16 failures / 16 runs.** `[103] Zoho: Add email to lead` returns
@@ -727,6 +750,54 @@ Owner action — instance configuration, not a workflow edit.
 `ECONNRESET` therefore becomes a lost run rather than a retried one.
 
 **Fix.** Enable `retryOnFail` with a small backoff on idempotent GETs first.
+
+### E3b · Google Sheets transients are the largest remaining failure class {#e3b}
+
+Measured 2026-08-18 over the seven days to that date — every failed execution on the instance,
+classified by the node type and HTTP code that killed it:
+
+| Failures | Node type | Code | What it is |
+|---|---|---|---|
+| 104 | httpRequest | 422 | `[113]`/`[294]` "already blacklisted" — **fixed**, see [B2](#b2) |
+| 18 | httpRequest | 402 | Lusha credit limit — **fixed**, see [B4](#b4) |
+| **11** | **googleSheets** | **ECONNRESET** | transient |
+| **4** | **googleSheets** | **503** | transient |
+| 4 | httpRequest | 500 | Aimfox, [B6](#b6) |
+| 3 | httpRequest | 401 | credential |
+
+With the two fixed classes removed, **Google Sheets transients are the biggest thing still breaking
+runs — roughly 15 a week, every one of them recoverable.** n8n's own error text says so:
+*"try again later or consider setting this node to retry automatically (in the node settings)"*.
+
+Of **42 active Google Sheets nodes** across the estate, exactly **one** carried `retryOnFail`:
+`[325] Find workspace in CS PDCA`. Nobody chose that; it is the residue of somebody once hitting the
+problem on that one node.
+
+**Fix, applied 2026-08-18** — `retryOnFail: true, maxTries: 3, waitBetweenTries: 5000` on **25**
+Sheets nodes across seven live workflows: `bison-blacklist-add` (6), `bison-lead-enrichment` (5),
+`aimfox-leads-processing` (3), `aimfox-premql-to-pdca` (3), `aimfox-daily-metrics` (5),
+`ooo-detect-and-log` (1 — explicit tries on the node that already retried), `ooo-remove-on-tag-removed` (2).
+
+**What was deliberately left alone, and why.** `business/retry-without-idempotency` is an *error*
+only for write nodes, because retrying a lookup is free. That is the whole selection rule here:
+
+- **reads** — retried; a repeated lookup returns the same rows.
+- **updates by matched row** — retried; the second write sets the same cell to the same value.
+- **appends** — NOT retried. `[327] Add OOO Leads row` and `[63] Insert new Daily Stats row` append.
+  An `ECONNRESET` on an append is precisely the case where the row may already exist and the
+  response was lost, so a retry duplicates it. `bison-lead-enrichment`'s manifest already records
+  that branch L is not idempotent, and this is why.
+- **`[329] Delete row from OOO Leads`** — NOT retried. Sheets deletes are by row *number*, and row
+  numbers shift under the delete itself.
+- **orphaned and deprecated limbs** — `ooo-enrol-followups` branch L (disconnected from its trigger
+  in Wave 1), `nrr-daily-stats` (deprecated, [C1](#c1)), the classifier's old Sheets config node
+  (superseded). No point hardening a path that no longer runs.
+- **`sheets-*` backfill utilities** — hand-run one-shots; a human is watching.
+
+Retry does not make Sheets reliable, it makes a transient cost 15 seconds instead of a run. The
+residual case — three failures in a row — still aborts, and for `bison-blacklist-add` that still
+costs the domain limb ([B2](#b2)). The structural answer is [Wave 5.1](#f): the workspace lookup
+moves to `client_sequencers` and stops being a Sheets call at all.
 
 ### E4 · 28 of 70 nodes in `[child-1]` swallow their own errors {#e4}
 

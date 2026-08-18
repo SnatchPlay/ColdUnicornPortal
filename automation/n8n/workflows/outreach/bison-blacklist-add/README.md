@@ -84,12 +84,21 @@ Two things had to be built first: `--settings` was only a modifier and could not
 and `check-drift` did not compare workflow settings at all — so this binding could have been removed
 in the UI and CI would still have said `0 drifted`. Both fixed; see [E1](../../../../docs/reference/n8n/defect-backlog.md#e1).
 
-### 3. No retries — **open, medium**
+### 3. No retries — **fixed 2026-08-18**
 
-No node sets `retryOnFail`. `[110] Find workspace in CS PDCA` intermittently returns `ECONNRESET`,
-and each occurrence is a lost run. Note the ordering constraint from
-`business/retry-without-idempotency`: the manifest must declare an idempotency key before any write
-node may retry — it does, so this is unblocked.
+`[110] Find workspace in CS PDCA` intermittently returned `ECONNRESET`, and on 2026-08-18
+`[156] Find lead in Leads sheet (by email)` returned a `503` — each occurrence a lost run, and each
+one taking the domain limb with it (defect 1 above, third instalment).
+
+All six Sheets nodes now carry `retryOnFail: true, maxTries: 3, waitBetweenTries: 5000`. Safe on
+every one of them: four are lookups, and the two writebacks set a known column on a matched row to a
+fixed value, so a repeat writes the same cell the same way. `business/retry-without-idempotency`
+needs the manifest to declare an idempotency key before a *write* node may retry — it does, and the
+Bison POSTs are the writes it describes, not these.
+
+Retry buys time, not reliability. Three failures in a row still abort, and still cost the domain
+limb. The structural answer is the Supabase cutover below: `[110]` becomes a `client_sequencers`
+lookup and stops being a Sheets call.
 
 ### 4. The name says `blacklisted-domais` — cosmetic
 

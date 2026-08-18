@@ -74,8 +74,13 @@ idempotency:
 
 retryPolicy:
   notes: >-
-    None. No node sets retryOnFail, so the intermittent ECONNRESET seen on
-    [110] Find workspace in CS PDCA is a lost run rather than a retried one.
+    2026-08-18: all six Google Sheets nodes retry — retryOnFail, maxTries 3, waitBetweenTries 5000.
+    Four are lookups and the two writebacks set a fixed column on a matched row, so every one of them
+    is safe to repeat. The three Bison POSTs do NOT retry: their 422 IS the idempotency mechanism
+    (see idempotency.key above) and it is already absorbed with onError, so a retry would add
+    latency and nothing else. Before this, a transient Sheets ECONNRESET or 503 anywhere in the email
+    limb cost the whole run INCLUDING the domain limb behind it — measured twice, 2026-08-12 and
+    2026-08-18.
 
 observability:
   notes: >-
