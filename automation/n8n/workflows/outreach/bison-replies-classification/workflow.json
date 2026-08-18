@@ -1,0 +1,1087 @@
+{
+  "name": "Bison Replies Classification - Sheets Primary 401 Fallback",
+  "nodes": [
+    {
+      "id": "b7c1d2e3-0001-4f20-9a44-2c9e7f1b3001",
+      "name": "[S] Resolve workspace config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -160,
+        336
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($('Normalize Payload').item.json.workspace_id)] }}"
+        },
+        "query": "-- Workspace config, from Supabase instead of the CS PDCA spreadsheet.\n--\n-- Replaces four nodes: the Google Sheets read, the \"is it a 401?\" branch, the Make.com fallback that\n-- branch called, and the stopAndError for every other Sheets failure. Two external systems become one\n-- table read.\n--\n-- Only two fields were ever consumed downstream - the Bison key and the forward recipients. The Set\n-- node that follows still normalises them, and still carries its old name, because six nodes address\n-- it as $('Sheets API - config.getWorkspaceConfig') and renaming it would mean touching all six.\n--\n-- The row is keyed on external_workspace_id for the EmailBison sequencer, and must be enabled: a\n-- disabled sequencer returning no row is correct - the run stops rather than tagging with a stale key.\nselect cs.api_key                                                   as bison_api_key,\n       cs.api_key                                                   as api_key,\n       cs.external_workspace_id                                     as workspace_id,\n       cl.name                                                      as client_name,\n       array_to_string(coalesce(cl.notification_emails, '{}'), ',') as email_recipients_csv\n  from public.client_sequencers cs\n  join public.clients cl on cl.id = cs.client_id\n where cs.external_workspace_id = $1\n   and cs.sequencer_id = '00000000-0000-4000-a000-000000000002'\n   and cs.enabled\n   and cs.api_key is not null\n   and cl.archived_at is null\n limit 1"
+      }
+    },
+    {
+      "id": "0697ea9a-3056-4ccd-a647-0cc4c078779e",
+      "name": "Bison - Attach Classification Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        48
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.api_key || $('Sheets API - config.getWorkspaceConfig').item.json.data?.api_key || '' ) }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ { tag_ids: [Number($json.tag_id) || $json.tag_id], lead_ids: [Number($json.lead_id) || $json.lead_id], skip_webhooks: false } }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{('https://go.gheads.com/api') + '/tags/attach-to-leads'}}"
+      }
+    },
+    {
+      "id": "6402e595-1611-4acf-b853-f96d985411b8",
+      "name": "Bison - Forward Reply Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        432
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.api_key || $('Sheets API - config.getWorkspaceConfig').item.json.data?.api_key || '' ) }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ { to_emails: String($('Sheets API - config.getWorkspaceConfig').item.json.data?.email_recipients_csv || '').split(',').map(e => ({ email_address: e.trim() })).filter(e => e.email_address), cc_emails: [], bcc_emails: [], content_type: 'html', inject_previous_email_body: true, sender_email_id: (($('Bison - Get Thread Replies').item.json.data || [])[0]?.sender_email_id || ''), message: '<p>Kolejna wiadomość od Twojego leada wpłynęła właśnie na Twoją skrzynkę</p><p><strong>Twój zespół ColdUnicorn 🦄</strong></p>' } }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{('https://go.gheads.com/api') + '/replies/' + (($('Bison - Get Thread Replies').item.json.data || [])[0]?.id || $('Normalize Payload').item.json.reply_id) + '/forward'}}"
+      }
+    },
+    {
+      "id": "4cdc38dc-29d7-4b16-bbcd-6c0fdf268335",
+      "name": "Bison - Get Lead Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3200,
+        432
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.api_key || $('Sheets API - config.getWorkspaceConfig').item.json.data?.api_key || '' ) }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{($env.BISON_API_BASE_URL || 'https://go.gheads.com/api') + '/leads/' + $('Normalize Payload').item.json.lead_id}}"
+      }
+    },
+    {
+      "id": "4b44c72f-bf54-4e06-bbcd-1d489fad5206",
+      "name": "Bison - Get Tags List",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3200,
+        144
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.api_key || $('Sheets API - config.getWorkspaceConfig').item.json.data?.api_key || '' ) }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{('https://go.gheads.com/api') + '/tags'}}"
+      }
+    },
+    {
+      "id": "ef73b973-b970-4d7b-90aa-3d5bd6054e48",
+      "name": "Bison - Get Thread Replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3424,
+        432
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.bison_api_key || $('Sheets API - config.getWorkspaceConfig').item.json.api_key || $('Sheets API - config.getWorkspaceConfig').item.json.data?.api_key || '' ) }}"
+            }
+          ]
+        },
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "campaign_id",
+              "value": "={{ $('Normalize Payload').item.json.campaign_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "sendQuery": true,
+        "url": "={{('https://go.gheads.com/api') + '/replies'}}"
+      }
+    },
+    {
+      "id": "c63b2763-0bfb-48f9-beff-c39841f74d11",
+      "name": "Bison Reply Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        304,
+        464
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "replies-classification",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "4ac24aee-d95e-4911-9ac5-62437f1ba68a",
+      "name": "Category Is Not NRR?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        384
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "02e7253c-e917-4456-a3e9-6a72be41fd26",
+              "leftValue": "={{ $json.category === 'NRR' ? 'no' : 'yes' }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "yes"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7bf128e1-aca2-4568-a6cb-f21c869dd4f4",
+      "name": "Execution Data",
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        528,
+        528
+      ],
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "workspace",
+              "value": "={{ $json.body.event.workspace_name }}"
+            },
+            {
+              "key": "lead",
+              "value": "={{ $json.body.data.reply.from_email_address }}"
+            },
+            {
+              "key": "leadName",
+              "value": "={{ $json.body.data.reply.from_name }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "68afb118-be1d-4101-8506-f1abce3cf175",
+      "name": "Fallback API - config.getWorkspaceConfig",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2752,
+        320
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ { operation: 'config.getWorkspaceConfig', payload: { workspace_id: $('Parse Classification').item.json.workspace_id, require_bison_api_key: true } } }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{$env.MAKE_CONFIG_GET_WORKSPACE_CONFIG_URL}}"
+      }
+    },
+    {
+      "id": "a129ddb0-18a5-4d5f-81cd-79b25aae1b05",
+      "name": "Google Sheets - config.getWorkspaceConfig",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2304,
+        336
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "cachedResultName": "GHEADS | PDCA",
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $('Parse Classification').item.json.workspace_id || $('Normalize Event').item.json.workspace_id || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "detectAutomatically"
+            }
+          },
+          "outputFormatting": {
+            "values": {
+              "date": "FORMATTED_STRING",
+              "general": "FORMATTED_VALUE"
+            }
+          }
+        },
+        "sheetName": {
+          "__rl": true,
+          "cachedResultName": "CS PDCA",
+          "mode": "list",
+          "value": 1287241336
+        }
+      }
+    },
+    {
+      "id": "6cdc4396-9b97-4a2d-9302-6cc06f43ea9a",
+      "name": "IF Google Sheets 401 - config.getWorkspaceConfig",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2528,
+        416
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "7ffed45b-5d3b-4fd9-948a-b027ee9b1196",
+              "leftValue": "={{ (JSON.stringify($json).includes('401') || JSON.stringify($json).toLowerCase().includes('unauthorized')) ? 'yes' : 'no' }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "yes"
+            }
+          ],
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7a5f7410-72c7-4ce6-82ab-1d1ff1375afb",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        960,
+        464
+      ],
+      "parameters": {
+        "mode": "chooseBranch"
+      }
+    },
+    {
+      "id": "4abeefc2-205c-4241-8ea7-ac6573a85ba2",
+      "name": "New Reply In Interested Thread?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3648,
+        432
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8a2b17b7-f284-486c-945f-6af2588cff4e",
+              "leftValue": "={{ (((( $('Bison - Get Lead Data').item.json.data?.tags || $('Bison - Get Lead Data').item.json.tags || [] ).map(t => t.name).includes('Interested, MQL')) || (( $('Bison - Get Lead Data').item.json.data?.tags || $('Bison - Get Lead Data').item.json.tags || [] ).map(t => t.name).includes('Interested'))) && (( $json.data || [] ).length > 1) && ( $('Sheets API - config.getWorkspaceConfig').item.json.data?.email_recipients_csv || '' ) !== '' ) ? 'yes' : 'no' }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "yes"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b4f14783-4bce-43de-b75f-a773d4e6d7bb",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1184,
+        464
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5b683724-d008-4136-8e16-d5f8b02a20cb",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $json.body?.event?.workspace_id || $json.event?.workspace_id || '' }}"
+            },
+            {
+              "id": "be79c384-332e-4d38-9ee9-ee5e9dcfa403",
+              "name": "workspace_name",
+              "type": "string",
+              "value": "={{ $json.body?.event?.workspace_name || $json.event?.workspace_name || '' }}"
+            },
+            {
+              "id": "2ba134d5-4849-48b9-8783-5ee95a7039e1",
+              "name": "lead_id",
+              "type": "string",
+              "value": "={{ $json.body?.data?.lead?.id || $json.data?.lead?.id || $json.body?.data?.taggable_id || $json.data?.taggable_id || '' }}"
+            },
+            {
+              "id": "e8dbb8ab-7380-41a8-821c-d13fd30a1c0e",
+              "name": "lead_email",
+              "type": "string",
+              "value": "={{ $json.body?.data?.lead?.email || $json.data?.lead?.email || '' }}"
+            },
+            {
+              "id": "6e54a48a-3fb9-4cc0-95e7-f1fc81a3b197",
+              "name": "reply_id",
+              "type": "string",
+              "value": "={{ $json.body?.data?.reply?.id || $json.data?.reply?.id || '' }}"
+            },
+            {
+              "id": "94608467-ebe6-4308-bdda-6c59b12c7490",
+              "name": "campaign_id",
+              "type": "string",
+              "value": "={{ $json.body?.data?.campaign?.id || $json.data?.campaign?.id || '' }}"
+            },
+            {
+              "id": "ca66862b-e497-4494-90fb-3a6e80c05662",
+              "name": "reply_text_body",
+              "type": "string",
+              "value": "={{ $json.body?.data?.reply?.text_body || $json.data?.reply?.text_body || '' }}"
+            },
+            {
+              "id": "162d885b-e3ee-4170-acff-2dead1298297",
+              "name": "automated_reply",
+              "type": "boolean",
+              "value": "={{ Boolean($json.body?.data?.reply?.automated_reply ?? $json.data?.reply?.automated_reply ?? false) }}"
+            },
+            {
+              "id": "81b20f2f-8840-45bf-a7b8-1aa6abedf78a",
+              "name": "reply_input",
+              "type": "string",
+              "value": "={{ (($json.body?.data?.reply?.automated_reply || $json.data?.reply?.automated_reply) ? 'Its automated reply \\n' : '') + 'Reply:\\n\\n' + ($json.body?.data?.reply?.text_body || $json.data?.reply?.text_body || '') }}"
+            },
+            {
+              "id": "aaf7db1e-6c98-4690-b5f6-0abe3eec1ccd",
+              "name": "classification_instructions",
+              "type": "string",
+              "value": "You are an assistant for analyzing email replies in order to automate B2B email campaigns.\r\n\r\n========================\r\n1. GENERAL INSTRUCTIONS\r\n========================\r\n- Your job is to read a single email reply and:\r\n  1) determine its primary type / category,\r\n  2) provide a very short reason,\r\n  3) extract useful structured fields if available.\r\n- Most emails will be in Polish, but some may be in English or other European languages. You MUST understand and classify replies written in Polish.\r\n- Always answer ONLY in JSON, with no additional text, comments, or explanations.\r\n- Ignore email signatures, legal footers, unsubscribe blocks, tracking noise, and previous quoted campaign messages when determining the category.\r\n- Do NOT rely on the subject line, even if it contains \"Re:\" — always classify based on the latest reply body content and intent.\r\n- When the reply contains a forwarded or quoted original message, classify only the newest human reply unless the newest reply is empty or impossible to interpret.\r\n- Be conservative with \"Interested\". Do not mark a lead as interested unless there is clear, current, direct interest in YOUR offer.\r\n\r\n========================\r\n2. CATEGORIES / LABELS\r\n========================\r\n\r\nYou must classify each email into exactly one of the following categories:\r\n\r\n1) \"OOO\"\r\n-------------------\r\nDefinition:\r\n- Automatic or semi-automatic \"out of office\" / \"vacation\" replies.\r\n- Messages clearly saying the person is temporarily unavailable.\r\n\r\nTypical patterns:\r\nPolish:\r\n- \"Jestem poza biurem do [data]\"\r\n- \"Jestem na urlopie\"\r\n- \"Odpowiem po [data]\"\r\n- \"Automatyczna odpowiedź\"\r\n- \"Przebywam na zwolnieniu lekarskim\"\r\n\r\nEnglish:\r\n- \"Out of office\"\r\n- \"OOO\"\r\n- \"I am currently on vacation\"\r\n- \"I will be back on [date]\"\r\n\r\nRules:\r\n- If the email clearly looks like an automatic OOO response, choose \"OOO\" even if there is extra text.\r\n- If it contains OOO plus clear buying intent, for example \"I'm interested, please write after 15.02\", still choose \"OOO\" and mention the interest in `short_reason`.\r\n\r\n2) \"Interested\"\r\n---------------\r\nDefinition:\r\n- The person clearly shows positive interest in YOUR offer and wants to move forward directly.\r\n- Genuine interest requires a clear next-step signal directed toward YOUR campaign/offer.\r\n- The engagement must be direct, current, and related to YOUR service/product.\r\n- Administrative forwarding, internal routing, internal review, or future possible interest is NOT enough.\r\n\r\nStrong positive signals:\r\n- They explicitly say they are interested.\r\n- They ask for more information about YOUR offer.\r\n- They ask for a quote, proposal, demo, pricing, or contract.\r\n- They propose or accept a meeting/call about YOUR offer.\r\n- They ask you to call them.\r\n- They say the topic sounds relevant and request next steps.\r\n\r\nTypical patterns in Polish:\r\n- \"Jestem zainteresowany\"\r\n- \"Jestem zainteresowana\"\r\n- \"Jesteśmy zainteresowani\"\r\n- \"Proszę o więcej informacji\"\r\n- \"Proszę przesłać szczegóły oferty\"\r\n- \"Proszę przesłać ofertę\"\r\n- \"Możemy umówić się na rozmowę\"\r\n- \"Możemy umówić spotkanie\"\r\n- \"Chętnie porozmawiamy\"\r\n- \"Proszę zadzwonić\"\r\n- \"Proszę o kontakt telefoniczny\"\r\n- \"Tak, to brzmi ciekawie\"\r\n- \"Możemy przetestować\"\r\n- \"Możemy spróbować\"\r\n\r\nTypical patterns in English:\r\n- \"We are interested\"\r\n- \"I am interested\"\r\n- \"Sounds interesting\"\r\n- \"Please send more details\"\r\n- \"Please send a proposal\"\r\n- \"Can you send pricing?\"\r\n- \"Let's schedule a call\"\r\n- \"Can we arrange a meeting?\"\r\n- \"We would like a demo\"\r\n\r\nRules:\r\n- Classify as \"Interested\" ONLY when the sender clearly engages with YOUR offer and indicates a concrete next step.\r\n- If there are doubts but the overall message clearly asks to proceed with YOUR offer, choose \"Interested\".\r\n- If they ask for a quote/proposal/demo/call about YOUR service, choose \"Interested\".\r\n- Do NOT classify as \"Interested\" just because the email contains words like \"contact\", \"talk\", \"manager\", \"colleague\", \"forward\", \"discuss\", \"consult\", or \"will get back\".\r\n- Do NOT classify as \"Interested\" if the sender only says they will forward the message to a colleague, manager, department, or another company.\r\n- Do NOT classify as \"Interested\" if the sender asks you to contact someone else, unless the reply also contains a clear explicit statement that the company is interested in YOUR offer.\r\n- Do NOT classify as \"Interested\" if the sender says they need to discuss, check, verify, or consult internally and will come back later.\r\n- Do NOT classify as \"Interested\" if the sender says they will verify whether there is room for discussion.\r\n- Do NOT classify as \"Interested\" if the sender says another person may contact you later.\r\n- Future possible interest is not current interest.\r\n- A third party being copied, mentioned, or assigned is not current interest.\r\n- A phrase like \"someone will contact you\", \"someone will gladly talk\", or \"I will pass this to the responsible person\" is not enough.\r\n- A reply that only redirects to their own website, form, portal, or catalog is NOT \"Interested\" — classify as \"other\".\r\n- A reply that promotes the lead's own product/service is NOT \"Interested\" — classify as \"Spam_Inbound\".\r\n\r\n3) \"NRR\"\r\n--------------------\r\nDefinition:\r\n- The person clearly rejects the offer.\r\n- The person does not want further contact.\r\n- The person says the service is not relevant, not needed, or not planned.\r\n\r\nTypical patterns in Polish:\r\n- \"Nie jesteśmy zainteresowani\"\r\n- \"Nie jestem zainteresowany\"\r\n- \"Nie potrzebujemy takiej usługi\"\r\n- \"Dziękuję, ale nie skorzystamy\"\r\n- \"Temat nas nie interesuje\"\r\n- \"Nie planujemy współpracy\"\r\n- \"Proszę nie wysyłać więcej wiadomości\"\r\n- \"Proszę usunąć mnie z listy\"\r\n- \"Nieaktualne\"\r\n- \"Nie widzimy potrzeby\"\r\n\r\nTypical patterns in English:\r\n- \"We are not interested\"\r\n- \"I am not interested\"\r\n- \"No, thank you\"\r\n- \"This is not relevant for us\"\r\n- \"Please remove me from your list\"\r\n- \"Do not contact me again\"\r\n\r\nRules:\r\n- If they ask you to stop writing, choose \"NRR\".\r\n- If they politely decline, choose \"NRR\".\r\n- If they say \"maybe in the future\" but clearly reject now, choose \"NRR\".\r\n- Be careful with polite rejections: friendly tone does not mean interest.\r\n\r\n4) \"Left_Company\"\r\n-------------------\r\nDefinition:\r\n- Permanent unavailability.\r\n- The person no longer works at the company, retired, or the mailbox is permanently inactive/disabled/blocked.\r\n\r\nTypical patterns:\r\nPolish:\r\n- \"Nie pracuje już w firmie\"\r\n- \"Nie jest już częścią naszej organizacji\"\r\n- \"Konto jest nieaktywne\"\r\n- \"Adres jest nieaktywny\"\r\n- \"Skrzynka została zamknięta\"\r\n- \"Przeszedł/przeszła na emeryturę\"\r\n\r\nEnglish:\r\n- \"No longer works here\"\r\n- \"No longer with the company\"\r\n- \"This mailbox is no longer active\"\r\n- \"Address is inactive\"\r\n- \"Account disabled\"\r\n- \"Retired\"\r\n\r\nRules:\r\n- If the automated email states the person is permanently gone and redirects to another employee, choose \"Left_Company\".\r\n- If the person is only temporarily unavailable, choose \"OOO\", not \"Left_Company\".\r\n\r\n5) \"Spam_Inbound\"\r\n-------------------\r\nDefinition:\r\n- The reply is NOT a response to your offer.\r\n- Instead, the lead is sending their own commercial pitch, advertisement, partnership proposal, or promotional content.\r\n- It is essentially cold outreach back to you.\r\n\r\nContextual signals:\r\n- The email body promotes the sender's own product/service.\r\n- It contains their own metrics, pricing, features, platform capabilities, catalog, offer, or advertisement.\r\n- It asks you to buy, test, use, promote, partner with, or check their product/service.\r\n- The content has no real connection to your original campaign topic.\r\n- It reads like a marketing or sales email, not a personal reply to your message.\r\n- It may include SEO, SaaS, link building, directories, software, recruitment, outsourcing, marketing services, or other commercial pitches.\r\n\r\nRules:\r\n- Check this BEFORE considering \"Interested\".\r\n- Do NOT rely on \"Re:\" in the subject.\r\n- If they are selling something to you, choose \"Spam_Inbound\".\r\n- Even if politely written, an inbound pitch is never interest in your offer.\r\n\r\n6) \"other\"\r\n----------\r\nDefinition:\r\n- Any reply that does not fit the five categories above.\r\n- Use this when there is no clear current direct interest, no clear rejection, no OOO, no permanent unavailability, and no inbound commercial pitch.\r\n\r\nCommon \"other\" cases:\r\n- Internal forwarding with no clear signal.\r\n- Adding someone to CC without direct interest.\r\n- Asking you to contact another person.\r\n- Saying another person will contact you later.\r\n- Saying they need to discuss/check/consult internally.\r\n- Saying they will return with an answer later.\r\n- Saying they need to verify whether the topic is relevant.\r\n- Redirecting to their own website, form, catalog, or portal.\r\n- Technical bounce that is not a typical OOO and not permanent unavailability.\r\n- Random/irrelevant text.\r\n- Impossible to classify due to missing or unclear body text.\r\n\r\nAdditional \"other\" cases — NOT Interested:\r\n\r\nA) Forwarding / internal routing:\r\nThe sender only forwards the email, adds someone in CC, or says they are passing the message to another person/team/department.\r\n\r\nPolish examples:\r\n- \"Przekazuję maila koleżance...\"\r\n- \"Załączam do wiadomości managera...\"\r\n- \"Dodaję do kopii osobę odpowiedzialną...\"\r\n- \"Przekażę Pana maila do project managera...\"\r\n- \"Tematem zajmuje się inny dział/osoba...\"\r\n- \"Przekierowuję wiadomość do osoby odpowiedzialnej...\"\r\n- \"Dodaję kolegę/koleżankę do korespondencji...\"\r\n\r\nEnglish examples:\r\n- \"I am forwarding this to my colleague.\"\r\n- \"I have copied our manager.\"\r\n- \"I am adding the responsible person.\"\r\n- \"I will pass this to the relevant department.\"\r\n\r\nRule:\r\n- These are \"other\" unless there is also an explicit current buying signal.\r\n\r\nB) Contact someone else:\r\nThe sender asks you to contact another person or says another person may contact you, without confirming interest.\r\n\r\nPolish examples:\r\n- \"Proszę kontaktować się z...\"\r\n- \"W tej sprawie proszę pisać do...\"\r\n- \"Kasia będzie w bezpośrednim kontakcie...\"\r\n- \"Nasz manager się odezwie...\"\r\n- \"On chętnie z Panem porozmawia...\"\r\n- \"Proszę przesłać wiadomość do...\"\r\n- \"Najlepiej skontaktować się z...\"\r\n\r\nEnglish examples:\r\n- \"Please contact...\"\r\n- \"Please reach out to...\"\r\n- \"Our manager will contact you.\"\r\n- \"She will be in touch.\"\r\n- \"He will gladly speak with you.\"\r\n\r\nRule:\r\n- These are \"other\" unless the sender also clearly confirms that the company is interested in YOUR offer.\r\n\r\nC) Internal discussion / pending decision:\r\nThe sender says they need to consult, discuss internally, verify relevance, or return later with an answer.\r\n\r\nPolish examples:\r\n- \"Skonsultuję temat z osobami odpowiedzialnymi...\"\r\n- \"Przedyskutujemy to wewnętrznie...\"\r\n- \"Wrócę z odpowiedzią...\"\r\n- \"Damy znać, czy jesteśmy zainteresowani...\"\r\n- \"Sprawdzimy, czy widzimy przestrzeń do rozmów...\"\r\n- \"Po konsultacji wrócimy z informacją...\"\r\n- \"Musimy to omówić w zespole...\"\r\n- \"Przekażę temat dalej i zobaczymy...\"\r\n- \"Zweryfikujemy temat i wrócimy z informacją...\"\r\n\r\nEnglish examples:\r\n- \"We will discuss this internally.\"\r\n- \"I need to check with the team.\"\r\n- \"We will get back to you if interested.\"\r\n- \"Let us review this and come back to you.\"\r\n- \"We need to verify whether this is relevant.\"\r\n\r\nRule:\r\n- These are \"other\" unless the reply also contains a clear, explicit, present-tense buying signal such as:\r\n  - \"jesteśmy zainteresowani\"\r\n  - \"proszę przesłać ofertę\"\r\n  - \"umówmy spotkanie\"\r\n  - \"chcemy porozmawiać o wdrożeniu\"\r\n  - \"we are interested\"\r\n  - \"please send a proposal\"\r\n  - \"let's schedule a call\"\r\n\r\nD) Redirect / deflection to their own process:\r\nThe lead acknowledges your message but only redirects to their own website, form, portal, procurement process, catalog, or general inquiry channel without showing direct engagement toward YOUR offer.\r\n\r\nExamples:\r\n- \"Please visit our website and fill out the inquiry form.\"\r\n- \"You can find our catalog at [link].\"\r\n- \"Submit your request through our portal.\"\r\n- \"Proszę wypełnić formularz na stronie.\"\r\n- \"Zapraszamy do zapoznania się z naszą ofertą na stronie.\"\r\n\r\nRule:\r\n- These are \"other\", not \"Interested\".\r\n\r\n=============================\r\n3. PRIORITY / CONFLICT RULES\r\n=============================\r\n\r\nWhen an email contains multiple signals, apply this priority:\r\n\r\n1) If the body content is a commercial pitch / inbound cold outreach from the lead promoting their own product/service:\r\n   - category = \"Spam_Inbound\"\r\n   - Check this FIRST before any other category.\r\n\r\n2) If it is clearly an automatic out of office:\r\n   - category = \"OOO\"\r\n   - Put all additional info into `short_reason`.\r\n\r\n3) If there is a clear rejection phrase:\r\n   - category = \"NRR\"\r\n   - Even if polite, indirect, or softened, the current status is rejection.\r\n\r\n4) If the person is permanently unavailable:\r\n   - category = \"Left_Company\"\r\n\r\n5) If the reply is forwarding, internal routing, adding another person, asking to contact another person, saying another person will contact you, internal consultation, pending decision, or future possible interest:\r\n   - category = \"other\"\r\n   - This rule applies BEFORE \"Interested\".\r\n   - Do not treat forwarded messages, CC additions, internal consultation, or future follow-up as interest.\r\n\r\n6) If there is a clear direct invitation to proceed with YOUR offer:\r\n   - category = \"Interested\"\r\n   - Requires present, explicit, direct engagement with YOUR offer.\r\n\r\n7) If the reply is a deflection/redirect to their own process without engaging YOUR offer:\r\n   - category = \"other\"\r\n\r\n8) If you really cannot decide:\r\n   - category = \"other\"\r\n\r\n================================\r\n4. OUTPUT FORMAT / STRICT JSON\r\n================================\r\n\r\nYou must always respond with valid JSON and nothing else.\r\n\r\nJSON schema:\r\n\r\n{\r\n  \"category\": \"OOO\" | \"Interested\" | \"NRR\" | \"Left_Company\" | \"Spam_Inbound\" | \"other\",\r\n  \"confidence\": 0-100,\r\n  \"short_reason\": \"very short explanation in English, 1 sentence max\",\r\n  \"language_detected\": \"pl\" | \"en\" | \"de\" | \"other\"\r\n}\r\n\r\nDetails:\r\n- `category`: choose ONLY from the fixed list.\r\n- `confidence`: integer from 0 to 100.\r\n- `short_reason`: one short sentence in English.\r\n- `language_detected`: choose the most probable language.\r\n- If the email is mostly Polish with some English signature/footer, choose \"pl\".\r\n- Do not output markdown.\r\n- Do not add comments.\r\n- Do not add fields not listed in the schema.\r\n\r\n=========================================\r\n5. EXAMPLES OF CLASSIFICATION\r\n=========================================\r\n\r\nExample 1 — OOO:\r\nEmail:\r\n\"Dzień dobry, jestem obecnie na urlopie do 15.08 i nie mam dostępu do poczty. Odpowiem po powrocie.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"OOO\",\r\n  \"confidence\": 98,\r\n  \"short_reason\": \"Automatic out of office message in Polish mentioning vacation and return date.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 2 — Interested:\r\nEmail:\r\n\"Tak, jesteśmy zainteresowani. Możemy umówić się na krótką rozmowę w przyszłym tygodniu? Pozdrawiam, Anna Nowak.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The contact clearly states they are interested and proposes a call.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 3 — NRR:\r\nEmail:\r\n\"Dziękuję za wiadomość, ale w tej chwili nie jesteśmy zainteresowani taką usługą. Proszę nie wysyłać kolejnych ofert.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"NRR\",\r\n  \"confidence\": 97,\r\n  \"short_reason\": \"The contact clearly declines the offer and asks to stop sending offers.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 4 — Left_Company:\r\nEmail:\r\n\"This mailbox is no longer active. Please contact Mariusz Kowalski at m.kowalski@company.com.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Left_Company\",\r\n  \"confidence\": 96,\r\n  \"short_reason\": \"Mailbox is permanently inactive and redirects to another person.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 5 — Spam_Inbound:\r\nEmail:\r\n\"Hi, now's the perfect moment to level up your SEO strategy. Our platform has 249,284+ live pages, Ahrefs DR:77, 300,000+ monthly traffic, permanent do-follow links. Let's make this month a real advantage for your brand.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Spam_Inbound\",\r\n  \"confidence\": 97,\r\n  \"short_reason\": \"Lead replied with their own commercial SEO pitch unrelated to the original campaign.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 6 — other, redirect/deflection:\r\nEmail:\r\n\"Hi, thank you for sending the inquiry. I would like to invite you to visit our website where you can see our range of products. Please submit an inquiry via the website. Our team will contact you to set up a meeting.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 82,\r\n  \"short_reason\": \"Lead acknowledged the message but redirected to their own website and form.\",\r\n  \"language_detected\": \"en\"\r\n}\r\n\r\nExample 7 — other, forwarding only:\r\nEmail:\r\n\"Dzień dobry, załączam do wiadomości mojego managera oraz koleżankę z działu marketingu. Pozdrawiam.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 92,\r\n  \"short_reason\": \"The sender only added other people to the thread without showing direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 8 — other, internal consultation:\r\nEmail:\r\n\"Dziękuję za wiadomość. Skonsultuję temat z osobami odpowiedzialnymi za ten obszar w naszej firmie. Wrócę do Pani z odpowiedzią, gdy otrzymam informację, czy widzimy przestrzeń do rozmów.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender needs internal consultation and has not confirmed current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 9 — other, contact another person:\r\nEmail:\r\n\"Przekażę Pana e-mail do naszego project managera w kopii. On chętnie z Panem porozmawia.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 90,\r\n  \"short_reason\": \"The sender redirects the conversation to another person without directly confirming interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 10 — other, possible future interest:\r\nEmail:\r\n\"Przedyskutujemy Państwa propozycję wewnętrznie i damy znać, jeśli będziemy zainteresowani.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender only mentions a possible future decision, not current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 11 — Interested, explicit direct interest:\r\nEmail:\r\n\"Dziękuję za wiadomość. Jesteśmy zainteresowani rozmową. Proszę przesłać dostępne terminy spotkania.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 96,\r\n  \"short_reason\": \"The sender explicitly confirms interest and asks to schedule a meeting.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 12 — other, manager copied:\r\nEmail:\r\n\"Dzień dobry, załączam do wiadomości mojego managera oraz koleżankę z działu marketingu. Pozdrawiam, Maria.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 93,\r\n  \"short_reason\": \"The sender only copied internal contacts and did not confirm interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 13 — other, passed to sister company:\r\nEmail:\r\n\"Bardzo dziękuję za zainteresowanie i kontakt z nami. Z uwagi na to, że propozycja niekoniecznie jest adresowana dla nas jako pracowników Dirlango, to pozwoliłam sobie przekazać ją jednej z naszych spółek córek. Kasia będzie w bezpośrednim kontakcie albo przekaże mi wiążące informacje po przedyskutowaniu ich z zespołem.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender forwards the topic to another company and waits for internal feedback without current interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 14 — other, consultation with responsible people:\r\nEmail:\r\n\"Dziękuję za wiadomość i przedstawioną propozycję. Skonsultuję temat z osobami odpowiedzialnymi za ten obszar w naszej firmie. Wrócę do Pani z odpowiedzią, gdy otrzymam informację, czy widzimy przestrzeń do rozmów w tej kwestii.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender will consult internally and only later decide whether there is room for discussion.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 15 — other, forwarding to responsible colleague:\r\nEmail:\r\n\"Pani Agnieszko, przekazuję Pani maila koleżance Beacie, która koordynuje u nas tematy związane z ekologią, a którą od razu dodaję do niniejszej odpowiedzi.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 94,\r\n  \"short_reason\": \"The sender only forwards the email to a responsible colleague without showing direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 16 — other, will pass to project manager:\r\nEmail:\r\n\"Dzień dobry, przekażę pana e-mail do naszego project managera w kopii. On chętnie z panem porozmawia. Pozdrawiam.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 91,\r\n  \"short_reason\": \"The sender says they will pass the email to a project manager but does not confirm direct interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 17 — Interested, contact person plus explicit interest:\r\nEmail:\r\n\"Dzień dobry, temat jest dla nas interesujący. Proszę przesłać szczegóły oferty do mnie oraz do naszej managerki Anny, którą dodaję w kopii.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"Interested\",\r\n  \"confidence\": 95,\r\n  \"short_reason\": \"The sender explicitly says the topic is interesting and asks for offer details.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\nExample 18 — other, copied person but no explicit interest:\r\nEmail:\r\n\"Dzień dobry, dodaję do korespondencji Annę, która zajmuje się tym obszarem.\"\r\n\r\nExpected JSON:\r\n{\r\n  \"category\": \"other\",\r\n  \"confidence\": 93,\r\n  \"short_reason\": \"The sender only adds the responsible person without confirming interest.\",\r\n  \"language_detected\": \"pl\"\r\n}\r\n\r\n=============================\r\n6. FINAL BEHAVIOR\r\n=============================\r\n\r\nAlways:\r\n- Detect the language.\r\n- Ignore signatures, footers, old quoted messages, and subject lines.\r\n- Apply the priority rules exactly.\r\n- Be conservative with \"Interested\".\r\n- Return valid JSON only.\r\n\r\nNever:\r\n- Add explanations outside JSON.\r\n- Change the allowed category names.\r\n- Classify based on subject line alone.\r\n- Treat forwarding, CC additions, internal consultation, or future possible interest as \"Interested\".\r\n- Invent data.\r\n- Output markdown.\r\n\r\nNow the user will provide the raw email reply with headers, signature, and possibly quoted messages. Analyze the email and respond ONLY with the JSON object described above."
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "62ca33e4-494a-4f10-b67e-0d9597360af2",
+      "name": "OpenAI - Classify Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1408,
+        464
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ ({\n  model: 'gpt-5-mini',\n  store: true,\n  input: [\n    {\n      role: 'developer',\n      content: $json.classification_instructions\n    },\n    {\n      role: 'user',\n      content: $json.reply_input\n    }\n  ],\n  text: {\n    format: {\n      type: 'json_schema',\n      name: 'lead_intent_classification',\n      strict: true,\n      schema: {\n        type: 'object',\n        properties: {\n          category: {\n            type: 'string',\n            description: 'Intent classification for the lead.',\n            enum: ['OOO', 'Interested', 'NRR', 'Spam_Inbound', 'Left_Company', 'other']\n          },\n          confidence: {\n            type: 'number',\n            description: \"Model's confidence in the classification (0-100).\",\n            minimum: 0,\n            maximum: 100\n          },\n          short_reason: {\n            type: 'string',\n            description: 'Very short explanation (1 sentence max) of why this category was chosen.',\n            minLength: 1,\n            maxLength: 200\n          },\n          language_detected: {\n            type: 'string',\n            description: 'Top-level detected language code for the message.',\n            enum: ['pl', 'en', 'de', 'other']\n          }\n        },\n        required: ['category', 'confidence', 'short_reason', 'language_detected'],\n        additionalProperties: false\n      }\n    }\n  }\n}) }}",
+        "method": "POST",
+        "nodeCredentialType": "openAiApi",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.openai.com/v1/responses"
+      }
+    },
+    {
+      "id": "de9864bc-5e90-4cf3-b50b-3014c94c7cec",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        464
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98efeb59-a4c5-4238-991f-8fedb13fab63",
+              "name": "category",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).category || 'other' }}"
+            },
+            {
+              "id": "6f786671-a9bc-4bca-9e44-7158a5aef07a",
+              "name": "confidence",
+              "type": "number",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).confidence || 0 }}"
+            },
+            {
+              "id": "cebe7746-8b5a-4618-bbea-bdf5a7d5126b",
+              "name": "short_reason",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).short_reason || '' }}"
+            },
+            {
+              "id": "167adc21-009e-45b9-a2be-5dc4da01dcab",
+              "name": "language_detected",
+              "type": "string",
+              "value": "={{ JSON.parse($json.output[1].content[0].text).language_detected || 'other' }}"
+            },
+            {
+              "id": "0c1559e5-a43c-4387-85a7-deedfce5dcf7",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $('Normalize Payload').item.json.workspace_id }}"
+            },
+            {
+              "id": "dde9db84-4455-48a9-ba43-7db3a5d035eb",
+              "name": "lead_id",
+              "type": "string",
+              "value": "={{ $('Normalize Payload').item.json.lead_id }}"
+            },
+            {
+              "id": "2d2b77fb-feb4-4eb6-b0b9-6914be99e2bf",
+              "name": "lead_email",
+              "type": "string",
+              "value": "={{ $('Normalize Payload').item.json.lead_email }}"
+            },
+            {
+              "id": "a1d4bf14-de20-48a4-9ccf-926a8db58e01",
+              "name": "automated_reply",
+              "type": "boolean",
+              "value": "={{ $('Normalize Payload').item.json.automated_reply }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5eaa180b-8045-4b24-872e-5b654cbe1118",
+      "name": "Resolve Bison Tag ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3424,
+        144
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6a755dd9-70cf-4f3d-8113-5fe0fe62b77b",
+              "name": "tag_id",
+              "type": "string",
+              "value": "={{ (($json.data || $json.tags || []).find(t => String(t.name || '').toLowerCase() === String($('Parse Classification').item.json.category || '').toLowerCase()) || {}).id || '' }}"
+            },
+            {
+              "id": "9a5d72e0-117d-48ae-b5c5-0356aaa4928b",
+              "name": "category",
+              "type": "string",
+              "value": "={{ $('Parse Classification').item.json.category }}"
+            },
+            {
+              "id": "f358eb61-e947-4638-aabe-062f6db92414",
+              "name": "lead_id",
+              "type": "string",
+              "value": "={{ $('Normalize Payload').item.json.lead_id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "408e6366-65ee-4fd9-83ba-2a57bee730fb",
+      "name": "Respond - Skipped",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2304,
+        560
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        },
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, action: 'skipped', reason: 'classification_rule_or_nrr', category: $('Parse Classification').item.json.category, automated_reply: $('Parse Classification').item.json.automated_reply } }}"
+      }
+    },
+    {
+      "id": "c5d7fa85-7ddd-4f94-a1e8-884214ba2677",
+      "name": "Respond - Tag Attached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4096,
+        48
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        },
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, action: 'tag_attached', category: $('Parse Classification').item.json.category, confidence: $('Parse Classification').item.json.confidence, short_reason: $('Parse Classification').item.json.short_reason, lead_id: $('Normalize Payload').item.json.lead_id } }}"
+      }
+    },
+    {
+      "id": "ca72c2eb-3fe3-48ab-84a5-78b97b7fc492",
+      "name": "Respond - Tag Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3872,
+        240
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        },
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, action: 'tag_not_found', category: $('Parse Classification').item.json.category, lead_id: $('Normalize Payload').item.json.lead_id } }}"
+      }
+    },
+    {
+      "id": "d06b75c8-0985-4ccf-9ca0-7c8e2f42b115",
+      "name": "Sheets API - config.getWorkspaceConfig",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2976,
+        240
+      ],
+      "notes": "Name kept for compatibility: six nodes address this as $('Sheets API - config.getWorkspaceConfig'). Since 2026-08-17 it is fed by [S] Resolve workspace config (Supabase), not by Sheets.",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6abe6326-bccc-42b8-bae5-ac5ea560d918",
+              "name": "source",
+              "type": "string",
+              "value": "supabase"
+            },
+            {
+              "id": "350d3431-356b-491e-bdfe-61339da64a79",
+              "name": "bison_api_key",
+              "type": "string",
+              "value": "={{ $json.bison_api_key }}"
+            },
+            {
+              "id": "050a9b19-249b-48c9-81b4-c7f9e6a3d15e",
+              "name": "api_key",
+              "type": "string",
+              "value": "={{ $json.bison_api_key }}"
+            },
+            {
+              "id": "1f0c9a77-2d31-4a5e-9d0b-6b5a1e2c4d10",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $json.workspace_id }}"
+            },
+            {
+              "id": "2b4e8c19-77a2-4c63-8f51-9d3e0a6b7c21",
+              "name": "client_name",
+              "type": "string",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "id": "b207351b-f5ce-4349-86d3-29f59ad00d28",
+              "name": "data",
+              "type": "object",
+              "value": "={{ { bison_api_key: $json.bison_api_key, api_key: $json.bison_api_key, workspace_id: $json.workspace_id, client_name: $json.client_name, email_recipients_csv: $json.email_recipients_csv } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2932e13d-fca6-415e-83e9-1063d6699e8d",
+      "name": "Should Process Classification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1856,
+        464
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4f5455f8-2a5b-446e-8d89-ce48509d7837",
+              "leftValue": "={{ (($json.category === 'OOO' && $json.automated_reply === true) || ($json.category !== 'OOO' && $json.automated_reply !== true)) ? 'yes' : 'no' }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "yes"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "55388d23-edcb-41d4-a86a-40aa311e304f",
+      "name": "Stop non-401 Sheets error - config.getWorkspaceConfig",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2752,
+        512
+      ],
+      "parameters": {
+        "errorMessage": "={{ 'Google Sheets failed with non-401 error: ' + JSON.stringify($json) }}"
+      }
+    },
+    {
+      "id": "2c0965f6-f711-4c4b-a4d6-8445859e7bb2",
+      "name": "Tag ID Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3648,
+        144
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "85dbe906-58ee-4743-a3a2-18ff2347c814",
+              "leftValue": "={{ $json.tag_id ? 'yes' : 'no' }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "yes"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b8d8e9ef-654a-4ca9-9f5e-3e0afee0c08f",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        528
+      ],
+      "parameters": {
+        "amount": 15
+      }
+    }
+  ],
+  "connections": {
+    "Bison - Attach Classification Tag": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond - Tag Attached",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Bison - Get Lead Data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Bison - Get Thread Replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Bison - Get Tags List": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve Bison Tag ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Bison - Get Thread Replies": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "New Reply In Interested Thread?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Bison Reply Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Execution Data",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Category Is Not NRR?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Resolve workspace config",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Respond - Skipped",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Execution Data": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Wait",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Fallback API - config.getWorkspaceConfig": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Sheets API - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Google Sheets - config.getWorkspaceConfig": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Sheets API - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "IF Google Sheets 401 - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "IF Google Sheets 401 - config.getWorkspaceConfig": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Fallback API - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Stop non-401 Sheets error - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Normalize Payload",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "New Reply In Interested Thread?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Bison - Forward Reply Notification",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "OpenAI - Classify Email",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "OpenAI - Classify Email": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Parse Classification",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Should Process Classification?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve Bison Tag ID": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Tag ID Exists?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Sheets API - config.getWorkspaceConfig": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Bison - Get Tags List",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Bison - Get Lead Data",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Should Process Classification?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Category Is Not NRR?",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Respond - Skipped",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Tag ID Exists?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Bison - Attach Classification Tag",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Respond - Tag Not Found",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "index": 1,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Resolve workspace config": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Sheets API - config.getWorkspaceConfig",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}
