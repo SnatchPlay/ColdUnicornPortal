@@ -1,0 +1,12 @@
+{
+  "event": {
+    "workspace_id": 999999,
+    "type": "TAG_ATTACHED"
+  },
+  "data": {
+    "taggable_id": 5500126,
+    "tag_name": "Interested",
+    "email": "someone@unmapped-workspace.example"
+  },
+  "_fixture": "Synthetic. workspace_id has no CS PDCA row, so [110] returns nothing and col_6 is undefined — every Bison call then goes out with 'Bearer undefined'. Documents the failure mode that the client_sequencers migration (§5.1) removes."
+}

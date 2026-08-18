@@ -1,0 +1,12 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED"
+  },
+  "data": {
+    "taggable_id": 5500123,
+    "tag_name": "Interested",
+    "email": "ana.kowalski@acme-industrial.pl"
+  },
+  "_fixture": "Synthetic. Happy path: corporate domain absent from the exclude list, address not yet blacklisted. Target: POST /blacklisted-emails 201, POST /blacklisted-domains 201, both ids written back to the client's Leads sheet."
+}

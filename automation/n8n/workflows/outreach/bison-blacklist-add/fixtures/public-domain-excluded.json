@@ -1,0 +1,12 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED"
+  },
+  "data": {
+    "taggable_id": 5500125,
+    "tag_name": "Not Interested",
+    "email": "jan.nowak@gmail.com"
+  },
+  "_fixture": "Synthetic. gmail.com is in the 🤖Emails Exclude List, so the domain limb must stop at 'Domain NOT in exclude list?'. Blacklisting a public mail domain would remove every future contact reachable at it. Note tag_name = 'Not Interested', which also suppresses both sheet writebacks."
+}

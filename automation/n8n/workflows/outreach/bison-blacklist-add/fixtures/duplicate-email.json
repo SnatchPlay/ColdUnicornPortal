@@ -1,0 +1,12 @@
+{
+  "event": {
+    "workspace_id": 900001,
+    "type": "TAG_ATTACHED"
+  },
+  "data": {
+    "taggable_id": 5500124,
+    "tag_name": "PreMQL",
+    "email": "already.listed@acme-industrial.pl"
+  },
+  "_fixture": "Synthetic. THE 63%-OF-RUNS CASE (defect 1). Bison answers POST /blacklisted-emails with 422 {\"message\":\"The email has already been taken.\"}. Today the execution aborts and the domain limb never runs. Target after the B2 fix: the 422 is absorbed, [294] still blacklists the domain, and both writebacks still happen."
+}
