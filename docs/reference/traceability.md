@@ -36,7 +36,7 @@ Legend: **✅** implemented and verified · **⚠️** implemented, diverges fro
 | 10 | Config change recovers parked episodes | `ooo_followups` | `recover_skipped_ooo_followups` | routing editor save | OOO routing editor | — | — | `ooo-invariants.sql` | ✅ |
 | 11 | Cancellation preserves history | `ooo_followups` | `cancel_active_ooo_followup` | — | — | — | ⚠️ sibling `ZZ0ughB302WdDJOf` **deletes** the sheet row | `ooo-invariants.sql` | ⚠️ |
 | 12 | Positive reply cancels the active episode | `ooo_followups`, `leads` | `promote_contact_to_lead` | — | — | — | ⛔ | `ooo-invariants.sql` | ⚠️ |
-| 13 | NRR creates no lead and no `final_outcome` | `replies` | — | — | CRM view | NRR counts | `1hHbU2hYYcsktLUP` (orphan) | `ooo-invariants.sql` | ⚠️ |
+| 13 | NRR creates no lead and no `final_outcome` | `replies` | — | — | CRM view | NRR counts | ⛔ **email NRR is implemented nowhere** — `1hHbU2hYYcsktLUP` is managed but has never executed and is now `deprecated`: the classifier's `Category Is Not NRR?` node suppresses the tag, so the HUB gate can never fire. Owner decided 2026-08-15 not to revive it ([C1](n8n/defect-backlog.md#c1)). The rule still holds *vacuously* for email (no NRR row exists to violate it) and is genuinely exercised on **Aimfox**, where `aimfox-classification` writes all 103 NRR replies | `ooo-invariants.sql` | ⚠️ |
 | 14 | OOO data is internal-only (never `client` role) | `sequencer_contacts`, `ooo_followups` | `private.can_manage_client` | — | — | — | — | `ooo-invariants.sql` (RLS isolation) | ✅ |
 | 15 | `daily_stats.ooo_count` is an outreach event count, not a CRM figure | `daily_stats` | — | `loadDashboard*` | manager/client dashboards | `ooo_count` | `amJdB2eGXxUNyCPY` (orphan) | — | ✅ |
 

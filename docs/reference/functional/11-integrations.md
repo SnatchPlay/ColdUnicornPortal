@@ -183,6 +183,11 @@ Key contract points n8n must respect:
 - **`promote_contact_to_lead` takes a strict whitelist.** `client_id`, `sequencer_id`, `external_id`,
   `qualification`, `won`, timestamps etc. are derived inside the function; a repeat call returns the existing
   lead with `created: false` rather than raising.
+- **`reply_text` is derived, not passed.** The function already reads the origin reply row (contact check,
+  classification gate, `received_at`), so since `20260815b` it copies that reply's `message_text` onto
+  `leads.reply_text` itself. Callers must not send it — the key is not in the whitelist and would raise.
+  The value is frozen at creation: it is the reply that made the lead, matching the sheet's `Mail from lead`,
+  while `replies` stays the authoritative thread.
 
 **Legacy disposition display — REMOVED 2026-07-22.** The old display-only fallback (rows where
 `leads.qualification` was `'OOO'`/`'NRR'` rendered via `deriveContactDisposition`) is gone. The

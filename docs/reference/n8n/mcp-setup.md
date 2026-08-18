@@ -2,6 +2,29 @@
 
 Connects Claude Code (and `pnpm n8n:*`) to the n8n instance.
 
+## ⚠️ There may be a second, unrelated n8n on your MCP list
+
+A hosted **`claude.ai n8n`** connector can appear alongside the server below and answer every
+question confidently — about a **different company**.
+
+Measured 2026-08-15: that connector returned **140 workflows** belonging to Hyra UK (Xero, Airtable,
+hire forms), in project `Hyra DEV <automation@hyrauk.com>`. This project's instance holds **71**.
+The intersection of workflow IDs was **zero**. The same session's `claude.ai Supabase` connector
+listed only `Hyra Master` / `Hyra Main DB` and could not see the portal's project at all.
+
+Nothing in either tool's output says which tenant it is talking about, so a wrong answer looks
+exactly like a right one.
+
+**The rule:**
+
+| Work | Use | Never |
+|---|---|---|
+| n8n — inventory, drift, export, deploy, health | `pnpm n8n:*`, i.e. `N8N_MCP_URL` + `N8N_REST_API_KEY` from `.env.local` | the `claude.ai n8n` connector |
+| Supabase — schema, queries, migrations | `SUPABASE_DB_URL`, or the project-scoped `supabase` server in [`.mcp.json`](../../../.mcp.json) | the `claude.ai Supabase` connector |
+
+If you are unsure which instance a tool is on, ask it for a workflow ID you know exists here
+(e.g. `lBOyL8ZPA3SZSvDW`). A tool that cannot find it is not on this instance.
+
 ## Which MCP
 
 The **official instance-level n8n MCP server**, served by n8n itself at `/mcp-server/http`.

@@ -13,7 +13,8 @@ workflow that contradicts a business rule is a defect in the workflow.**
 | [environments.md](environments.md) | What am I allowed to change, and where? |
 | [security.md](security.md) | What must never be committed; open security findings |
 | [workflow-lifecycle.md](workflow-lifecycle.md) | How do I add, change or import a workflow? |
-| [migration-backlog.md](migration-backlog.md) | Which of the 33 live workflows are handled, and in what order? |
+| [migration-backlog.md](migration-backlog.md) | Which of the live workflows are handled, and in what order? |
+| [defect-backlog.md](defect-backlog.md) | What is broken **right now**? (audit of 2026-08-15) |
 | [ooo-phase-a.md](ooo-phase-a.md) | OOO/NRR dual-write design — **live** on all four workflows |
 | [aimfox-phase-a.md](aimfox-phase-a.md) | LinkedIn dual-write design — phase 0, blocked on two credential moves |
 | [../../../automation/n8n/conventions.md](../../../automation/n8n/conventions.md) | What does an artifact directory look like? |

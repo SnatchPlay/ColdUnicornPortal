@@ -86,7 +86,8 @@ edit to a live flow. The REST `PUT /workflows/{id}` takes raw workflow JSON, so 
 applied onto the exact live graph, node by node.
 
 ```bash
-pnpm n8n:deploy --id <logical-id> --nodes "Node A"              # dry-run: show the param diff
+pnpm n8n:deploy --id <logical-id> --nodes "Node A"               # dry-run: show the param diff
+pnpm n8n:deploy --id <logical-id> --node-settings "Node A"       # dry-run: show the onError/retry diff
 pnpm n8n:deploy --id <logical-id> --add  "New Trigger,New Code"  # dry-run: show nodes/edges to add
 N8N_APPROVED_PRODUCTION_WRITE="<what + why>" \
   pnpm n8n:deploy --id <logical-id> --nodes "Node A" --apply     # write (production is gated)
@@ -98,6 +99,14 @@ How it stays safe (`scripts/n8n/deploy.mjs`, over `scripts/n8n/lib/rest.mjs`):
   node's `parameters`/`typeVersion` from the committed artifact onto the live node; `--add` appends a
   brand-new node plus its outgoing edges. Everything else — every credential, `webhookId`, position,
   and untouched node/edge — is taken verbatim from live.
+- **`--node-settings` moves a node's failure posture**, which is *not* part of `parameters` and so was
+  never carried by `--nodes`. It copies exactly `onError`, `retryOnFail`, `maxTries`,
+  `waitBetweenTries`, `alwaysOutputData` and `executeOnce` — a closed list, because `id`, `webhookId`,
+  `position`, `name` and `credentials` also live at node level and must keep coming from live. A key
+  the artifact does not carry is **deleted** from the live node, so removing `retryOnFail` from the
+  artifact actually disables it rather than silently leaving it on. Verification additionally proves a
+  `--node-settings` node did not move its `parameters`. It is not structural, so it does **not** need
+  `--allow-active` — reserve that for `--add`/`--rewire`.
 - It **never PUTs the committed artifact wholesale**: the artifact is credential-sanitised, so a full
   push would strip auth from every node. The allowlist is mandatory; there is no "sync everything".
 - Dry-run by default; the actual PUT needs **both** `--apply` and `N8N_APPROVED_PRODUCTION_WRITE`

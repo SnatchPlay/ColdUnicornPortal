@@ -37,7 +37,7 @@ into a column read as a fact. This is the single most-violated rule in this proc
 | Event | Source | Effect |
 |---|---|---|
 | Reply classified `OOO` | n8n reply classification | open or refresh the one active episode |
-| Reply classified `NRR` | n8n | record the reply; **no lead, no episode, no `final_outcome`** |
+| Reply classified `NRR` | n8n | record the reply; **no lead, no episode, no `final_outcome`**. ⚠️ **LinkedIn only.** On the email channel nothing is recorded: the Bison classifier suppresses the NRR tag before attaching it, so no child runs and no `replies` row is written. Owner decided 2026-08-15 not to revive that path — [C1](../../n8n/defect-backlog.md#c1) |
 | Reply classified `Interested` | n8n | create/return the CRM lead **and** cancel the active episode |
 | OOO tag removed / correction | Bison `TAG_REMOVED` | cancel the active episode — never delete |
 | Routing configured in the portal | manager saves a routing rule | `recover_skipped_ooo_followups` pulls parked episodes back to `pending` |
@@ -147,7 +147,7 @@ outreach and CRM ([04-metrics-catalog](../../functional/04-metrics-catalog.md), 
 | `ooo-detect-and-log` | `O4DqMEu1Z9LcxikE` | OOO tag attached → detect return date, record | **managed**, contradicts this document — see below |
 | — | `ZZ0ughB302WdDJOf` | OOO tag removed → delete sheet row | orphan; must become `cancel_active_ooo_followup` |
 | — | `zaPkpSAuvjibUUDU` | scheduled re-enrolment from the sheet | orphan; must become the `pending` → `claim` → `submit` worker |
-| — | `1hHbU2hYYcsktLUP` | NRR → increment a Sheets counter | orphan |
+| `nrr-daily-stats` | `1hHbU2hYYcsktLUP` | NRR → increment a Sheets counter | **managed but never executed; `deprecated` 2026-08-15.** Unreachable by design — the classifier suppresses the NRR tag, so the HUB gate cannot fire. Not being revived ([C1](../../n8n/defect-backlog.md#c1)) |
 | — | `xPzdtWQiY3lGtqI1` | HUB dispatcher | orphan |
 
 ### Where the implementation actually is (as of 2026-07-21)

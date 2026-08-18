@@ -243,6 +243,55 @@ Registered as a `knownViolation` against
 review date of **2026-11-30**. `pnpm n8n:validate` raises `unauthenticated-webhook` on both
 artifacts; that warning is the reminder — do not silence it.
 
+### 12. The same OpenAI key pattern in `Bison Replies Classification` — **key removed 2026-08-17; ROTATION STILL OWED**
+
+Found 2026-08-15 while diagnosing [C1](defect-backlog.md#c1). Finding 8 fixed this in
+`aimfox-classification` on 2026-07-22 — and its **email-channel sibling was missed**.
+
+`Bison Replies Classification - Sheets Primary 401 Fallback` (`XdTMd1KJX0cRmF9u`, **ACTIVE**, 2242
+executions in 16 days, orphan) authenticates both OpenAI calls with a literal `Bearer sk-proj-…`
+typed into an `Authorization` header parameter. Running this repository's scanner against the live
+graph:
+
+```
+ERROR   secret/openai-key         ×2
+ERROR   pin-data
+ERROR   credential-reference
+WARNING unauthenticated-webhook
+```
+
+Three consequences, beyond the obvious one: the key is visible to anyone with UI access and appears
+in every export and in n8n's version history; it cannot be rotated centrally, only node by node; and
+`pnpm n8n:export` refuses to write an artifact that trips the scanner, so this workflow **cannot be
+brought under repository control** — which is also why it is still unbound from the failure recorder
+in [E1](defect-backlog.md#e1). `pinData` is committed on it as well, the same problem for personal
+data rather than secrets.
+
+**Removed from the graph 2026-08-17.** The earlier claim that an agent could not do this was wrong,
+and worth correcting because the same reasoning was used for findings 7 and 8: attaching an
+*existing* credential needs no secret and no credential API. `pnpm n8n:deploy --credentials-from
+"Node=<logical-id>:Donor Node"` copies a credential block off a live node in another managed
+workflow, and `aimfox-classification`'s `OpenAI - Classify Email` was an exact donor — same node
+type (`n8n-nodes-base.httpRequest`), same `openAiApi` credential. What an agent cannot do is create a
+credential or supply a new secret; reusing one already on the instance is different.
+
+So: the node now uses `authentication: predefinedCredentialType` + `nodeCredentialType: openAiApi`
+with the `OpenAi account` credential, the literal key is gone from the graph, and re-scanning the
+live workflow no longer reports `secret/openai-key`. Verified by execution rather than by assertion —
+executions 77384/77386/77388 immediately after the deploy show `openai=ok` and a real category.
+
+That also unblocked adoption: the workflow is now managed as
+[`outreach/bison-replies-classification`](../../../automation/n8n/workflows/outreach/bison-replies-classification/README.md)
+and bound to the failure recorder.
+
+⚠️ **Rotation is still owed and is the important half.** Assume the key is compromised — it sat in
+plaintext for an unknown period, is in n8n's version history, and stays billable until rotated in
+OpenAI. Moving it out of the graph does not un-leak it. Owner action.
+
+`pinData` is still on the instance (the export sanitiser strips it, so it is not in the artifact).
+
+Do not paste this workflow's node parameters or execution data into a document, an issue or a chat.
+
 ## Reviewing a workflow
 
 - [ ] `pnpm n8n:validate` passes
