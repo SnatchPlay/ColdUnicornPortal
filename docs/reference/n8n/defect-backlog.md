@@ -719,6 +719,25 @@ action.
 blocker turned out to be softer than recorded: attaching an *existing* credential needs no credential
 API, only `--credentials-from` pointed at a donor node of the same type in another managed workflow.
 
+**Update 2026-08-18: still 11, and now we know what they have in common.** Re-measured against the
+instance, cross-referenced with `registry.yaml`: **every single unbound workflow is unmanaged**, and
+every managed one is bound. E1 is therefore no longer an observability task with a settings write at
+the end of it — it is entirely blocked on adoption, because `n8n:deploy --settings` cannot target a
+workflow that has no artifact.
+
+Of the 11, only **three** are actually worth adopting:
+
+| workflow | id | why |
+|---|---|---|
+| `[HUB] Bison Replies Dispatcher` | `xPzdtWQiY3lGtqI1` | **851 runs/week** — the entry point of the whole email funnel, and nothing hears it fail |
+| `[child-5]` unblacklist | `FZSFz5bcgigUneQZ` | in scope for [Wave 5.2](#f) |
+| `[child-6]` MQL removal | `wJZbg0cRsdF58ylE` | in scope for [Wave 5.3](#f) |
+
+The other eight are correctly excluded, not overlooked: six are the CRM dispatcher family
+(**parked by decision**, see [B3](#b3)), `Winnr Sync - Error Handler` *is* an error handler, and
+`Winnr Daily Sync` is bound already — to the Winnr handler rather than to ours, which is a
+deliberate per-owner routing, not a gap.
+
 **Still unbound: 11, none of them managed.** Every remaining one is an orphan, and `n8n:deploy`
 cannot target a workflow that has no committed artifact — each needs importing first
 ([workflow-lifecycle.md](workflow-lifecycle.md) Option A), which is a manifest and a README apiece,
