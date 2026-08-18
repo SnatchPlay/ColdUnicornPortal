@@ -1,0 +1,73 @@
+schemaVersion: 1
+
+id: error-notification-slack
+name: "Error Notification"
+domain: ops
+owner: automation
+lifecycle: managed
+status: active
+criticality: medium          # it does not process data; it is how a failure becomes visible
+
+businessProcess:
+  - docs/reference/n8n/README.md
+
+architectureDecisions:
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+triggers:
+  - type: error
+    detail: "n8n Error Trigger — runs when a workflow that names it as errorWorkflow fails"
+
+reads:
+  external: []
+  tables: []
+
+writes:
+  external:
+    - "Slack · #coldunicorn-errors — one message per failed execution"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+credentials:
+  - alias: "Slack account"
+    type: slackApi
+    usedBy: "Send a message"
+
+transition:
+  phase: C                   # nothing to migrate; it never touched Sheets
+  phaseState: n/a
+  authoritativeSource: n/a
+  notes: >-
+    Adopted 2026-08-18 at the owner's request, together with turning on `availableInMCP`.
+
+    Getting to it exposed a real circle in the tooling: `availableInMCP: false` hides a workflow from
+    every MCP-backed script here, including `n8n:export` — so it could not be exported, so it had no
+    artifact, so `n8n:deploy` could not target it to flip the flag. `n8n:export` now falls back to the
+    REST API, which has no such gate and already backs the deploy path. Without that, a workflow in
+    this state is permanently unreachable from the repository.
+
+    The Slack node needed fixing before it was worth binding to anything: it was a stub that posted
+    the literal string "Test", with messageType "block" and no blocks configured. It now sends the
+    workflow name, the node that failed, the error message (truncated to 800 chars) and the execution
+    URL, all read from the Error Trigger payload.
+
+    ONE ERROR WORKFLOW PER WORKFLOW. n8n's `settings.errorWorkflow` is a single id, so a workflow
+    cannot both record and notify by binding two. The estate resolves this by keeping
+    `automation-failure-recorder` bound everywhere and giving IT the Slack step — see that workflow's
+    README. This one stays as the standalone notifier and the rollback shape.
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "n8n executes an error workflow once per failed execution"
+  notes: >-
+    A retried execution that fails again is a new execution and produces a second message, which is
+    correct — two failures, two alerts.
+
+retryPolicy:
+  notes: >-
+    None, deliberately. If Slack is down the alert is lost; the durable record is
+    `integration_sync_runs`, written by automation-failure-recorder, not this workflow.
+
+knownViolations: []

@@ -23,10 +23,38 @@ wrong. A failing workflow should become a row.
 ## Flow
 
 ```
-Error Trigger ─ Normalize Failure ─ Record Failed Run
-                (derive provider     (UPSERT integration_sync_runs
-                 from workflow name)   on n8n_execution_id)
+Error Trigger ─ Normalize Failure ─┬─ Record Failed Run   (UPSERT integration_sync_runs,
+                (derive provider    │                      keyed on n8n_execution_id)
+                 from workflow name)│
+                                    └─ Notify Slack       (#coldunicorn-errors)
 ```
+
+**Both limbs hang off `Normalize Failure`, not off each other**, and both carry
+`onError: continueRegularOutput`. That is deliberate and it is the whole design:
+
+- the alert must not depend on the database write succeeding;
+- the row must not depend on Slack being up.
+
+Under `executionOrder: v1` the lower Y runs first, so `Record Failed Run` goes before `Notify Slack`:
+the durable record is the thing that cannot be recreated later, so it goes first.
+
+The trade, stated plainly: with `onError` on both, **this workflow's own failures now report success**.
+A broken Postgres credential here would stop rows appearing and nothing would say so. The signal to
+watch is therefore the row count, not the execution list —
+`select count(*) from integration_sync_runs where sync_type = 'workflow_failure'` should keep pace
+with `pnpm n8n:health`.
+
+## Why the Slack step lives here and not in `error-notification-slack`
+
+There is a second error workflow, [`error-notification-slack`](../error-notification-slack/README.md)
+(`4jIUZMYNgKtb9fmi`), whose whole job is the Slack message. It is not bound to anything.
+
+**n8n allows exactly one `errorWorkflow` per workflow** — `settings.errorWorkflow` is a single id, not
+a list. Binding the notifier would have meant unbinding the recorder on all 21 workflows that point
+here, trading a durable, queryable record for a message that scrolls away. Moving the Slack node in
+instead cost one deploy, changed no binding, and turned alerting on for every bound workflow at once.
+
+`error-notification-slack` stays as the standalone notifier and the rollback shape.
 
 ## What it records
 
