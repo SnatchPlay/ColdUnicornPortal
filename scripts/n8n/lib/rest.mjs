@@ -136,3 +136,43 @@ export function activateWorkflow(id) {
 export function deactivateWorkflow(id) {
   return rest("POST", `/workflows/${id}/deactivate`, undefined);
 }
+
+/** Walk a cursor-paginated collection endpoint to exhaustion, or until `stop(page)` says enough. */
+async function paginate(path, params = {}, stop = () => false) {
+  const rows = [];
+  let cursor;
+  // Bounded so a server that keeps handing back a cursor cannot spin forever.
+  for (let page = 0; page < 200; page += 1) {
+    const query = new URLSearchParams({ limit: "250", ...params });
+    if (cursor) query.set("cursor", cursor);
+    const body = await rest("GET", `${path}?${query}`);
+    const batch = body.data ?? [];
+    rows.push(...batch);
+    cursor = body.nextCursor;
+    if (!cursor || stop(batch)) break;
+  }
+  return rows;
+}
+
+/**
+ * Every workflow the key can see — INCLUDING archived ones.
+ *
+ * This is deliberately not `lib/mcp.mjs`'s `listWorkflows`. The MCP `search_workflows` tool filters
+ * archived workflows out, so the inventory reported 51 where the instance holds 71 (measured
+ * 2026-08-15) and twenty workflows were invisible to every repository tool.
+ */
+export function listWorkflows() {
+  return paginate("/workflows", { excludePinnedData: "true" });
+}
+
+/**
+ * Executions, newest first, back to `startedAfter` (ISO 8601). The public API has no server-side
+ * date filter for this collection, so pagination stops on the first page that reaches back past the
+ * boundary and the caller filters the tail.
+ *
+ * The instance prunes history — roughly 16 days as measured on 2026-08-15 — so an older boundary
+ * silently returns less than asked for. Report the oldest row actually seen rather than assuming.
+ */
+export function listExecutions(startedAfter) {
+  return paginate("/executions", {}, (batch) => batch.some((row) => row.startedAt < startedAfter));
+}

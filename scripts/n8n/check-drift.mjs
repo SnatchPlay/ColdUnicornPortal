@@ -21,6 +21,38 @@ function arg(name) {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
+// Workflow-level settings live outside `nodes`, so without this block a UI edit that unbinds the
+// failure recorder or flips the timezone reads as "no drift" — the same class of blind spot as the
+// node-level one below, one level up. Measured 2026-08-15: SEVEN of the
+// 25 managed artifacts were already stale this way. The instance had `errorWorkflow` bound and the
+// repository did not know, which is exactly the state E1 is trying to establish and keep.
+//
+// A closed list, like every other allowlist here, so a future n8n release adding a settings key does
+// not light up every workflow at once. Each entry earns its place by what its silent change costs.
+//
+// `availableInMCP` is deliberately NOT here, and the reason is worth stating because it looks like an
+// omission. sanitize() strips it from the canonical form as an instance concern, so no artifact can
+// ever carry it — comparing it would report drift on every workflow that had it set, forever. It is
+// held true by other means: deploy.mjs forces `availableInMCP: true` into every PUT, and when it is
+// false the MCP tools refuse outright ("Workflow is not available in MCP"), which is a louder signal
+// than a drift line. n8n:export falls back to REST for exactly that case.
+const WATCHED_SETTINGS = [
+  "errorWorkflow", // where failures are reported — unset means nobody hears them (E1)
+  "executionOrder", // "v1" is what makes fan-out run top-to-bottom by Y; branch order depends on it
+  "timezone", // every cron and every date expression in the workflow
+  "callerPolicy", // who is allowed to call a sub-workflow
+  "executionTimeout",
+  "saveDataErrorExecution",
+  "saveDataSuccessExecution",
+  "saveExecutionProgress",
+  "saveManualExecutions",
+];
+
+/** `""` and "key absent" both mean "not set" in the n8n UI; don't report that pair as a change. */
+function normalizeSetting(value) {
+  return value === "" || value === undefined ? null : value;
+}
+
 /** Compare two canonical workflows and describe the difference in reviewable terms. */
 function describeDrift(local, remote) {
   const differences = [];
@@ -45,10 +77,27 @@ function describeDrift(local, remote) {
     if (localNode.type !== remoteNode.type || localNode.typeVersion !== remoteNode.typeVersion) {
       differences.push(`node type/version changed: "${name}"`);
     }
+    // Failure posture is not part of `parameters`, so without this a UI edit removing
+    // `onError: continueRegularOutput` from a node reads as "no drift" — while changing whether a
+    // Sheets error costs one row or aborts the Supabase branch behind it. `pnpm n8n:deploy
+    // --node-settings` can move these, so CI has to be able to see them move.
+    for (const key of ["onError", "retryOnFail", "maxTries", "waitBetweenTries", "alwaysOutputData", "executeOnce"]) {
+      if (JSON.stringify(localNode[key] ?? null) === JSON.stringify(remoteNode[key] ?? null)) continue;
+      const show = (value) => (value === undefined ? "(unset)" : JSON.stringify(value));
+      differences.push(`node ${key} changed: "${name}" ${show(localNode[key])} → ${show(remoteNode[key])}`);
+    }
   }
 
   if (JSON.stringify(local.connections) !== JSON.stringify(remote.connections)) {
     differences.push("connections changed");
+  }
+
+  for (const key of WATCHED_SETTINGS) {
+    const localValue = normalizeSetting((local.settings ?? {})[key]);
+    const remoteValue = normalizeSetting((remote.settings ?? {})[key]);
+    if (JSON.stringify(localValue) === JSON.stringify(remoteValue)) continue;
+    const show = (value) => (value === null ? "(unset)" : JSON.stringify(value));
+    differences.push(`settings.${key} changed: ${show(localValue)} → ${show(remoteValue)}`);
   }
   return differences;
 }
