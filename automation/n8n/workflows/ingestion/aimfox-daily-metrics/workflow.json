@@ -8,7 +8,7 @@
       "typeVersion": 4.2,
       "position": [
         440,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -33,7 +33,7 @@
       "typeVersion": 4.2,
       "position": [
         240,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -58,7 +58,7 @@
       "typeVersion": 2.6,
       "position": [
         -200,
-        900
+        -592
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -75,7 +75,7 @@
       "typeVersion": 2,
       "position": [
         1840,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "parameters": {
@@ -89,7 +89,7 @@
       "typeVersion": 4.2,
       "position": [
         1240,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -114,7 +114,7 @@
       "typeVersion": 4.2,
       "position": [
         1440,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -139,7 +139,7 @@
       "typeVersion": 2,
       "position": [
         1640,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "parameters": {
@@ -153,7 +153,7 @@
       "typeVersion": 4.2,
       "position": [
         840,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -178,7 +178,7 @@
       "typeVersion": 4.2,
       "position": [
         640,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -220,7 +220,7 @@
       "typeVersion": 3,
       "position": [
         20,
-        900
+        -592
       ],
       "parameters": {
         "batchSize": 1,
@@ -234,7 +234,7 @@
       "typeVersion": 1,
       "position": [
         1040,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -250,7 +250,7 @@
       "typeVersion": 2.6,
       "position": [
         2040,
-        1020
+        -472
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -762,6 +762,8 @@
         2400,
         -176
       ],
+      "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -1032,6 +1034,8 @@
         2848,
         -176
       ],
+      "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -1302,6 +1306,8 @@
         3296,
         -176
       ],
+      "notes": "Branch-L terminal write. onError so a Sheets failure cannot fail the run after the Supabase upsert has already committed (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,

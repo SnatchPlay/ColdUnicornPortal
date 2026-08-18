@@ -192,6 +192,8 @@
         1248,
         -112
       ],
+      "notes": "Branch-L terminal. onError so a Sheets/notification failure cannot fail the run after branch S has already written through the RPCs (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -529,7 +531,7 @@
       "typeVersion": 4.4,
       "position": [
         400,
-        500
+        -328
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -553,7 +555,7 @@
       "typeVersion": 2.6,
       "position": [
         1200,
-        500
+        -328
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -571,7 +573,7 @@
       "typeVersion": 2.6,
       "position": [
         1000,
-        500
+        -328
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -589,7 +591,7 @@
       "typeVersion": 2.6,
       "position": [
         800,
-        500
+        -328
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -607,7 +609,7 @@
       "typeVersion": 2.6,
       "position": [
         600,
-        500
+        -328
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -928,6 +930,8 @@
         3248,
         -112
       ],
+      "notes": "Branch-L terminal. onError so a Sheets/notification failure cannot fail the run after branch S has already written through the RPCs (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "authentication": "genericCredentialType",
         "bodyParameters": {

@@ -9,7 +9,7 @@
       "typeVersion": 2.1,
       "position": [
         1360,
-        208
+        480
       ],
       "parameters": {
         "builtInTools": {},
@@ -43,7 +43,7 @@
       "typeVersion": 4.4,
       "position": [
         688,
-        208
+        480
       ],
       "parameters": {
         "headerParameters": {
@@ -66,7 +66,7 @@
       "typeVersion": 4.4,
       "position": [
         912,
-        208
+        480
       ],
       "parameters": {
         "headerParameters": {
@@ -89,7 +89,7 @@
       "typeVersion": 4.7,
       "position": [
         464,
-        208
+        480
       ],
       "retryOnFail": true,
       "parameters": {
@@ -123,7 +123,7 @@
       "typeVersion": 3.4,
       "position": [
         1136,
-        208
+        480
       ],
       "parameters": {
         "assignments": {
@@ -146,8 +146,9 @@
       "typeVersion": 4.7,
       "position": [
         1712,
-        208
+        480
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -256,7 +257,7 @@
       "typeVersion": 4.4,
       "position": [
         688,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -280,7 +281,7 @@
       "typeVersion": 4.4,
       "position": [
         912,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -304,7 +305,7 @@
       "typeVersion": 2.1,
       "position": [
         1360,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -339,7 +340,7 @@
       "typeVersion": 3.4,
       "position": [
         1136,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -363,7 +364,7 @@
       "typeVersion": 2.6,
       "position": [
         2032,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -381,7 +382,7 @@
       "typeVersion": 2.6,
       "position": [
         464,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -399,7 +400,7 @@
       "typeVersion": 2.6,
       "position": [
         1808,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -417,7 +418,7 @@
       "typeVersion": 2.6,
       "position": [
         1584,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
