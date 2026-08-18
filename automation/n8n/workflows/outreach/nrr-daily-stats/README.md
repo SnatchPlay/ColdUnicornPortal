@@ -3,7 +3,27 @@
 **Logical ID:** `nrr-daily-stats` · **Domain:** `outreach` · **Criticality:** low
 **Remote (production):** `1hHbU2hYYcsktLUP` — `[child-2] TAG_ATTACHED · NRR · Daily stats`
 **Business process:** [OOO follow-ups (and NRR)](../../../../../docs/reference/processes/outreach/ooo-followups.md)
-**Phase:** A · dual-write, live since 2026-07-21 ([ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md))
+**Phase:** A · **unreachable** — see the banner below ([ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md))
+
+> ## ⚠️ This workflow has never run, and by decision it never will
+>
+> **Status `deprecated` since 2026-08-15.** It is not broken — it is unreachable. `Bison Replies
+> Classification` (`XdTMd1KJX0cRmF9u`) contains an IF node `Category Is Not NRR?` whose false branch
+> goes to `Respond - Skipped`, so an NRR classification never reaches the tag-attach call. With no
+> `TAG_ATTACHED` + `NRR` webhook, the HUB's `fire_child_2` gate can never be true.
+>
+> Proven twice: 0 executions in 16 days, and the 900 most recent HUB executions carry only
+> `OOO` / `Interested` / `preMQL` tags. The header below said "dual-write, live since 2026-07-21";
+> that was never true, and a workflow with zero executions has no dual-write to speak of.
+>
+> **The owner decided on 2026-08-15 not to revive the email NRR path.** The suppression stays. This
+> directory is kept as the record of what the NRR contract was — reviving it later is a one-node
+> change in the classifier — but nothing should count on it running. For the email channel, NRR is
+> recorded in no store at all; all 103 `classification='NRR'` replies in Supabase are **Aimfox**,
+> written by `aimfox-classification`, which does not route through the Bison HUB.
+>
+> Everything below this banner describes the design as built. Read it as history.
+> Defect [C1](../../../../../docs/reference/n8n/defect-backlog.md#c1).
 
 ## Business purpose
 

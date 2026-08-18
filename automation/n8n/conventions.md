@@ -28,7 +28,18 @@ Domains follow the business, not the vendor: `outreach`, `crm`, `ingestion`, `op
 
 ## `workflow.json`
 
-**Generated. Never hand-edit.** Produced only by `pnpm n8n:export`, which sanitizes and normalizes.
+**Generated. Never hand-edit — with exactly one exception.** Produced by `pnpm n8n:export`, which
+sanitizes and normalizes.
+
+The exception is [workflow-lifecycle.md](../../docs/reference/n8n/workflow-lifecycle.md) Option B
+step 4: `pnpm n8n:deploy` reads the change it is going to push **from the artifact**, so a deploy
+begins by editing the artifact and ends by re-exporting it. Outside that flow — and especially after
+a remote change — the artifact is written by `n8n:export` and nothing else, or the repository stops
+being the record of what runs.
+
+When you do edit it by hand, keep the normal form: keys sorted recursively, nodes sorted by name,
+2-space, trailing newline. `pnpm n8n:validate` enforces this as `artifact/not-normalized`, so a
+misplaced key fails the build rather than landing as diff noise.
 
 Removed on export: `credentials`, `pinData`, `staticData`, `webhookId`, `versionId`,
 `activeVersionId`, `active`, `activeVersion`, `canExecute`, `parentFolderId`, `triggerCount`,
