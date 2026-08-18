@@ -2,6 +2,132 @@
   "name": "Add OOO Leads",
   "nodes": [
     {
+      "id": "a1f0c2d4-0006-4a10-9c31-0b1e5f7a9006",
+      "name": "[S] Bison: attach leads to campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1632,
+        -48
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.api_key }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ lead_ids: $json.lead_ids }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://go.gheads.com/api/campaigns/{{ $json.campaign_id }}/leads/attach-leads"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0004-4a10-9c31-0b1e5f7a9004",
+      "name": "[S] Claim episode",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1216,
+        -48
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [$json.followup_id] }}"
+        },
+        "query": "-- One claim per episode. claim_ooo_followup is the concurrency guard: it returns NULL when the row\n-- was already taken, and a NULL composite makes every join below fail, so the item simply produces no\n-- output row. That is the filter -- no Filter node, no SKIP LOCKED, no race.\n-- MATERIALIZED so the volatile call cannot be evaluated more than once.\nwith c as materialized (select public.claim_ooo_followup($1::uuid) as f)\nselect (c.f).id::text           as followup_id,\n       (c.f).attempt_count      as attempt_count,\n       sc.external_contact_id   as bison_lead_id,\n       camp.external_id         as bison_campaign_id,\n       cs.external_workspace_id as workspace_id,\n       cs.api_key               as api_key\n  from c\n  join public.sequencer_contacts sc on sc.id = (c.f).sequencer_contact_id\n  join public.client_sequencers  cs on cs.id = sc.client_sequencer_id\n  join public.campaigns        camp on camp.id = (c.f).target_campaign_id"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0002-4a10-9c31-0b1e5f7a9002",
+      "name": "[S] Expire stale",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1008,
+        -160
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.stale_days)] }}"
+        },
+        "query": "-- An OOO reply means \"I am back on <date>\". A follow-up sent long after that date is not a late\n-- follow-up, it is a cold email with a false premise. Expire through the RPC, never with raw DML.\n-- 'stale' was added by 20260815c; recover_skipped_ooo_followups deliberately does NOT resurrect it.\nselect count(*)::int as expired\n  from (\n    select public.skip_ooo_followup(f.id, 'stale')\n      from public.ooo_followups f\n     where f.status = 'pending'\n       and f.scheduled_for < current_date - ($1::int * interval '1 day')\n  ) s"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0005-4a10-9c31-0b1e5f7a9005",
+      "name": "[S] Group by campaign",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -48
+      ],
+      "parameters": {
+        "jsCode": "// One HTTP request per (workspace, campaign) -- the attach endpoint takes a campaign and a list of\n// lead ids, while claim/mark are per episode. followup_ids travels alongside so the marking nodes can\n// address each episode individually after the call.\n//\n// lead_ids is deduplicated. Branch L did not: execution 76265 posted 557756 three times and 573330\n// three times in a single request (defect B5).\nconst groups = new Map();\nfor (const item of $input.all()) {\n  const j = item.json;\n  const key = j.workspace_id + '::' + j.bison_campaign_id;\n  if (!groups.has(key)) {\n    groups.set(key, {\n      workspace_id: j.workspace_id,\n      campaign_id: j.bison_campaign_id,\n      api_key: j.api_key,\n      lead_ids: [],\n      followup_ids: [],\n    });\n  }\n  const g = groups.get(key);\n  const leadId = Number(j.bison_lead_id);\n  if (!g.lead_ids.includes(leadId)) g.lead_ids.push(leadId);\n  g.followup_ids.push(j.followup_id);\n}\nreturn [...groups.values()].map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0008-4a10-9c31-0b1e5f7a9008",
+      "name": "[S] mark_ooo_failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1840,
+        64
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ ['{' + $('[S] Group by campaign').item.json.followup_ids.join(',') + '}', String($json.error?.message ?? $json.error ?? 'attach failed').slice(0, 500)] }}"
+        },
+        "query": "-- Same per-episode rule on the failure limb, carrying the HTTP error into last_error so the reason is\n-- readable in SQL rather than only in the n8n execution list. 'failed' is re-claimable by design.\nselect count(*)::int as marked\n  from (select public.mark_ooo_failed(t.id, $2) from unnest($1::uuid[]) as t(id)) s"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0007-4a10-9c31-0b1e5f7a9007",
+      "name": "[S] mark_ooo_submitted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1840,
+        -160
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ ['{' + $('[S] Group by campaign').item.json.followup_ids.join(',') + '}'] }}"
+        },
+        "query": "-- The attach endpoint is per-campaign, the state machine is per-episode: mark each id in the group.\n-- mark_ooo_submitted requires status='processing' and raises otherwise, so a replay cannot double-mark.\n-- Acceptance is NOT proof of campaign membership (the RPC's own comment) -- confirmation is separate.\nselect count(*)::int as marked\n  from (select public.mark_ooo_submitted(t.id) from unnest($1::uuid[]) as t(id)) s"
+      }
+    },
+    {
+      "id": "a1f0c2d4-0003-4a10-9c31-0b1e5f7a9003",
+      "name": "[S] Select due episodes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1008,
+        -48
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [String($json.stale_days)] }}"
+        },
+        "query": "-- Episodes that are due AND still recent enough to be worth sending. NO LIMIT: the run takes the\n-- whole due set. A cap of 100/run was tried first and removed on 2026-08-15 once the arrival rate\n-- was measured at 115-130 episodes on a working day - a cap below the inflow does not pace the\n-- worker, it guarantees the backlog grows.\n-- Catch-up by construction: \"<= current_date\", never \"= today\", so a missed run is not a lost cohort\n-- (branch L's own sticky note records that bug). The lower bound is the staleness cut: anything older\n-- was expired by [S] Expire stale in the same run, so this predicate and that one must stay in step.\n-- Inner-joining campaigns drops episodes whose routing has not resolved; they stay 'pending' and are\n-- picked up once a routing rule exists (recover_skipped_ooo_followups covers the parked ones).\nselect f.id::text               as followup_id,\n       sc.external_contact_id   as bison_lead_id,\n       camp.external_id         as bison_campaign_id,\n       cs.external_workspace_id as workspace_id,\n       f.routing_key            as routing_key\n  from public.ooo_followups f\n  join public.sequencer_contacts sc on sc.id = f.sequencer_contact_id\n  join public.client_sequencers  cs on cs.id = sc.client_sequencer_id and cs.enabled\n  join public.campaigns        camp on camp.id = f.target_campaign_id\n where f.status = 'pending'\n   and f.scheduled_for <= current_date\n   and f.scheduled_for >= current_date - ($1::int * interval '1 day')\n   -- Client isolation, enforced here as well as in the routing data. Found on the first controlled\n   -- run (2026-08-15): all three of FortumEnergia's routing rows pointed at GIC's identically named\n   -- \"OOO automation | *\" campaigns, so 95 episodes would have enrolled one client's contacts into\n   -- another client's campaign. Only Bison's 403 stopped it, and only because the api_key belongs to\n   -- the contact's workspace. client_ooo_routing has no constraint tying campaign to client, so this\n   -- predicate is the worker refusing to be the vector while that is fixed.\n   and camp.client_id = cs.client_id\n   and sc.external_contact_id is not null\n   and cs.api_key is not null\n order by f.scheduled_for, f.id"
+      }
+    },
+    {
       "id": "44f1bbdd-8937-450e-8d02-24b348233121",
       "name": "[S] SHADOW · record intended enrolment",
       "type": "n8n-nodes-base.postgres",
@@ -20,6 +146,29 @@
       }
     },
     {
+      "id": "a1f0c2d4-0001-4a10-9c31-0b1e5f7a9001",
+      "name": "[S] Worker config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        -48
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "stale-days",
+              "name": "stale_days",
+              "type": "number",
+              "value": 14
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "7a28c37e-d595-4f37-b079-ac5ee1c867c1",
       "name": "Attach leads to campaign1",
       "type": "n8n-nodes-base.httpRequest",
@@ -28,6 +177,7 @@
         2048,
         256
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -306,7 +456,7 @@
         [
           {
             "index": 0,
-            "node": "Get OOO leads1",
+            "node": "[S] Worker config",
             "type": "main"
           },
           {
@@ -316,11 +466,79 @@
           }
         ]
       ]
+    },
+    "[S] Bison: attach leads to campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] mark_ooo_submitted",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[S] mark_ooo_failed",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Claim episode": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Group by campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Group by campaign": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: attach leads to campaign",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Select due episodes": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Claim episode",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Worker config": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Expire stale",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Select due episodes",
+            "type": "main"
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "binaryMode": "separate",
     "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1",
     "timeSavedMode": "fixed"
   }
