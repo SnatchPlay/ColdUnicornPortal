@@ -31,7 +31,7 @@ reads:
     - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps — called TWICE per lead, once per branch, each on its own credential (branch L: CS PDCA col_6; branch S: client_sequencers.api_key via [S0])"
     - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List — branch L only"
     - "Snov.io · local list + global profile lookup — called once per branch (double cost, deliberate — ADR-0017 §1a)"
-    - "Lusha · POST /v2/person (fallback phone) — called once per branch (double cost, deliberate)"
+    - "Lusha · POST /v2/person (fallback phone) — branch S ONLY since 2026-08-18; branch L's [181] is disabled"
     - "OpenAI · gpt-4o reply analysis — called once per branch (double cost, deliberate)"
 
 writes:
@@ -60,7 +60,7 @@ credentials:
     usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes — branch L only"
   - alias: "Lusha"
     type: httpHeaderAuth
-    usedBy: "[181] Lusha: POST /v2/person (branch L) and [S] Lusha: POST /v2/person (branch S) — same credential, two independent calls"
+    usedBy: "[S] Lusha: POST /v2/person (branch S). Branch L's [181] uses the same credential but is DISABLED since 2026-08-18 — see transition.notes"
   - alias: "UniTalk"
     type: httpHeaderAuth
     usedBy: "HTTP Request (notification) — branch L only"
@@ -85,7 +85,17 @@ transition:
     Supabase failure there degrades that one execution's branch-S data (every reactivated node is
     onError=continueRegularOutput) and never touches branch L.
 
-    This reverses the previous narrowing: Snov.io, Lusha and OpenAI are now called once per branch
+    2026-08-18 — LUSHA IS NO LONGER CALLED TWICE. `[181]` (branch L) is disabled; `[S] Lusha` keeps
+    running. Nothing is lost where it matters: the phone still reaches Supabase through
+    promote_contact_to_lead, and only the spreadsheet row loses its fallback phone — a store that is
+    being switched off. Snov.io and OpenAI are still called once per branch.
+
+    This narrowing is deliberate and it does weaken the ADR-0017 §1a reading below: branch L is no
+    longer fully independent of branch S for phone data. That is accepted, because branch L is the
+    branch being retired, and because Lusha credits were exhausted (defect B4) — half the calls were
+    returning 402 anyway.
+
+    The original arrangement, for context: Snov.io, Lusha and OpenAI were called once per branch
     (double vendor cost per lead), accepted explicitly in exchange for the literal reading of
     ADR-0017 §1a — either branch can be disconnected without the other's correctness depending on
     what's in the other branch's data source. The reactivated chain is 18 nodes that already existed

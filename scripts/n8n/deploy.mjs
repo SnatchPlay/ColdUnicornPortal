@@ -59,9 +59,17 @@ function arg(name) {
 /**
  * Node-level keys --node-settings is allowed to move. Deliberately a closed list rather than a
  * whole-object copy: `id`, `webhookId`, `position`, `credentials` and `name` also live at node level
- * and must keep coming from live. Everything here describes what a node does when it FAILS.
+ * and must keep coming from live.
+ *
+ * Mostly this describes what a node does when it FAILS. `disabled` is the exception and is here
+ * because it is the same kind of thing — node-level, not a parameter, and unreachable through any
+ * other allowlist — so without it, switching a node off could only be done by hand in the UI. n8n
+ * passes input straight through a disabled node, so downstream nodes still run and simply see no
+ * result from it; that is the intended shape when turning off a vendor call whose only consumer is
+ * a store being retired.
  */
 const NODE_SETTING_KEYS = [
+  "disabled",
   "onError",
   "retryOnFail",
   "maxTries",

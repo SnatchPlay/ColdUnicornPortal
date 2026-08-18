@@ -794,6 +794,8 @@
         1504,
         464
       ],
+      "disabled": true,
+      "notes": "Disabled 2026-08-18. Its only consumer is Edit Fields -> the sheet row (country); branch S passes no phone or country to promote_contact_to_lead, so this spend never reached Supabase at all.",
       "parameters": {
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",

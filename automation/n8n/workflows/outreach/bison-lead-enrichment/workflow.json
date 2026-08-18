@@ -146,6 +146,8 @@
         5296,
         -16
       ],
+      "disabled": true,
+      "notes": "Disabled 2026-08-18 to stop paying Lusha twice per lead. Branch S has its own [S] Lusha call, so Supabase keeps the phone; only the sheet row loses it, and the sheet is being retired.",
       "onError": "continueRegularOutput",
       "parameters": {
         "authentication": "genericCredentialType",

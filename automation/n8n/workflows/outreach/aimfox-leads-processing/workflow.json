@@ -1000,6 +1000,8 @@
         1920,
         -128
       ],
+      "disabled": true,
+      "notes": "Disabled 2026-08-18. Its only consumers are [287] Set phone from Lusha and Create Record, both on the sheet limb; branch S passes no phone to promote_contact_to_lead, so this spend never reached Supabase at all.",
       "parameters": {
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",

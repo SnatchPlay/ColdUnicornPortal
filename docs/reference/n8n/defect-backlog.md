@@ -164,6 +164,27 @@ execution.
 
 > **Deployed 2026-08-15** — the `onError` half. **The credit limit itself is untouched**: phones
 > still are not enriched, the run simply no longer dies. Topping up Lusha is an owner action.
+>
+> **2026-08-18 — the burn rate is halved on the Bison flow and stopped on both Aimfox flows.** Every
+> Lusha call in the estate was traced to its consumer first, and all three fed the SHEET only:
+>
+> | workflow | node | its only consumer | reached Supabase? |
+> |---|---|---|---|
+> | `bison-lead-enrichment` | `[181]` | `[287] Set phone from Lusha` → sheet | no — branch S has its own `[S] Lusha` |
+> | `aimfox-premql-to-pdca` | `Lusha Enrichment` | `Edit Fields` (country) → sheet | no |
+> | `aimfox-leads-processing` | `Lusha Enrichment` | `[287]` + `Create Record` → sheet | no |
+>
+> All three are now `disabled`. The Bison one is a pure saving — branch S still enriches and the phone
+> still reaches `leads` through the RPC.
+>
+> **The two Aimfox ones are not.** Their branch S never called Lusha and passes no phone to
+> `promote_contact_to_lead`, so for the LinkedIn channel this ends phone and country enrichment
+> **everywhere**, not just in the sheet. That was worth paying for only while the sheet was the
+> product; it is not worth paying for a store being switched off. If LinkedIn leads need phones after
+> the cutover, branch S has to make the call itself, the way `bison-lead-enrichment` does.
+>
+> Deploying this needed `disabled` to become a movable node-level key — it is not a parameter, so no
+> allowlist could carry it and a node could only be switched off by hand in the UI.
 
 ### B5 · `Add OOO Leads` — API key does not match the workspace {#b5}
 
