@@ -36,7 +36,7 @@ reads:
   external:
     - "Aimfox API · GET /leads/{id} (branch L AND branch S each make their own call)"
     - "Google Sheets · CS PDCA — client row; <client>/Leads — existing lead?"
-    - "Lusha · POST /v3/contacts/search-and-enrich"
+    - "Lusha · POST /v3/contacts/search-and-enrich — branch S only since 2026-08-18; branch L's node is disabled"
     - "Snov.io · OAuth + /v2/li-profiles-by-urls (start, then poll result)"
 
 writes:
@@ -67,7 +67,7 @@ credentials:
     usedBy: "[2] Find workspace in CS PDCA, [4] Check if lead already in Leads sheet, [96] Update Qualification col, Create Record, Get Table ID"
   - alias: "Lusha"
     type: httpHeaderAuth
-    usedBy: "Lusha Enrichment"
+    usedBy: "[S] Lusha Enrichment — the branch-L node of the same name still holds the credential but is DISABLED since 2026-08-18"
   - alias: "UniTalk"
     type: httpHeaderAuth
     usedBy: "HTTP Request (notification)"
@@ -90,7 +90,22 @@ transition:
     upsert_sequencer_contact -> upsert_reply (classification hardcoded 'Interested', message text
     straight from the webhook body — this payload carries it inline, unlike aimfox-premql-to-pdca) ->
     Resolve campaign (body.event.campaign.id, the same catalog aimfox-campaign-sync builds) ->
-    promote_contact_to_lead. No Lusha/Snov.io duplication — phone_number stays NULL (not measured).
+    promote_contact_to_lead.
+
+    2026-08-18 — LUSHA MOVED TO BRANCH S, so phone_number no longer stays NULL. Branch L's call was
+    switched off to stop paying for enrichment whose only consumers were the sheet row and a Set node
+    feeding it; branch S now makes the call itself and passes phone_number + phone_source through the
+    RPC. That is a move, not a duplication: there is still exactly one Lusha call per lead, it just
+    now lands somewhere that survives the Sheets shutdown.
+
+    Two deliberate differences from the node it replaces: it reveals only `phones` (branch L asked for
+    emails too, which branch S takes from Aimfox and Lusha bills per revealed datapoint), and it
+    carries onError=continueRegularOutput because credits are exhausted (defect B4) — a 402 must cost
+    the phone, never the lead. The RPC keys are `jsonb_strip_nulls`ed, so an empty phone simply is not
+    sent.
+
+    Verified in a rolled-back transaction on a real unpromoted Aimfox Interested reply:
+    created=true, and the row came back phone_number='+48 123 456 789', phone_source='Lusha'.
   reconciliation: >-
     One `leads` row per qualifying reply, matched on (client, Aimfox contact id), leads.sequencer_id =
     aimfox. Compare against branch L's sheet appends per client per day. Qualification is synced as of

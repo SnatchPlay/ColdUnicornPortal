@@ -177,11 +177,22 @@ execution.
 > All three are now `disabled`. The Bison one is a pure saving — branch S still enriches and the phone
 > still reaches `leads` through the RPC.
 >
-> **The two Aimfox ones are not.** Their branch S never called Lusha and passes no phone to
-> `promote_contact_to_lead`, so for the LinkedIn channel this ends phone and country enrichment
-> **everywhere**, not just in the sheet. That was worth paying for only while the sheet was the
-> product; it is not worth paying for a store being switched off. If LinkedIn leads need phones after
-> the cutover, branch S has to make the call itself, the way `bison-lead-enrichment` does.
+> **The two Aimfox ones were not**, and were handled differently the same day:
+>
+> - **`aimfox-leads-processing` — Lusha moved into branch S.** Its call was the only phone source for
+>   the LinkedIn channel, so switching it off would have ended phone enrichment everywhere rather than
+>   just in the sheet. `[S] Lusha Enrichment` now runs between `[S] Resolve campaign` and the RPC, and
+>   `phone_number` / `phone_source` go through `promote_contact_to_lead`. Still exactly one Lusha call
+>   per lead — it just lands somewhere that survives the Sheets shutdown. It reveals only `phones`
+>   (branch L also asked for emails, which branch S takes from Aimfox, and Lusha bills per revealed
+>   datapoint) and carries `onError` so a 402 costs the phone and never the lead. Proven in a
+>   rolled-back transaction: `phone_number='+48 123 456 789'`, `phone_source='Lusha'`.
+> - **`aimfox-premql-to-pdca` — left off, deliberately.** Its Lusha result fed exactly one field,
+>   `country`, and branch L's own expression already fell back to the Aimfox location when Lusha had
+>   nothing. Branch S computes `country` from that same Aimfox location and passes it as `$12` today,
+>   so the only thing Lusha added was an occasional refinement — and it never carried a phone there at
+>   all. Not worth a credit per lead. Say so if that refinement is wanted; the node is one `disabled`
+>   flag away from returning, this time on branch S.
 >
 > Deploying this needed `disabled` to become a movable node-level key — it is not a parameter, so no
 > allowlist could carry it and a node could only be switched off by hand in the UI.
