@@ -5,7 +5,7 @@ name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
 domain: outreach
 owner: automation
 lifecycle: managed
-status: active
+status: deprecated             # 2026-08-15: owner decided not to revive the email NRR path (C1)
 criticality: low
 
 businessProcess:
@@ -35,7 +35,7 @@ writes:
 
 transition:
   phase: A
-  phaseState: live              # published 2026-07-21; branch S runs on every NRR TAG_ATTACHED
+  phaseState: unreachable       # CORRECTED 2026-08-15 — see below. Was "live", which was never true.
   authoritativeSource: sheets
   targetStore: "Supabase · replies (upsert_reply with classification NRR)"
   design: docs/reference/n8n/ooo-phase-a.md
@@ -43,6 +43,44 @@ transition:
     NRR creates NO lead and NO episode, and must not set final_outcome — a lost outcome is a human
     decision on a lead that already exists (ADR-0015). Branch S is only upsert_reply.
     daily_stats.ooo_count stays a sequencer-reported EVENT count, never a CRM figure.
+
+    2026-08-15 — THIS WORKFLOW HAS NEVER RUN, so neither branch writes anything and the phase-A
+    claim above was false. It is not broken: it is unreachable. `Bison Replies Classification`
+    (XdTMd1KJX0cRmF9u) contains an IF node `Category Is Not NRR?` whose false branch goes to
+    `Respond - Skipped`, so an NRR classification never reaches the tag-attach call. With no
+    TAG_ATTACHED/NRR webhook, the HUB's fire_child_2 gate can never be true. Verified two ways:
+    0 executions in 16 days, and the 900 most recent HUB executions contain only OOO / Interested /
+    preMQL tags.
+
+    The classification is alive but not here — all 103 `replies.classification='NRR'` rows are
+    Aimfox, written by aimfox-classification, which does not route through the Bison HUB. For the
+    email channel, NRR is recorded in no store at all: not Supabase, not the sheet. Same for `other`,
+    `Left_Company` and `Spam_Inbound` — EmailBison only ever lands OOO and Interested.
+
+    DECISION 2026-08-15 (owner): do NOT revive the email NRR path. The `Category Is Not NRR?`
+    suppression in the classifier stays as it is, so this workflow stays unreachable permanently and
+    its status is now `deprecated`. It is left in place rather than deleted because it is the only
+    written record of what the NRR contract was, and because reviving it later is a one-node change
+    in the classifier — but nothing in this repository should count on it running.
+
+    Consequences of that decision, so nobody has to re-derive them:
+      - For the EMAIL channel, NRR exists in no store. Not Supabase, not the sheet. It is not
+        "missing data to be backfilled" — it was never captured, and by decision will not be.
+      - `daily_stats` NRR counters fed by branch L stop being maintained. Nothing in the portal
+        reads an NRR metric (grepped 2026-08-15: no nrr_count anywhere in src/, the gateway or the
+        migrations), so no surface silently reads zero. The only NRR-aware UI is the reply
+        classification badge in portal-ui.tsx, which renders whatever `replies.classification`
+        holds — so it will keep showing NRR for Aimfox and never for email, which is now correct.
+      - The LinkedIn channel is unaffected: aimfox-classification writes its own reply rows and
+        does not route through the Bison HUB. All 103 NRR replies in Supabase are Aimfox.
+
+    Still open and INDEPENDENT of this decision: the Bison classifier records a reply row only when a
+    tag is attached, so `other`, `Left_Company` and `Spam_Inbound` are also computed and discarded for
+    email. Recording the classification regardless of tagging changes nothing a client can see and is
+    a precondition for the Sheets cutover.
+
+    Do not reorder this workflow's branches (defect E5 / Wave 3) — it does not run, so reordering
+    proves nothing and the flow is deprecated anyway. Defect C1.
   reconciliation: null
   parityEvidence: null
 

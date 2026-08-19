@@ -1,0 +1,1160 @@
+{
+  "name": "[child-4] TAG_ATTACHED · Blacklist add (email + domain)",
+  "description": "Adds lead's email (always) and domain (if not in public exclude list) to Bison blacklist on Interested/Not Interested/PreMQL tag. Writes blacklist IDs back to Leads sheet (skipping for Not Interested tag).",
+  "nodes": [
+    {
+      "id": "c4770d56-9c78-4b6a-bdfb-ec4941d5aa19",
+      "name": "[110] Find workspace in CS PDCA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        464,
+        304
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "col_5",
+              "lookupValue": "={{ $json.event.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CS PDCA"
+        }
+      }
+    },
+    {
+      "id": "a11b6ba8-d049-4049-98a2-a97c69f31cde",
+      "name": "[111] Bison: GET /leads/{taggable_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        304
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendHeaders": true,
+        "url": "={{ \"https://go.gheads.com/api/leads/\" + $(\"When Called by HUB\").first().json.data.taggable_id }}"
+      }
+    },
+    {
+      "id": "a460b48b-9fb6-45bd-baf4-90610d915bfa",
+      "name": "[113] Bison: POST /blacklisted-emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        208
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[110] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ email: $json.data.email }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://go.gheads.com/api/blacklisted-emails"
+      }
+    },
+    {
+      "id": "51ffb869-14c1-4404-9a18-9d4bc0709120",
+      "name": "[156] Find lead in Leads sheet (by email)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1360,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[110] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "E-MAIL",
+              "lookupValue": "={{ $('[111] Bison: GET /leads/{taggable_id}').item.json.data.email }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "3569d570-2477-442a-adcd-bfc205827193",
+      "name": "[157] Update Leads col Email Blacklist ID",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1584,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "FULL NAME",
+              "id": "FULL NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "JOB TITLE",
+              "id": "JOB TITLE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-MAIL",
+              "id": "E-MAIL",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Number",
+              "id": "Phone Number",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Source",
+              "id": "Phone Source",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMPANY NAME",
+              "id": "COMPANY NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "INDUSTRY",
+              "id": "INDUSTRY",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "HEADCOUNT",
+              "id": "HEADCOUNT",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RECEIVED",
+              "id": "LEAD RECEIVED",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "CAMPAIGN NAME",
+              "id": "CAMPAIGN NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE TITLE",
+              "id": "MESSAGE TITLE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE #",
+              "id": "MESSAGE #",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WEBSITE",
+              "id": "WEBSITE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "QUALIFICATION",
+              "id": "QUALIFICATION",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RESPONSE TIME",
+              "id": "LEAD RESPONSE TIME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS",
+              "id": "MEETINGS",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS HELD",
+              "id": "MEETINGS HELD",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "OFFER SENT",
+              "id": "OFFER SENT",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMMENTS",
+              "id": "COMMENTS",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Mail from lead",
+              "id": "Mail from lead",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "TIP",
+              "id": "TIP",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Campaign ID",
+              "id": "Campaign ID",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Blacklist ID",
+              "id": "Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Domain Blacklist ID",
+              "id": "Domain Blacklist ID",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LinkedIn URL",
+              "id": "LinkedIn URL",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Column 29",
+              "id": "Column 29",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "Blacklist ID": "={{ $('[113] Bison: POST /blacklisted-emails').item.json.data.id }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[110] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "f4b003ba-c416-410e-812f-19a895ba4d65",
+      "name": "[292] Check if domain is public",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        912,
+        400
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Emails",
+              "lookupValue": "={{ $json.data.email.extractDomain() }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "🤖Emails Exclude List"
+        }
+      }
+    },
+    {
+      "id": "335f9841-54b5-4b35-9369-3ec2c67ca982",
+      "name": "[294] Bison: POST /blacklisted-domais (sic)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        400
+      ],
+      "notes": "Same benign 422 as [113] - 'The domain has already been taken.' Absorbing it here is what lets [296]/[298] write the blacklist ids back to the sheet; before 2026-08-18 the run died at this node instead.",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{$(\"[111] Bison: GET /leads/{taggable_id}\").first().json.data.email.extractDomain() }}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $(\"[110] Find workspace in CS PDCA\").first().json[\"col_6\"] }}"
+            }
+          ]
+        },
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "url": "https://go.gheads.com/api/blacklisted-domains"
+      }
+    },
+    {
+      "id": "746f6337-252f-4227-aa45-4fc9e9ec0681",
+      "name": "[296] Find lead in Leads sheet (domain path)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1808,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[110] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "E-MAIL",
+              "lookupValue": "={{ $('[111] Bison: GET /leads/{taggable_id}').item.json.data.email }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "2956c3d6-75be-4338-84b1-7b3272920b17",
+      "name": "[298] Update Leads col Domain Blacklist ID",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2032,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "columns": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "FULL NAME",
+              "id": "FULL NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "JOB TITLE",
+              "id": "JOB TITLE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "E-MAIL",
+              "id": "E-MAIL",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Number",
+              "id": "Phone Number",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone Source",
+              "id": "Phone Source",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMPANY NAME",
+              "id": "COMPANY NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "INDUSTRY",
+              "id": "INDUSTRY",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "HEADCOUNT",
+              "id": "HEADCOUNT",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RECEIVED",
+              "id": "LEAD RECEIVED",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "CAMPAIGN NAME",
+              "id": "CAMPAIGN NAME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE TITLE",
+              "id": "MESSAGE TITLE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MESSAGE #",
+              "id": "MESSAGE #",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WEBSITE",
+              "id": "WEBSITE",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "QUALIFICATION",
+              "id": "QUALIFICATION",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LEAD RESPONSE TIME",
+              "id": "LEAD RESPONSE TIME",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS",
+              "id": "MEETINGS",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "MEETINGS HELD",
+              "id": "MEETINGS HELD",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "OFFER SENT",
+              "id": "OFFER SENT",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "WON",
+              "id": "WON",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "COMMENTS",
+              "id": "COMMENTS",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date",
+              "id": "Date",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Mail from lead",
+              "id": "Mail from lead",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "TIP",
+              "id": "TIP",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Month",
+              "id": "Month",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Campaign ID",
+              "id": "Campaign ID",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Blacklist ID",
+              "id": "Blacklist ID",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Domain Blacklist ID",
+              "id": "Domain Blacklist ID",
+              "removed": false,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "LinkedIn URL",
+              "id": "LinkedIn URL",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Column 29",
+              "id": "Column 29",
+              "removed": true,
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "row_number",
+              "id": "row_number",
+              "readOnly": true,
+              "removed": false,
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "Domain Blacklist ID": "={{ $('[294] Bison: POST /blacklisted-domais (sic)').item.json.data.id }}",
+            "row_number": "={{ $json.row_number }}"
+          }
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[110] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "operation": "update",
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
+      "id": "4e953360-6467-4d00-bbc1-f2b4b24910a2",
+      "name": "Domain NOT in exclude list?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "2a77af60-95e8-4dc0-af64-337f51df7488",
+              "leftValue": "={{ $(\"[292] Check if domain is public\").item.json }}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "909898ac-0de5-41ae-ad73-b91d22f5860b",
+      "name": "tag != Not Interested (domain path)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1584,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $(\"When Called by HUB\").first().json.data.tag_name }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "Not Interested"
+            }
+          ]
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      }
+    },
+    {
+      "id": "e64bd02e-9ce9-44e4-a07c-da4ec78cff3b",
+      "name": "tag != Not Interested (email path)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        208
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "62e3b5ce-c8cd-426c-ba81-2472a612ecc8",
+              "leftValue": "={{ $(\"When Called by HUB\").first().json.data.tag_name }}",
+              "operator": {
+                "operation": "notEquals",
+                "type": "string"
+              },
+              "rightValue": "Not Interested"
+            }
+          ],
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      }
+    },
+    {
+      "id": "84dd94f8-fd39-4460-ac1f-f0f1013952d4",
+      "name": "When Called by HUB",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        304
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Domain NOT in exclude list?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[294] Bison: POST /blacklisted-domais (sic)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "When Called by HUB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[110] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[110] Find workspace in CS PDCA": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[111] Bison: GET /leads/{taggable_id}",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[111] Bison: GET /leads/{taggable_id}": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[292] Check if domain is public",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[113] Bison: POST /blacklisted-emails",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[113] Bison: POST /blacklisted-emails": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "tag != Not Interested (email path)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[156] Find lead in Leads sheet (by email)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[157] Update Leads col Email Blacklist ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[292] Check if domain is public": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Domain NOT in exclude list?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[294] Bison: POST /blacklisted-domais (sic)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "tag != Not Interested (domain path)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[296] Find lead in Leads sheet (domain path)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[298] Update Leads col Domain Blacklist ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "tag != Not Interested (domain path)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[296] Find lead in Leads sheet (domain path)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "tag != Not Interested (email path)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[156] Find lead in Leads sheet (by email)",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

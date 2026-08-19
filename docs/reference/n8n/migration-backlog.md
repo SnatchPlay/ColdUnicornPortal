@@ -1,5 +1,11 @@
 # n8n migration backlog
 
+> **Superseded counts — re-audited 2026-08-15.** The instance now holds **71 workflows (51 live + 20
+> archived), 33 active, 24 managed, 27 orphan**. Live defects found by that audit live in
+> [defect-backlog.md](defect-backlog.md); read it alongside §0 below. Notably it contradicts two
+> claims in this file: the NRR path of §1 has **not fired once** in 16 days, and the Aimfox metrics
+> flow of §5 called "live" fails 13 runs in 113.
+
 Inventory re-taken 2026-07-22 (evening): **37 workflows, 29 active, 18 managed, 19 orphan.**
 (Managed: the four OOO/NRR workflows of §1, `[child-1]` lead enrichment, all five Aimfox workflows of
 §5, the four Bison ingestion workflows of §3, the failure recorder, the credential sync of §8, and
@@ -20,7 +26,8 @@ The state of the migration in one table. Everything here is measured against pro
 
 | Process | Phase | Evidence |
 |---|---|---|
-| OOO / NRR (§1) | **A, live** — all four workflows call the RPCs | 66 `ooo_followups` rows (2026-07-22) — the "0 rows" gap had already closed; the real defect found instead: 100% had `date_source='fallback'` even when the LLM found a real date (accessor bug, fixed 2026-07-22) |
+| OOO (§1) | **A, live** — the three OOO workflows call the RPCs | 66 `ooo_followups` rows (2026-07-22) — the "0 rows" gap had already closed; the real defect found instead: 100% had `date_source='fallback'` even when the LLM found a real date (accessor bug, fixed 2026-07-22) |
+| NRR (§1) | **A, UNREACHABLE** — corrected 2026-08-15, previously counted as "live" in the row above | `[child-2]` has never executed, so neither branch writes. The classifier's `Category Is Not NRR?` node routes NRR to `Respond - Skipped` before the tag is attached, so the HUB gate can never be true (900 recent HUB executions: only OOO / Interested / preMQL). All 103 `classification='NRR'` replies are **Aimfox**; for the email channel NRR is in no store at all. [C1](defect-backlog.md#c1) |
 | Bison ingestion (§3) | **C** — Supabase-only by construction | repaired 2026-07-22 after days of silent failure |
 | Bison lead enrichment (§2) | **A, live, independent** — branch S writes leads via `promote_contact_to_lead` on its own Bison/Snov.io/Lusha/OpenAI calls | repaired 2026-07-22: branch L reverted to CS PDCA col_6, branch S given its own data-fetch chain — neither branch's credential resolution references the other |
 | Aimfox metrics (§5) | **A, live** — branch S writes `sequencer_daily_stats` per account, every 2h | execution 50246; runs verified successful through 17:00 on 2026-07-22. **Completeness verified 2026-07-22**: backfill captured all 118 sheet candidates (117 written, UniTalk's 1 day accepted-as-lost); 3 garbage `__workspace_total__` overlap rows for 07-22 deleted; date gaps confirmed as zero-activity days by the backfill's own filter. Residual: a live sheet↔Supabase Aimfox diff can't be run from a headless session (public n8n REST can't execute a workflow) — only needed if paranoid about the zero-activity gaps before the sheet is deleted |

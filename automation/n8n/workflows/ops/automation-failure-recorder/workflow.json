@@ -27,6 +27,32 @@
       }
     },
     {
+      "id": "c3f4a5b6-0001-4d30-8e21-7a1b9c2d3001",
+      "name": "Notify Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        500,
+        460
+      ],
+      "notes": "Fed by Normalize Failure, not by Record Failed Run: the alert must not depend on the database write succeeding. Both limbs carry onError=continueRegularOutput so neither can swallow the other.",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "coldunicorn-errors"
+        },
+        "messageType": "text",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "sendAsUser": "ColdUnicorn Error Notification"
+        },
+        "select": "channel",
+        "text": "={{ [\n  ':red_circle: *' + $json.workflow_name + '* failed',\n  '*Node:* ' + ($json.last_node || 'unknown'),\n  '*Error:* ' + String($json.error_message).slice(0, 800),\n  '*Execution:* ' + $json.n8n_execution_id + '  (' + $json.provider + ')',\n].join('\\n') }}"
+      }
+    },
+    {
       "id": "cb3f0d8d-5934-4e56-9aa2-99d9d6f643b9",
       "name": "Record Failed Run",
       "type": "n8n-nodes-base.postgres",
@@ -35,6 +61,7 @@
         500,
         300
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
@@ -63,12 +90,18 @@
             "index": 0,
             "node": "Record Failed Run",
             "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Notify Slack",
+            "type": "main"
           }
         ]
       ]
     }
   },
   "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   }
 }

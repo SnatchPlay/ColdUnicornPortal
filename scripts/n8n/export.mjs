@@ -13,6 +13,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { currentEnvironment, getWorkflow } from "./lib/mcp.mjs";
+import { getWorkflow as getWorkflowViaRest } from "./lib/rest.mjs";
 import { toCanonicalJson } from "./lib/sanitize.mjs";
 import { scanWorkflow } from "./lib/scan.mjs";
 import { WORKFLOWS_ROOT, loadRegistry } from "./lib/registry.mjs";
@@ -40,7 +41,19 @@ async function main() {
 
   if (!remoteId) throw new Error("Pass --remote-id <n8nWorkflowId> or --id <logical-id>.");
 
-  const raw = await getWorkflow(remoteId);
+  // MCP first, REST second. `availableInMCP: false` makes a workflow invisible to every MCP-backed
+  // tool in this repository — inventory, check-drift and this script — which is the exact state that
+  // keeps an orphan un-adoptable: it cannot be exported, so it cannot get an artifact, so `n8n:deploy`
+  // cannot target it to flip the flag. REST has no such gate and already backs the deploy path, so
+  // falling back to it breaks that circle instead of leaving the workflow permanently unreachable.
+  let raw;
+  try {
+    raw = await getWorkflow(remoteId);
+  } catch (error) {
+    if (!/available in MCP/i.test(error.message)) throw error;
+    console.log("transport   : MCP refused (availableInMCP is false) — falling back to the REST API");
+    raw = await getWorkflowViaRest(remoteId);
+  }
   const { json, removed } = toCanonicalJson(raw);
   const workflow = JSON.parse(json);
 

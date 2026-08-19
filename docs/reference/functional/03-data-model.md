@@ -392,7 +392,7 @@ Columns of note:
 | `external_blacklist_id`, `external_domain_blacklist_id` | integer | Back-refs to ingestion tool tables. |
 | `source` | varchar(30) default `'cold_email'` | Channel provenance (free text; gateway reply-path fallback `"cold_email"`). **Not** the sequencer link — see `sequencer_id`. |
 | `sequencer_id` | uuid FK > `sequencers.id` not null, default EmailBison | ADR-0008 attribution. n8n/ingestion-owned; NOT in the portal lead-patch whitelist (ADR-0004). Index `idx_leads_client_sequencer (client_id, sequencer_id)`. |
-| `reply_text` | text | Denormalised latest reply for quick lead-list rendering. |
+| `reply_text` | text | Denormalised copy of **the reply that created the lead**, for the leads-table column `Mail from lead` and the export. Written by `promote_contact_to_lead` from `origin_reply_id` inside the creating transaction (`20260815b`); never rewritten afterwards, so a later reply does not change it — same semantics as the sheet's column. Not "the latest reply": the authoritative, always-current thread is `replies`, which the drawer renders. Rows imported from the Sheets era carry the sheet's value. |
 | `client_note` | text | Client-facing report note (renamed from `comments` in Batch 4, `20260618b`). Editable by manager/admin; visible to the client. |
 | `coldunicorn_note` | text | Internal report note (Batch 4). Editable by manager/admin; **nulled for the client role** in `loadLeadsList`. |
 | `highlight` | text `green\|yellow\|red` | Manual report row colour (Batch 4, Task 4E). `null` = none. |

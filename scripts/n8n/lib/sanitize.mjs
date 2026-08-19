@@ -29,6 +29,10 @@ const DROPPED_TOP_LEVEL = new Set([
   "staticData",
   "meta",
   "tags",
+  // Only the REST payload carries these; the MCP one never did, so they went unnoticed until
+  // n8n:export gained a REST fallback (2026-08-18). `versionCounter` is instance bookkeeping that
+  // would churn the artifact on every unrelated save.
+  "versionCounter",
 ]);
 
 const DROPPED_NODE_FIELDS = new Set(["credentials", "issues", "webhookId"]);
@@ -146,6 +150,10 @@ export function normalize(workflow) {
   };
 
   for (const key of Object.keys(workflow).sort()) {
+    // A null-valued leftover carries no information and only differs between transports — the REST
+    // payload sends `description: null` where MCP omits it entirely. Keeping it would make the same
+    // workflow produce two different artifacts depending on how it was fetched.
+    if (workflow[key] === null) continue;
     if (!(key in ordered) && key !== "id") ordered[key] = sortDeep(workflow[key]);
   }
   return ordered;

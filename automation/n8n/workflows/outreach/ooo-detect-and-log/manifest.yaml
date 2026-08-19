@@ -46,12 +46,12 @@ writes:
 # The OOO Leads sheet is the system the business runs on today. Migration is by dual-write, not
 # replacement: the sheet keeps being written until Supabase has been proven against it.
 transition:
-  phase: A                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
-  phaseState: live              # published 2026-07-21; branch S runs on every OOO TAG_ATTACHED
-  authoritativeSource: sheets
-  legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…)"
+  phase: C                      # 0 = sheets only | A = dual-write | B = parity | C = supabase only
+  phaseState: live              # branch L DISABLED 2026-08-19 (owner decision); branch S is the only limb that runs
+  authoritativeSource: supabase
+  legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…) — no longer written as of 2026-08-19"
   targetStore: "Supabase · sequencer_contacts + ooo_followups"
-  ordering: "branch L and branch S are independent from the trigger; every S node is onError=continueRegularOutput"
+  ordering: "branch S only. Branch L's six nodes remain in the graph, disabled, as the rollback path"
   goLive: >-
     Done. Migration 20260722g was applied first (42 routing rules, 14 clients enabled), then the
     workflow was published. Verified on real data from a manual run: record_ooo_followup returned
@@ -73,9 +73,47 @@ transition:
     - "~~defect 9~~ — fixed 2026-07-22 on both branches, see goLive above"
     - "~~defect 8~~ — fixed 2026-07-22: [326] now sorts newest-first, matching branch S"
     - "~~defect 5 (sheet append idempotency)~~ — decided 2026-07-22 won't-fix (branch L only, disconnected at phase C); not a blocker. See README defect 5."
-    - "reconciliation not built yet — the real entry condition for phase B (backlog §1 item 6)"
-  reconciliation: null          # required to leave phase A; see ADR-0017 §5
-  parityEvidence: null
+    - "~~reconciliation not built~~ — superseded 2026-08-19: phase C reached without passing through B. See cutover below."
+  cutover: >-
+    2026-08-19, owner decision: branch L disabled. THIS SKIPPED PHASE B, and the reason it is not a
+    violation of ADR-0017 so much as a recognition of what had already happened is worth stating
+    plainly, because "we turned off the dual-write without building the reconciliation we said was
+    required" is exactly the sentence a future reader should be suspicious of.
+
+    The sheet stopped being authoritative at Wave 1 (2026-08-15), not today. Until then the OOO Leads
+    sheet was the only thing that enrolled anyone — branch S was a read-only shadow. When the Supabase
+    worker took over enrolment, the sheet became a write-only record that nothing acted on. Today's
+    change stops writing it. `authoritativeSource: sheets` had been stale for four days.
+
+    Content parity was therefore never the right gate, and could not have been met anyway: both
+    branches ask gpt-5-mini the return date SEPARATELY, and on the same reply they disagree — S said
+    08-18 where L said 08-19, S said null where L said "2027" (see README defect 10). Two independent
+    model calls cannot be reconciled by construction. Building the phase-B comparison would have
+    measured the models' disagreement with each other, not the stores' divergence.
+
+    COVERAGE was the right gate, and it is met. `[child-3]` executions vs `ooo_followups` rows
+    created, per day, measured 2026-08-19:
+
+        08-11  81 ok / 2 err → 80      08-15   3 ok / 0 err →   3
+        08-12 104 ok / 3 err → 103     08-17  94 ok / 0 err →  92
+        08-13 189 ok / 1 err → 183     08-18 121 ok / 0 err → 120
+        08-14 156 ok / 2 err → 152     08-19   3 ok / 0 err →   3
+
+    Executions always exceed episodes slightly and must: `record_ooo_followup` is idempotent, so a
+    second OOO reply from a contact who already has an active episode refreshes it instead of
+    creating one. Since the 2026-08-15 onError fix the failure count is 0–2/day and since 08-17 it is
+    zero. Every OOO event reaches Supabase.
+
+    What this buys beyond the cutover itself: one fewer Bison call pair and one fewer PAID gpt-5-mini
+    call per OOO event — 90–190 events a day — and the removal of the second, disagreeing answer.
+  reconciliation: >-
+    Not applicable at phase C: there is one store. The standing check is COVERAGE, not parity — run
+    the query in `cutover` above weekly and confirm `ooo_followups` rows created still track
+    `[child-3]`'s successful executions. A widening gap means episodes are being lost, which is the
+    only failure this cutover can produce.
+  parityEvidence: >-
+    Deliberately none, and not an omission: see `cutover`. Content parity between the branches was
+    unmeasurable because each branch ran its own LLM call. Coverage evidence stands in its place.
 
 # ── The Supabase side the dual-write must add (ADR-0015 §5, 11-integrations §6a) ───────────────
 targetContract:
@@ -147,10 +185,20 @@ knownViolations:
     node: "[327] Add OOO Leads row"
     reason: >-
       Branch L still writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the
-      LLM parses none. Left as-is deliberately: branch L must keep behaving exactly as it did during
-      phase A, and changing it would invalidate the very comparison phase A exists to make. Branch S
-      does the right thing — NULL expected_return_date, fallback only in scheduled_for — as of
-      2026-07-22, once its own accessor bug was fixed (it previously always fell back too; see
-      transition.goLive). Closed when branch L is disconnected at phase C.
+      LLM parses none — that is the accepted violation, and it is unchanged. Branch S does the right
+      thing — NULL expected_return_date, fallback only in scheduled_for — as of 2026-07-22, once its
+      own accessor bug was fixed (it previously always fell back too; see transition.goLive). Closed
+      when branch L is disconnected at phase C.
+      2026-08-19 (later the same day): branch L is DISABLED, so this violation is now dormant rather
+      than live — `[327]` no longer executes. The acceptance is kept, not deleted, because the six
+      nodes remain in the graph as the rollback path and re-enabling them would make it live again.
+      Delete it when branch L is deleted.
+      2026-08-19: the mapping expression WAS edited, so "branch L behaves exactly as in phase A" is
+      no longer literally true and should not be read as the reason. What changed is only which rows
+      get written at all: the old expression assumed ISO and read one key spelling, so a reply the
+      model answered as "14.08" or under `returnDate` produced an expression error and — since the
+      2026-08-15 onError — no sheet row whatsoever. The new one falls back instead of failing. The
+      fallback-into-expected behaviour this acceptance covers is byte-for-byte the same; the sheet
+      simply stops losing rows. See defect-backlog B1.
     trackedIn: docs/reference/n8n/ooo-phase-a.md
     expires: 2026-10-31

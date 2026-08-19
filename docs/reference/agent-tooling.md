@@ -28,6 +28,18 @@ Configured in [`.vscode/mcp.json`](../../.vscode/mcp.json). Three servers, each 
 | `playwright` | stdio (`@playwright/mcp`) | Visual debugging of the running portal: open the preview server, navigate as a role, take screenshots, click elements, capture console errors. **Use this any time you change UI before declaring done.** |
 | `shadcn` | stdio (`@shadcn/ui mcp`) | List or inspect shadcn registry components. Useful when adding a new primitive — check the registry instead of inventing markup. |
 
+### ⚠️ Hosted connectors on your list may belong to another company
+
+A session can also carry hosted **`claude.ai n8n`** and **`claude.ai Supabase`** connectors. Measured
+2026-08-15, both were bound to **Hyra UK**, not to this project: the n8n one returned 140 workflows
+(Xero, Airtable, hire forms) with **zero** ID overlap with this instance's 71, and the Supabase one
+listed only `Hyra Master` / `Hyra Main DB` — never `bnetnuzxynmdftiadwef`.
+
+They answer confidently either way, so a wrong-tenant answer is indistinguishable from a right one.
+Use the project-scoped `supabase` server above (or `SUPABASE_DB_URL`) for the database, and
+`pnpm n8n:*` for n8n — see [n8n/mcp-setup.md](n8n/mcp-setup.md). To check which instance a tool is
+on, ask it for an ID you know exists here; if it cannot find it, it is somewhere else.
+
 ### Activation
 
 Each editor / agent host activates MCP servers differently. For Claude Code with VS Code MCP integration, the servers in `.vscode/mcp.json` are picked up automatically. Verify by listing tools at the start of a session — you should see `mcp__playwright__*`, `mcp__supabase__*`, `mcp__shadcn__*` (exact names depend on the MCP runtime).
@@ -127,6 +139,12 @@ The n8n MCP cannot do everything, and two of its gaps have cost real time:
   published version until `publish_workflow`. That is a safety property worth using: deploy, inspect,
   publish.
 - **`execute_workflow` ignores webhook input** and fires the workflow's own trigger.
+- **`search_workflows` hides archived workflows.** It reported 51 where the instance held 71
+  (2026-08-15) — twenty invisible to every repository tool. `pnpm n8n:inventory` now reads the REST
+  collection instead (`scripts/n8n/lib/rest.mjs` `listWorkflows`).
+- **This instance's MCP build has no `search_executions`,** so nothing MCP-side can answer "is it
+  working". Use `pnpm n8n:health`, which reads `/api/v1/executions` directly: per-workflow failure
+  ratios plus the list of ACTIVE workflows with **zero** runs — the failure a ratio cannot express.
 
 ### RLS verification recipe
 

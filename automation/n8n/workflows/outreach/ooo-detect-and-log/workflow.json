@@ -9,8 +9,9 @@
       "typeVersion": 2.1,
       "position": [
         1360,
-        208
+        480
       ],
+      "disabled": true,
       "parameters": {
         "builtInTools": {},
         "modelId": {
@@ -19,7 +20,7 @@
           "value": "gpt-5-mini"
         },
         "options": {
-          "instructions": "You are extracting the expected return-from-office date from an out-of-office auto-reply email. Return only the structured JSON. If no clear return date is present, return null.",
+          "instructions": "=You are extracting the expected return-from-office date from an out-of-office auto-reply email. Respond with JSON {\"return_date\": \"YYYY-MM-DD\"} or {\"return_date\": null} when no clear date is present. Use exactly that key. Never guess a date. The reply was received on {{ $json.last_reply.data[0].date_received }}. Resolve every partial or relative date (\"15 August\", \"14.08\", \"next Monday\") against THAT date, and return the full ISO date. The return date must be on or after it — if your answer would fall earlier, you have inferred the wrong year: correct the year rather than returning a date in the past.",
           "store": true,
           "textFormat": {
             "textOptions": {
@@ -43,8 +44,9 @@
       "typeVersion": 4.4,
       "position": [
         688,
-        208
+        480
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -66,8 +68,9 @@
       "typeVersion": 4.4,
       "position": [
         912,
-        208
+        480
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -89,9 +92,12 @@
       "typeVersion": 4.7,
       "position": [
         464,
-        208
+        480
       ],
+      "disabled": true,
       "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -123,8 +129,9 @@
       "typeVersion": 3.4,
       "position": [
         1136,
-        208
+        480
       ],
+      "disabled": true,
       "parameters": {
         "assignments": {
           "assignments": [
@@ -146,8 +153,10 @@
       "typeVersion": 4.7,
       "position": [
         1712,
-        208
+        480
       ],
+      "disabled": true,
+      "onError": "continueRegularOutput",
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -227,8 +236,8 @@
             }
           ],
           "value": {
-            "Expected Return Date": "={{ $json.output?.[0]?.content?.[0]?.text?.return_date || $now.plus({ days: 14 }).toFormat(\"yyyy-LL-dd\") }}",
-            "Formatted Expected Date": "={{ ($json.output?.[0]?.content?.[0]?.text?.return_date ? DateTime.fromISO($json.output[0].content[0].text.return_date).format('yyyy-MM-dd').toDateTime().toSeconds() : $now.plus({ days: 14 })).format('yyyy-MM-dd').toDateTime().toSeconds()}}",
+            "Expected Return Date": "={{ (() => { const t = $json.output?.[0]?.content?.[0]?.text ?? {}; const raw = t.return_date ?? t.returnDate ?? t.return_to_office ?? null; const d = raw ? DateTime.fromISO(String(raw)) : null; const v = (d && d.isValid) ? d : $now.plus({ days: 14 }); return v.toFormat('yyyy-LL-dd'); })() }}",
+            "Formatted Expected Date": "={{ (() => { const t = $json.output?.[0]?.content?.[0]?.text ?? {}; const raw = t.return_date ?? t.returnDate ?? t.return_to_office ?? null; const d = raw ? DateTime.fromISO(String(raw)) : null; const v = (d && d.isValid) ? d : $now.plus({ days: 14 }); return v.startOf('day').toSeconds(); })() }}",
             "Gender": "={{ $('[318] Bison: GET /leads/{taggable_id}').item.json.data.custom_variables.find(item => item.name=='gender').value }}",
             "LeadID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].lead_id }}",
             "ReplyID": "={{ $('[326] Set last_reply (newest by date_received)').item.json.last_reply.data[0].id }}",
@@ -256,7 +265,7 @@
       "typeVersion": 4.4,
       "position": [
         688,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -280,7 +289,7 @@
       "typeVersion": 4.4,
       "position": [
         912,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -304,7 +313,7 @@
       "typeVersion": 2.1,
       "position": [
         1360,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -315,7 +324,7 @@
           "value": "gpt-5-mini"
         },
         "options": {
-          "instructions": "Extract the expected return-from-office date from this out-of-office auto-reply. Respond with JSON {\"returnDate\": \"YYYY-MM-DD\"} or {\"returnDate\": null} when no clear date is present. Never guess a date.",
+          "instructions": "=Extract the expected return-from-office date from this out-of-office auto-reply. Respond with JSON {\"returnDate\": \"YYYY-MM-DD\"} or {\"returnDate\": null} when no clear date is present. Never guess a date. The reply was received on {{ $json.ooo_reply.date_received }}. Resolve every partial or relative date (\"15 August\", \"14.08\", \"next Monday\") against THAT date, and return the full ISO date. The return date must be on or after it — if your answer would fall earlier, you have inferred the wrong year: correct the year rather than returning a date in the past.",
           "store": true,
           "textFormat": {
             "textOptions": {
@@ -339,7 +348,7 @@
       "typeVersion": 3.4,
       "position": [
         1136,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -363,7 +372,7 @@
       "typeVersion": 2.6,
       "position": [
         2032,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -381,7 +390,7 @@
       "typeVersion": 2.6,
       "position": [
         464,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -399,7 +408,7 @@
       "typeVersion": 2.6,
       "position": [
         1808,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -417,7 +426,7 @@
       "typeVersion": 2.6,
       "position": [
         1584,
-        480
+        208
       ],
       "onError": "continueRegularOutput",
       "parameters": {

@@ -7,11 +7,19 @@
 //   managed    — in registry.yaml AND present on the instance
 //   observed   — on the instance, in the registry, but not yet owned (no workflow.json)
 //   orphan     — on the instance, absent from the registry
+//   archived   — soft-deleted on the instance and unclaimed; retired, not a backlog item
 //   missing    — in the registry, absent from the instance (deleted remotely, or wrong environment)
+//
+// An archived workflow that IS in the registry keeps its normal classification and is flagged
+// instead — a managed workflow archived out from under the repository is a finding, not a filing.
 //
 // Read-only.
 
-import { currentEnvironment, listWorkflows } from "./lib/mcp.mjs";
+import { currentEnvironment } from "./lib/mcp.mjs";
+// REST, not the MCP `search_workflows` tool: that tool filters archived workflows out, so this
+// inventory reported 51 where the instance held 71 (measured 2026-08-15) — twenty workflows invisible
+// to every repository tool. An inventory that cannot see part of the estate is not an inventory.
+import { listWorkflows } from "./lib/rest.mjs";
 import { discoverWorkflowDirs, loadManifest, loadRegistry } from "./lib/registry.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -37,11 +45,13 @@ async function main() {
 
   const rows = remote.map((workflow) => {
     const entry = byRemoteId.get(workflow.id);
-    const classification = !entry ? "orphan" : hasArtifact.get(entry.id) ? "managed" : "observed";
+    const claimed = hasArtifact.get(entry?.id) ? "managed" : "observed";
+    const classification = entry ? claimed : workflow.isArchived ? "archived" : "orphan";
     return {
       remoteId: workflow.id,
       name: workflow.name,
       active: Boolean(workflow.active),
+      archived: Boolean(workflow.isArchived),
       logicalId: entry?.id ?? null,
       classification,
     };
@@ -55,6 +65,7 @@ async function main() {
         remoteId,
         name: entry.name,
         active: false,
+        archived: false,
         logicalId: entry.id,
         classification: "missing",
       });
@@ -74,9 +85,11 @@ async function main() {
   );
   console.log("");
 
-  const order = { managed: 0, observed: 1, orphan: 2, missing: 3 };
+  const order = { managed: 0, observed: 1, orphan: 2, archived: 3, missing: 4 };
   for (const row of rows.sort((a, b) => order[a.classification] - order[b.classification] || a.name.localeCompare(b.name))) {
-    const state = row.active ? "ACTIVE  " : "inactive";
+    // "inactive" and "archived" are different facts: the first can be switched back on, the second
+    // was retired. Only say "archived" where it is not already the classification.
+    const state = row.active ? "ACTIVE  " : row.archived && row.classification !== "archived" ? "ARCHIVED" : "inactive";
     console.log(
       `${row.classification.padEnd(9)} ${state} ${row.remoteId.padEnd(18)} ${row.logicalId ? `${row.logicalId}  ` : ""}${row.name}`,
     );

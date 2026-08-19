@@ -7,6 +7,9 @@
 //
 // Four allowlists, each naming its own blast radius:
 //   --nodes             update the `parameters`/`typeVersion` of existing nodes
+//   --node-settings     update the node-level FAILURE POSTURE of existing nodes (onError, retry…)
+//   --positions         move existing nodes on the canvas — which under executionOrder v1 is what
+//                       decides WHICH FAN-OUT BRANCH RUNS FIRST, so it is gated like a structural change
 //   --add               append nodes that exist in the artifact but not on live
 //   --rewire            replace the outgoing connections of existing nodes
 //   --credentials-from  give an --added node the credential block of a named LIVE node
@@ -19,6 +22,10 @@
 //   * It copies ONLY the `parameters` (and typeVersion) of the named nodes from the artifact onto
 //     the LIVE graph fetched over REST. Everything else on those nodes — credentials, webhookId,
 //     node id, position — and every other node, connection and setting is taken verbatim from live.
+//   * `onError` and the retry keys are NOT parameters, so --nodes never carried them and a failure
+//     posture could only be changed by hand in the UI — which is how a graph stops matching its
+//     artifact. --node-settings copies exactly the keys in NODE_SETTING_KEYS and nothing else. It is
+//     not structural (no edge moves), so it does not need --allow-active.
 //   * It NEVER PUTs the committed artifact wholesale: the artifact is credential-sanitised
 //     (scripts/n8n/lib/sanitize.mjs), so pushing it as-is would strip auth from every node.
 //   * The node allowlist is mandatory — there is no "sync everything". The blast radius is the nodes
@@ -47,6 +54,37 @@ import {
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+/**
+ * Node-level keys --node-settings is allowed to move. Deliberately a closed list rather than a
+ * whole-object copy: `id`, `webhookId`, `position`, `credentials` and `name` also live at node level
+ * and must keep coming from live.
+ *
+ * Mostly this describes what a node does when it FAILS. `disabled` is the exception and is here
+ * because it is the same kind of thing — node-level, not a parameter, and unreachable through any
+ * other allowlist — so without it, switching a node off could only be done by hand in the UI. n8n
+ * passes input straight through a disabled node, so downstream nodes still run and simply see no
+ * result from it; that is the intended shape when turning off a vendor call whose only consumer is
+ * a store being retired.
+ */
+const NODE_SETTING_KEYS = [
+  "disabled",
+  "onError",
+  "retryOnFail",
+  "maxTries",
+  "waitBetweenTries",
+  "alwaysOutputData",
+  "executeOnce",
+];
+
+/** The NODE_SETTING_KEYS a node actually carries. Absent keys stay absent — n8n's defaults differ per key. */
+function pickNodeSettings(node) {
+  const out = {};
+  for (const key of NODE_SETTING_KEYS) {
+    if (node?.[key] !== undefined) out[key] = node[key];
+  }
+  return out;
 }
 
 /** Deterministic JSON: sort object keys so two equal shapes stringify identically. */
@@ -181,17 +219,25 @@ async function main() {
 
   const addArg = arg("add");
   const rewireArg = arg("rewire");
+  const nodeSettingsArg = arg("node-settings");
+  const positionsArg = arg("positions");
   const credentialsArg = arg("credentials-from");
   const create = process.argv.includes("--create");
   if (!logicalId) throw new Error("Pass --id <logical-id>.");
   const toggling = process.argv.includes("--activate") || process.argv.includes("--deactivate");
-  if (!create && !toggling && !nodesArg && !addArg && !rewireArg) {
+  // --settings on its own is a real operation, not a modifier: binding `errorWorkflow` so a
+  // workflow's failures are recorded somewhere changes no node and no edge. Requiring a node
+  // operation alongside it would have meant inventing a fake node edit to ship an observability fix.
+  const settingsOnly = process.argv.includes("--settings");
+  if (!create && !toggling && !settingsOnly && !nodesArg && !addArg && !rewireArg && !nodeSettingsArg && !positionsArg) {
     throw new Error(
-      'Pass --nodes "Node A" (update existing), --add "Node B" (add new nodes), ' +
-        '--rewire "Node C" (replace outgoing connections) or --create (POST a brand-new workflow).',
+      'Pass --nodes "Node A" (update existing), --node-settings "Node A" (failure posture), ' +
+        '--add "Node B" (add new nodes), --rewire "Node C" (replace outgoing connections), ' +
+        '--positions "Node D" (move nodes, i.e. change branch order), ' +
+        "--settings (workflow-level settings only) or --create (POST a brand-new workflow).",
     );
   }
-  if (create && (nodesArg || addArg || rewireArg)) {
+  if (create && (nodesArg || addArg || rewireArg || nodeSettingsArg)) {
     throw new Error("--create posts the whole artifact; it does not combine with --nodes/--add/--rewire.");
   }
 
@@ -237,6 +283,8 @@ async function main() {
   const nodeNames = (nodesArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const addNames = (addArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const rewireNames = (rewireArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const settingNames = (nodeSettingsArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const positionNames = (positionsArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
   // "New Node=Live Node" pairs. The donor is read from LIVE, never from the artifact — the artifact
   // is credential-sanitised, so this is the only way an added node can end up authenticated, and no
@@ -265,13 +313,15 @@ async function main() {
   console.log(`live active : ${live.active}`);
   console.log(`nodes       : live ${live.nodes?.length}, artifact ${artifact.nodes?.length}`);
   if (nodeNames.length) console.log(`update      : ${nodeNames.join(", ")}`);
+  if (settingNames.length) console.log(`node-settings: ${settingNames.join(", ")}`);
+  if (positionNames.length) console.log(`positions   : ${positionNames.join(", ")}`);
   if (addNames.length) console.log(`add         : ${addNames.join(", ")}`);
   if (rewireNames.length) console.log(`rewire      : ${rewireNames.join(", ")}`);
   console.log("");
 
   // A structural change to a workflow that is currently serving traffic is a different act from
   // re-parameterising one, and it must be asked for out loud.
-  if (live.active && (addNames.length || rewireNames.length) && !process.argv.includes("--allow-active")) {
+  if (live.active && (addNames.length || rewireNames.length || positionNames.length) && !process.argv.includes("--allow-active")) {
     throw new Error(
       `"${logicalId}" is ACTIVE on ${environment}. --add/--rewire re-shape the graph while it is\n` +
         `serving traffic; re-run with --allow-active if that is genuinely intended, or deactivate first.`,
@@ -281,6 +331,7 @@ async function main() {
   // Snapshot the pre-write live parameters of EVERY node, plus the connection graph, so post-write
   // verification can prove that untargeted nodes and existing edges are untouched.
   const liveBefore = new Map((live.nodes ?? []).map((n) => [n.name, stable(n.parameters)]));
+  const settingsBefore = new Map((live.nodes ?? []).map((n) => [n.name, stable(pickNodeSettings(n))]));
   const connBefore = stable(live.connections ?? {});
   const addedSources = [];
   const rewiredSources = [];
@@ -335,6 +386,40 @@ async function main() {
     changed += 1;
   }
 
+  // --node-settings: move the failure posture (onError + the retry keys) of existing nodes. Separate
+  // from --nodes because the blast radius is different in kind: --nodes changes what a node DOES,
+  // this changes what happens to the run when it fails — which is the difference between a sheet
+  // error costing one row and it aborting the Supabase branch behind it.
+  for (const name of settingNames) {
+    const liveNode = nodeByName(live, name);
+    const artNode = nodeByName(artifact, name);
+    if (!liveNode) throw new Error(`--node-settings node "${name}" is not on the LIVE workflow.`);
+    if (!artNode) throw new Error(`--node-settings node "${name}" is not in the artifact.`);
+
+    const before = pickNodeSettings(liveNode);
+    const after = pickNodeSettings(artNode);
+    if (stable(before) === stable(after)) {
+      console.log(`= ${name}: node settings already match artifact.`);
+      continue;
+    }
+    console.log(`~ ${name} (node settings):`);
+    for (const key of NODE_SETTING_KEYS) {
+      if (stable(before[key]) === stable(after[key])) continue;
+      const show = (v) => (v === undefined ? "(unset)" : JSON.stringify(v));
+      console.log(`    ${key}: ${show(before[key])} → ${show(after[key])}`);
+    }
+    console.log("");
+
+    // Assign the artifact's value, and DELETE any key the artifact does not carry — otherwise
+    // removing `retryOnFail` from the artifact would silently leave it enabled on live, and the
+    // printed diff would claim otherwise.
+    for (const key of NODE_SETTING_KEYS) {
+      if (after[key] === undefined) delete liveNode[key];
+      else liveNode[key] = after[key];
+    }
+    changed += 1;
+  }
+
   // --add: append brand-new nodes (and their outgoing edges) that exist in the artifact but not on
   // live. New nodes carry no credentials, so they can be copied verbatim; existing nodes and edges
   // are never touched. Refuse anything that would collide with or rewire the live graph.
@@ -359,6 +444,29 @@ async function main() {
       live.connections[name] = artConn;
       addedSources.push(name);
     }
+    changed += 1;
+  }
+
+  // --positions: move a node on the canvas. This looks cosmetic and is not. Under
+  // `executionOrder: v1` n8n runs the branches of a fan-out top-to-bottom by Y, so the position of
+  // the first node in each branch decides which one executes first — and therefore, when the first
+  // branch throws without an onError, whether the second one runs at all. Moving the Supabase branch
+  // above the Sheets branch is the fix for defect E5; it changes no edge and no parameter, and it
+  // changes behaviour completely. Gated with --allow-active for that reason.
+  for (const name of positionNames) {
+    const liveNode = nodeByName(live, name);
+    const artNode = nodeByName(artifact, name);
+    if (!liveNode) throw new Error(`--positions node "${name}" is not on the LIVE workflow.`);
+    if (!artNode) throw new Error(`--positions node "${name}" is not in the artifact.`);
+    if (!Array.isArray(artNode.position) || artNode.position.length !== 2) {
+      throw new Error(`--positions node "${name}" has no [x, y] position in the artifact.`);
+    }
+    if (stable(liveNode.position) === stable(artNode.position)) {
+      console.log(`= ${name}: already at ${JSON.stringify(artNode.position)}.`);
+      continue;
+    }
+    console.log(`⇕ ${name}: ${JSON.stringify(liveNode.position)} → ${JSON.stringify(artNode.position)}`);
+    liveNode.position = [...artNode.position];
     changed += 1;
   }
 
@@ -471,7 +579,9 @@ async function main() {
   }
 
   if (!apply) {
-    console.log(`DRY RUN — ${changed} node(s) would change. Re-run with --apply (and`);
+    // "change(s)", not "node(s)": the counter also covers the workflow-settings block, and a
+    // settings-only deploy touches no node at all.
+    console.log(`DRY RUN — ${changed} change(s) would be written. Re-run with --apply (and`);
     console.log(`N8N_APPROVED_PRODUCTION_WRITE set) to write.`);
     return;
   }
@@ -498,10 +608,40 @@ async function main() {
       problems.push(`"${name}" did not land as expected`);
     }
   }
+  // A node named only by --node-settings must have moved its posture and NOTHING else: its
+  // parameters have to be byte-identical to what was live before the write.
+  for (const name of settingNames) {
+    const artNode = nodeByName(artifact, name);
+    const liveNode = nodeByName(after, name);
+    if (!liveNode || stable(pickNodeSettings(liveNode)) !== stable(pickNodeSettings(artNode))) {
+      problems.push(`"${name}" node settings did not land as expected`);
+    }
+    if (!touched.has(name) && liveNode && liveBefore.get(name) !== stable(liveNode.parameters)) {
+      problems.push(`--node-settings "${name}" also changed its parameters`);
+    }
+  }
+  // A node named only by --positions must have MOVED and nothing else — the whole point is that
+  // execution order changed while behaviour did not.
+  for (const name of positionNames) {
+    const artNode = nodeByName(artifact, name);
+    const liveNode = nodeByName(after, name);
+    if (!liveNode || stable(liveNode.position) !== stable(artNode.position)) {
+      problems.push(`"${name}" did not move as expected`);
+    }
+    if (!touched.has(name) && liveNode && liveBefore.get(name) !== stable(liveNode.parameters)) {
+      problems.push(`--positions "${name}" also changed its parameters`);
+    }
+  }
+
+  const settingsTouched = new Set(settingNames);
   for (const node of after.nodes ?? []) {
     if (touched.has(node.name)) continue;
     if (liveBefore.get(node.name) !== stable(node.parameters)) {
       problems.push(`untargeted node "${node.name}" changed`);
+    }
+    if (settingsTouched.has(node.name)) continue;
+    if (settingsBefore.get(node.name) !== stable(pickNodeSettings(node))) {
+      problems.push(`untargeted node "${node.name}" changed its failure posture`);
     }
   }
   // Credentials on added nodes must have survived the round trip, or the node is authenticated
@@ -528,12 +668,30 @@ async function main() {
       problems.push(`rewired connections from "${src}" did not land as expected`);
     }
   }
+  // A settings write gets the same treatment as a node write: read it back rather than trust the
+  // 200. `errorWorkflow` in particular is invisible on the canvas, so nothing else would catch a PUT
+  // that silently dropped it.
+  const settingsLanded = [];
+  if (settingsOnly) {
+    const { kept } = filterSettings({ availableInMCP: true, ...(artifact.settings ?? {}) });
+    for (const [key, value] of Object.entries(kept)) {
+      if (JSON.stringify((after.settings ?? {})[key]) !== JSON.stringify(value)) {
+        problems.push(`settings.${key} did not land: expected ${JSON.stringify(value)}, live has ${JSON.stringify((after.settings ?? {})[key])}`);
+      } else {
+        settingsLanded.push(key);
+      }
+    }
+  }
+
   if (problems.length) throw new Error(`Post-write verification FAILED:\n  - ${problems.join("\n  - ")}`);
 
   const summary = [
     nodeNames.length && `${nodeNames.length} updated`,
     addNames.length && `${addNames.length} added`,
     rewiredSources.length && `${rewiredSources.length} rewired`,
+    settingNames.length && `${settingNames.length} node posture`,
+    positionNames.length && `${positionNames.length} moved`,
+    settingsLanded.length && `settings verified (${settingsLanded.join(", ")})`,
   ]
     .filter(Boolean)
     .join(", ");

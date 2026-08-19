@@ -31,36 +31,41 @@ The fields this workflow actually reads:
 
 ## Flow
 
+Branch L is **disabled as of 2026-08-19** (phase C). Its six nodes stay in the graph as the rollback
+path — re-enabling them is one `--node-settings` deploy.
+
 ```
-When Called by HUB ─┬─▶ [325] Find workspace in CS PDCA (Sheets, retry 5×5s)
-                    │        └─▶ [318] Bison GET /leads/{id}
-                    │              └─▶ [322] Bison GET /leads/{id}/replies
-                    │                    └─▶ [326] Set last_reply (newest by date_received)
-                    │                          └─▶ [317] gpt-5-mini: extract return date
-                    │                                ├─▶ [327] Append row to "OOO Leads" sheet
-                    │                                └─▶ Update rows in a table (public.leads)
-                    └─▶ Select rows from a table (public.client_sequencers)   ◀── DEAD END
+When Called by HUB ─┬─▶ [S] Resolve client sequencer            (y=208, runs first)
+                    │     └─▶ [S] Bison GET /leads/{id}
+                    │           └─▶ [S] Bison GET /leads/{id}/replies
+                    │                 └─▶ [S] Pick newest OOO reply
+                    │                       └─▶ [S] Extract expected return date  (gpt-5-mini)
+                    │                             └─▶ [S] upsert_sequencer_contact
+                    │                                   └─▶ [S] upsert_reply
+                    │                                         └─▶ [S] record_ooo_followup
+                    │
+                    └─▶ [325] Find workspace in CS PDCA        (y=480, DISABLED)
+                          └─▶ [318] Bison GET /leads/{id}       DISABLED
+                                └─▶ [322] Bison GET /leads/{id}/replies   DISABLED
+                                      └─▶ [326] Set last_reply (newest by date_received)  DISABLED
+                                            └─▶ [317] gpt-5-mini: extract return date     DISABLED
+                                                  └─▶ [327] Append row to "OOO Leads"     DISABLED
 ```
+
+Disabling branch L removes, per OOO event (90–190 a day): one Sheets read, one Sheets append, two
+Bison calls, and **one paid gpt-5-mini call** — the one that disagreed with branch S's.
 
 ## Outputs
 
-1. **Google Sheet `OOO Leads`** (`1BGjr3EWsv…`) — one appended row: `LeadID`, `ReplyID`,
-   `WorkspaceID`, `Expected Return Date`, `Formatted Expected Date`, `Gender`. **This sheet is the
-   de-facto source of truth for OOO today**, and it is what the scheduled `Add OOO Leads` workflow
-   reads to re-enrol contacts.
-   Under [ADR-0017](../../../../../docs/adr/0017-sheets-to-supabase-dual-write-transition.md) this
-   write is **kept** through the transition — it is the system the business currently reads, not debt
-   to delete.
-2. **`public.leads`** — `UPDATE … SET qualification='OOO', expected_return_date=… WHERE external_id=…`.
-   Verified against production on 2026-07-21: **0 rows carry `qualification='OOO'` and 0 carry a
-   non-null `expected_return_date`.** This write has never landed. Treat the Postgres branch as
-   non-functional, not as a second source of truth.
-
-   **Update 2026-07-22: branch S is no longer non-functional — it now writes `ooo_followups`.** 66
-   rows exist as of this check, all through `record_ooo_followup`, not the direct write above (which
-   remains dead and is still the cutover gate). The earlier "OOO episode gap" (`ooo_followups`
-   apparently stuck at 0 despite `sequencer_contacts`/`replies` growing) had already closed by the time
-   it was re-checked — the migration-backlog entry describing it as open was stale.
+1. **Supabase** — `sequencer_contacts`, `replies`, `ooo_followups`, all through RPCs
+   (`upsert_sequencer_contact` → `upsert_reply` → `record_ooo_followup`). This is the only store as
+   of 2026-08-19.
+2. ~~**Google Sheet `OOO Leads`**~~ — no longer written. It was the de-facto source of truth for OOO
+   until Wave 1 (2026-08-15) moved enrolment to Supabase, and a write-only record for four days after
+   that. Existing rows are left in place as history.
+3. ~~**`public.leads`** direct write~~ — deleted 2026-07-21. It never landed a row (verified: 0 leads
+   ever carried `qualification='OOO'` or a non-null `expected_return_date`), and a second store does
+   not license bypassing the RPC contract (ADR-0015 §5).
 
 ## Known defects
 
@@ -78,6 +83,7 @@ debt with an expiry) except where noted.
 | 7 | The Bison API key travels from a Google Sheet cell into an `Authorization` header expression | Per-client API keys live in a spreadsheet rather than `client_sequencers.api_key`. Tracked in [security.md](../../../../../docs/reference/n8n/security.md), not in `knownViolations` (it is not a rule the offline validator can express). |
 | 8 | ~~`[326]` sorted **ascending** and took the oldest reply~~ — **fixed 2026-07-22** | Branch L's `[326]` now sorts **descending** and takes the newest reply (renamed to "Set last_reply (**newest** by date_received)", comparator flipped to `new Date(b…) - new Date(a…)`), matching branch S's `[S] Pick newest OOO reply`, which was already correct. For a contact with several replies the newest is the current OOO auto-reply, so both branches now feed the LLM the right message. |
 | 9 | ~~The two branches read `[317]`'s output with incompatible shapes~~ — **fixed 2026-07-22** | Both `[327] Add OOO Leads row` and `[S] record_ooo_followup` read a flat field (`$json.expected_return_date` / `$json.returnDate`) that never existed — the real langchain-openai response nests it at `output[0].content[0].text.{return_date\|returnDate}`. Neither consumer path could ever have worked. |
+| 10 | ~~The extractor is never told what today's date is~~ — **fixed 2026-08-19** | `gpt-5-mini` reading "back on 15 August" had no reference date, so it invented the year: 36 of 974 parsed episodes carried an impossible `expected_return_date` (35 in the past, one at +366 days). 23 of them were later expired as `stale` — contacts who named a return date and were never followed up. Both prompts now carry the reply's `date_received`; the RPC rejects an implausible date as `date_source='parse_rejected'`. See [B1](../../../../../docs/reference/n8n/defect-backlog.md#b1). |
 
 **Defect 9 resolved, not just described.** The open question this defect raised ("is the fallback
 firing on every event, or only when the LLM genuinely finds nothing?") was checked against real
@@ -95,6 +101,24 @@ fix) — the LLM returned `"2026-07-24"` on both branches, `[327]` wrote `2026-0
 `ae1abbc8-351d-40f5-b481-8e0470a3f5b9` with `expected_return_date="2026-07-24"`,
 `date_source='reply_parsed'` — the first `reply_parsed` row `ooo_followups` has ever had (69
 `fallback` / 1 `reply_parsed` as of this write).
+
+
+**Defect 10 and the two things it exposed.** The failure everyone could see was
+`cannot convert to Luxon DateTime` in `[327]`, and it was recorded as a date-conversion bug for three
+weeks. It was not. Two independent problems shared that symptom:
+
+- **The model picked its own key.** `[317]`'s instruction said "Return only the structured JSON"
+  without naming one, so production shows `return_date`, `returnDate` *and* `return_to_office` from
+  the same node. Branch L reads only the first. Defect 9 above records the two branches reading
+  *different* keys as a quirk of each branch — it is actually the model choosing freely, and branch S
+  only escaped because its prompt happened to name the key.
+- **The model picked its own year.** Which no amount of accessor fixing could have caught, because
+  the value parses fine — it is simply wrong.
+
+The branches also disagree *with each other*: on the same reply, S returned 08-18 where L returned
+08-19, and S returned null where L returned "2027". Two paid LLM calls asking one question twice
+cannot be reconciled — which is what ADR-0017 phase B would require. Worth remembering before the
+next dual-write puts a model on both sides of it.
 
 ## Migration
 

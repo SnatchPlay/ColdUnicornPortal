@@ -1,0 +1,123 @@
+schemaVersion: 1
+
+id: bison-replies-classification
+name: "Bison Replies Classification - Sheets Primary 401 Fallback"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # every Bison reply enters here; no tag is attached without it
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: webhook
+    detail: "POST /webhook/... — Bison fires on every reply. UNAUTHENTICATED (security.md finding 12)."
+
+reads:
+  external:
+    - "OpenAI · POST /v1/responses (gpt-5-mini), strict json_schema — the classification itself"
+    - "Bison API · GET /tags, GET /leads/{id}, GET thread replies"
+  tables:
+    - client_sequencers        # api_key + external_workspace_id
+    - clients                  # notification_emails (forward recipients)
+
+writes:
+  external:
+    - "Bison · POST /tags/attach-to-leads — THE side effect: the tag it attaches is what the HUB dispatcher fans out on"
+    - "Bison · reply forward notification, when the thread is Interested and the client has recipients"
+  tables: []
+  rpcs: []
+  tablesWritten: []           # writes NOTHING to Supabase — see transition.notes
+
+credentials:
+  - alias: "OpenAi account"
+    type: openAiApi
+    usedBy: "OpenAI - Classify Email"
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "[S] Resolve workspace config"
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "Google Sheets - config.getWorkspaceConfig — ORPHANED 2026-08-17, kept as the rollback path"
+
+transition:
+  phase: C                   # Supabase only. It never dual-wrote — it only ever READ config
+  phaseState: cutover-2026-08-17
+  authoritativeSource: supabase
+  legacyStore: "Google Sheets · CS PDCA (+ a Make.com scenario as the 401 fallback)"
+  targetStore: "Supabase · client_sequencers.api_key + clients.notification_emails"
+  design: docs/reference/processes/outreach/bison-ingestion.md
+  notes: >-
+    Adopted 2026-08-17. It could not be adopted before: a literal OpenAI key sat in the
+    `OpenAI - Classify Email` header, and `pnpm n8n:export` refuses to write an artifact that trips
+    the secret scanner. The artifact committed here already carries the fix — authentication moved to
+    `predefinedCredentialType` / `openAiApi`, matching what aimfox-classification did in July
+    (security.md finding 8) — so the artifact deliberately LEADS the instance until that deploy lands.
+    The exposed key must still be rotated in OpenAI; moving it out of the graph does not un-leak it.
+
+    What it actually depends on Sheets for is small, and that is the good news. Six nodes read the
+    config Set, but only TWO fields are consumed anywhere: `bison_api_key` (the four Bison calls) and
+    `email_recipients_csv` (the forward gate). `client_spreadsheet_id` and `sms_recipients_csv` are
+    computed by the Set and never read.
+
+    The Sheets read was also the most fragile thing here, and the strongest argument for moving —
+    stronger than the shutdown. The old Set normalised whichever shape arrived by POSITIONAL INDEX:
+    `Object.values(r)[6]` for the API key, `[98]` for the recipients. Insert a column in CS PDCA and it
+    silently starts reading the wrong value; nothing fails, the wrong key is simply used and Bison
+    answers 403.
+
+    CUT OVER 2026-08-17. `[S] Resolve workspace config` (one Postgres node, keyed on
+    external_workspace_id for the EmailBison sequencer, requiring enabled + a non-null api_key + a
+    live client) replaced FOUR nodes: the Sheets read, the "is it a 401?" branch, the Make.com scenario
+    that branch called, and the stopAndError for every other Sheets failure. Two external systems
+    became one table read, and the positional indexing is gone — the Set now reads named columns.
+
+    The Set keeps its old name, `Sheets API - config.getWorkspaceConfig`, which is now a misnomer. Six
+    nodes address it as `$('Sheets API - config.getWorkspaceConfig')`, and n8n:deploy cannot rename a
+    node (--nodes matches by name), so renaming would mean rewriting all six expressions. Its `notes`
+    field records what actually feeds it.
+
+    The four old nodes stay in the graph, orphaned — they are the rollback, exactly like branch L in
+    ooo-enrol-followups. Re-pointing `Category Is Not NRR?` back at the Sheets node is a one-flag
+    revert.
+  reconciliation: >-
+    This workflow writes nothing, so reconciliation is about the config it reads, not about rows:
+    for each workspace, compare the api_key and recipients resolved from CS PDCA against
+    client_sequencers.api_key / clients.notification_emails. A mismatch means the sheet and Supabase
+    disagree about who a client is, which is a data problem regardless of which store wins.
+  parityEvidence: >-
+    2026-08-17 coverage: 15/15 workspaces seen in the 400 most recent executions resolve in
+    client_sequencers with an api_key and an enabled sequencer, and every owning client has at least
+    one notification_emails entry.
+
+    2026-08-17 cutover, verified on live traffic rather than asserted — real replies for two different
+    clients went the new way within minutes of the deploy:
+
+      77400  RevOpsi      cfg=ok  src=supabase  key=present  -> New Reply In Interested Thread?
+      77402  Kaizen rent  cfg=ok  src=supabase  key=present  -> New Reply In Interested Thread?
+
+    Same terminal node as before the change, so the Bison calls downstream still authenticate.
+
+    Recipient lists were deliberately NOT compared against the sheet. Owner decision 2026-08-17:
+    Supabase is the source of truth, so a client whose forwarded replies now reach a different address
+    is the new truth, not a regression. Coverage was the gate; content was not.
+
+idempotency:
+  key: "Bison tag attach is a no-op for a tag the lead already carries; the HUB dedupes on (tag_id, taggable_id, action)"
+  notes: >-
+    A replayed webhook re-classifies (a second OpenAI call, so it costs money and may return a
+    different category) and re-attaches the same tag. The attach is harmless; the re-classification is
+    not free. There is no local dedup on the reply id.
+
+retryPolicy:
+  notes: >-
+    None. The Sheets node carries onError=continueErrorOutput, which is how the 401 fallback to
+    Make.com is wired — it is a routing device, not error tolerance. Every other node stops the run.
+
+knownViolations: []

@@ -219,6 +219,38 @@ anything here; a superuser would pass regardless. Recorded as
 branch L's, except differences explained by divergence 1. Recorded in
 `manifest.transition.parityEvidence`.
 
+### A1 → A2 measured 2026-08-15 — **PASSED**
+
+Branch L's actual attach payloads were read from execution data — the **output of
+`Build attach requests1`** (`{clientKey, type, campaignId, apiKey, leadIds[]}`), not the HTTP node,
+whose output is only Bison's acknowledgement and carries no lead ids. Branch S's intent came from
+`integration_sync_runs.metadata->'intended_attach'`. Window: the last 40 executions / 40 shadow runs
+(8 executions actually reached the build node; 1 stopped at `Get OOO leads1`).
+
+| Measure | Result |
+|---|---|
+| Distinct leads, branch L | 254 |
+| Distinct leads, branch S | 1002 |
+| In both | 174 |
+| **Resolved to a DIFFERENT campaign by the two branches** | **0** ✅ |
+| S \ L | 828 |
+| L \ S | 80 |
+
+Zero campaign disagreement is the gate, and it passes: the double-enrolment hazard the A1 shadow was
+built to detect does not exist in this data. The two asymmetries are both expected and neither
+blocks A2:
+
+- **S \ L = 828.** Branch L's due filter is an exact equality on today−2d
+  (`workflow.json` `Get OOO leads1`), so a cohort missed by one run is dropped forever; it also
+  failed 4 of its last 9 runs. Branch S's `scheduled_for <= current_date` is inherently catch-up.
+- **L \ S = 80.** Sheet rows with no `ooo_followups` episode underneath — episodes that predate
+  branch S, which has only been recording since 2026-07-22.
+
+**This refutes the assumption that the `pending` backlog is work branch L has already done.** Branch
+L attached **254** distinct leads across the whole retained window while branch S intended **1002**;
+the ~828 difference is genuinely unserved, not duplicated. Any backlog decision has to rest on
+whether an episode's return date is still meaningful, **not** on "branch L already handled it".
+
 **A2 → B:** branch S has driven the process for a full cycle with no episode stuck in `failed`, and
 `ooo_followups` status counts reconcile against sheet rows. Authority flips to Supabase.
 

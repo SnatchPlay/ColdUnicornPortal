@@ -1,0 +1,97 @@
+schemaVersion: 1
+
+id: bison-blacklist-add
+name: "[child-4] TAG_ATTACHED · Blacklist add (email + domain)"
+domain: outreach
+owner: automation
+lifecycle: managed
+status: active
+criticality: high            # blacklisting is irreversible for that client
+
+businessProcess:
+  - docs/reference/processes/outreach/bison-ingestion.md
+
+architectureDecisions:
+  - docs/adr/0017-sheets-to-supabase-dual-write-transition.md
+
+triggers:
+  - type: sub-workflow
+    detail: >-
+      Called by [HUB] Bison Replies Dispatcher (xPzdtWQiY3lGtqI1) when
+      fire_child_4 is true: event.type === "TAG_ATTACHED" and tag_name is one of
+      Interested / Not Interested / PreMQL / preMQL.
+
+reads:
+  tables: []
+  external:
+    - "Google Sheets · CS PDCA — workspace_id → col_4 (client Leads sheet id) + col_6 (Bison API key)"
+    - "Google Sheets · 🤖Emails Exclude List — public-domain guard before the domain blacklist"
+    - "Google Sheets · <client>/Leads — locates the lead row to write the blacklist ids back to"
+    - "Bison API · GET /leads/{taggable_id}"
+
+writes:
+  external:
+    - "Bison · POST /blacklisted-emails"
+    - "Bison · POST /blacklisted-domains"
+    - "Google Sheets · <client>/Leads — 'Blacklist ID' and 'Domain Blacklist ID' columns"
+  tables: []
+  rpcs: []
+
+credentials:
+  - alias: "Google Sheets account"
+    type: googleSheetsOAuth2Api
+    usedBy: "the four Sheets nodes"
+  # Bison is NOT an n8n credential here: every Authorization header is an expression over
+  # CS PDCA col_6. That is security finding 1, and it is why this workflow dies the moment the
+  # spreadsheet is disconnected — see transition.notes.
+
+transition:
+  phase: 0
+  phaseState: "sheets-only — no Supabase branch exists"
+  authoritativeSource: sheets
+  legacyStore: "Google Sheets · CS PDCA + <client>/Leads + 🤖Emails Exclude List"
+  targetStore: "Supabase · client_sequencers (credentials), email_exclude_list (guard), leads (blacklist ids)"
+  design: docs/reference/n8n/defect-backlog.md
+  notes: >-
+    Every dependency already has a Supabase counterpart, which is why this is phase 0 rather than
+    blocked: client_sequencers holds external_workspace_id + api_key for all 45 EmailBison rows;
+    email_exclude_list exists with 161 rows; leads.external_blacklist_id / external_domain_blacklist_id
+    are real columns. Two cautions before the switch — email_exclude_list has not been touched since
+    2026-04-21 and must be diffed against the sheet first, and external_domain_blacklist_id is
+    populated on ZERO leads today, so nothing has ever written it. Writing either column from n8n
+    needs a SECURITY DEFINER RPC: `leads` is RPC-owned and a direct write is a validate ERROR.
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "Bison's own uniqueness on the blacklist: POST /blacklisted-emails returns 422 'The email has already been taken.' for a repeat"
+  notes: >-
+    That 422 is the workflow's de-facto dedup, and it is also its biggest defect: the node has no
+    onError, so a benign duplicate ABORTS the execution — 211 of 337 runs in the 16 days to
+    2026-08-15. Because [111] fans out to the email limb (y=208) before the domain limb (y=400) and
+    n8n runs branches top-to-bottom by position, the abort happens before the domain is blacklisted
+    and before either id is written back to the sheet. Fix in defect-backlog.md B2.
+
+retryPolicy:
+  notes: >-
+    2026-08-18: all six Google Sheets nodes retry — retryOnFail, maxTries 3, waitBetweenTries 5000.
+    Four are lookups and the two writebacks set a fixed column on a matched row, so every one of them
+    is safe to repeat. The three Bison POSTs do NOT retry: their 422 IS the idempotency mechanism
+    (see idempotency.key above) and it is already absorbed with onError, so a retry would add
+    latency and nothing else. Before this, a transient Sheets ECONNRESET or 503 anywhere in the email
+    limb cost the whole run INCLUDING the domain limb behind it — measured twice, 2026-08-12 and
+    2026-08-18.
+
+observability:
+  notes: >-
+    settings.errorWorkflow is UNSET — this workflow reports its failures nowhere, which is why a 63%
+    failure rate ran unnoticed. Binding [ERR] Automation failure recorder (Pmz0JjRRuJNdNpSE) is
+    defect-backlog.md E1.
+
+environments:
+  development:
+    remoteWorkflowId: null
+  production:
+    remoteWorkflowId: bEB3aOHEq2lEpubp
+
+knownViolations: []

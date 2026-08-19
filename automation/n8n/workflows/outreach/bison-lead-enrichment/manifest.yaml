@@ -31,7 +31,7 @@ reads:
     - "Bison API · GET /leads/{id}, /leads/{id}/replies, /leads/{id}/scheduled-emails, /campaigns/{id}, /campaigns/v1.1/{id}/sequence-steps — called TWICE per lead, once per branch, each on its own credential (branch L: CS PDCA col_6; branch S: client_sequencers.api_key via [S0])"
     - "Google Sheets · CS PDCA; <client>/Leads; 🤖Emails Exclude List — branch L only"
     - "Snov.io · local list + global profile lookup — called once per branch (double cost, deliberate — ADR-0017 §1a)"
-    - "Lusha · POST /v2/person (fallback phone) — called once per branch (double cost, deliberate)"
+    - "Lusha · POST /v2/person (fallback phone) — branch S ONLY since 2026-08-18; branch L's [181] is disabled"
     - "OpenAI · gpt-4o reply analysis — called once per branch (double cost, deliberate)"
 
 writes:
@@ -60,7 +60,7 @@ credentials:
     usedBy: "CS PDCA / Leads / Emails Exclude List lookups and writes — branch L only"
   - alias: "Lusha"
     type: httpHeaderAuth
-    usedBy: "[181] Lusha: POST /v2/person (branch L) and [S] Lusha: POST /v2/person (branch S) — same credential, two independent calls"
+    usedBy: "[S] Lusha: POST /v2/person (branch S). Branch L's [181] uses the same credential but is DISABLED since 2026-08-18 — see transition.notes"
   - alias: "UniTalk"
     type: httpHeaderAuth
     usedBy: "HTTP Request (notification) — branch L only"
@@ -85,7 +85,17 @@ transition:
     Supabase failure there degrades that one execution's branch-S data (every reactivated node is
     onError=continueRegularOutput) and never touches branch L.
 
-    This reverses the previous narrowing: Snov.io, Lusha and OpenAI are now called once per branch
+    2026-08-18 — LUSHA IS NO LONGER CALLED TWICE. `[181]` (branch L) is disabled; `[S] Lusha` keeps
+    running. Nothing is lost where it matters: the phone still reaches Supabase through
+    promote_contact_to_lead, and only the spreadsheet row loses its fallback phone — a store that is
+    being switched off. Snov.io and OpenAI are still called once per branch.
+
+    This narrowing is deliberate and it does weaken the ADR-0017 §1a reading below: branch L is no
+    longer fully independent of branch S for phone data. That is accepted, because branch L is the
+    branch being retired, and because Lusha credits were exhausted (defect B4) — half the calls were
+    returning 402 anyway.
+
+    The original arrangement, for context: Snov.io, Lusha and OpenAI were called once per branch
     (double vendor cost per lead), accepted explicitly in exchange for the literal reading of
     ADR-0017 §1a — either branch can be disconnected without the other's correctness depending on
     what's in the other branch's data source. The reactivated chain is 18 nodes that already existed
@@ -105,7 +115,39 @@ transition:
     20260723_promote_contact_qualification_sync.sql. So compare on existence AND qualification; a
     preMQL-in-Supabase / MQL-in-sheet split is now a defect, not expected divergence. ADR-0004 governs
     what the PORTAL may edit, not whether n8n may set qualification from the tag.
-  parityEvidence: "2026-07-23: 54 historical preMQL leads with MQL signals reconciled; flow deployed."
+  parityEvidence: >-
+    2026-07-23: 54 historical preMQL leads with MQL signals reconciled; flow deployed.
+
+    2026-08-15 — FIELD parity measured, and it was not there. The sheet row gets 19 populated
+    columns; branch S was passing 9. Every EmailBison lead written through the RPC since
+    2026-07-21 (336 of them, all carrying origin_reply_id) had industry, headcount_range,
+    linkedin_url, country, message_title, message_number and response_time_label empty — while the
+    same lead's sheet row was complete. A clean cliff, not a decay: the 483 complete rows before it
+    have origin_reply_id = 0 and were Sheets-era rows given their contact link retroactively.
+    Same day, ALL EIGHT missing fields were closed. D1: linkedin_url / industry / headcount_range /
+    country added to [S] Edit Fields and the RPC call — the RPC had accepted them since 20260723.
+    D2: message_title / message_number / response_time_hours / response_time_label required
+    migration 20260815_promote_contact_lead_reply_context.sql to extend v_allowed, proven in a
+    rolled-back transaction on a real unpromoted Interested contact (created=true, smallint and
+    numeric casts correct, empty strings → null, unknown key still rejected). Branch S was already
+    computing every one of these on every run and discarding them.
+    Also fixed the same day (D6): [S] Pick Snovio output body read branch L's [11] global Snov.io
+    node instead of its own [S] one, so branch S paid for a lookup it discarded and enriched from
+    branch L — the coupling this manifest claims was removed. Its try/catch meant that once branch L
+    goes, branch S would have silently fallen back to the local list.
+    D3 also closed the same day, and it needed nothing from this workflow: all 478 leads with an
+    origin_reply_id already had their reply row with replies.lead_id pointing back, so the body was
+    in Supabase all along — it was simply never copied to leads.reply_text, which is where the
+    leads-table column and the export read. Migration 20260815b makes promote_contact_to_lead copy
+    the origin reply's message_text itself (it already reads that row for the classification gate),
+    and backfilled 471 rows: 476 of 478 now carry the body, 0 disagree with `replies`, the 2
+    remaining are replies with no message_text at all. The caller must NOT send reply_text — the key
+    is deliberately absent from v_allowed and would raise. Genuinely still open here:
+    gender is computed by neither branch; 34 of 336 leads have a null campaign_id (D4); and the
+    enrichment fields on the rows written 2026-07-21 … 2026-08-15 are not backfilled (D5).
+    Phase B therefore stays UNREACHED — not for field parity any more, but because the backlog is
+    unfixed and no post-fix lead has been measured yet. Re-run the by-week coverage query after the
+    next real MQL lead before advancing.
 
 idempotency:
   key: "uq_leads_source_sequencer_contact + leads.origin_reply_id + replies UNIQUE (external_id)"
@@ -121,6 +163,14 @@ retryPolicy:
     onError=continueRegularOutput, so a Supabase or vendor failure on branch S cannot stop the sheet
     or CRM path (ADR-0017: Supabase failure is non-fatal in phase A). Branch L has no error branch —
     pre-existing.
+
+    2026-08-18: branch L's five Google Sheets nodes retry — retryOnFail, maxTries 3,
+    waitBetweenTries 5000. Reads and a matched-row column update only; the sheet APPEND is
+    deliberately excluded, because branch L's dedup is a sheet lookup (see idempotency.notes) and a
+    retried append after a lost response is exactly how a duplicate row is born. Execution 77929
+    (2026-08-18) is why: a Sheets 503 on [4] killed branch L outright. Branch S had already written
+    the contact, the reply and the lead by then — the reorder holding, and the reason that failure
+    cost a spreadsheet row and nothing else.
 
 knownViolations: []
     # Resolved 2026-07-22: the direct-table-write nodes ("Update rows in a table", "Insert rows in a

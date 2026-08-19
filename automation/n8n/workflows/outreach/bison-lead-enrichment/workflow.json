@@ -9,7 +9,7 @@
       "typeVersion": 2.3,
       "position": [
         3472,
-        88
+        96
       ],
       "parameters": {
         "conditions": {
@@ -43,7 +43,7 @@
       "typeVersion": 4.4,
       "position": [
         4048,
-        -8
+        -16
       ],
       "parameters": {
         "headerParameters": {
@@ -74,7 +74,7 @@
       "typeVersion": 2.1,
       "position": [
         4496,
-        88
+        96
       ],
       "parameters": {
         "builtInTools": {},
@@ -111,7 +111,7 @@
       "typeVersion": 2.3,
       "position": [
         5072,
-        88
+        96
       ],
       "parameters": {
         "conditions": {
@@ -144,8 +144,11 @@
       "typeVersion": 4.4,
       "position": [
         5296,
-        -8
+        -16
       ],
+      "disabled": true,
+      "notes": "Disabled 2026-08-18 to stop paying Lusha twice per lead. Branch S has its own [S] Lusha call, so Supabase keeps the phone; only the sheet row loses it, and the sheet is being retired.",
+      "onError": "continueRegularOutput",
       "parameters": {
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
@@ -176,8 +179,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        6416,
-        88
+        7152,
+        -336
       ],
       "parameters": {
         "bodyParameters": {
@@ -188,7 +191,7 @@
             },
             {
               "name": "sender_email_id",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].sender_email_id }}"
+              "value": "={{ $('[S] Pick Snovio output body').first().json.last_reply.sender_email_id }}"
             },
             {
               "name": "content_type",
@@ -196,7 +199,7 @@
             },
             {
               "name": "to_emails",
-              "value": "={{ \n  ($('[2] Find workspace in CS PDCA').item.json.col_101 || '')\n    .split(',')\n    .map(item => item.trim())\n    .filter(Boolean)\n    .map(email => ({ email_address: email }))\n}}"
+              "value": "={{ \n  $json.notification_emails\n    .map(item => item.trim())\n    .filter(Boolean)\n    .map(email => ({ email_address: email }))\n}}"
             },
             {
               "name": "inject_previous_email_body",
@@ -208,7 +211,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $('[2] Find workspace in CS PDCA').first().json.col_6 }}"
+              "value": "={{ \"Bearer \" +  $('[S0] Resolve Bison credentials').first().json.bison_api_key}}"
             }
           ]
         },
@@ -216,7 +219,7 @@
         "options": {},
         "sendBody": true,
         "sendHeaders": true,
-        "url": "={{ \"https://go.gheads.com/api/replies/\" + $(\"[226+227+228] Pick Snovio output body\").first().json.last_reply.id + \"/forward\" }}"
+        "url": "={{ \"https://go.gheads.com/api/replies/\" + $('[S] Pick Snovio output body').first().json.last_reply.id + \"/forward\" }}"
       }
     },
     {
@@ -226,8 +229,11 @@
       "typeVersion": 4.7,
       "position": [
         784,
-        88
+        96
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -259,7 +265,7 @@
       "typeVersion": 2,
       "position": [
         4272,
-        88
+        96
       ],
       "parameters": {
         "jsCode": "const local = $(\"[9] Snov.io: POST /v1/get-prospects-by-email (Local List)\").first().json;\nlet snovio_body = local;\ntry {\n  const globalAll = $(\"[11] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[79+72+51+8+57] Compute derived values\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
@@ -272,7 +278,7 @@
       "typeVersion": 2.3,
       "position": [
         2128,
-        280
+        288
       ],
       "parameters": {
         "conditions": {
@@ -307,7 +313,7 @@
       "typeVersion": 4.4,
       "position": [
         2352,
-        280
+        288
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -335,7 +341,7 @@
       "typeVersion": 2,
       "position": [
         4848,
-        88
+        96
       ],
       "parameters": {
         "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\nconst phoneFromAi = (ai.phone_number || \"\").trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
@@ -348,7 +354,7 @@
       "typeVersion": 3.4,
       "position": [
         5520,
-        -8
+        -16
       ],
       "parameters": {
         "assignments": {
@@ -377,9 +383,12 @@
       "typeVersion": 4.7,
       "position": [
         2576,
-        280
+        288
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -411,7 +420,7 @@
       "typeVersion": 2.3,
       "position": [
         2800,
-        280
+        288
       ],
       "parameters": {
         "conditions": {
@@ -445,7 +454,7 @@
       "typeVersion": 4.4,
       "position": [
         3024,
-        280
+        288
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -479,9 +488,12 @@
       "typeVersion": 4.7,
       "position": [
         1232,
-        88
+        96
       ],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -511,7 +523,7 @@
       "typeVersion": 4.4,
       "position": [
         1008,
-        88
+        96
       ],
       "parameters": {
         "headerParameters": {
@@ -534,7 +546,7 @@
       "typeVersion": 4.4,
       "position": [
         1680,
-        184
+        192
       ],
       "parameters": {
         "headerParameters": {
@@ -557,7 +569,7 @@
       "typeVersion": 3.4,
       "position": [
         1904,
-        184
+        192
       ],
       "parameters": {
         "assignments": {
@@ -580,7 +592,7 @@
       "typeVersion": 4.4,
       "position": [
         2352,
-        88
+        96
       ],
       "parameters": {
         "headerParameters": {
@@ -597,13 +609,83 @@
       }
     },
     {
+      "id": "d7609d3b-ea97-442f-afbe-5a9eaab37f05",
+      "name": "[4b] Duplicate appeared mid-run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5952,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a54ba36a-3130-4dba-99d2-88ab29405d22",
+              "leftValue": "={{ $json['E-MAIL'] }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8a619ea8-c76d-40a2-8691-b6edcfe82ce4",
+      "name": "[4b] Re-check lead in Leads sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        5744,
+        288
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"[2] Find workspace in CS PDCA\").first().json[\"col_4\"] }}"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "E-MAIL",
+              "lookupValue": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data.email || $('[226+227+228] Pick Snovio output body').item.json.last_reply?.from_email_address }}"
+            }
+          ]
+        },
+        "options": {},
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        }
+      }
+    },
+    {
       "id": "05078131-3ca2-44de-b24b-629aba207c34",
       "name": "[52] Bison: GET /campaigns/{id}",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
         2128,
-        88
+        96
       ],
       "parameters": {
         "headerParameters": {
@@ -626,7 +708,7 @@
       "typeVersion": 4.4,
       "position": [
         2576,
-        88
+        96
       ],
       "parameters": {
         "headerParameters": {
@@ -649,7 +731,7 @@
       "typeVersion": 2,
       "position": [
         2800,
-        88
+        96
       ],
       "parameters": {
         "jsCode": "const last_reply = $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0]\nconst scheduled = $(\"[49] Bison: GET /leads/{lead_id}/scheduled-emails\").first().json.data || [];\nconst stepsResp = $input.first().json.data;\nconst sequenceSteps = stepsResp.sequence_steps|| [];\n\nconst scheduledRow = scheduled.find(s => s.id === last_reply.scheduled_email_id) || {};\nconst sequenceStepId = scheduledRow.sequence_step_id ?? null;\nconst sequenceStepRow = sequenceSteps.find(s => s.id === sequenceStepId) || {};\nconst firstEmailDateIso = scheduledRow.sent_at ?? null;\nconst subject = scheduledRow.email_subject ?? \"\";\n\nlet responseTimeHours = null;\nif (firstEmailDateIso && last_reply.date_received) {\n  responseTimeHours = (new Date(last_reply.date_received).getTime() - new Date(firstEmailDateIso).getTime()) / 1000 / 3600;\n}\n\nlet responseTimeBucket = \"another day\";\nif (responseTimeHours !== null) {\n  if (responseTimeHours < 0.25) responseTimeBucket = \"less than 15 minutes\";\n  else if (responseTimeHours < 1) responseTimeBucket = \"less than 1 hour\";\n  else if (responseTimeHours < 12) responseTimeBucket = \"less than 12 hours\";\n  else responseTimeBucket = \"another day\";\n}\n\nreturn [{ json: {\n  last_reply,\n  sequence_step_id: sequenceStepId,\n  sequence_step_order: sequenceStepRow.order ?? null,\n  first_email_date: last_reply.date_received,\n  response_time_hours: responseTimeHours,\n  response_time_bucket: responseTimeBucket,\n  subject,\n}}];"
@@ -662,7 +744,7 @@
       "typeVersion": 4.4,
       "position": [
         3248,
-        88
+        96
       ],
       "parameters": {
         "bodyParameters": {
@@ -699,8 +781,11 @@
       "typeVersion": 4.7,
       "position": [
         1680,
-        -104
+        -112
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "columns": {
           "attemptToConvertTypes": false,
@@ -1038,7 +1123,7 @@
       "typeVersion": 4.4,
       "position": [
         1456,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1062,7 +1147,7 @@
       "typeVersion": 4.4,
       "position": [
         1904,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1086,7 +1171,7 @@
       "typeVersion": 4.4,
       "position": [
         1680,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1110,7 +1195,7 @@
       "typeVersion": 4.4,
       "position": [
         784,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1134,7 +1219,7 @@
       "typeVersion": 4.4,
       "position": [
         1008,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1158,7 +1243,7 @@
       "typeVersion": 2,
       "position": [
         2128,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1172,7 +1257,7 @@
       "typeVersion": 3.4,
       "position": [
         5072,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1219,6 +1304,54 @@
               "name": "website",
               "type": "string",
               "value": "={{ ($('[S] Parse AI output + set phone').item.json.ai?.company_website) || (($('[S] Bison: GET /leads/{taggable_id}').item.json.data?.email || '').split('@').pop()) || '' }}"
+            },
+            {
+              "id": "sef-linkedin",
+              "name": "linkedin_url",
+              "type": "string",
+              "value": "={{ (($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.social || []).find(s => s.type === 'linkedinProfile')?.link) || ($('[S] Parse AI output + set phone').item.json.ai?.person_linkedin) || '' }}"
+            },
+            {
+              "id": "sef-industry",
+              "name": "industry",
+              "type": "string",
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.industry) || ($('[S] Parse AI output + set phone').item.json.ai?.company_industry) || '' }}"
+            },
+            {
+              "id": "sef-headcount",
+              "name": "headcount_range",
+              "type": "string",
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.size) || ($('[S] Parse AI output + set phone').item.json.ai?.company_size) || '' }}"
+            },
+            {
+              "id": "sef-country",
+              "name": "country",
+              "type": "string",
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.country) || '' }}"
+            },
+            {
+              "id": "sef-message-title",
+              "name": "message_title",
+              "type": "string",
+              "value": "={{ $('[S] Pick Snovio output body').item.json.subject || '' }}"
+            },
+            {
+              "id": "sef-message-number",
+              "name": "message_number",
+              "type": "string",
+              "value": "={{ $('[S] Pick Snovio output body').item.json.sequence_step_order ?? '' }}"
+            },
+            {
+              "id": "sef-response-time-hours",
+              "name": "response_time_hours",
+              "type": "string",
+              "value": "={{ $('[S] Pick Snovio output body').item.json.response_time_hours ?? '' }}"
+            },
+            {
+              "id": "sef-response-time-label",
+              "name": "response_time_label",
+              "type": "string",
+              "value": "={{ $('[S] Pick Snovio output body').item.json.response_time_bucket || '' }}"
             }
           ]
         },
@@ -1266,7 +1399,7 @@
       "typeVersion": 4.4,
       "position": [
         2352,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1334,7 +1467,7 @@
       "typeVersion": 2.1,
       "position": [
         3696,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1372,7 +1505,7 @@
       "typeVersion": 2,
       "position": [
         4048,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1386,7 +1519,7 @@
       "typeVersion": 2.3,
       "position": [
         4272,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1420,11 +1553,11 @@
       "typeVersion": 2,
       "position": [
         3472,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
-        "jsCode": "const local = $(\"[S] Snov.io: POST /v1/get-prospects-by-email (Local List)\").first().json;\nlet snovio_body = local;\ntry {\n  const globalAll = $(\"[11] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[S] Compute derived values\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
+        "jsCode": "const local = $(\"[S] Snov.io: POST /v1/get-prospects-by-email (Local List)\").first().json;\nlet snovio_body = local;\ntry {\n  // Branch S's OWN global call. This said \"[11]\" until 2026-08-15 — branch L's node — so branch S\n  // paid for a global lookup it then discarded, and silently enriched from branch L instead. The\n  // try/catch hid it: once branch L goes, the fallback is the local list and nobody is told.\n  const globalAll = $(\"[S] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[S] Compute derived values\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
       }
     },
     {
@@ -1434,15 +1567,15 @@
       "typeVersion": 2.6,
       "position": [
         6192,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps), (() => { const tags = $('[S] Bison: GET /leads/{taggable_id}').first().json?.data?.tags || []; const names = tags.map(t => String(t?.name ?? t ?? '').trim().toLowerCase()); if (names.includes('interested') || names.includes('mql')) return 'MQL'; if (names.includes('premql') || names.includes('pre-mql')) return 'preMQL'; return String($('When Called by HUB').first().json.data?.tag_name || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL'; })() ]; })() }}"
+          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps), (() => { const tags = $('[S] Bison: GET /leads/{taggable_id}').first().json?.data?.tags || []; const names = tags.map(t => String(t?.name ?? t ?? '').trim().toLowerCase()); if (names.includes('interested') || names.includes('mql')) return 'MQL'; if (names.includes('premql') || names.includes('pre-mql')) return 'preMQL'; return String($('When Called by HUB').first().json.data?.tag_name || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL'; })(), String(e.linkedin_url || ''), String(e.industry || ''), String(e.headcount_range || ''), String(e.country || ''), String(e.message_title || ''), String(e.message_number ?? ''), String(e.response_time_hours ?? ''), String(e.response_time_label || '') ]; })() }}"
         },
-        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, ''),\n           'qualification', nullif($12, '')\n         ))) as result;"
+        "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, ''),\n           'qualification', nullif($12, ''),\n           'linkedin_url',  nullif($13, ''),\n           'industry',      nullif($14, ''),\n           'headcount_range', nullif($15, ''),\n           'country',       nullif($16, ''),\n           'message_title', nullif($17, ''),\n           'message_number', nullif($18, ''),\n           'response_time_hours', nullif($19, ''),\n           'response_time_label', nullif($20, '')\n         ))) as result;"
       }
     },
     {
@@ -1452,7 +1585,7 @@
       "typeVersion": 2.6,
       "position": [
         5968,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1470,7 +1603,7 @@
       "typeVersion": 2.6,
       "position": [
         5296,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1488,7 +1621,7 @@
       "typeVersion": 3.4,
       "position": [
         1232,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1542,7 +1675,7 @@
       "typeVersion": 2.3,
       "position": [
         2800,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1609,7 +1742,7 @@
       "typeVersion": 4.4,
       "position": [
         2576,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1647,7 +1780,7 @@
       "typeVersion": 2.6,
       "position": [
         5744,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1665,7 +1798,7 @@
       "typeVersion": 2.6,
       "position": [
         5520,
-        -296
+        -304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1683,7 +1816,7 @@
       "typeVersion": 2.6,
       "position": [
         560,
-        -8
+        -16
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -1701,8 +1834,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        6416,
-        280
+        7168,
+        -16
       ],
       "parameters": {
         "options": {
@@ -1732,7 +1865,7 @@
       "typeVersion": 4.4,
       "position": [
         5968,
-        88
+        96
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
@@ -1751,8 +1884,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        6192,
-        -104
+        6912,
+        -672
       ],
       "parameters": {
         "assignments": {
@@ -1761,7 +1894,7 @@
               "id": "abb1587f-6a76-4ce6-b7b3-7a1e8eae5f66",
               "name": "phones",
               "type": "array",
-              "value": "={{ $('[2] Find workspace in CS PDCA').item.json['Ecosystem integration - ABM stage 1'].split(',') }}"
+              "value": "={{ $json.sms_phone_numbers }}"
             }
           ]
         },
@@ -1774,8 +1907,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        6192,
-        280
+        6944,
+        -16
       ],
       "parameters": {
         "assignments": {
@@ -1784,55 +1917,55 @@
               "id": "8b45934e-47d0-4b03-a067-edd1463a46a2",
               "name": "email",
               "type": "string",
-              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '' }}"
+              "value": "={{ $('[S] Bison: GET /leads/{taggable_id}').item.json.data.email || '' }}"
             },
             {
               "id": "7ab46e26-8282-4c7c-83a3-2bda8edd2696",
               "name": "firstname",
               "type": "string",
-              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.firstName) || ($('[286] Parse AI output + set phone').item.json.ai?.first_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.first_name) || '' }}"
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body.data[0].firstName) || ($('[S] Parse AI output + set phone').item.json.ai.first_name) || ($('[S] Bison: GET /leads/{taggable_id}').item.json.data.first_name) || '' }}"
             },
             {
               "id": "fbd92e21-15a8-4056-bcbc-0834e7caf2ce",
               "name": "lastname",
               "type": "string",
-              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.lastName) || ($('[286] Parse AI output + set phone').item.json.ai?.last_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.last_name) || '' }}"
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body.data[0].lastName) || ($('[S] Parse AI output + set phone').item.json.ai.last_name) || ($('[S] Bison: GET /leads/{taggable_id}').item.json.data.last_name) || '' }}"
             },
             {
               "id": "16a15220-8cb5-41b4-95fe-b81fbde978a9",
               "name": "phone",
               "type": "string",
-              "value": "={{ $('[287] Set phone from Lusha').isExecuted ? $('[287] Set phone from Lusha').item.json.phoneNumber : ($('[286] Parse AI output + set phone').item.json.phoneNumber || '') }}"
+              "value": "={{ $('[S] Set phone from Lusha').isExecuted ? $('[S] Set phone from Lusha').item.json.phoneNumber : ($('[S] Parse AI output + set phone').item.json.phoneNumber || '') }}"
             },
             {
               "id": "318a953f-5e20-46b4-80c4-d345ec0b4ce6",
               "name": "company",
               "type": "string",
-              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.companyName) || ($('[286] Parse AI output + set phone').item.json.ai?.company_name) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.company) || '' }}"
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.companyName) || ($('[S] Parse AI output + set phone').item.json.ai?.company_name) || ($('[S] Bison: GET /leads/{taggable_id}').item.json.data?.company) || '' }}"
             },
             {
               "id": "7b3260c2-0ef1-4819-9d18-fdcabbeb0d1c",
               "name": "position",
               "type": "string",
-              "value": "={{ ($('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.position) || ($('[286] Parse AI output + set phone').item.json.ai?.lead_position) || ($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.title) || '' }}"
+              "value": "={{ ($('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0]?.currentJob?.[0]?.position) || ($('[S] Parse AI output + set phone').item.json.ai?.lead_position) || ($('[S] Bison: GET /leads/{taggable_id}').item.json.data?.title) || '' }}"
             },
             {
               "id": "b852fa2d-325c-4f66-9219-d64ae2f59c0d",
               "name": "website",
               "type": "string",
-              "value": "={{ ($('[286] Parse AI output + set phone').item.json.ai?.company_website) || (($('[40] Bison: GET /leads/{taggable_id}').item.json.data?.email || '').split('@').pop()) || '' }}"
+              "value": "={{ ($('[S] Parse AI output + set phone').item.json.ai?.company_website) || (($('[S] Bison: GET /leads/{taggable_id}').item.json.data?.email || '').split('@').pop()) || '' }}"
             },
             {
               "id": "dccbbe96-8928-453c-b89d-955b36201b8b",
               "name": "notes",
               "type": "string",
-              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.notes || '' }}"
+              "value": "={{ $('[S] Bison: GET /leads/{taggable_id}').item.json.data?.notes || '' }}"
             },
             {
               "id": "e6e62d8c-f8a9-4803-b16d-ee5abafa1e45",
               "name": "created_at",
               "type": "string",
-              "value": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data?.created_at || '' }}"
+              "value": "={{ $('[S] Bison: GET /leads/{taggable_id}').item.json.data?.created_at || '' }}"
             },
             {
               "id": "e68c54aa-fa74-428a-949d-d0d2e2e2e57f",
@@ -1844,43 +1977,43 @@
               "id": "ee994814-85f3-48f5-8ef9-f0652c5708ac",
               "name": "last_reply_subject",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].subject }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].subject }}"
             },
             {
               "id": "eb59ae6b-067c-449e-9dd5-eff6d2fcbd19",
               "name": "last_reply_body",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].text_body }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].text_body }}"
             },
             {
               "id": "0519d60a-4522-418a-9a2b-3aa2a282077d",
               "name": "last_reply_created_at",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].created_at }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].created_at }}"
             },
             {
               "id": "90a0e8d5-1ffe-4cb6-b01e-9296f36de40a",
               "name": "last_reply_body_html",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].html_body }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].html_body }}"
             },
             {
               "id": "093c72de-b54f-44ad-a286-6efe7038958f",
               "name": "last_reply_to_name",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].name }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].name }}"
             },
             {
               "id": "f89cae72-d569-481c-b57b-5634f67e3136",
               "name": "last_reply_to_email",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].address }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].to[0].address }}"
             },
             {
               "id": "4d1d4571-b178-4972-bee3-ee7c69b312ae",
               "name": "last_reply_message_id",
               "type": "string",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].raw_message_id }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].raw_message_id }}"
             }
           ]
         },
@@ -1916,8 +2049,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        6192,
-        88
+        6928,
+        -320
       ],
       "parameters": {
         "conditions": {
@@ -1925,11 +2058,11 @@
           "conditions": [
             {
               "id": "dd2b9cf0-a3f8-4d59-8828-627a2f429ae8",
-              "leftValue": "={{ ($(\"[2] Find workspace in CS PDCA\").first().json[\"col_101\"] || \"\").trim() }}",
+              "leftValue": "={{ $json.notification_emails }}",
               "operator": {
                 "operation": "notEmpty",
                 "singleValue": true,
-                "type": "string"
+                "type": "array"
               }
             }
           ],
@@ -1972,13 +2105,46 @@
       }
     },
     {
+      "id": "cf52491d-d593-42a8-8c99-122fcf6088f1",
+      "name": "Filter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        6400,
+        -304
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fd38bd45-d210-42e2-b999-2af01ea91729",
+              "leftValue": "={{ $json.result.created }}",
+              "operator": {
+                "operation": "equals",
+                "type": "boolean"
+              },
+              "rightValue": true
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "b6d166e2-95ee-429a-acbb-3e81551e019b",
       "name": "Get Snov.io Access Token (Global)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
         3760,
-        -8
+        -16
       ],
       "parameters": {
         "bodyParameters": {
@@ -2011,7 +2177,7 @@
       "typeVersion": 4.4,
       "position": [
         3024,
-        88
+        96
       ],
       "parameters": {
         "bodyParameters": {
@@ -2044,7 +2210,7 @@
       "typeVersion": 4.4,
       "position": [
         5744,
-        88
+        96
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
@@ -2059,8 +2225,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        6640,
-        -104
+        7360,
+        -672
       ],
       "parameters": {
         "authentication": "genericCredentialType",
@@ -2094,7 +2260,7 @@
       "typeVersion": 2.3,
       "position": [
         1456,
-        88
+        96
       ],
       "parameters": {
         "conditions": {
@@ -2128,10 +2294,44 @@
       "typeVersion": 3.2,
       "position": [
         336,
-        -8
+        -16
       ],
       "parameters": {
         "mode": "chooseBranch"
+      }
+    },
+    {
+      "id": "98205fb6-34b5-4274-b381-a85ba0b348e1",
+      "name": "Select rows from a table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        6608,
+        -304
+      ],
+      "parameters": {
+        "operation": "select",
+        "options": {},
+        "returnAll": true,
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "cachedResultName": "clients",
+          "mode": "list",
+          "value": "clients"
+        },
+        "where": {
+          "values": [
+            {
+              "column": "id",
+              "value": "={{ $('[S0] Resolve Bison credentials').item.json.client_id }}"
+            }
+          ]
+        }
       }
     },
     {
@@ -2140,8 +2340,8 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        6416,
-        -104
+        7136,
+        -672
       ],
       "parameters": {
         "fieldToSplitOut": "phones",
@@ -2168,7 +2368,7 @@
       "typeVersion": 1.1,
       "position": [
         -560,
-        -8
+        -16
       ],
       "parameters": {
         "inputSource": "passthrough"
@@ -2178,23 +2378,7 @@
   "connections": {
     "Create Record": {
       "main": [
-        [
-          {
-            "index": 0,
-            "node": "Email Recipients configured?",
-            "type": "main"
-          },
-          {
-            "index": 0,
-            "node": "Edit Fields",
-            "type": "main"
-          },
-          {
-            "index": 0,
-            "node": "Edit Fields1",
-            "type": "main"
-          }
-        ]
+        []
       ]
     },
     "Edit Fields": {
@@ -2247,6 +2431,17 @@
           {
             "index": 0,
             "node": "Edit Fields2",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Select rows from a table",
             "type": "main"
           }
         ]
@@ -2309,6 +2504,27 @@
           {
             "index": 0,
             "node": "[S0] Resolve Bison credentials",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Select rows from a table": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Email Recipients configured?",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Edit Fields1",
             "type": "main"
           }
         ]
@@ -2393,7 +2609,7 @@
         [
           {
             "index": 0,
-            "node": "Get Table ID",
+            "node": "[4b] Re-check lead in Leads sheet",
             "type": "main"
           }
         ]
@@ -2471,7 +2687,7 @@
         [
           {
             "index": 0,
-            "node": "Get Table ID",
+            "node": "[4b] Re-check lead in Leads sheet",
             "type": "main"
           }
         ]
@@ -2569,6 +2785,29 @@
           }
         ],
         []
+      ]
+    },
+    "[4b] Duplicate appeared mid-run?": {
+      "main": [
+        [],
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[4b] Re-check lead in Leads sheet": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[4b] Duplicate appeared mid-run?",
+            "type": "main"
+          }
+        ]
       ]
     },
     "[52] Bison: GET /campaigns/{id}": {
@@ -2871,6 +3110,17 @@
           {
             "index": 0,
             "node": "[S] Snov.io Local empty?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] promote_contact_to_lead": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Filter",
             "type": "main"
           }
         ]

@@ -34,16 +34,46 @@ writes:
     - integration_sync_runs    # shadow log only (provider=bison, sync_type=ooo_enrol_shadow)
 
 transition:
-  phase: A1                     # SHADOW: branch S records intent, sends nothing
-  phaseState: live              # published 2026-07-21
-  authoritativeSource: sheets
+  phase: B                      # branch S enrols; branch L is orphaned in the graph as the rollback
+  phaseState: live              # cutover + activation 2026-08-15, no per-run cap
+  authoritativeSource: supabase
   legacyStore: "Google Sheets · OOO Leads + ARM"
   targetStore: "Supabase · ooo_followups + client_ooo_routing"
   design: docs/reference/n8n/ooo-phase-a.md
   notes: >-
-    The only workflow in the family needing the A1 shadow step: two branches resolving DIFFERENT
+    The only workflow in the family that needed the A1 shadow step: two branches resolving DIFFERENT
     campaigns would enrol one contact into two follow-up sequences. Same campaign is a safe no-op —
     Bison ignores a lead already in the campaign (ADR-0015 §4).
+
+    2026-08-15 — CUTOVER. The C0 parity gate passed (254 vs 1002 leads, 174 in both, 0 campaign
+    mismatches), so the swap was made in a single PUT: 8 branch-S nodes added and Schedule Trigger
+    re-pointed at them, with no intermediate state in which both branches enrol. Branch L's nodes
+    stay in the graph, orphaned — re-pointing the trigger back is the rollback.
+
+    Worth writing down, because it changed how cautious the first run had to be: attaching a lead to
+    a Bison campaign QUEUES it, it does not send anything that day. The risk of an over-large batch
+    is a wrong queue entry, not a wrong email.
+
+    Shape: Worker config -> Expire stale + Select due -> Claim (per episode) -> Group by campaign ->
+    attach (per campaign) -> mark_submitted / mark_failed (per episode). The claim is the concurrency
+    guard: claim_ooo_followup returns NULL when the row is already taken, a NULL composite makes
+    every join in that query fail, and the item produces no output row — so no Filter node and no
+    SKIP LOCKED. stale_days lives in a Set node so it moves with a parameters-only deploy rather than
+    a structural one.
+
+    NO PER-RUN CAP. A batch_size of 100 was deployed first and removed the same day, once the arrival
+    rate was actually measured: 115-130 new episodes on a working day, ~630/week. A cap below the
+    inflow does not pace the worker, it guarantees the backlog grows - the "drains in about a week"
+    estimate that justified it had simply ignored the arrivals. The run now takes the whole due set.
+    Load is modest either way, because the attach call is per campaign, not per episode: 746 due
+    episodes across 11 clients collapse to a few dozen HTTP requests.
+
+    Client isolation is enforced in two places, and both are deliberate. The due query carries
+    `camp.client_id = cs.client_id`, and the database now carries a composite foreign key
+    (migration 20260815d) so client_ooo_routing cannot name another client's campaign at all. The
+    worker's predicate is not redundant: it keeps the worker from being the vector even if the
+    constraint is ever dropped, and it costs nothing. Defect B8, which the first controlled run of
+    this worker uncovered. lead_ids are deduplicated per request, which branch L never did (B5).
   reconciliation: >-
     Per scheduled run, compare branch S's intent against branch L's actual attach calls:
       select metadata->'intended_attach', metadata->>'due_count', metadata->>'unrouted_count'
@@ -53,16 +83,99 @@ transition:
     A1 -> A2 requires the (bison_lead_id, bison_campaign_id) sets to agree, EXCLUDING workspaces
     75 and 130 (knowingly unrouted) and excluding rows branch L missed because its due filter is
     an exact equality — branch S catching those up is correct, not a divergence.
-  parityEvidence: null
+  parityEvidence: >-
+    2026-08-15, first controlled run (execution 76305, manual, batch_size 5, workflow inactive):
+    5 selected, 5 claimed (attempt_count 1), 5 campaign groups, 3 submitted, 2 failed, 0 left in
+    'processing'. Both failures carry their HTTP body in last_error, which is the whole point of
+    phase B — branch L could only ever fail silently at the same call.
+
+      403 — "the api key does not match the workspace the record is on"  (root cause: defect B8)
+      422 — "No leads were added because this is a followup campaign, and these leads either have
+             not replied, or had their sender emails deleted"
+
+    The 422 is real business feedback nobody could see before: some contacts cannot be enrolled in a
+    reply-followup campaign at all. It needs its own decision — retrying it daily will not change it.
+
+    Backlog state after the run: 248 expired as 'stale' through skip_ooo_followup (migration
+    20260815c), 1214 still pending, 0 pending-and-overdue. Of the pending set, 746 are currently
+    selectable by the worker; the difference is the FortumEnergia episodes the isolation guard
+    withholds.
+
+    Activated the same day. Backlog at activation: 1115 pending — 746 due now (every one of them
+    selectable: 0 dropped for a missing campaign, missing bison lead id, missing api_key, disabled
+    sequencer or cross-client routing) and 369 scheduled into the future, as far out as 2027-07-26.
+    683
+    skipped, of which 248 'stale' (the expiry) and 162 'routing_missing' (95 of those are
+    FortumEnergia's, parked when its cross-client routing was deleted — they return by themselves via
+    recover_skipped_ooo_followups once it has real routing).
+
+    KNOWN AND NOT YET ADDRESSED — 262 of the 746 due episodes target a campaign that is not running:
+    180 in a `stopped` campaign (UniTalk, a quarter of the whole backlog) and 82 in `completed` ones
+    (RevOpsi, Runmageddon). Attaching to those queues the lead where nothing will send it, and the
+    worker will still mark the episode `submitted` — mark_ooo_submitted's own comment already warns
+    that acceptance is not proof of campaign membership. Some of the 422 responses probably come from
+    the same place. The campaign statuses are a conversation with the client (owner, 2026-08-15);
+    until then the worker does not filter on campaign status, so those episodes are enrolled and
+    counted like any other. Filtering would be one predicate — `camp.status = 'active'` — if the
+    decision goes that way.
+
+    2026-08-16T06:00 — FIRST UNATTENDED SCHEDULED RUN (execution 76670), and the number that matters:
+    811 episodes selected, 811 claimed, collapsed into 19 campaign groups, 19 attach calls, 19
+    mark_ooo_submitted, zero failures — mark_ooo_failed did not execute at all. Whole run: 4.5
+    seconds. Backlog moved from 3 submitted to 814; pending fell 1115 -> 294 (what remains is
+    future-dated); failed still 1, the same 422 from the day before. [S] Expire stale expired 13 more
+    on the way past.
+
+    That 811 -> 19 collapse is the answer to whether the per-run cap was needed: the attach call is
+    per campaign, so an order of magnitude more episodes costs nothing measurable.
+
+    STILL NOT A WEEK: one scheduled run. The check in the process doc — submitted rises, pending
+    falls, failed stays near zero, and no contact ends up in two campaigns — needs the remaining days
+    before phase B is settled. And 262 of those 811 went into stopped or completed campaigns, so
+    "submitted" is not yet the same claim as "will be sent".
 
 idempotency:
-  key: "bison attach-leads is a no-op for a lead already in the campaign (ADR-0015 §4)"
+  key: "ooo_followups.id + the status='processing' guard on both mark RPCs; bison attach-leads is a
+    no-op for a lead already in the campaign (ADR-0015 §4)"
   notes: >-
-    Safe on re-run for the SAME campaign only. Re-running with a different resolved campaign
-    double-enrols the contact. There is no local dedup.
+    Branch S is idempotent by state machine, not by hope. claim_ooo_followup moves pending|failed ->
+    processing atomically and returns NULL if it lost the race; mark_ooo_submitted and
+    mark_ooo_failed both REQUIRE status='processing' and raise otherwise, so a replayed attach cannot
+    double-mark. Verified in a rolled-back transaction: a second claim of the same episode returns
+    zero rows, and mark_ooo_failed on an already-submitted episode raises
+    "cannot move to failed from submitted".
+
+    Bison's own answer to a repeat is "Existing leads were not added", so the same campaign twice is
+    a no-op there too. Re-running with a DIFFERENT resolved campaign would still double-enrol the
+    contact — which is why the campaign is resolved once, from the episode's target_campaign_id, and
+    never re-derived at send time.
+
+    Gap, deliberately accepted: if mark_ooo_submitted fails AFTER a successful attach, the episode is
+    stranded in 'processing' and claim will not take it again (claim accepts only pending|failed).
+    The run fails loudly and the failure recorder reports it, which is the intended trade against
+    silently swallowing the error (defect E4). Recovery is reopen_ooo_followup(id) or
+    retry_ooo_followup(id) — both already exist.
 
 retryPolicy:
   notes: >-
-    None. No retry and no error branch on the attach call, so a failed enrolment is lost with no
-    trace beyond the n8n execution list. Branch S fixes this by recording the outcome via
-    mark_ooo_submitted / mark_ooo_failed.
+    No retry. Since 2026-08-15 `Attach leads to campaign1` carries onError=continueRegularOutput,
+    which is a containment fix, not a retry: a failed enrolment is still lost with no trace beyond
+    the n8n execution list, but it now costs only the client whose request failed.
+
+    Why it was added (defect B5). Execution 76265 on 2026-08-15 built FOUR attach requests — one per
+    client, 24 lead ids — and the first returned
+    403 "The api key does not match the workspace the record is on" (one client's stale CS PDCA key).
+    Without onError the node threw, so the other three clients were never attached. And because
+    Schedule Trigger fans out to `Get OOO leads1` (y=256) and `[S] SHADOW` (y=560), and
+    executionOrder v1 runs the lower Y first, the abort also killed the shadow — so on 5 of the last
+    10 runs the phase-A evidence was not recorded either. Both consequences are gone; the 403 itself
+    is not, and its real fix is the branch-S worker resolving api_key per client from
+    client_sequencers rather than from the sheet.
+
+    Also visible in that execution and unfixed: leadIds repeats ids within a single request (557756
+    three times, 573330 three times, 573476 three times). Note that each item carries a raw Bison API
+    key in its JSON, so this workflow's execution data is credential-bearing — never paste it into a
+    doc or an issue.
+
+    Branch S records the outcome properly via mark_ooo_submitted / mark_ooo_failed.
+

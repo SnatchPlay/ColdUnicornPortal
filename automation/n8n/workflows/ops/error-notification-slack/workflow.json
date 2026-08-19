@@ -1,0 +1,58 @@
+{
+  "name": "Error Notification",
+  "nodes": [
+    {
+      "id": "9e98f1e5-8142-4ccd-935f-0197389adc19",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "40dde0f2-250b-4146-9033-2a0c0a2c04a9",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        208,
+        0
+      ],
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "coldunicorn-errors"
+        },
+        "messageType": "text",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "sendAsUser": "ColdUnicorn Error Notification"
+        },
+        "select": "channel",
+        "text": "={{ [\n  ':red_circle: *' + ($json.workflow?.name || 'unknown workflow') + '* failed',\n  '*Node:* ' + ($json.execution?.lastNodeExecuted || 'unknown'),\n  '*Error:* ' + String($json.execution?.error?.message || 'no message').slice(0, 800),\n  '*Execution:* ' + ($json.execution?.url || ($json.execution?.id ? 'id ' + $json.execution.id : 'no id')),\n].join('\\n') }}"
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Send a message",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

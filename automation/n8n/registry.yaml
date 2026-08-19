@@ -228,6 +228,26 @@ workflows:
     lastRepositorySync: 2026-07-22
     lastValidation: 2026-07-22 phase A branch S published — RPC chain verified in a rolled-back transaction
 
+  # Imported 2026-08-15 by the instance audit: it was failing 211 of 337 runs and, being an orphan,
+  # reported that nowhere. Sheets-only — no Supabase path exists yet (defect-backlog.md B2 / §5.1).
+  - id: bison-blacklist-add
+    name: "[child-4] TAG_ATTACHED · Blacklist add (email + domain)"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/bison-blacklist-add
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high        # blacklisting is irreversible for that client
+    trigger: sub-workflow
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: bEB3aOHEq2lEpubp
+    lastRepositorySync: 2026-08-15
+    lastValidation: 2026-08-15 imported; scanner clean, 0 credential refs in the graph
+
   # Ops. Bound as settings.errorWorkflow on every managed workflow above.
   - id: automation-failure-recorder
     name: "[ERR] Automation failure recorder"
@@ -328,6 +348,51 @@ workflows:
         remoteWorkflowId: BQbFKHUaIcEKPc01
     lastRepositorySync: 2026-07-22
 
+  # Slack alerting for failures. Deliberately separate from automation-failure-recorder: that one
+  # RECORDS a failure as a row, this one SHOUTS. n8n allows exactly one errorWorkflow per workflow,
+  # so only one of the two can be bound — see the README for how that is resolved.
+  - id: error-notification-slack
+    name: "Error Notification"
+    domain: ops
+    path: automation/n8n/workflows/ops/error-notification-slack
+    businessProcess: docs/reference/n8n/README.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: medium
+    trigger: error
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: 4jIUZMYNgKtb9fmi
+    lastRepositorySync: 2026-08-18
+
+  # The reply classifier: every Bison reply enters here, is classified by an LLM, and only then does a
+  # tag get attached that the HUB dispatcher fans out to the children. Adopted 2026-08-17 — it was an
+  # orphan, and could not be adopted before because a plaintext OpenAI key in its graph tripped the
+  # secret scanner (security finding 12 / defect E6).
+  - id: bison-replies-classification
+    name: "Bison Replies Classification - Sheets Primary 401 Fallback"
+    domain: outreach
+    path: automation/n8n/workflows/outreach/bison-replies-classification
+    businessProcess: docs/reference/processes/outreach/bison-ingestion.md
+    owner: automation
+    lifecycle: managed
+    status: active
+    criticality: high
+    trigger: webhook
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: XdTMd1KJX0cRmF9u
+    lastRepositorySync: 2026-08-17
+
+  # Unreachable, and deliberately so. The classifier suppresses the NRR tag before it is attached,
+  # so the HUB gate can never fire and this workflow has never executed. Owner decided 2026-08-15 not
+  # to revive the email NRR path — kept, not deleted, as the record of what the contract was.
+  # Defect C1 in docs/reference/n8n/defect-backlog.md.
   - id: nrr-daily-stats
     name: "[child-2] TAG_ATTACHED · NRR · Daily stats"
     domain: outreach
@@ -335,7 +400,7 @@ workflows:
     businessProcess: docs/reference/processes/outreach/ooo-followups.md
     owner: automation
     lifecycle: managed
-    status: active
+    status: deprecated
     criticality: low
     trigger: sub-workflow
     environments:

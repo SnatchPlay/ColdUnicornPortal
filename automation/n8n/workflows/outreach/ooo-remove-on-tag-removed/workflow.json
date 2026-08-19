@@ -9,8 +9,11 @@
       "typeVersion": 4.7,
       "position": [
         1120,
-        304
+        560
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -42,8 +45,10 @@
       "typeVersion": 4.7,
       "position": [
         1424,
-        304
+        560
       ],
+      "notes": "Branch-L terminal. onError so a Sheets failure cannot fail the run behind an already-committed Supabase cancellation (E5 / Wave 3).",
+      "onError": "continueRegularOutput",
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -66,8 +71,11 @@
       "typeVersion": 4.7,
       "position": [
         528,
-        304
+        560
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "documentId": {
           "__rl": true,
@@ -99,7 +107,7 @@
       "typeVersion": 4.4,
       "position": [
         832,
-        304
+        560
       ],
       "parameters": {
         "headerParameters": {
@@ -122,7 +130,7 @@
       "typeVersion": 2.6,
       "position": [
         528,
-        560
+        304
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -232,6 +240,8 @@
   },
   "settings": {
     "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
     "executionOrder": "v1"
   }
 }
