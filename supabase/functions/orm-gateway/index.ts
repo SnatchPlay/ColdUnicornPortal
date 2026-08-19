@@ -1986,7 +1986,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const aimfoxSummaryRows = await rawQuery<Record<string, unknown>>(tx, sql`
       WITH af AS (
         SELECT sds.client_id, sds.report_date,
-               sds.invites_sent, sds.invites_accepted,
+               sds.invites_sent,
                sds.schedule_today, sds.schedule_tomorrow, sds.schedule_day_after,
                sds.invite_limit, sds.invite_limit_remaining, sds.remaining_database_size
         FROM sequencer_daily_stats sds
@@ -2002,16 +2002,6 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 2), 0)::int AS af_sent_d2,
         COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 3), 0)::int AS af_sent_d3,
         COALESCE(SUM(invites_sent) FILTER (WHERE report_date = CURRENT_DATE - 4), 0)::int AS af_sent_d4,
-        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date      AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6), 0)::int AS af_sent_w0,
-        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1), 0)::int  AS af_sent_w1,
-        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8),  0)::int  AS af_sent_w2,
-        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15), 0)::int  AS af_sent_w3,
-        COALESCE(SUM(invites_sent)     FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22), 0)::int  AS af_sent_w4,
-        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date      AND report_date <= date_trunc('week', CURRENT_DATE)::date + 6))::int  AS af_acc_w0,
-        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 7  AND report_date <= date_trunc('week', CURRENT_DATE)::date - 1))::int   AS af_acc_w1,
-        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 14 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 8))::int    AS af_acc_w2,
-        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 21 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 15))::int   AS af_acc_w3,
-        (SUM(invites_accepted) FILTER (WHERE report_date >= date_trunc('week', CURRENT_DATE)::date - 28 AND report_date <= date_trunc('week', CURRENT_DATE)::date - 22))::int   AS af_acc_w4,
         COALESCE(SUM(schedule_today)     FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_today,
         COALESCE(SUM(schedule_tomorrow)  FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_tomorrow,
         COALESCE(SUM(schedule_day_after) FILTER (WHERE report_date = lt.d), 0)::int AS af_sched_day_after,
@@ -2029,6 +2019,35 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         `(dailyStatClients=${dailySummaryRows.length}, leadClients=${leadSummaryRows.length}, ` +
         `leadChannelRows=${leadChannelRows.length}, aimfoxClients=${aimfoxSummaryRows.length})`,
     );
+
+    // Per-campaign Aimfox facts, rolled up per client over the client's ACTIVE campaigns only.
+    //
+    // Three grid numbers come from here rather than from sequencer_daily_stats, because all three
+    // are facts of a campaign and not of a day:
+    //   · remaining database  — the loaded audience still un-invited. `sequencer_daily_stats
+    //     .remaining_database_size` computed the same thing from Aimfox's `audience_size`, which is
+    //     a fixed ceiling (10000 for every `list` campaign), so it ran ~20x high; that column is
+    //     deprecated and no longer read.
+    //   · acceptance rate     — accepted / sent, summed across active campaigns. The daily
+    //     `invites_accepted` counter measures a different thing (a day's events, off by the
+    //     leading-bucket artefact) and is an order of magnitude out.
+    //   · service level       — whether the client runs invitations only or a full sequence.
+    //
+    // Raw counts, never a ratio: rates are computed once, in lib/client-metrics.ts.
+    const aimfoxCampaignRows = await rawQuery<Record<string, unknown>>(tx, sql`
+      SELECT client_id,
+             COUNT(*)::int                                                AS af_act_campaigns,
+             COALESCE(SUM(database_size), 0)::int                         AS af_act_audience,
+             SUM(invites_sent)::int                                       AS af_act_sent,
+             SUM(invites_accepted)::int                                   AS af_act_accepted,
+             COUNT(*) FILTER (WHERE COALESCE(message_steps, 0) > 0)::int   AS af_act_with_messages,
+             COUNT(*) FILTER (WHERE message_steps IS NOT NULL)::int        AS af_act_measured
+      FROM public.campaigns
+      WHERE sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid
+        AND status = 'active'
+        AND archived_at IS NULL
+      GROUP BY client_id
+    `);
 
     // Merge daily-stats and leads summaries by client_id into compact per-client objects.
     const dailyByClient = new Map<string, Record<string, unknown>>();
@@ -2051,11 +2070,16 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     for (const row of aimfoxSummaryRows) {
       if (typeof row.client_id === "string") aimfoxByClient.set(row.client_id, row);
     }
+    const aimfoxCampByClient = new Map<string, Record<string, unknown>>();
+    for (const row of aimfoxCampaignRows) {
+      if (typeof row.client_id === "string") aimfoxCampByClient.set(row.client_id, row);
+    }
 
     const allClientIds = new Set([
       ...dailyByClient.keys(),
       ...leadByClient.keys(),
       ...aimfoxByClient.keys(),
+      ...aimfoxCampByClient.keys(),
     ]);
     const summaries = Array.from(allClientIds).map((clientId) => {
       const d = dailyByClient.get(clientId) ?? {};
@@ -2063,6 +2087,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       const eb = ebByClient.get(clientId) ?? {};
       const af = afLeadByClient.get(clientId) ?? {};
       const ax = aimfoxByClient.get(clientId) ?? {};
+      const ac = aimfoxCampByClient.get(clientId) ?? {};
       return {
         client_id: clientId,
         daily_sent:         [toInt(d.sent_d0),    toInt(d.sent_d1),    toInt(d.sent_d2),    toInt(d.sent_d3),    toInt(d.sent_d4)],
@@ -2105,11 +2130,19 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         aimfox_schedule_today:     toInt(ax.af_sched_today),
         aimfox_schedule_tomorrow:  toInt(ax.af_sched_tomorrow),
         aimfox_schedule_day_after: toInt(ax.af_sched_day_after),
-        aimfox_wow_sent:    [toInt(ax.af_sent_w0),   toInt(ax.af_sent_w1),   toInt(ax.af_sent_w2),   toInt(ax.af_sent_w3),   toInt(ax.af_sent_w4)],
-        aimfox_wow_accepted: [toIntOrNull(ax.af_acc_w0), toIntOrNull(ax.af_acc_w1), toIntOrNull(ax.af_acc_w2), toIntOrNull(ax.af_acc_w3), toIntOrNull(ax.af_acc_w4)],
         aimfox_invite_limit:            toIntOrNull(ax.af_invite_limit),
         aimfox_invite_limit_remaining:  toIntOrNull(ax.af_invite_limit_remaining),
         aimfox_remaining_database_size: toIntOrNull(ax.af_remaining_db),
+        // ── Aimfox ACTIVE-campaign rollup (campaigns table, not the daily snapshot) ──────────
+        // toIntOrNull throughout: a client with no active campaigns must read "—", not 0%. The
+        // audience is the exception — it is COALESCEd in SQL because a campaign with a NULL
+        // database_size is a campaign with no audience loaded, which is a real zero.
+        aimfox_active_campaigns:        toInt(ac.af_act_campaigns),
+        aimfox_active_audience:         toInt(ac.af_act_audience),
+        aimfox_active_invites_sent:     toIntOrNull(ac.af_act_sent),
+        aimfox_active_invites_accepted: toIntOrNull(ac.af_act_accepted),
+        aimfox_active_with_messages:    toInt(ac.af_act_with_messages),
+        aimfox_active_measured:         toInt(ac.af_act_measured),
       };
     });
 

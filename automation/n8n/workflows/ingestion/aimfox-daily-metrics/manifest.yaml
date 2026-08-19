@@ -32,9 +32,14 @@ writes:
     - "Google Sheets · 🤖Daily stats — today's row for the client"
   tables:
     - sequencer_daily_stats
+    - campaigns
   rpcs: []
   tablesWritten:
     - sequencer_daily_stats  # branch S, one row per Aimfox account per day
+    - campaigns              # branch S, metrics ONLY (invites_sent / invites_accepted /
+                             # message_steps / metrics_synced_at) — UPDATE, never INSERT.
+                             # Identity, status and database_size belong to aimfox-campaign-sync;
+                             # the two writers share the row on disjoint column sets.
 
 transition:
   phase: A                   # dual-write: branch L to Sheets, branch S to Supabase
@@ -52,6 +57,13 @@ transition:
     taken from a spreadsheet row number, the averaging of account and workspace identifiers, and the
     first-bucket artefact in the interactions series. It writes nothing when a client has zero
     accounts, or more than one — see knownRisks in the README.
+
+    2026-08-19: branch S also stores the per-campaign numbers it was already fetching and throwing
+    away — invites sent, invites accepted, and the count of message templates that says whether a
+    campaign only invites or runs a full sequence. Same pass, no extra vendor calls. The same change
+    fixed remaining-database to subtract from `target_count` (the loaded audience) instead of
+    `audience_size`, a fixed vendor ceiling — 10000 for every `list` campaign — which had it reading
+    roughly twenty times too high.
   reconciliation: >-
     Per report_date compare the PDCA cells against the sequencer_daily_stats rows for the same
     client, summing across profile_id and EXCLUDING profile_id = '__workspace_total__' (those are the

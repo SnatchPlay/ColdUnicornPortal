@@ -188,6 +188,26 @@ export const BUILTIN_METRICS: MetricDescriptor[] = [
 
   // --- Week over Week ---
   {
+    // LinkedIn acceptance, cumulative across the client's ACTIVE Aimfox campaigns. A 0..1 fraction,
+    // like every other rate here — a rule comparing against 30 rather than 0.30 never fires.
+    path: "aimfox_accept_rate",
+    label: "LinkedIn acceptance rate",
+    surface: "clients_overview",
+    columnKey: "aimfox_accept_rate",
+    valueType: "percent",
+    operators: PERCENT_OPS,
+    group: "Basic",
+  },
+  {
+    path: "aimfox_remaining_db",
+    label: "LinkedIn remaining database",
+    surface: "clients_overview",
+    columnKey: "aimfox_remaining_db",
+    valueType: "number",
+    operators: NUMERIC_OPS,
+    group: "Basic",
+  },
+  {
     path: "wow_total_response_rate",
     label: "WoW Total response rate",
     surface: "clients_wow",

@@ -156,7 +156,7 @@ Surfaces and their built-in metrics:
 
 | `surface` | What it colours | Catalog group |
 |-----------|-----------------|---------------|
-| `clients_overview` | Overview columns: Client, Manager, Status, Inboxes, Signed, Added, Min sent, KPI Leads, KPI Meetings, Won. **Custom columns also live here.** | Basic, KPI, Client, Custom columns |
+| `clients_overview` | Overview columns: Client, Manager, Status, Inboxes, Signed, Added, Min sent, KPI Leads, KPI Meetings, Won, LinkedIn acceptance rate, LinkedIn remaining database. **Custom columns also live here.** | Basic, KPI, Client, Custom columns |
 | `clients_3dod` | The "3-Day rolling" columns. | 3-Day rolling |
 | `clients_wow` | "Week over Week" columns. | Week over Week |
 | `clients_mom` | "Month over Month" columns. | Month over Month |

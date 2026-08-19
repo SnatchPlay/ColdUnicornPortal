@@ -834,25 +834,56 @@ an **EmailBison-only** (`…_eb`) and **Aimfox-only** (`…_af`) column beside i
 - **Schedule (Aimfox)** bucket `+2/+1/0`: `SUM(schedule_day_after / schedule_tomorrow / schedule_today)`
   from each client's **latest** report_date (the 2-hourly snapshot).
 
-### 18.3 WoW invitation acceptance rate
+### 18.3 Invitation acceptance rate
 
-- **Where:** new `WoW Accept` sub-band, rendered like the other WoW rates.
-- **Formula:** `SUM(invites_accepted) / SUM(invites_sent)` per ISO week (same Monday-anchored windows
-  as the other WoW columns). **null (—), never 0%,** when the week had no sends or acceptances were
-  unmeasured — `invites_accepted` is nullable and a real 0 must stay distinct from "not reported".
+- **Where:** a single `Accept` column in the **Aimfox capacity** band. It replaced the five-column
+  `WoW Accept` sub-band, **removed 2026-08-19**.
+- **Formula:** `SUM(campaigns.invites_accepted) / SUM(campaigns.invites_sent)` over the client's
+  **ACTIVE** Aimfox campaigns. Both counters are cumulative over a campaign's life, so this is a
+  standing figure, not a weekly one. **null (—), never 0%,** when there is no active campaign or
+  nothing has been sent.
+- **Thresholds** (`aimfox_accept_rate`, [20260819c](../../../supabase/migrations/20260819c_aimfox_capacity_colour_rules.sql)):
+  ≥ 40% green · 30–39% yellow · < 30% red. Written as `0.4` / `0.3` — the context carries rates as
+  0..1 fractions, like every other rate rule.
 
-### 18.4 Aimfox capacity (sheet columns R / S)
+> **Why the WoW band went away.** It divided two per-day counters out of `sequencer_daily_stats`,
+> and the numerator is measured wrongly at source: `invites_accepted` comes from a single-day
+> `/analytics/interactions` query whose leading bucket is a known artefact, so it reads an order of
+> magnitude low. ColdUnicorn PL had **4** accepted stored across its whole history against **333**
+> that the vendor's own campaign metrics reported. The column was not showing a weaker version of
+> the truth; it was showing a different number.
 
-- **Rem DB** = `remaining_database_size`, latest day, summed across profiles (PDCA sheet column R
-  "Remaining database").
-- **Inv left** = `invite_limit_remaining`, latest day, summed across profiles — invites still
-  available today. This is what the PDCA sheet's **column S "Invitations limit"** actually shows: its
-  cached values (e.g. 8 / 20 / 8) reconcile with `invite_limit_remaining`, **not** the ~195 weekly
-  cap. n8n writes that column directly (`remaining_limit = daily_limit − sent`), and the
-  `20260705` migration documents the same ("the 'Invitations limit' cell is the REMAINING limit for
-  today, not the weekly cap"). The cap (`invite_limit`, ~195) is still fetched into
-  `ClientMetricsSummary.aimfox_invite_limit` for future use but is not rendered.
-- Both are `null` (—) for a client with no Aimfox `client_sequencers` row.
+> **The consequence of scoping to ACTIVE campaigns:** a client's rate moves when a campaign
+> completes, not only when performance changes. ColdUnicorn PL read 42% while its Sales Navigator
+> campaign (772 sent / 328 accepted) was running, and 33% the week that campaign went `DONE`.
+
+### 18.4 Aimfox capacity (Rem DB · Accept)
+
+Both columns are derived from **`campaigns`**, not from the daily snapshot — they are facts of a
+campaign, not of a day.
+
+- **Rem DB** = `SUM(campaigns.database_size) − SUM(campaigns.invites_sent)` over the client's ACTIVE
+  Aimfox campaigns, floored at 0. `database_size` is the vendor's `target_count`: the audience
+  actually loaded into the campaign.
+  **Thresholds** (`aimfox_remaining_db`): ≥ 200 green · 100–199 yellow · < 100 red.
+- **Accept** — see §18.3.
+- Both are `null` (—) when the client has no active campaign, and also when its campaigns exist but
+  have not been measured yet (`aimfox-campaign-sync` catalogues a campaign up to an hour before
+  `aimfox-daily-metrics` measures it; a remaining database of "the whole audience" would be a guess
+  stated as a fact).
+
+> **The old Rem DB was wrong by ~20x, and the old "Inv left" was a duplicate.**
+>
+> `sequencer_daily_stats.remaining_database_size` subtracted from Aimfox's `audience_size`, which is
+> a **fixed ceiling the vendor assigns at campaign creation** — 10000 for every `list` campaign,
+> 2500 for a `navigator` one — not the loaded audience. Bent Iron PL stored 19968 against a real
+> 918. The column is **deprecated as of 2026-08-19**; n8n still writes it (now correctly), nothing
+> reads it.
+>
+> `Inv left` (`invite_limit_remaining`) was removed because it is *the same variable* as the
+> `Schedule (Aimfox)` bucket `0` cell — the ingestion workflow assigns both from one value — so the
+> column repeated a number the grid already showed one band to the left. The weekly cap
+> (`invite_limit`, ~195) is still fetched into `ClientMetricsSummary` and still not rendered.
 
 **Update cadence:** every 2 hours, driven by the `aimfox-daily-metrics` n8n workflow — no portal-side
 freshness change beyond the mega-table's existing refetch.
@@ -879,14 +910,13 @@ Two consequences that define the whole design:
 | 3-DoD TOTAL/SQL, WoW Total/SQL, MoM Total/SQL/Mtg/Won | blended | EB | AF |
 | `· EB` / `· AF` comparison bands | ✓ | — | — |
 | WoW Resp / Human / Bnc / OOO | ✓ | ✓ | — |
-| WoW Accept, Aimfox capacity (Rem DB, Inv left) | ✓ | — | ✓ |
+| Aimfox capacity (Rem DB, Accept) | ✓ | — | ✓ |
 | Customer Success, Basic, Custom | ✓ | ✓ | ✓ |
 
 **Parity gaps, and why they are irreducible:** `daily_stats` has no `sequencer_id` — it is
 EmailBison by construction — so the reply / bounce / OOO rates simply do not exist for LinkedIn;
-symmetrically, `invites_accepted`, `remaining_database_size` and `invite_limit_remaining` have no
-email analogue. In the Aimfox view those four rate bands are replaced by `WoW Accept` +
-`Aimfox capacity`. `latest_prospects_count` (Basic → **Added**) is also Bison-derived and stays
+symmetrically, the LinkedIn acceptance rate and remaining audience have no email analogue. In the
+Aimfox view those four rate bands are replaced by `Aimfox capacity`. `latest_prospects_count` (Basic → **Added**) is also Bison-derived and stays
 neutral in all three views.
 
 **Headers name the channel.** Outside `Both`, every metric band's header gets a `· EB` / `· AF`

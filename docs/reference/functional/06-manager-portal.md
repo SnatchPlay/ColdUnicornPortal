@@ -156,20 +156,20 @@ native rows, and renders the rest projected):
 | **DoD Schedule (Aimfox)** | Schedule (Aimfox) | +2, +1, 0 — `dodRows[bucket].aimfoxSchedule` |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
 | **DoD Daily sent (Aimfox)** | Daily sent (Aimfox) | 0, -1, -2, -3, -4 — `dodRows[bucket].aimfoxSent` |
-| **Aimfox capacity** | Aimfox capacity | Rem DB, Inv left — `overview.aimfoxRemainingDb` / `aimfoxInviteLimitRemaining` (sheet R "Remaining database" / S "Invitations limit" = remaining today) |
+| **Aimfox capacity** | Aimfox capacity | Rem DB, Accept — both derived from `campaigns` over the client's ACTIVE Aimfox campaigns (`04-metrics §18.3/§18.4`), both coloured |
 | **3-Day rolling** | 3-DoD TOTAL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads{,Eb,Af}` |
 |  | 3-DoD SQL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].sqlLeads{,Eb,Af}` |
 | **Week over Week** | WoW Total · (Total / EB / AF) | 0/-1/-2/-3/-4 — `wowRows[bucket].totalLeads{,Eb,Af}` |
 |  | WoW SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `wowRows[bucket].sqlLeads{,Eb,Af}` |
 |  | WoW Resp / Human / Bnc / OOO | 0/-1/-2/-3/-4 per metric — rates from `wowRows[bucket]` |
-|  | WoW Accept | 0/-1/-2/-3/-4 — `wowRows[bucket].acceptRate` (Aimfox invites accepted/sent) |
 | **Month over Month** | MoM Total · (Total / EB / AF) | 0/-1/-2/-3/-4 — `momRows[bucket].totalLeads{,Eb,Af}` |
 |  | MoM SQL · (Total / EB / AF) | 0/-1/-2/-3/-4 — `momRows[bucket].sqlLeads{,Eb,Af}` |
 |  | MoM Mtg / Won | 0/-1/-2/-3/-4 per metric — `momRows[bucket]`; split per channel in the payload (`meetingsEb/Af`, `wonEb/Af`) but with no side-by-side columns |
 
-156 built-in columns in `Both` (was 61 before the per-channel/Aimfox split); 81 in `EmailBison` and
-68 in `Aimfox` — the 13-column difference is exactly the reply-rate bands (20) against `WoW Accept`
-plus `Aimfox capacity` (7), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage is the inline satisfaction rating, §2.7.)
+151 built-in columns in `Both` (was 61 before the per-channel/Aimfox split, and 156 before the
+2026-08-19 Aimfox capacity rework removed the five `WoW Accept` columns and the duplicated
+`Inv left`); 81 in `EmailBison` and 63 in `Aimfox` — the 18-column difference is exactly the
+reply-rate bands (20) against `Aimfox capacity` (2), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage is the inline satisfaction rating, §2.7.)
 
 **Workspaces (Basic band).** Two letter marks per client — `E` (EmailBison) and `L` (Aimfox), the
 channels as the team names them rather than the vendors. Written by the setup workflows into
@@ -181,6 +181,13 @@ Aimfox), colouring every unbought channel amber or red would drown the answer. T
 the hover tooltip and in the drawer. **Sorting is still 4-level** (`provisioningRank`, worst first on
 descending) — collapsing it would rank a benign "no connector" identically to a workspace a run
 reported broken, which is the only reason to sort this column at all.
+
+**The LinkedIn letter carries the service level.** `Li` = every active Aimfox campaign only sends
+invitations · `Lf` = at least one runs a message sequence · plain `L` = unknown (no active campaign,
+or none measured yet). Derived from `campaigns.message_steps`, the count of message templates on the
+campaign's flows — the vendor's own `outreach_type` field reads `connect` on every campaign in every
+workspace and separates nothing. Colour still answers a different question (is the connector wired),
+so a client can legitimately be a green `L`: set up, nothing running.
 
 A third mark splitting LinkedIn into invitations-only (`Li`) and full-campaign (`Lf`) is wanted but
 not yet buildable: nothing in the data distinguishes them.

@@ -186,11 +186,15 @@ function makeSummary(): ClientMetricsSummary {
     aimfox_schedule_today: 45,
     aimfox_schedule_tomorrow: 46,
     aimfox_schedule_day_after: 47,
-    aimfox_wow_sent: [200, 0, 0, 0, 0],
-    aimfox_wow_accepted: [50, null, null, null, null],
     aimfox_invite_limit: 195,
     aimfox_invite_limit_remaining: 8,
     aimfox_remaining_database_size: 19_968,
+    aimfox_active_campaigns: 1,
+    aimfox_active_audience: 2167,
+    aimfox_active_invites_sent: 215,
+    aimfox_active_invites_accepted: 71,
+    aimfox_active_with_messages: 0,
+    aimfox_active_measured: 1,
   };
 }
 
@@ -220,9 +224,8 @@ describe("projectMetricsToChannel", () => {
     expect(eb.overview.sentToday).toBe(380);
     expect(eb.overview.scheduleDayAfter).toBe(410);
 
-    // Reply rates are Bison facts and stay; the Aimfox acceptance rate has no email meaning.
+    // Reply rates are Bison facts and stay.
     expect(eb.wowRows[0].humanRate).toBeCloseTo(0.1, 4);
-    expect(eb.wowRows[0].acceptRate).toBeNull();
 
     expect(eb.overview.threeDodTotal).toBe(21); // buckets 0..-2
     expect(eb.overview.wowSql).toBe(7);
@@ -250,13 +253,14 @@ describe("projectMetricsToChannel", () => {
     expect(af.overview.sentToday).toBe(40);
     expect(af.overview.scheduleToday).toBe(45);
 
-    // No email reply rate may survive under an Aimfox heading; acceptance does.
+    // No email reply rate may survive under an Aimfox heading. There is no WoW acceptance band any
+    // more — acceptance is a cumulative per-campaign fact now, on the overview, not a weekly rate
+    // divided out of two daily counters.
     expect(af.wowRows[0].responseRate).toBeNull();
     expect(af.wowRows[0].humanRate).toBeNull();
     expect(af.wowRows[0].bounceRate).toBeNull();
     expect(af.wowRows[0].oooRate).toBeNull();
     expect(af.overview.wowHumanRate).toBeNull();
-    expect(af.wowRows[0].acceptRate).toBeCloseTo(0.25, 4);
 
     // Channel-agnostic facts survive untouched.
     expect(af.overview.latestProspectsCount).toBe(4200);

@@ -142,6 +142,49 @@ FitMech, which has none. Before a second account appears anywhere, the filter mu
 It also writes nothing when `invites_sent` could not be measured — a missing bucket yields no row
 rather than a zero ([bison-ingestion invariant 3](../../../../../docs/reference/processes/outreach/bison-ingestion.md#business-invariants)).
 
+### Per-campaign metrics — added 2026-08-19
+
+Branch S already called `GET /campaigns/{id}` and `GET /campaigns/{id}/metrics` for every campaign and
+kept two numbers out of each response. It now stores what it was discarding.
+
+```
+[S] Campaign totals ─┬─ [S] Build row (unchanged chain, remaining database)
+                     └─ [S] Campaign metrics SQL ─ [S] Upsert campaign metrics
+```
+
+A parallel branch, not a link in the chain: `[S] Build row` still reads `[S] Campaign totals`
+directly, so the existing path is untouched.
+
+| Column on `campaigns` | Source |
+|---|---|
+| `invites_sent` | `metrics.sent_connections` — cumulative for the campaign, not per day |
+| `invites_accepted` | `metrics.accepted_connections` |
+| `message_steps` | `Σ flows[].flow_message_templates.length` — 0 = invitations only |
+| `metrics_synced_at` | `NOW()` |
+
+**`UPDATE`, never `INSERT`.** The catalog belongs to
+[`aimfox-campaign-sync`](../aimfox-campaign-sync/README.md); the two workflows share the row on
+disjoint column sets, the same discipline campaign-sync applies to `type` / `sequencer_id`.
+
+**Why `message_steps` and not the vendor's `outreach_type`.** Probed across all nine keyed
+workspaces on 2026-08-19: `outreach_type` is `connect` on every one of the 19 campaigns and
+distinguishes nothing. The message sequence lives in the `PRIMARY_CONNECT` flow's
+`flow_message_templates` — zero of them means the campaign sends invites and never writes.
+Corroborated independently: the only two clients that come out at zero are exactly the two whose
+campaigns are named *Zaproszenia* (Polish for "invitations").
+
+### Defect 5, fixed in the same pass: remaining database was ~20x too high
+
+`[S] Build row` subtracted from `campaign.audience_size`. That is **a fixed ceiling the vendor
+assigns at creation** — 10000 for every `type: 'list'` campaign, 2500 for a `navigator` one — not
+the loaded audience. Bent Iron PL stored **19968** against a real **918**. The loaded audience is
+`target_count`, which `campaigns.database_size` already carries.
+
+The column is now correct *and* deprecated: the clients grid derives remaining database from
+`campaigns` instead, so nothing reads `sequencer_daily_stats.remaining_database_size`. It keeps
+being written by explicit decision — a retired column holding a right number beats one holding a
+wrong one.
+
 ### Reconciling against the sheet
 
 Sum across `profile_id` **excluding `'__workspace_total__'`** — those are the

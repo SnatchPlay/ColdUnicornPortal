@@ -46,8 +46,14 @@ build this?". Implementation: [docs/reference/functional/INDEX.md](docs/referenc
    never test-by-deploying to production. See
    [reference/local-supabase.md](docs/reference/local-supabase.md). Types and tests are necessary,
    not sufficient.
-3. **`pnpm lint` + `pnpm test:run` + `pnpm build` clean.** Note: **`pnpm build` does not type-check**
-   (it is `vite build`); type errors surface in `pnpm test:run`. Run the tests.
+3. **`pnpm lint` + `pnpm test:run` + `pnpm build` clean.** Note: **nothing in this repo type-checks.**
+   There is no `tsconfig.json` at all — `pnpm build` is `vite build` and `pnpm test:run` is `vitest
+   run`, and both transpile without checking types; ESLint has no type-aware rules for the same
+   reason. A wrong type, a missing required field on a payload, a renamed property — none of it is
+   caught by any command here. Treat every type you write as a comment, and prove the behaviour with
+   a test or in the browser. *(Corrected 2026-08-19: this line used to claim `pnpm test:run` surfaces
+   type errors. It does not, and acting on that produced a payload contract with fixtures missing
+   half its required fields, entirely silently.)*
 4. **Docs updated in the same change** — see the table in
    [development-standards-and-operations.md §4](docs/development-standards-and-operations.md#4-documentation-discipline),
    or state explicitly why no doc update is needed.

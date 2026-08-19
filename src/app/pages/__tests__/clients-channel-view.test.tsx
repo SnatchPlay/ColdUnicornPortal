@@ -53,8 +53,9 @@ function makeSummary(clientId: string, overrides: Partial<ClientMetricsSummary> 
     mom_won_eb: [...ZEROS], mom_won_af: [...ZEROS],
     aimfox_daily_sent: [...ZEROS],
     aimfox_schedule_today: 0, aimfox_schedule_tomorrow: 0, aimfox_schedule_day_after: 0,
-    aimfox_wow_sent: [...ZEROS], aimfox_wow_accepted: [null, null, null, null, null],
     aimfox_invite_limit: null, aimfox_invite_limit_remaining: null, aimfox_remaining_database_size: null,
+    aimfox_active_campaigns: 0, aimfox_active_audience: 0, aimfox_active_invites_sent: null,
+    aimfox_active_invites_accepted: null, aimfox_active_with_messages: 0, aimfox_active_measured: 0,
     ...overrides,
   };
 }
@@ -193,7 +194,7 @@ describe("clients grid channel view", () => {
 
     // Same sections in the same order, once each view's channel-native extras are removed.
     const emailOnly = ["WoW Resp", "WoW Human", "WoW Bnc", "WoW OOO"];
-    const aimfoxOnly = ["Aimfox capacity", "WoW Accept"];
+    const aimfoxOnly = ["Aimfox capacity"];
     const strip = (headers: string[], native: string[]) => unsuffixed(headers).filter((h) => !native.includes(h));
     expect(strip(email, emailOnly)).toEqual(strip(aimfox, aimfoxOnly));
 
@@ -229,9 +230,10 @@ describe("clients grid channel view", () => {
   it("drops a sort bound to a column the switch hides", async () => {
     await renderPage();
 
-    // "WoW Accept" is Aimfox-native; it does not exist in the EmailBison view.
+    // The Aimfox capacity band is LinkedIn-native; it does not exist in the EmailBison view.
+    // Matched loosely because the band's heading carries a channel suffix in a single-channel view.
     switchChannel("LinkedIn numbers only");
-    fireEvent.click(screen.getByRole("button", { name: "Sort by WoW Accept · AF 0" }));
+    fireEvent.click(screen.getByRole("button", { name: /Sort by .*capacity.* Accept/i }));
     switchChannel("Email numbers only");
 
     // The gateway write is debounced; the layout cache is written synchronously, so assert there.
