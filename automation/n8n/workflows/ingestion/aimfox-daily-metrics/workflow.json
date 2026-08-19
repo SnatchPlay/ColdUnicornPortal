@@ -265,6 +265,7 @@
         2080,
         -292
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {},
