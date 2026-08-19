@@ -144,37 +144,59 @@ outreach and CRM ([04-metrics-catalog](../../functional/04-metrics-catalog.md), 
 
 | Logical ID | Remote | Role | State |
 |---|---|---|---|
-| `ooo-detect-and-log` | `O4DqMEu1Z9LcxikE` | OOO tag attached → detect return date, record | **managed**, contradicts this document — see below |
-| — | `ZZ0ughB302WdDJOf` | OOO tag removed → delete sheet row | orphan; must become `cancel_active_ooo_followup` |
-| — | `zaPkpSAuvjibUUDU` | scheduled re-enrolment from the sheet | orphan; must become the `pending` → `claim` → `submit` worker |
+| `ooo-detect-and-log` | `O4DqMEu1Z9LcxikE` | OOO tag attached → detect return date, record | **phase C since 2026-08-19** — branch L disabled, Supabase only |
+| `ooo-remove-on-tag-removed` | `ZZ0ughB302WdDJOf` | OOO tag removed → cancel the episode | managed; `[S] cancel_active_ooo_followup` runs first, sheet limb below it |
+| `ooo-enrol-followups` | `zaPkpSAuvjibUUDU` | `pending` → `claim` → attach → `submit` worker | managed; rewired to Supabase in Wave 1, 2026-08-15 |
 | `nrr-daily-stats` | `1hHbU2hYYcsktLUP` | NRR → increment a Sheets counter | **managed but never executed; `deprecated` 2026-08-15.** Unreachable by design — the classifier suppresses the NRR tag, so the HUB gate cannot fire. Not being revived ([C1](../../n8n/defect-backlog.md#c1)) |
 | — | `xPzdtWQiY3lGtqI1` | HUB dispatcher | orphan |
 
-### Where the implementation actually is (as of 2026-07-21)
+### Where the implementation actually is (as of 2026-08-19)
 
-This document describes the **target**. The live implementation is at **phase 0** of the
-[Sheets → Supabase dual-write transition](../../../adr/0017-sheets-to-supabase-dual-write-transition.md):
-OOO state lives in the `OOO Leads` Google Sheet, `record_ooo_followup` is never called, and
-`ooo_followups` has **0 rows** in production.
+**This document is no longer describing a target.** It describes what runs.
 
-That is a migration in progress, not neglect — the sheet is the system the agency runs on, and it
-keeps being written until Supabase has been proven against it. What *is* a defect is the Postgres
-branch writing `leads.qualification='OOO'` directly: a second store does not license bypassing the RPC
-contract. It has never landed a row anyway (verified: 0 leads carry that qualification or a non-null
-`expected_return_date`), so removing it costs nothing.
+The [Sheets → Supabase transition](../../../adr/0017-sheets-to-supabase-dual-write-transition.md) for
+this process is at **phase C**: `ooo_followups` is the only store, and the `OOO Leads` sheet is no
+longer written. Production, 2026-08-19:
 
-Consequences, in order of importance:
+| status | episodes |
+|---|---|
+| `submitted` | 1000 |
+| `skipped` | 729 |
+| `pending` | 289 |
+| `cancelled` | 14 |
+| `failed` | 1 |
 
-1. Invariants 4, 5, 6 and 8 are **not enforced anywhere** today — the sheet has no unique index, no
-   status and no skip reason. Until dual-write reaches phase B, the invariants above are a contract
-   the database can honour and nothing exercises.
-2. **`20260722z` (drop legacy OOO columns) cannot be applied** until `ooo-detect-and-log` stops
-   referencing `leads.expected_return_date`. This is unblocked by **phase A**, not phase C — the
-   legacy *lead* columns are written by no phase.
-3. The sheet append is unconditional, so it is **not idempotent**. Dual-write makes that worse, not
-   better: two stores with different duplicate behaviour diverge by construction. Fixing the sheet
-   write to append-or-update on a stable key is a precondition for phase A, not a later cleanup.
-4. `daily_stats.ooo_count` and the sheet can disagree, with no reconciliation.
+How it got here, because the order matters and none of it was a single cutover:
+
+1. **2026-07-21/22 — phase A.** Branch S added, then its accessor bug fixed; `record_ooo_followup`
+   starts landing rows. The direct `leads.qualification='OOO'` write named as a defect below was
+   deleted, not kept.
+2. **2026-08-15 — Wave 1.** The enrolment worker moved to Supabase. This is the moment the sheet
+   stopped being authoritative: until then the sheet was the only thing that enrolled anyone and
+   branch S was a read-only shadow; afterwards the sheet was a write-only record nothing acted on.
+3. **2026-08-19 — phase C.** Branch L disabled. The six nodes stay in the graph as the rollback path.
+
+**Phase B was skipped, deliberately.** Content parity was not merely unmeasured, it was
+*unmeasurable*: each branch made its own gpt-5-mini call for the return date, and on the same reply
+they disagreed. Reconciling them would have measured two models against each other, not two stores.
+COVERAGE was used as the gate instead, and met — see `transition.cutover` in the workflow's
+[manifest](../../../../automation/n8n/workflows/outreach/ooo-detect-and-log/manifest.yaml).
+
+The standing check is therefore coverage, not parity: `ooo_followups` rows created must keep tracking
+`[child-3]`'s successful executions. A widening gap means episodes are being lost, and that is the
+only failure this cutover can produce.
+
+Consequences that were listed here as open and are now resolved:
+
+- ~~Invariants 4, 5, 6 and 8 are enforced nowhere~~ — they are enforced by the table and the RPCs; the
+  sheet never had a unique index, a status or a skip reason, and it is no longer in the path.
+- ~~`20260722z` cannot be applied~~ — applied; the legacy OOO lead columns are gone.
+- ~~The sheet append is not idempotent~~ — moot: the sheet is not written. `record_ooo_followup`'s
+  partial unique indexes carry the guarantee ([README defect 5](../../../../automation/n8n/workflows/outreach/ooo-detect-and-log/README.md#known-defects)
+  records the won't-fix decision this supersedes).
+- `daily_stats.ooo_count` and the episode table can still disagree, and that is expected, not a
+  defect: `ooo_count` is a sequencer-reported daily counter written by `bison-daily-stats-process`,
+  not derived from episodes (ADR-0015 §9).
 
 Sequenced plan: [migration-backlog §1](../../n8n/migration-backlog.md#1-ooo-cutover).
 
