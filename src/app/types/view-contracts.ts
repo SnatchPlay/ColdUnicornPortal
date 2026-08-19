@@ -435,10 +435,6 @@ export interface ClientMetricsSummary {
   aimfox_schedule_tomorrow: number;
   /** Aimfox schedule_day_after from the latest snapshot day (bucket "+2") */
   aimfox_schedule_day_after: number;
-  /** SUM(invites_sent) per ISO week: [current, -1w, -2w, -3w, -4w] */
-  aimfox_wow_sent: number[];
-  /** SUM(invites_accepted) per ISO week. null = unmeasured (never coerced to 0). */
-  aimfox_wow_accepted: Array<number | null>;
   /** Latest-day SUM(invite_limit): the weekly connect-cap snapshot ("~195 per account"). null = unmeasured. */
   aimfox_invite_limit: number | null;
   /**
@@ -447,8 +443,34 @@ export interface ClientMetricsSummary {
    * this field, not the ~195 cap). See 20260705 migration + 04-metrics §18.4. null = unmeasured.
    */
   aimfox_invite_limit_remaining: number | null;
-  /** Latest-day SUM(remaining_database_size). null = unmeasured. */
+  /**
+   * Latest-day SUM(remaining_database_size).
+   * @deprecated 2026-08-19 — do not read. Derived from Aimfox `audience_size`, a fixed ceiling
+   * rather than the loaded audience, so the value runs high by a large factor. Use
+   * `aimfox_active_audience - aimfox_active_invites_sent` instead. Still written by n8n.
+   */
   aimfox_remaining_database_size: number | null;
+
+  // ── Aimfox ACTIVE-campaign rollup ──────────────────────────────────────────────────────────
+  // Sourced from `campaigns` (status='active', sequencer=aimfox), written by aimfox-campaign-sync
+  // (identity, audience) and aimfox-daily-metrics (the metrics). These are facts of a campaign,
+  // cumulative over its life — not per-day counters, and not comparable to the daily fields above.
+  /** How many ACTIVE Aimfox campaigns the client has. 0 → the three fields below mean nothing. */
+  aimfox_active_campaigns: number;
+  /** SUM(campaigns.database_size) = the loaded audience across active campaigns. */
+  aimfox_active_audience: number;
+  /** SUM(campaigns.invites_sent), cumulative per campaign. null = never measured. */
+  aimfox_active_invites_sent: number | null;
+  /** SUM(campaigns.invites_accepted), cumulative per campaign. null = never measured. */
+  aimfox_active_invites_accepted: number | null;
+  /** How many active campaigns run a message sequence (message_steps > 0). 0 → invitations only. */
+  aimfox_active_with_messages: number;
+  /**
+   * How many active campaigns have `message_steps` measured at all. 0 means "we have not looked",
+   * which is NOT the same as "no messages" — without it a never-synced client would read as
+   * invitations-only rather than unknown.
+   */
+  aimfox_active_measured: number;
 }
 
 /** Payload returned by loadClientsMetricsSummary. */

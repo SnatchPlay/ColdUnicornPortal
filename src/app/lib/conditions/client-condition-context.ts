@@ -103,6 +103,16 @@ export interface ClientConditionContext {
   monthly_meeting_kpi: number | null;
   monthly_won_kpi: number | null;
 
+  /**
+   * LinkedIn acceptance across the client's ACTIVE Aimfox campaigns, as a 0..1 fraction (the same
+   * scale every other rate on this context uses). null when there is no active campaign or nothing
+   * has been sent — and null is the gate: every numeric operator returns false against it, so a
+   * client with no LinkedIn simply stays uncoloured without needing a base_filter.
+   */
+  aimfox_accept_rate: number | null;
+  /** Loaded audience still un-invited across active Aimfox campaigns. null under the same rules. */
+  aimfox_remaining_db: number | null;
+
   report_or_folder_link: string | null;
   folder_link: string | null;
   issues: string | null;
@@ -222,6 +232,8 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
     monthly_sql_kpi: client.kpi_leads ?? null,
     monthly_meeting_kpi: client.kpi_meetings ?? null,
     monthly_won_kpi: null,
+    aimfox_accept_rate: metricsOverview.aimfoxAcceptRate ?? null,
+    aimfox_remaining_db: metricsOverview.aimfoxActiveRemainingDb ?? null,
 
     report_or_folder_link: null,
     folder_link: null,

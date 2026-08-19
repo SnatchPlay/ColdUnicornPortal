@@ -192,6 +192,10 @@ Primary mappings:
 - `monthly_won_kpi` < `null` (rule is seeded disabled)
 - `auto_li_api_key` < aimfox `client_sequencers.api_key` (was `clients.linkedin_api_key`; ADR-0012)
 - `client.external_workspace_id` / `client.external_api_key` / `client.linkedin_api_key` metric paths < emailbison/aimfox `client_sequencers` rows (ADR-0012) — the path names are kept for live-rule compatibility (`spreadsheet_or_workspace_ids_present` reads `client.external_workspace_id`)
+- `aimfox_accept_rate` < `ClientMetricsOverview.aimfoxAcceptRate` — accepted / sent over ACTIVE
+  Aimfox campaigns, as a 0..1 fraction. `null` when there is no active campaign or nothing sent.
+- `aimfox_remaining_db` < `ClientMetricsOverview.aimfoxActiveRemainingDb` — loaded audience minus
+  invites sent, over the same campaigns. `null` under the same conditions.
 - `bi_setup` < `clients.bi_setup_done` (context key retained; the **Bi column was removed** from the
   grid and the drawer, so `bi_setup_required` is now seeded disabled and the metric is no longer
   offered in the guided builder)
@@ -233,6 +237,8 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 - `spreadsheet_or_workspace_ids_present`
 - `auto_li_api_key_present`
 - `setup_type_colour` (added by `20260714_pdca_cell_colour_rules.sql`)
+- `aimfox_accept_rate` (added by `20260819c_aimfox_capacity_colour_rules.sql`)
+- `aimfox_remaining_db` (added by `20260819c_aimfox_capacity_colour_rules.sql`)
 
 ### 7.2 Disabled (with notes)
 
@@ -290,6 +296,33 @@ the blockquote below. The field id is environment-specific, so the migration res
 > Branch order matters: branches evaluate in array order, first match wins, so the two positive
 > branches come first and the catch-all is last.
 
+
+### 7.4 LinkedIn capacity (`20260819c_aimfox_capacity_colour_rules.sql`)
+
+| Cell | metric / column key | good | warning | danger |
+|---|---|---|---|---|
+| Accept | `aimfox_accept_rate` | ≥ 0.40 | 0.30–0.399 | < 0.30 |
+| Rem DB | `aimfox_remaining_db` | ≥ 200 | 100–199 | < 100 |
+
+**Rates are 0..1 fractions.** `0.4`, never `40` — the context carries every rate that way
+(`wow_bounce_rate` compares against `0.01`), so a rule written in percent points never fires. This is
+the single easiest way to ship these two rules broken.
+
+> **Neither rule has a `base_filter`, and that is the "IF LinkedIn connected" gate.** Both metrics
+> are `null` for a client with no active Aimfox campaign, and `compareWithOperator`
+> ([evaluator.ts](../../../src/app/lib/conditions/evaluator.ts)) returns `false` for every numeric
+> operator when the left operand does not coerce to a number — so those clients match no branch and
+> stay uncoloured, with no filter to keep in sync.
+>
+> Contrast with the DoD LinkedIn rules, which **do** need an explicit filter: their counters come
+> through the gateway's `toInt` and arrive as a real `0`, indistinguishable from "connected and idle".
+> The difference is where the null survives, not a difference of intent.
+
+A real `0` still colours: a client that has invited its whole audience genuinely has nothing left,
+and 0% acceptance on real sends is the worst case there is — both belong in red.
+
+Both metrics are in the guided builder ([metric-catalog.ts](../../../src/app/lib/conditions/metric-catalog.ts),
+group **Basic**), so a master_admin can retune the thresholds without the Raw JSON tab.
 
 `mom_meetings_vs_meeting_kpi` is graded the same way against `monthly_meeting_kpi`.
 
@@ -383,6 +416,7 @@ Tests added under:
 - `src/app/lib/conditions/__tests__/client-condition-context.test.ts`
 - `src/app/pages/__tests__/clients-conditions.test.tsx`
 - `src/app/pages/__tests__/settings-conditions-builder.test.tsx`
+- `src/app/lib/conditions/__tests__/aimfox-capacity-rules.test.ts`
 
 Coverage includes:
 
@@ -392,4 +426,6 @@ Coverage includes:
 - Client context mapping fidelity
 - ClientsPage visual behavior (danger/healthy/DoD cases)
 - Admin settings builder visibility + CRUD/validation flow
+- LinkedIn capacity boundaries (0.40 / 0.399, 0.30 / 0.299, 200 / 199, 100 / 99) and the
+  null-means-uncoloured contract that stands in for a base filter
 

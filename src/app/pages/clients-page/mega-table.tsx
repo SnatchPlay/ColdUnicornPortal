@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/pop
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../components/ui/utils";
 import type {
+  ClientMetricsOverview,
   ClientMetricsPack,
   DodRow,
   MetricsChannelView,
@@ -181,7 +182,9 @@ function ProvisioningMark({ letter, row }: { letter: string; row: ClientSequence
   return (
     <span
       className={cn(
-        "inline-flex h-4 w-4 items-center justify-center rounded border text-[9px] font-bold",
+        // min-w rather than w: the LinkedIn mark carries two characters (Li / Lf) once the service
+        // level is known, and a fixed 1rem box clips them.
+        "inline-flex h-4 min-w-4 items-center justify-center rounded border px-[2px] text-[9px] font-bold",
         isConfigured
           ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
           : "border-white/15 bg-white/5 text-white/40",
@@ -190,6 +193,23 @@ function ProvisioningMark({ letter, row }: { letter: string; row: ClientSequence
       {letter}
     </span>
   );
+}
+
+/**
+ * The LinkedIn service level, as one letter. Derived from whether any ACTIVE Aimfox campaign
+ * carries message templates (`campaigns.message_steps`) — the vendor's `outreach_type` reads
+ * 'connect' on every campaign in every workspace and separates nothing.
+ */
+function linkedinLetter(mode: ClientMetricsOverview["aimfoxCampaignMode"]): string {
+  if (mode === "invites") return "Li";
+  if (mode === "full") return "Lf";
+  return "L";
+}
+
+function campaignModeWord(mode: ClientMetricsOverview["aimfoxCampaignMode"]): string {
+  if (mode === "invites") return "Li — invitations only";
+  if (mode === "full") return "Lf — full campaign (messages)";
+  return "No active LinkedIn campaign measured";
 }
 
 const DOD_SCHED_BUCKETS = ["+2", "+1", "0"] as const;
@@ -314,14 +334,19 @@ function buildColumns(): MegaColumn[] {
     // Audytel (no connector), Fortum and GIC (missing label) months before somebody went looking by
     // hand. The drawer carries the detail.
     //
-    // A third mark splitting LinkedIn into "invitations only" (Li) and "full campaign" (Lf) is
-    // wanted but not buildable yet: nothing in the data distinguishes them today.
+    // The LinkedIn letter carries the service level as well as the connection: `Li` = invitations
+    // only, `Lf` = a full campaign with a message sequence, plain `L` = we do not know yet (no
+    // active campaign, or none measured). Colour still answers "is the connector wired", so the two
+    // facts stay separable — a client can be green `L` (wired, nothing running).
     render: (row) => (
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex gap-1">
             <ProvisioningMark letter="E" row={row.sequencerCreds.emailbison} />
-            <ProvisioningMark letter="L" row={row.sequencerCreds.aimfox} />
+            <ProvisioningMark
+              letter={linkedinLetter(row.metrics.overview.aimfoxCampaignMode)}
+              row={row.sequencerCreds.aimfox}
+            />
           </span>
         </TooltipTrigger>
         <TooltipContent>
@@ -329,6 +354,8 @@ function buildColumns(): MegaColumn[] {
             Email: {provisioningWord(row.sequencerCreds.emailbison)}
             <br />
             LinkedIn: {provisioningWord(row.sequencerCreds.aimfox)}
+            <br />
+            {campaignModeWord(row.metrics.overview.aimfoxCampaignMode)}
           </span>
         </TooltipContent>
       </Tooltip>
@@ -544,24 +571,33 @@ function buildColumns(): MegaColumn[] {
     minWidth: 44,
     align: "center",
     defaultDirection: "desc",
-    render: (row) => formatNum(row.metrics.overview.aimfoxRemainingDb ?? null),
-    sortValue: (row) => row.metrics.overview.aimfoxRemainingDb ?? null,
+    conditionKey: "aimfox_remaining_db",
+    render: (row) => formatNum(row.metrics.overview.aimfoxActiveRemainingDb ?? null),
+    sortValue: (row) => row.metrics.overview.aimfoxActiveRemainingDb ?? null,
   });
   out.push({
-    // "Invitations limit" = the PDCA sheet's column S: invites still available today
-    // (invite_limit_remaining), NOT the ~195 weekly cap. Sheet column S values (8/20/8) reconcile
-    // with this field. See 04-metrics §18.4.
-    id: "af-invite-limit",
+    // Replaced "Inv left" (invite_limit_remaining), which was the same number as the Schedule
+    // (Aimfox) "0" cell — both are written from one variable in the ingestion workflow, so the
+    // column carried no information the grid did not already show one band to the left.
+    //
+    // Acceptance across the client's ACTIVE campaigns, cumulative: Σ accepted / Σ sent from
+    // `campaigns`. NOT the daily `invites_accepted` counter, which measures a day's events through
+    // an interactions endpoint whose leading bucket is a known artefact and reads an order of
+    // magnitude low (ColdUnicorn PL: 4 stored against 333 real).
+    id: "af-accept-rate",
     group: "aimfoxCap",
     sub: "Aimfox capacity",
     channel: "aimfox",
-    label: "Inv left",
-    width: 52,
-    minWidth: 40,
+    label: "Accept",
+    // 60, not the 52 the old "Inv left" used: the header is uppercase with 0.12em tracking, and at
+    // 52 the only word naming this metric renders as "ACC…".
+    width: 60,
+    minWidth: 44,
     align: "center",
     defaultDirection: "desc",
-    render: (row) => formatNum(row.metrics.overview.aimfoxInviteLimitRemaining ?? null),
-    sortValue: (row) => row.metrics.overview.aimfoxInviteLimitRemaining ?? null,
+    conditionKey: "aimfox_accept_rate",
+    render: (row) => formatRate(row.metrics.overview.aimfoxAcceptRate ?? null),
+    sortValue: (row) => row.metrics.overview.aimfoxAcceptRate ?? null,
   });
 
   // --- 3-DoD (per channel: Total / EmailBison / Aimfox) -------------------
@@ -644,7 +680,9 @@ function buildColumns(): MegaColumn[] {
     { key: "human",    label: "Human",      conditionKey: "wow_human_response_rate", channel: "email",  format: "rate", pick: (r) => r.humanRate },
     { key: "bnc",      label: "Bnc",        conditionKey: "wow_bounce_rate",         channel: "email",  format: "rate", pick: (r) => r.bounceRate },
     { key: "ooo",      label: "OOO",        conditionKey: "wow_ooo_rate",            channel: "email",  format: "rate", pick: (r) => r.oooRate },
-    { key: "accept",   label: "Accept",     channel: "aimfox", format: "rate", pick: (r) => r.acceptRate },
+    // No "Accept" band here any more. It divided two per-day counters from sequencer_daily_stats,
+    // and the numerator (invites_accepted) is measured wrongly at source — the rate is now a single
+    // cumulative column in the Aimfox capacity band, computed from campaigns.
   ];
 
   for (const m of wowMetrics) {

@@ -91,8 +91,6 @@ export interface WowRow {
   totalLeadsAf?: number;
   sqlLeadsEb?: number;
   sqlLeadsAf?: number;
-  /** Aimfox acceptance rate for the week: accepted/sent. null when sent=0 or accepted unmeasured. */
-  acceptRate?: number | null;
 }
 
 export interface MomRow {
@@ -132,8 +130,28 @@ export interface ClientMetricsOverview {
   aimfoxInviteLimit?: number | null;
   /** Aimfox invites still available today (PDCA sheet column S "Invitations limit"). undefined in the raw path. */
   aimfoxInviteLimitRemaining?: number | null;
-  /** Aimfox remaining database size, latest day. undefined in the raw path. */
+  /**
+   * Aimfox remaining database size, latest day.
+   * @deprecated 2026-08-19 — use `aimfoxActiveRemainingDb`. This one is computed from the vendor's
+   * `audience_size`, a fixed ceiling rather than the loaded audience, and reads far too high.
+   */
   aimfoxRemainingDb?: number | null;
+
+  // ── Aimfox ACTIVE-campaign rollup ──────────────────────────────────────────────────────────
+  // Facts of a campaign, cumulative over its life — not day counters. All undefined in the raw path.
+  /** Loaded audience still un-invited across active campaigns. null = no active campaigns, or never measured. */
+  aimfoxActiveRemainingDb?: number | null;
+  /** Invites sent across active campaigns, cumulative. null = never measured. */
+  aimfoxActiveInvitesSent?: number | null;
+  /** Invites accepted across active campaigns, cumulative. null = never measured. */
+  aimfoxActiveInvitesAccepted?: number | null;
+  /** accepted / sent across active campaigns, as a 0..1 fraction. null when nothing was sent. */
+  aimfoxAcceptRate?: number | null;
+  /**
+   * The LinkedIn service level, derived from whether any active campaign carries message templates.
+   * null = no active campaigns, or none measured yet — deliberately distinct from "invites".
+   */
+  aimfoxCampaignMode?: "invites" | "full" | null;
 }
 
 export interface ClientMetricsPack {
@@ -448,8 +466,6 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
     const bounce  = g(s.wow_bounce,   i);
     const ooo     = g(s.wow_ooo,      i);
     const negative = g(s.wow_negative, i);
-    const afSent     = g(s.aimfox_wow_sent, i);
-    const afAccepted = gN(s.aimfox_wow_accepted, i);
     return {
       bucket: i === 0 ? "0" : `-${i}`,
       totalLeads:   g(s.wow_leads, i),
@@ -463,8 +479,6 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
       totalLeadsAf: g(s.wow_leads_af, i),
       sqlLeadsEb:   g(s.wow_sql_eb,   i),
       sqlLeadsAf:   g(s.wow_sql_af,   i),
-      // Acceptance rate: null (not 0) when nothing was sent or acceptances were unmeasured.
-      acceptRate:   afAccepted === null ? null : toRate(afAccepted, afSent),
     };
   });
 
@@ -484,11 +498,34 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
     wonAf:        g(s.mom_won_af,      i),
   }));
 
+  // Aimfox ACTIVE-campaign rollup. Every branch below answers "—" rather than a number we cannot
+  // stand behind: a client with no active campaigns has no rate to report, and one whose campaigns
+  // have never been measured is unknown, not zero.
+  const afActiveCampaigns = s.aimfox_active_campaigns ?? 0;
+  const afActiveSent = s.aimfox_active_invites_sent ?? null;
+  const afActiveAccepted = s.aimfox_active_invites_accepted ?? null;
+  const afActiveRemainingDb =
+    afActiveCampaigns === 0 || afActiveSent === null
+      ? null
+      : Math.max((s.aimfox_active_audience ?? 0) - afActiveSent, 0);
+  const afCampaignMode: ClientMetricsOverview["aimfoxCampaignMode"] =
+    afActiveCampaigns === 0 || (s.aimfox_active_measured ?? 0) === 0
+      ? null
+      : (s.aimfox_active_with_messages ?? 0) > 0
+        ? "full"
+        : "invites";
+
   const overview = deriveOverview({ dodRows, threeDodRows, wowRows, momRows }, {
     latestProspectsCount: s.latest_prospects_count,
     aimfoxInviteLimit: s.aimfox_invite_limit ?? null,
     aimfoxInviteLimitRemaining: s.aimfox_invite_limit_remaining ?? null,
     aimfoxRemainingDb: s.aimfox_remaining_database_size ?? null,
+    aimfoxActiveRemainingDb: afActiveRemainingDb,
+    aimfoxActiveInvitesSent: afActiveSent,
+    aimfoxActiveInvitesAccepted: afActiveAccepted,
+    aimfoxAcceptRate:
+      afActiveSent === null || afActiveAccepted === null ? null : toRate(afActiveAccepted, afActiveSent),
+    aimfoxCampaignMode: afCampaignMode,
   });
 
   return { overview, dodRows, threeDodRows, wowRows, momRows };
@@ -497,7 +534,15 @@ export function createClientMetricsFromSummary(s: ClientMetricsSummary): ClientM
 /** Facts the row bands cannot carry — they are per-client, not per-bucket. */
 type OverviewExtras = Pick<
   ClientMetricsOverview,
-  "latestProspectsCount" | "aimfoxInviteLimit" | "aimfoxInviteLimitRemaining" | "aimfoxRemainingDb"
+  | "latestProspectsCount"
+  | "aimfoxInviteLimit"
+  | "aimfoxInviteLimitRemaining"
+  | "aimfoxRemainingDb"
+  | "aimfoxActiveRemainingDb"
+  | "aimfoxActiveInvitesSent"
+  | "aimfoxActiveInvitesAccepted"
+  | "aimfoxAcceptRate"
+  | "aimfoxCampaignMode"
 >;
 
 /**
@@ -534,6 +579,11 @@ function deriveOverview(
     aimfoxInviteLimit: extras.aimfoxInviteLimit,
     aimfoxInviteLimitRemaining: extras.aimfoxInviteLimitRemaining,
     aimfoxRemainingDb: extras.aimfoxRemainingDb,
+    aimfoxActiveRemainingDb: extras.aimfoxActiveRemainingDb,
+    aimfoxActiveInvitesSent: extras.aimfoxActiveInvitesSent,
+    aimfoxActiveInvitesAccepted: extras.aimfoxActiveInvitesAccepted,
+    aimfoxAcceptRate: extras.aimfoxAcceptRate,
+    aimfoxCampaignMode: extras.aimfoxCampaignMode,
   };
 }
 
@@ -579,7 +629,6 @@ export function projectMetricsToChannel(
     bounceRate: email ? r.bounceRate : null,
     oooRate: email ? r.oooRate : null,
     negativeRate: email ? r.negativeRate : null,
-    acceptRate: email ? null : r.acceptRate,
   }));
 
   const momRows: MomRow[] = pack.momRows.map((r) => ({

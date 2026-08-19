@@ -79,7 +79,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// One row per Aimfox account per day, from the account's own numbers.\n// Fixes, rather than ports, four defects of branch L (see the workflow README).\nconst client = $('[S] Loop clients').first().json;\nconst accJson = $('[S] Accounts').first().json || {};\nconst accounts = Array.isArray(accJson.accounts) ? accJson.accounts : [];\n\nconst out = { client_id: client.client_id, client: client.name, accounts: accounts.length,\n              skipped: null, payload: '[]' };\n\n// Interactions are a WORKSPACE-level series; the API's per-account filter could not be verified\n// (account_ids 500s, and no client has more than one account to tell a working filter from an\n// ignored one). Attributing a workspace total to one of several accounts would be a guess.\nif (accounts.length !== 1) {\n  out.skipped = accounts.length === 0 ? 'no LinkedIn account connected'\n                                      : `${accounts.length} accounts — cannot attribute workspace interactions`;\n  return [{ json: out }];\n}\nconst account = accounts[0];\n\nconst num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\n\n// The FIRST bucket of a single-day query is a boundary artefact and lies: asked for 2026-07-20 it\n// returned sent=0 where the true value was 33. Only the last bucket describes the requested day.\nconst buckets = $('[S] Interactions').first().json?.buckets || [];\nconst last = buckets.length ? buckets[buckets.length - 1] : null;\nconst invitesSent = last ? num(last.sent_connections) : null;\nconst invitesAccepted = last ? num(last.accepted_connections) : null;\n\n// limit.connect is the WEEKLY cap; the daily allowance is a fifth of it (process invariant).\nconst weeklyCap = num($('[S] Account limits').first().json?.limit?.connect);\nconst dailyLimit = weeklyCap ? Math.floor(weeklyCap / 5) : null;\n\n// Single subtraction. Branch L computes daily - buckets[1] - buckets[0] and double-counts.\nconst remaining = (dailyLimit === null || invitesSent === null)\n  ? null : Math.max(dailyLimit - invitesSent, 0);\n\n// Remaining database = this account's ACTIVE campaigns, audience minus already-sent.\nlet remainingDb = null;\nconst details = [];\ntry {\n  for (const it of $input.all()) {\n    const j = it.json || {};\n    if (!j || j.error || !j.metrics) continue;\n    details.push(j);\n  }\n} catch (e) { /* no campaign items */ }\nif (details.length) {\n  remainingDb = details.reduce((s, d) => s + Math.max(num(d.audience_size) - num(d.sent_connections), 0), 0);\n}\n\nconst reportDate = $now.toFormat('yyyy-MM-dd');\nout.payload = JSON.stringify([{\n  client_id: client.client_id,\n  profile_id: String(account.id),\n  report_date: reportDate,\n  invites_sent: invitesSent,\n  invites_accepted: invitesAccepted,\n  invite_limit: weeklyCap || null,\n  invite_limit_remaining: remaining,\n  remaining_database_size: remainingDb,\n  schedule_today: remaining,\n  schedule_tomorrow: dailyLimit,\n  schedule_day_after: dailyLimit,\n}]);\nreturn [{ json: out }];\n"
+        "jsCode": "// One row per Aimfox account per day, from the account's own numbers.\n// Fixes, rather than ports, four defects of branch L (see the workflow README).\nconst client = $('[S] Loop clients').first().json;\nconst accJson = $('[S] Accounts').first().json || {};\nconst accounts = Array.isArray(accJson.accounts) ? accJson.accounts : [];\n\nconst out = { client_id: client.client_id, client: client.name, accounts: accounts.length,\n              skipped: null, payload: '[]' };\n\n// Interactions are a WORKSPACE-level series; the API's per-account filter could not be verified\n// (account_ids 500s, and no client has more than one account to tell a working filter from an\n// ignored one). Attributing a workspace total to one of several accounts would be a guess.\nif (accounts.length !== 1) {\n  out.skipped = accounts.length === 0 ? 'no LinkedIn account connected'\n                                      : `${accounts.length} accounts — cannot attribute workspace interactions`;\n  return [{ json: out }];\n}\nconst account = accounts[0];\n\nconst num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\n\n// The FIRST bucket of a single-day query is a boundary artefact and lies: asked for 2026-07-20 it\n// returned sent=0 where the true value was 33. Only the last bucket describes the requested day.\nconst buckets = $('[S] Interactions').first().json?.buckets || [];\nconst last = buckets.length ? buckets[buckets.length - 1] : null;\nconst invitesSent = last ? num(last.sent_connections) : null;\nconst invitesAccepted = last ? num(last.accepted_connections) : null;\n\n// limit.connect is the WEEKLY cap; the daily allowance is a fifth of it (process invariant).\nconst weeklyCap = num($('[S] Account limits').first().json?.limit?.connect);\nconst dailyLimit = weeklyCap ? Math.floor(weeklyCap / 5) : null;\n\n// Single subtraction. Branch L computes daily - buckets[1] - buckets[0] and double-counts.\nconst remaining = (dailyLimit === null || invitesSent === null)\n  ? null : Math.max(dailyLimit - invitesSent, 0);\n\n// Remaining database = this client's ACTIVE campaigns, LOADED AUDIENCE minus already-sent.\n// `target_count` is that audience; `audience_size` is a fixed vendor ceiling and was the bug.\n// The ACTIVE filter moved here from `[S] Campaign totals`, which now emits every campaign so the\n// per-campaign metrics can be stored regardless of state.\n//\n// NOTE: `remaining_database_size` is deprecated as of 2026-08-19 and nothing reads it — the clients\n// grid derives the same number from campaigns.database_size - campaigns.invites_sent. It is still\n// written, and written correctly, by explicit decision: a retired column holding a right number\n// beats one holding a wrong one.\nlet remainingDb = null;\nconst details = [];\ntry {\n  for (const it of $input.all()) {\n    const j = it.json || {};\n    if (!j || j.error || !j.metrics || j.state !== 'ACTIVE') continue;\n    details.push(j);\n  }\n} catch (e) { /* no campaign items */ }\nif (details.length) {\n  remainingDb = details.reduce((s, d) => s + Math.max(num(d.target_count) - num(d.sent_connections), 0), 0);\n}\n\nconst reportDate = $now.toFormat('yyyy-MM-dd');\nout.payload = JSON.stringify([{\n  client_id: client.client_id,\n  profile_id: String(account.id),\n  report_date: reportDate,\n  invites_sent: invitesSent,\n  invites_accepted: invitesAccepted,\n  invite_limit: weeklyCap || null,\n  invite_limit_remaining: remaining,\n  remaining_database_size: remainingDb,\n  schedule_today: remaining,\n  schedule_tomorrow: dailyLimit,\n  schedule_day_after: dailyLimit,\n}]);\nreturn [{ json: out }];\n"
       }
     },
     {
@@ -133,6 +133,19 @@
       }
     },
     {
+      "id": "aimfox-s-campaign-metrics-sql",
+      "name": "[S] Campaign metrics SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        -292
+      ],
+      "parameters": {
+        "jsCode": "// One multi-row UPDATE for this client's campaigns.\n//\n// UPDATE only, never INSERT. The campaign catalog is owned by `aimfox-campaign-sync`; a campaign it\n// has not synced yet waits for the next hour rather than being half-created here with no name, no\n// client and no type. Two workflows write one row, on DISJOINT column sets — the same discipline\n// campaign-sync already applies to `type` / `sequencer_id`.\nconst rows = $input.all().map((i) => i.json).filter((j) => j && j.metrics && j.external_id);\nif (!rows.length) return [{ json: { sql: 'SELECT 1', count: 0 } }];\n\nconst safe = (s) => String(s ?? '').replace(/'/g, \"''\");\nconst n = (v) => { const x = Number(v); return Number.isFinite(x) ? Math.trunc(x) : 0; };\n\n// Every value is cast: a single-row VALUES list otherwise leaves Postgres to infer, and `unknown`\n// against a text column is a runtime error rather than a wrong answer, but still an outage.\nconst values = rows.map((r) =>\n  `('${safe(r.external_id)}'::text, ${n(r.sent_connections)}::int, ${n(r.accepted_connections)}::int, ${n(r.message_steps)}::int)`\n).join(',\\n');\n\nconst sql = `\nUPDATE public.campaigns c SET\n  invites_sent      = v.sent,\n  invites_accepted  = v.accepted,\n  message_steps     = v.steps,\n  metrics_synced_at = NOW()\nFROM (VALUES\n${values}\n) AS v(external_id, sent, accepted, steps)\nWHERE c.external_id = v.external_id\n  AND c.sequencer_id = '00000000-0000-4000-a000-000000000003'::uuid\nRETURNING c.external_id, c.invites_sent, c.invites_accepted, c.message_steps\n`;\nreturn [{ json: { sql, count: rows.length } }];\n"
+      }
+    },
+    {
       "id": "s-merge",
       "name": "[S] Campaign totals",
       "type": "n8n-nodes-base.code",
@@ -143,7 +156,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "\n// pairs each campaign's audience with its sent count, keeping only ACTIVE ones\nconst det = $('[S] Campaign detail').all();\nconst out = [];\n$input.all().forEach((it, i) => {\n  const m = it.json?.metrics; const c = det[i]?.json?.campaign;\n  if (!m || !c) return;\n  if (String(c.state || '').toUpperCase() !== 'ACTIVE') return;\n  out.push({ json: { metrics: true, audience_size: c.audience_size, sent_connections: m.sent_connections } });\n});\nreturn out.length ? out : [{ json: {} }];"
+        "jsCode": "// Pairs each campaign's detail with its own metrics, and emits ONE ITEM PER CAMPAIGN.\n//\n// Two deliberate changes from the version that only fed remaining-database:\n//  1. no ACTIVE filter here. `[S] Campaign metrics SQL` stores the numbers for every campaign, so a\n//     campaign changing state later does not erase what it did; `[S] Build row` applies the ACTIVE\n//     filter itself, where it actually means something.\n//  2. `target_count`, not `audience_size`. audience_size is a fixed vendor ceiling — 10000 for every\n//     `list` campaign and 2500 for a `navigator` one, probed across all nine keyed workspaces on\n//     2026-08-19 — and using it made remaining-database ~20x too large (Bent Iron PL: 19968 stored\n//     against a real 918). target_count is the loaded audience, and it is what campaigns.database_size\n//     already carries.\nconst det = $('[S] Campaign detail').all();\nconst items = $input.all();\n\n// Detail and metrics are paired BY INDEX: the metrics call is made per detail item and its response\n// carries no campaign id, so there is nothing else to pair on. Both HTTP nodes continue on error, so\n// the lengths should always match — if they ever do not, emit nothing rather than attribute one\n// campaign's sent count to another campaign's audience.\nif (det.length !== items.length) {\n  return [{ json: { metrics: false, skipped: `detail/metrics length mismatch (${det.length} vs ${items.length})` } }];\n}\n\nconst num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\nconst out = [];\nitems.forEach((it, i) => {\n  const m = it.json?.metrics;\n  const c = det[i]?.json?.campaign;\n  if (!m || !c) return;\n\n  // The LinkedIn service level, straight from the vendor. `outreach_type` is 'connect' on every\n  // campaign in every workspace and distinguishes nothing; the message sequence lives in the\n  // PRIMARY_CONNECT flow's `flow_message_templates`. 0 of them = invitations only, >0 = full campaign.\n  const steps = (Array.isArray(c.flows) ? c.flows : []).reduce(\n    (s, f) => s + (Array.isArray(f?.flow_message_templates) ? f.flow_message_templates.length : 0),\n    0,\n  );\n\n  out.push({ json: {\n    metrics: true,\n    external_id: String(c.id ?? ''),\n    state: String(c.state ?? '').toUpperCase(),\n    target_count: num(c.target_count),\n    sent_connections: num(m.sent_connections),\n    accepted_connections: num(m.accepted_connections),\n    message_steps: steps,\n  } });\n});\nreturn out.length ? out : [{ json: {} }];\n"
       }
     },
     {
@@ -241,6 +254,22 @@
       "parameters": {
         "fieldToSplitOut": "campaigns",
         "options": {}
+      }
+    },
+    {
+      "id": "aimfox-s-upsert-campaign-metrics",
+      "name": "[S] Upsert campaign metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2080,
+        -292
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {},
+        "query": "={{ $json.sql }}"
       }
     },
     {
@@ -2064,12 +2093,28 @@
         ]
       ]
     },
+    "[S] Campaign metrics SQL": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Upsert campaign metrics",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "[S] Campaign totals": {
       "main": [
         [
           {
             "index": 0,
             "node": "[S] Build row",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[S] Campaign metrics SQL",
             "type": "main"
           }
         ]
