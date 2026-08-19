@@ -120,6 +120,16 @@ export interface ClientConditionContext {
   auto_li_api_key: string | null;
 
   /**
+   * "Does this client run LinkedIn?" — the gate the Aimfox DoD rules hang on. Two arms, because
+   * neither alone is complete: the Aimfox credential is the intent (a client can be connected and
+   * simply idle today), and any Aimfox number arriving is the evidence (some clients send invites
+   * without a `client_sequencers` row in the portal). Without this the rules could not fire at all:
+   * the gateway runs the Aimfox counters through `toInt`, so an email-only client reports a real 0
+   * and would light up red across both LinkedIn bands.
+   */
+  linkedin_connected: boolean;
+
+  /**
    * Master-admin custom-field values, keyed by field id. Rules reference
    * via `custom.<fieldId>`. Stored as raw text; evaluator's `eq` string-
    * coerces, so checkbox comparisons against "true"/"false" work without
@@ -158,6 +168,13 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
   const wow0 = rowByBucket(wowRows, "0");
   const mom0 = rowByBucket(momRows, "0");
 
+  const aimfoxApiKey = input.sequencerCredentials?.aimfoxApiKey ?? null;
+  const hasAimfoxNumbers =
+    metricsOverview.aimfoxInviteLimit != null ||
+    metricsOverview.aimfoxInviteLimitRemaining != null ||
+    metricsOverview.aimfoxRemainingDb != null ||
+    input.dodRows.some((row) => (row.aimfoxSchedule ?? 0) > 0 || (row.aimfoxSent ?? 0) > 0);
+
   const custom: Record<string, string | null> = {};
   if (customFieldValues) {
     for (const [fieldId, value] of customFieldValues) {
@@ -182,7 +199,7 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
       bi_setup_done: client.bi_setup_done,
       external_workspace_id: input.sequencerCredentials?.emailbisonWorkspaceId ?? null,
       external_api_key: input.sequencerCredentials?.emailbisonApiKey ?? null,
-      linkedin_api_key: input.sequencerCredentials?.aimfoxApiKey ?? null,
+      linkedin_api_key: aimfoxApiKey,
       setup_info: client.setup_info ?? null,
       notes: client.notes ?? null,
     },
@@ -239,7 +256,9 @@ export function buildClientConditionContext(input: BuildClientConditionContextIn
     folder_link: null,
     issues: null,
     bi_setup: client.bi_setup_done,
-    auto_li_api_key: input.sequencerCredentials?.aimfoxApiKey ?? null,
+    auto_li_api_key: aimfoxApiKey,
+
+    linkedin_connected: (aimfoxApiKey ?? "").trim().length > 0 || hasAimfoxNumbers,
 
     custom,
   };

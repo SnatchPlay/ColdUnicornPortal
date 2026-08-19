@@ -20,6 +20,7 @@ import type {
 } from "../../lib/client-metrics";
 import type { evaluateClientConditions } from "../../lib/conditions/client-condition-results";
 import { dodCellKey, momCellKey, threeDodCellKey, wowCellKey } from "../../lib/conditions/client-condition-results";
+import type { DodCellKind } from "../../lib/conditions/client-condition-results";
 import { getCellCondition } from "../../lib/conditions/evaluator";
 import type { ConditionEvaluationResult, ConditionSeverity } from "../../lib/conditions/types";
 import { formatNumber } from "../../lib/format";
@@ -114,7 +115,7 @@ interface MegaColumn {
   conditionKey?: string;
   /** Condition cell key for DoD per-bucket lookup (overrides conditionKey). */
   dodBucket?: string;
-  dodKind?: "schedule" | "sent";
+  dodKind?: DodCellKind;
   /** Condition cell key for WoW per-bucket lookup (overrides conditionKey). */
   wowBucket?: string;
   wowMetricKey?: string;
@@ -504,8 +505,9 @@ function buildColumns(): MegaColumn[] {
 
   // --- DoD Schedule (Aimfox) ---------------------------------------------
   // LinkedIn invite schedule mirror of the Bison band, for side-by-side reading in the Both view.
-  // No condition keys — the condition engine only knows the blended (email) DoD cells; these are
-  // display-only. Missing Aimfox data → "—".
+  // Coloured by the `clients_dod_aimfox_schedule` rule, which gates itself on the client actually
+  // having a LinkedIn connector — without that gate the summary's `toInt` would turn every
+  // Aimfox-less client's missing schedule into a red 0. Missing Aimfox data → "—".
   for (const b of DOD_SCHED_BUCKETS) {
     out.push({
       id: `dod-sched-af-${b}`,
@@ -516,6 +518,8 @@ function buildColumns(): MegaColumn[] {
       width: 38,
       minWidth: 32,
       align: "center",
+      dodBucket: b,
+      dodKind: "aimfox_schedule",
       defaultDirection: "desc",
       render: (row) => formatNum(dodLookup(row, b)?.aimfoxSchedule ?? null),
       sortValue: (row) => dodLookup(row, b)?.aimfoxSchedule ?? null,
@@ -542,6 +546,7 @@ function buildColumns(): MegaColumn[] {
   }
 
   // --- DoD Daily sent (Aimfox) -------------------------------------------
+  // Coloured by `clients_dod_aimfox_sent` — same LinkedIn-connector gate as the schedule band.
   for (const b of DOD_SENT_BUCKETS) {
     out.push({
       id: `dod-sent-af-${b}`,
@@ -552,6 +557,8 @@ function buildColumns(): MegaColumn[] {
       width: 38,
       minWidth: 32,
       align: "center",
+      dodBucket: b,
+      dodKind: "aimfox_sent",
       defaultDirection: "desc",
       render: (row) => formatNum(dodLookup(row, b)?.aimfoxSent ?? null),
       sortValue: (row) => dodLookup(row, b)?.aimfoxSent ?? null,
@@ -832,6 +839,12 @@ function isProjectedCell(col: MegaColumn, channelView: ChannelView): boolean {
   return col.projected === "always" || (col.projected === "aimfoxOnly" && channelView === "aimfox");
 }
 
+/** The Aimfox twin of an email DoD band, for the LinkedIn view's projected cells. */
+const AIMFOX_DOD_KIND: Partial<Record<DodCellKind, DodCellKind>> = {
+  schedule: "aimfox_schedule",
+  sent: "aimfox_sent",
+};
+
 /**
  * In a single-channel view a neutral metric cell shows that channel's number, while the condition
  * rules keep being evaluated on the blended pack (their thresholds — min_sent, the KPIs — are
@@ -839,12 +852,22 @@ function isProjectedCell(col: MegaColumn, channelView: ChannelView): boolean {
  * every rule means). Tinting a projected cell would therefore colour a number that is not on
  * screen, so drop the per-bucket binding for every cell the projection rewrites. The plain
  * `conditionKey` path (Basic columns, custom fields) is untouched — those values never move.
+ *
+ * The one exception is the DoD band in the LinkedIn view: there the projection swaps in the Aimfox
+ * numbers, and those have rules of their own on their own surfaces. Re-point rather than strip, so
+ * the LinkedIn view colours the same cells the Both view's "(Aimfox)" mirror does — otherwise the
+ * thresholds would exist but be invisible to anyone working in the LinkedIn view.
  */
 function stripProjectedConditionKeys(col: MegaColumn, channelView: ChannelView): MegaColumn {
   if (!isProjectedCell(col, channelView)) return col;
   const next = { ...col };
-  delete next.dodBucket;
-  delete next.dodKind;
+  const aimfoxKind = next.dodKind ? AIMFOX_DOD_KIND[next.dodKind] : undefined;
+  if (aimfoxKind && channelView === "aimfox") {
+    next.dodKind = aimfoxKind;
+  } else {
+    delete next.dodBucket;
+    delete next.dodKind;
+  }
   delete next.wowBucket;
   delete next.wowMetricKey;
   delete next.td3Bucket;

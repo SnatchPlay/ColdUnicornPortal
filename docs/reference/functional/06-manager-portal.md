@@ -153,9 +153,9 @@ native rows, and renders the rest projected):
 | **Customer Success** (sticky) | Customer Success | Client (name + status pill), Health (severity badge + score + rollup cause), Manager |
 | **Basic** | Basic | Status, Workspaces, Inboxes, Signed, Added, Min sent, KPI L, KPI M, Auto-OOO ✓, CRM ✓, Updated |
 | **DoD Schedule** | Schedule | +2, +1, 0 — `ClientMetricsPack.dodRows[bucket].schedule` |
-| **DoD Schedule (Aimfox)** | Schedule (Aimfox) | +2, +1, 0 — `dodRows[bucket].aimfoxSchedule` |
+| **DoD Schedule (Aimfox)** | Schedule (Aimfox) | +2, +1, 0 — `dodRows[bucket].aimfoxSchedule`; coloured ≥30 green / <30 red |
 | **DoD Daily sent** | Daily sent | 0, -1, -2, -3, -4 — `ClientMetricsPack.dodRows[bucket].sent` |
-| **DoD Daily sent (Aimfox)** | Daily sent (Aimfox) | 0, -1, -2, -3, -4 — `dodRows[bucket].aimfoxSent` |
+| **DoD Daily sent (Aimfox)** | Daily sent (Aimfox) | 0, -1, -2, -3, -4 — `dodRows[bucket].aimfoxSent`; coloured ≥20 green / 10-19 yellow / <10 red |
 | **Aimfox capacity** | Aimfox capacity | Rem DB, Accept — both derived from `campaigns` over the client's ACTIVE Aimfox campaigns (`04-metrics §18.3/§18.4`), both coloured |
 | **3-Day rolling** | 3-DoD TOTAL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].totalLeads{,Eb,Af}` |
 |  | 3-DoD SQL leads · (Total / EB / AF) | 0, -1, -2, -3, -4 — `threeDodRows[bucket].sqlLeads{,Eb,Af}` |
@@ -170,6 +170,18 @@ native rows, and renders the rest projected):
 2026-08-19 Aimfox capacity rework removed the five `WoW Accept` columns and the duplicated
 `Inv left`); 81 in `EmailBison` and 63 in `Aimfox` — the 18-column difference is exactly the
 reply-rate bands (20) against `Aimfox capacity` (2), i.e. the irreducible gap of 04-metrics §18.5. Column widths resizable per-cell via `useResizableColumns` (storage key `table:clients:mega-columns`). Sorting via column-header buttons (`Sort by <sub> <label>` aria-label). Default sort: `name asc`. (It was `health asc`, but no column ever had that id — `compareMega` returned 0, so the sort was a silent no-op; the health column is gone now anyway. Row triage is the inline satisfaction rating, §2.7.)
+
+**LinkedIn DoD colouring.** Since `20260819_aimfox_dod_colour_rules.sql` the two `(Aimfox)` bands are
+graded against absolute floors — Schedule ≥ 30, Daily sent ≥ 20 / ≥ 10 — and only for clients the
+engine considers LinkedIn-connected (`linkedin_connected`: an Aimfox credential, or Aimfox numbers
+arriving). Without that gate every email-only client would be solid red, because the gateway reports
+their missing Aimfox counters as `0`, not `null`. The same colours appear on the neutral
+Schedule / Daily sent bands in the **LinkedIn** channel view, which carry the Aimfox numbers by
+projection. Thresholds and rationale:
+[14-condition-rules §7.4](14-condition-rules.md#74-linkedin-dod-floors-20260819_aimfox_dod_colour_rulessql).
+
+Note the LinkedIn bands still render a literal `0` (not `—`) for a client with no LinkedIn at all —
+same `toInt` artefact, now merely uncoloured rather than red.
 
 **Workspaces (Basic band).** Two letter marks per client — `E` (EmailBison) and `L` (Aimfox), the
 channels as the team names them rather than the vendors. Written by the setup workflows into

@@ -167,8 +167,27 @@ Rows are sorted worst-first by default (`healthScore ASC`) in the clients overvi
 DoD rules are reusable via runtime `value` injection:
 
 - Rule column key in DB: `dynamic_dod_bucket`
-- Runtime cell keys: `dod:{bucket}:{schedule|sent}`
-- Each DoD schedule/sent cell evaluates the same rule with the injected `value`
+- Runtime cell keys: `dod:{bucket}:{kind}`, where `kind` is one of
+  `schedule` · `sent` · `aimfox_schedule` · `aimfox_sent`
+- Each DoD cell evaluates every rule on its band's surface with the injected `value`
+
+**Four bands, three surfaces** (`DOD_CELL_BANDS`,
+[client-condition-results.ts](../../../src/app/lib/conditions/client-condition-results.ts)):
+
+| Band | Cell key | Surface | Graded against |
+|---|---|---|---|
+| Schedule (email) | `dod:{bucket}:schedule` | `clients_dod` | `min_sent` |
+| Daily sent (email) | `dod:{bucket}:sent` | `clients_dod` | `min_sent` |
+| Schedule (LinkedIn) | `dod:{bucket}:aimfox_schedule` | `clients_dod_aimfox_schedule` | literal floor |
+| Daily sent (LinkedIn) | `dod:{bucket}:aimfox_sent` | `clients_dod_aimfox_sent` | literal floor |
+
+The two email bands share one surface because they share one rule and one target. The two LinkedIn
+bands get a surface each because their targets are unrelated: 30 invites *planned* has nothing to do
+with 20 invites *sent*, and neither is a reading of `min_sent`.
+
+All three surfaces are **raw-mode only** — no `metric-catalog.ts` entries, so the guided builder does
+not offer them. They still appear in the Settings rule list's surface filter, which is derived from
+the rules themselves.
 
 ---
 
@@ -199,6 +218,10 @@ Primary mappings:
 - `bi_setup` < `clients.bi_setup_done` (context key retained; the **Bi column was removed** from the
   grid and the drawer, so `bi_setup_required` is now seeded disabled and the metric is no longer
   offered in the guided builder)
+- `linkedin_connected` < **true when the client has an aimfox `client_sequencers` row with a
+  non-blank `api_key`, OR any Aimfox number is arriving for it** (a non-null Aimfox capacity reading,
+  or a non-zero `aimfoxSchedule` / `aimfoxSent` in any DoD bucket). See §7.4 for why both arms are
+  needed.
 
 Per-cell sibling keys (only present while a cell is being coloured, see
 [client-condition-results.ts](../../../src/app/lib/conditions/client-condition-results.ts)):
@@ -237,6 +260,8 @@ Seed migration inserts 23 normalized rules (`source_sheet='CS PDCA'` + `source_r
 - `spreadsheet_or_workspace_ids_present`
 - `auto_li_api_key_present`
 - `setup_type_colour` (added by `20260714_pdca_cell_colour_rules.sql`)
+- `dod_aimfox_schedule_floor` (added by `20260819_aimfox_dod_colour_rules.sql`)
+- `dod_aimfox_sent_floor` (added by `20260819_aimfox_dod_colour_rules.sql`)
 - `aimfox_accept_rate` (added by `20260819c_aimfox_capacity_colour_rules.sql`)
 - `aimfox_remaining_db` (added by `20260819c_aimfox_capacity_colour_rules.sql`)
 
@@ -323,6 +348,37 @@ and 0% acceptance on real sends is the worst case there is — both belong in re
 
 Both metrics are in the guided builder ([metric-catalog.ts](../../../src/app/lib/conditions/metric-catalog.ts),
 group **Basic**), so a master_admin can retune the thresholds without the Raw JSON tab.
+### 7.5 LinkedIn DoD floors (`20260819_aimfox_dod_colour_rules.sql`)
+
+The Schedule (LinkedIn) and Daily sent (LinkedIn) bands are graded against **absolute floors**, not
+against a per-client contract number — LinkedIn has no `min_sent` equivalent.
+
+| Band | good | warning | danger |
+|---|---|---|---|
+| Schedule (LinkedIn) | ≥ 30 | — | < 30 |
+| Daily sent (LinkedIn) | ≥ 20 | 10–19 | < 10 |
+
+Both rules carry the same `base_filter`: `linkedin_connected eq true`.
+
+> **The gate is load-bearing, not cosmetic.** `loadClientsMetricsSummary` runs the Aimfox counters
+> through `toInt` ([orm-gateway/index.ts](../../../supabase/functions/orm-gateway/index.ts)), so a
+> client with no Aimfox connector reports a genuine `0` rather than `null` — indistinguishable from
+> "connected and sent nothing today". Without the filter every email-only client would light up solid
+> red across both LinkedIn bands.
+>
+> **Why `linkedin_connected` has two arms.** The Aimfox credential alone is not enough: there are
+> clients with `sequencer_daily_stats` rows and no `client_sequencers` row, and they would silently
+> lose their colouring. Arriving numbers alone are not enough either: a connected client that sends
+> nothing for a week would drop out of the rule exactly in the week somebody needs to see red. The
+> context key is true when **either** holds. The residual hole — no credential *and* no numbers — is
+> indistinguishable from an email-only client with the data we have.
+
+**Where the colours appear.** Both the "(Aimfox)" mirror bands in the **Both** view and the neutral
+Schedule / Daily sent bands in the **LinkedIn** view, which the channel projection fills with the
+same Aimfox numbers. `stripProjectedConditionKeys`
+([mega-table.tsx](../../../src/app/pages/clients-page/mega-table.tsx)) re-points the DoD binding to
+the Aimfox band in the LinkedIn view instead of dropping it; every other projected band (WoW, MoM,
+3-DoD) still drops its binding, because those have no Aimfox-specific rules to re-point to.
 
 `mom_meetings_vs_meeting_kpi` is graded the same way against `monthly_meeting_kpi`.
 
@@ -416,6 +472,8 @@ Tests added under:
 - `src/app/lib/conditions/__tests__/client-condition-context.test.ts`
 - `src/app/pages/__tests__/clients-conditions.test.tsx`
 - `src/app/pages/__tests__/settings-conditions-builder.test.tsx`
+- `src/app/lib/conditions/__tests__/pdca-cell-rules.test.ts`
+- `src/app/lib/conditions/__tests__/aimfox-dod-rules.test.ts`
 - `src/app/lib/conditions/__tests__/aimfox-capacity-rules.test.ts`
 
 Coverage includes:
@@ -428,4 +486,6 @@ Coverage includes:
 - Admin settings builder visibility + CRUD/validation flow
 - LinkedIn capacity boundaries (0.40 / 0.399, 0.30 / 0.299, 200 / 199, 100 / 99) and the
   null-means-uncoloured contract that stands in for a base filter
+- LinkedIn DoD floors at every boundary (30 / 29, 20 / 19, 10 / 9) and the `linkedin_connected`
+  gate, including the email-only client whose Aimfox counters arrive as a real `0`
 
