@@ -12,9 +12,13 @@
 // values on `MEGA_COLUMNS` (mega-table.tsx). Custom entries are generated
 // at runtime from `clientCustomFields`.
 //
-// Out of scope for v1: `clients_dod` surface — DoD cells use a dynamic
-// `dod:{bucket}:{kind}` column key handled by a separate evaluation path
-// in client-condition-results.ts. Authoring DoD rules stays in raw mode.
+// Out of scope: the DoD surfaces — `clients_dod` and the two LinkedIn ones,
+// `clients_dod_aimfox_schedule` / `clients_dod_aimfox_sent`. DoD cells use a
+// dynamic `dod:{bucket}:{kind}` column key handled by a separate evaluation
+// path in client-condition-results.ts, so authoring DoD rules stays in raw
+// mode. They are deliberately absent from CONDITION_SURFACES below too: the
+// builder filters surfaces to those with catalog metrics, so listing them
+// would add nothing but dead entries.
 
 import { CLIENT_STATUSES } from "../../types/core";
 import type { ClientCustomFieldRecord } from "../../types/core";

@@ -166,4 +166,58 @@ describe("buildClientConditionContext", () => {
     expect(context.issues).toBeNull();
     expect(context.monthly_won_kpi).toBeNull();
   });
+
+  describe("linkedin_connected", () => {
+    // The gate the Aimfox DoD colour rules hang on (20260819 migration). Both arms matter: the
+    // credential covers a connected client that is idle today, the numbers cover a client that
+    // sends invites without a client_sequencers row.
+    const base = {
+      client: { id: "c1", name: "C" } as never,
+      manager: null,
+      threeDodRows: [],
+      wowRows: [],
+      momRows: [],
+      campaigns: [],
+      leads: [],
+      dailyStats: [],
+    };
+
+    const build = (
+      overview: Record<string, unknown>,
+      dodRows: Array<Record<string, unknown>>,
+      aimfoxApiKey: string | null,
+    ) =>
+      buildClientConditionContext({
+        ...base,
+        metricsOverview: overview as never,
+        dodRows: dodRows as never,
+        sequencerCredentials: { aimfoxApiKey },
+      });
+
+    it("is false for a client with no Aimfox credential and no Aimfox numbers", () => {
+      // The zeros are what the gateway actually sends for an email-only client: `toInt(undefined)`.
+      const context = build({}, [{ bucket: "0", schedule: 600, sent: 600, aimfoxSchedule: 0, aimfoxSent: 0 }], null);
+      expect(context.linkedin_connected).toBe(false);
+    });
+
+    it("is true on the credential alone, even with a week of zeros", () => {
+      const context = build({}, [{ bucket: "0", schedule: 0, sent: 0, aimfoxSchedule: 0, aimfoxSent: 0 }], "af-key");
+      expect(context.linkedin_connected).toBe(true);
+    });
+
+    it("is true on arriving Aimfox numbers alone, with no credential row", () => {
+      const context = build({}, [{ bucket: "0", schedule: 0, sent: 0, aimfoxSchedule: 33, aimfoxSent: 0 }], null);
+      expect(context.linkedin_connected).toBe(true);
+    });
+
+    it("is true on an Aimfox capacity reading alone", () => {
+      const context = build({ aimfoxRemainingDb: 0 }, [], null);
+      expect(context.linkedin_connected).toBe(true);
+    });
+
+    it("treats a blank credential string as no credential", () => {
+      const context = build({}, [], "   ");
+      expect(context.linkedin_connected).toBe(false);
+    });
+  });
 });

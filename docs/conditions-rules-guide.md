@@ -76,7 +76,7 @@ One row per band. Each band has:
 The `Raw JSON` tab shows the rule as `condition_rules` JSON. Edit and tab out — on blur, the JSON is parsed and validated. Use it for:
 
 - Deep `all` / `any` nesting (e.g. `(A AND B) OR C`).
-- Surfaces the visual builder doesn't support (`clients_dod` cells use a dynamic `dod:{bucket}:{kind}` column key — author DoD rules here).
+- Surfaces the visual builder doesn't support (all DoD cells use a dynamic `dod:{bucket}:{kind}` column key, where `kind` is `schedule` / `sent` / `aimfox_schedule` / `aimfox_sent` — author DoD rules here).
 - Metric paths not in the catalog (rare; usually means the catalog needs an entry).
 - Reading the underlying shape for debugging.
 
@@ -161,7 +161,14 @@ Surfaces and their built-in metrics:
 | `clients_wow` | "Week over Week" columns. | Week over Week |
 | `clients_mom` | "Month over Month" columns. | Month over Month |
 | `clients_setup` | Setup-status badges. | Setup |
-| `clients_dod` | DoD cells. **Raw mode only** — dynamic column keys. | (not exposed in builder) |
+| `clients_dod` | The email DoD cells (Schedule + Daily sent). **Raw mode only** — dynamic column keys. | (not exposed in builder) |
+| `clients_dod_aimfox_schedule` | The Schedule (LinkedIn) cells. **Raw mode only.** | (not exposed in builder) |
+| `clients_dod_aimfox_sent` | The Daily sent (LinkedIn) cells. **Raw mode only.** | (not exposed in builder) |
+
+The two LinkedIn DoD surfaces are separate on purpose: their targets are absolute floors that have
+nothing to do with each other, or with the email bands' `min_sent`. Both seeded rules gate on
+`linkedin_connected` — see
+[14-condition-rules §7.4](reference/functional/14-condition-rules.md#74-linkedin-dod-floors-20260819_aimfox_dod_colour_rulessql).
 
 To add a new built-in metric: edit `metric-catalog.ts`, add an entry, run the type-check.
 

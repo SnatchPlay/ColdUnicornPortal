@@ -1,5 +1,5 @@
 import type { ClientRecord } from "../../types/core";
-import type { ClientMetricsPack, MomRow, ThreeDodRow, WowRow } from "../client-metrics";
+import type { ClientMetricsPack, DodRow, MomRow, ThreeDodRow, WowRow } from "../client-metrics";
 import type { ClientConditionContext } from "./client-condition-context";
 import { evaluateConditionRules, evaluateSingleRule } from "./evaluator";
 import type { ConditionEvaluationResult, ConditionRule } from "./types";
@@ -28,7 +28,36 @@ function getRulesBySurface(rules: ConditionRule[], surface: string, client: Clie
   return rules.filter((rule) => rule.enabled && rule.surface === surface && isRuleScopedToClient(rule, client));
 }
 
-function makeDodCellKey(bucket: string, kind: "schedule" | "sent") {
+/**
+ * The four DoD bands the grid can colour. `schedule` / `sent` are the Bison (email) bands and share
+ * one reusable rule on `clients_dod`; the two Aimfox bands get a surface each because their targets
+ * are unrelated absolute floors (invites planned vs invites sent), not two readings of `min_sent`.
+ */
+export type DodCellKind = "schedule" | "sent" | "aimfox_schedule" | "aimfox_sent";
+
+interface DodCellBand {
+  kind: DodCellKind;
+  surface: string;
+  pick: (row: DodRow) => number | null | undefined;
+  /**
+   * Rules on the Bison bands compare the cell against the client's configured `min_sent`, which the
+   * evaluator reports back as the result's `threshold`. The Aimfox bands compare against literals
+   * written into the rule, so there is nothing to report.
+   */
+  usesMinSentThreshold: boolean;
+}
+
+const DOD_CELL_BANDS: DodCellBand[] = [
+  { kind: "schedule",        surface: "clients_dod",                 pick: (row) => row.schedule,        usesMinSentThreshold: true },
+  { kind: "sent",            surface: "clients_dod",                 pick: (row) => row.sent,            usesMinSentThreshold: true },
+  { kind: "aimfox_schedule", surface: "clients_dod_aimfox_schedule", pick: (row) => row.aimfoxSchedule,  usesMinSentThreshold: false },
+  { kind: "aimfox_sent",     surface: "clients_dod_aimfox_sent",     pick: (row) => row.aimfoxSent,      usesMinSentThreshold: false },
+];
+
+/** Every surface `evaluateDodCells` knows how to evaluate — the caller's rule filter. */
+export const DOD_CELL_SURFACES: string[] = Array.from(new Set(DOD_CELL_BANDS.map((band) => band.surface)));
+
+function makeDodCellKey(bucket: string, kind: DodCellKind) {
   return `dod:${bucket}:${kind}`;
 }
 
@@ -38,44 +67,31 @@ function evaluateDodCells(
   metrics: ClientMetricsPack,
 ): Record<string, ConditionEvaluationResult[]> {
   const results: Record<string, ConditionEvaluationResult[]> = {};
-  const dodRules = rules.filter((rule) => rule.surface === "clients_dod");
-  if (dodRules.length === 0) return results;
 
-  for (const row of metrics.dodRows) {
-    if (row.schedule !== null && row.schedule !== undefined) {
-      const cellKey = makeDodCellKey(row.bucket, "schedule");
-      const cellContext = { ...context, value: row.schedule };
-      const cellMatches = dodRules
-        .map((rule) => {
-          const threshold = typeof context.min_sent === "number" ? context.min_sent : undefined;
-          return evaluateSingleRule(cellContext, rule, {
+  for (const band of DOD_CELL_BANDS) {
+    const bandRules = rules.filter((rule) => rule.surface === band.surface);
+    if (bandRules.length === 0) continue;
+
+    for (const row of metrics.dodRows) {
+      const value = band.pick(row);
+      // A bucket the band does not cover (schedule has no past days, sent has no future ones) is
+      // null, and a client with no Aimfox connector is undefined on the raw metrics path.
+      if (value === null || value === undefined) continue;
+
+      const cellKey = makeDodCellKey(row.bucket, band.kind);
+      const cellContext = { ...context, value };
+      const threshold =
+        band.usesMinSentThreshold && typeof context.min_sent === "number" ? context.min_sent : undefined;
+      const cellMatches = bandRules
+        .map((rule) =>
+          evaluateSingleRule(cellContext, rule, {
             targetId: context.target_id,
             columnKey: cellKey,
             applyTo: "cell",
-            value: row.schedule,
+            value,
             threshold,
-          });
-        })
-        .filter((item): item is ConditionEvaluationResult => Boolean(item));
-      if (cellMatches.length > 0) {
-        results[cellKey] = cellMatches;
-      }
-    }
-
-    if (row.sent !== null && row.sent !== undefined) {
-      const cellKey = makeDodCellKey(row.bucket, "sent");
-      const cellContext = { ...context, value: row.sent };
-      const cellMatches = dodRules
-        .map((rule) => {
-          const threshold = typeof context.min_sent === "number" ? context.min_sent : undefined;
-          return evaluateSingleRule(cellContext, rule, {
-            targetId: context.target_id,
-            columnKey: cellKey,
-            applyTo: "cell",
-            value: row.sent,
-            threshold,
-          });
-        })
+          }),
+        )
         .filter((item): item is ConditionEvaluationResult => Boolean(item));
       if (cellMatches.length > 0) {
         results[cellKey] = cellMatches;
@@ -284,7 +300,11 @@ export function evaluateClientConditions(
     { targetId },
   );
 
-  const dodCellResults = evaluateDodCells(context, getRulesBySurface(rules, "clients_dod", client), metrics);
+  const dodCellResults = evaluateDodCells(
+    context,
+    DOD_CELL_SURFACES.flatMap((surface) => getRulesBySurface(rules, surface, client)),
+    metrics,
+  );
   const dodResultsFlat = Object.values(dodCellResults).flat();
 
   const threeDodCellResults = evaluateThreeDodCells(context, getRulesBySurface(rules, "clients_3dod", client), metrics);
@@ -319,6 +339,6 @@ export function evaluateClientConditions(
   };
 }
 
-export function dodCellKey(bucket: string, kind: "schedule" | "sent") {
+export function dodCellKey(bucket: string, kind: DodCellKind) {
   return makeDodCellKey(bucket, kind);
 }
