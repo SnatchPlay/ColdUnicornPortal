@@ -118,6 +118,58 @@ setting is the urgent half — it stops the bleeding regardless of the date bug.
 > longer takes branch S down with it. Watch `ooo_followups` row growth on those same executions to
 > confirm episodes now land.
 
+#### 2026-08-19 — the date bug closed, and it was never really a Luxon bug
+
+The entry above names the wrong defect. `cannot convert to Luxon DateTime` is a symptom; the cause is
+that **nobody tells the model what today is.** An auto-reply saying "back on 15 August" is ambiguous
+without a reference date, so `gpt-5-mini` invents the year.
+
+Measured on production over 974 episodes with `date_source = 'reply_parsed'`:
+
+| | count | range |
+|---|---|---|
+| plausible (0–60 days out) | 938 | |
+| **already in the past** | **35** | 2023-08-04 … 2026-08-14 |
+| more than 6 months out | 1 | 2027-07-24 |
+
+The shape is a dropped year, not random noise: created 2026-08-06, "returns" 2025-08-15 — day and
+month right, year wrong. **23 of the 36 were later expired as `stale` by the Wave 1 worker**:
+contacts who wrote "I am back on ⟨date⟩" and were never followed up at all. Six more were submitted
+on a hallucinated schedule.
+
+Two more findings from the same measurement:
+
+- **The output key drifts.** `[317]`'s instruction said "Return only the structured JSON" without
+  naming a key, so the model returned `return_date`, `returnDate` *and* `return_to_office` across
+  executions. Branch L reads only `return_date`, so the other two silently became a +14-day fallback.
+  Branch S never had this problem, because its prompt always named the key — the difference is
+  entirely in the prompt.
+- **The branches disagree with each other.** Two independent LLM calls on the same reply: S said
+  08-18 where L said 08-19; S said null where L said "2027". A dual-write whose two stores are each
+  asking a model the same question separately cannot reconcile by construction.
+
+**Fixed in three layers, 2026-08-19.**
+
+1. **Database backstop** — `20260818_ooo_reject_implausible_return_date.sql`. `record_ooo_followup`
+   discards a parsed date outside `[current_date - 7, current_date + 180]`, schedules on the default
+   cadence and records `date_source = 'parse_rejected'`. Not an exception: raising would abort the
+   episode, which is worse than today. Not `fallback` either — that would hide it among the 1056
+   replies that genuinely carried no date, and the whole point is to be able to measure how often the
+   extractor is wrong. The −7 bound is measured, not chosen: the deltas run
+   `-1 -1 -1 -2 -2 -2 -3 -3 -5` (legitimate late processing) then an empty band, then `-13 -18 -21
+   -38 …`. The cut sits in the gap and separates all 9 real ones from all 27 impossible ones.
+2. **Prompts — the actual root.** Both extractors now receive the reply's `date_received` and are
+   told to resolve partial dates against it and never return an earlier one. `[317]` additionally
+   names its key and format, as branch S always did.
+3. **`[327]`** — reads all three observed key spellings and checks `isValid` instead of assuming ISO.
+
+**A rule went quiet while this was being fixed, and that is worth recording.** Rewriting `[327]`'s
+mapping as an IIFE put `?? {}` in front of `$now.plus`, and `business/fallback-date-as-fact` matched
+with `[^}]*` — so it stopped reporting, with no behaviour change whatsoever. Nothing caught it except
+`manifest/stale-known-violation`, which noticed that this workflow's still-valid acceptance had
+nothing left to accept. The regexes now match the JSON string body properly. A rule a reformat can
+silence is not a rule.
+
 ### B2 · `[child-4]` blacklist — 63% of runs abort before blocking the domain {#b2}
 
 `bEB3aOHEq2lEpubp` — **211 failures / 337 runs.**
@@ -323,16 +375,53 @@ important half — but a picker that offers another client's campaigns is still 
 **Still true:** FortumEnergia has no OOO campaigns of its own. Its episodes stay parked until someone
 creates them in Bison and configures routing.
 
-### B6 · `aimfox-premql-to-pdca` — 500 on blacklist {#b6}
+### B6 · `aimfox-premql-to-pdca` — 500 on blacklist — fixed 2026-08-19 {#b6}
 
 `s0GqDtCzyLAvVnm1` — **12 failures / 116 runs.** `Add company to blacklist` returns
 `500 — An internal server error occurred`.
 
-### B7 · `Get Metrics from Aimfox` — unretried transients {#b7}
+The 500 comes from Aimfox and is not ours to fix. What *was* ours is what the abort costs. Execution
+77896 settles it: every `[S]` RPC node — `upsert_sequencer_contact`, `upsert_reply`,
+`promote_contact_to_lead` — had already run, and `Add company to blacklist` was the last node
+executed. So Supabase is intact, and the visible cost is one missing blacklist entry.
+
+The invisible cost is the fan-out. `If1` sends its true output to `Add company to blacklist`
+(`y=1008`) and its false output to `OpenAI - Search for the company name` → `Filter2` →
+`Add company to blacklist1` (`y=1200`). An abort on the upper limb ends the execution before the
+lower one runs. **This is the fourth workflow in this document with that exact shape** — after
+`[113]`, `[294]` and `[156]` in [B2](#b2). It is not a coincidence; it is what `executionOrder: v1`
+does to any graph whose limbs are not individually guarded.
+
+Both `Add company to blacklist` nodes already carried `retryOnFail` — so the 500 had already been
+retried three times before it killed the run. Retry was never the missing piece here.
+
+> **Deployed 2026-08-19.** `onError: continueRegularOutput` on `Add company to blacklist`,
+> `Add company to blacklist1` and `Add Lead to Blacklist`. Drift 0.
+
+### B7 · `Get Metrics from Aimfox` — unretried transients — fixed 2026-08-18/19 {#b7}
 
 `sVev5d0N6rtrbcgI` — **13 failures / 113 runs.** Google Sheets `503` and `ECONNRESET`, Aimfox
 `500`. All twelve HTTP nodes have `retryOnFail` unset, so every transient becomes a lost run
 ([E3](#e3)).
+
+**Mostly closed as a side effect of [E3b](#e3b).** This workflow is the managed artifact
+`ingestion/aimfox-daily-metrics`, and 8 of its 9 failures in the week to 2026-08-18 were the Google
+Sheets transients that the estate-wide retry pass covered — the five Sheets nodes here were in that
+batch. Re-measured by node:
+
+| Failures | Node | Code |
+|---|---|---|
+| 2 | `Update row in sheet` | ECONNRESET |
+| 2 | `Update row in sheet1` | ECONNRESET |
+| 2 | `Update row in sheet2` | ECONNRESET |
+| 1 | `Get row(s) in sheet` | 503 |
+| 1 | `Get row(s) in sheet1` | ECONNRESET |
+| 2 | `Get Campaign` | 500 (Aimfox) |
+
+> **`Get Campaign` deployed 2026-08-19** with `retryOnFail` only — **deliberately no `onError`.** It
+> feeds `Get Campaign Metrics`, and `continueRegularOutput` would pass an empty item into the metrics
+> chain, turning a failed run into a silently wrong number. A lost run is the better failure here,
+> and it is the one case in this pass where absorbing the error would have been the wrong move.
 
 ---
 

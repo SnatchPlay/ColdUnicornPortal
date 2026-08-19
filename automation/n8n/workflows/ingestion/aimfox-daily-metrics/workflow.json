@@ -446,6 +446,9 @@
         -272
       ],
       "alwaysOutputData": false,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "headerParameters": {
           "parameters": [

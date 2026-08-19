@@ -78,6 +78,7 @@ debt with an expiry) except where noted.
 | 7 | The Bison API key travels from a Google Sheet cell into an `Authorization` header expression | Per-client API keys live in a spreadsheet rather than `client_sequencers.api_key`. Tracked in [security.md](../../../../../docs/reference/n8n/security.md), not in `knownViolations` (it is not a rule the offline validator can express). |
 | 8 | ~~`[326]` sorted **ascending** and took the oldest reply~~ — **fixed 2026-07-22** | Branch L's `[326]` now sorts **descending** and takes the newest reply (renamed to "Set last_reply (**newest** by date_received)", comparator flipped to `new Date(b…) - new Date(a…)`), matching branch S's `[S] Pick newest OOO reply`, which was already correct. For a contact with several replies the newest is the current OOO auto-reply, so both branches now feed the LLM the right message. |
 | 9 | ~~The two branches read `[317]`'s output with incompatible shapes~~ — **fixed 2026-07-22** | Both `[327] Add OOO Leads row` and `[S] record_ooo_followup` read a flat field (`$json.expected_return_date` / `$json.returnDate`) that never existed — the real langchain-openai response nests it at `output[0].content[0].text.{return_date\|returnDate}`. Neither consumer path could ever have worked. |
+| 10 | ~~The extractor is never told what today's date is~~ — **fixed 2026-08-19** | `gpt-5-mini` reading "back on 15 August" had no reference date, so it invented the year: 36 of 974 parsed episodes carried an impossible `expected_return_date` (35 in the past, one at +366 days). 23 of them were later expired as `stale` — contacts who named a return date and were never followed up. Both prompts now carry the reply's `date_received`; the RPC rejects an implausible date as `date_source='parse_rejected'`. See [B1](../../../../../docs/reference/n8n/defect-backlog.md#b1). |
 
 **Defect 9 resolved, not just described.** The open question this defect raised ("is the fallback
 firing on every event, or only when the LLM genuinely finds nothing?") was checked against real
@@ -95,6 +96,24 @@ fix) — the LLM returned `"2026-07-24"` on both branches, `[327]` wrote `2026-0
 `ae1abbc8-351d-40f5-b481-8e0470a3f5b9` with `expected_return_date="2026-07-24"`,
 `date_source='reply_parsed'` — the first `reply_parsed` row `ooo_followups` has ever had (69
 `fallback` / 1 `reply_parsed` as of this write).
+
+
+**Defect 10 and the two things it exposed.** The failure everyone could see was
+`cannot convert to Luxon DateTime` in `[327]`, and it was recorded as a date-conversion bug for three
+weeks. It was not. Two independent problems shared that symptom:
+
+- **The model picked its own key.** `[317]`'s instruction said "Return only the structured JSON"
+  without naming one, so production shows `return_date`, `returnDate` *and* `return_to_office` from
+  the same node. Branch L reads only the first. Defect 9 above records the two branches reading
+  *different* keys as a quirk of each branch — it is actually the model choosing freely, and branch S
+  only escaped because its prompt happened to name the key.
+- **The model picked its own year.** Which no amount of accessor fixing could have caught, because
+  the value parses fine — it is simply wrong.
+
+The branches also disagree *with each other*: on the same reply, S returned 08-18 where L returned
+08-19, and S returned null where L returned "2027". Two paid LLM calls asking one question twice
+cannot be reconciled — which is what ADR-0017 phase B would require. Worth remembering before the
+next dual-write puts a model on both sides of it.
 
 ## Migration
 

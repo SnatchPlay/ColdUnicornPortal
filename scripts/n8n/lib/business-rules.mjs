@@ -120,9 +120,15 @@ export function validateBusinessRules(workflow, manifest, label) {
   if (isOooProcess) {
     for (const node of workflow.nodes ?? []) {
       const serialized = JSON.stringify(node.parameters ?? {});
+      // Both patterns used to stop at the first `}` (`[^}]*` / `[^,}]*`). That made them trivially
+      // evadable WITHOUT changing behaviour: on 2026-08-18 rewriting the mapping as an IIFE
+      // containing `?? {}` put a brace in front of `$now.plus`, the rule went quiet, and the only
+      // thing that noticed was `manifest/stale-known-violation` on the acceptance this workflow
+      // still legitimately needs. A rule a reformat can silence is not a rule. Match the JSON string
+      // body properly (respecting escapes) and use a bounded any-char window for the RPC form.
       const fallbackIntoExpected =
-        /"?Expected Return Date"?\s*:\s*"=?\{\{[^}]*\$now\.plus/i.test(serialized) ||
-        /expected_return_date[^,}]*\$now\.plus/i.test(serialized);
+        /"Expected Return Date"\s*:\s*"(?:[^"\\]|\\.)*?\$now\.plus/i.test(serialized) ||
+        /expected_return_date[\s\S]{0,200}?\$now\.plus/i.test(serialized);
       if (fallbackIntoExpected) {
         push(
           "error",

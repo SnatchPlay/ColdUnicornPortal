@@ -147,10 +147,16 @@ knownViolations:
     node: "[327] Add OOO Leads row"
     reason: >-
       Branch L still writes `$now.plus({days: 14})` into the sheet's "Expected Return Date" when the
-      LLM parses none. Left as-is deliberately: branch L must keep behaving exactly as it did during
-      phase A, and changing it would invalidate the very comparison phase A exists to make. Branch S
-      does the right thing — NULL expected_return_date, fallback only in scheduled_for — as of
-      2026-07-22, once its own accessor bug was fixed (it previously always fell back too; see
-      transition.goLive). Closed when branch L is disconnected at phase C.
+      LLM parses none — that is the accepted violation, and it is unchanged. Branch S does the right
+      thing — NULL expected_return_date, fallback only in scheduled_for — as of 2026-07-22, once its
+      own accessor bug was fixed (it previously always fell back too; see transition.goLive). Closed
+      when branch L is disconnected at phase C.
+      2026-08-19: the mapping expression WAS edited, so "branch L behaves exactly as in phase A" is
+      no longer literally true and should not be read as the reason. What changed is only which rows
+      get written at all: the old expression assumed ISO and read one key spelling, so a reply the
+      model answered as "14.08" or under `returnDate` produced an expression error and — since the
+      2026-08-15 onError — no sheet row whatsoever. The new one falls back instead of failing. The
+      fallback-into-expected behaviour this acceptance covers is byte-for-byte the same; the sheet
+      simply stops losing rows. See defect-backlog B1.
     trackedIn: docs/reference/n8n/ooo-phase-a.md
     expires: 2026-10-31

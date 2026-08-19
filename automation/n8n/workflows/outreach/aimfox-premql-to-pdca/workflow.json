@@ -261,6 +261,7 @@
         1008
       ],
       "retryOnFail": true,
+      "onError": "continueRegularOutput",
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -289,6 +290,7 @@
         1200
       ],
       "retryOnFail": true,
+      "onError": "continueRegularOutput",
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -316,6 +318,7 @@
         2336,
         704
       ],
+      "onError": "continueRegularOutput",
       "parameters": {
         "headerParameters": {
           "parameters": [
