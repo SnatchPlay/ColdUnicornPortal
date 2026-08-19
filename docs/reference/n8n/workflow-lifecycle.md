@@ -124,6 +124,18 @@ How it stays safe (`scripts/n8n/deploy.mjs`, over `scripts/n8n/lib/rest.mjs`):
 Always finish with `pnpm n8n:check-drift --id <logical-id>` (must be `0 drifted`) and `pnpm n8n:export`
 to re-canonicalise. Measured against the production instance on 2026-07-23.
 
+> **A PUT drops node-level `notes`, and `check-drift` cannot see it** (observed 2026-08-19 deploying
+> `aimfox-daily-metrics`: three untouched branch-L Sheets nodes lost the note explaining why they
+> carry `onError` + retry). Drift compares `parameters`, `type`/`typeVersion` and the failure-posture
+> keys — **not `notes`** — so the loss is invisible to every check we run, and a following
+> `pnpm n8n:export` will quietly delete the notes from the artifact too, making the regression look
+> like an intentional edit.
+>
+> Until the tool copies `notes`, do **not** blindly commit an export that only removes them: keep the
+> artifact's notes (`git checkout -- <workflow.json>`) and re-add them in the n8n UI when convenient.
+> Documentation that survives only in the repository is still better than documentation that survives
+> nowhere. This is the one place the artifact is deliberately allowed to be ahead of the instance.
+
 ## The SDK authoring contract
 
 The MCP path — `update_workflow` and `create_workflow_from_code` — takes **SDK code**, not workflow
