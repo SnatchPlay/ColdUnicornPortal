@@ -185,6 +185,31 @@ The column is now correct *and* deprecated: the clients grid derives remaining d
 being written by explicit decision — a retired column holding a right number beats one holding a
 wrong one.
 
+### Defect 6: branch S never implemented the schedule formula
+
+The [business process](../../../../../docs/reference/processes/outreach/linkedin-aimfox.md) specifies:
+
+```
+schedule_today     = min(daily_limit, remaining_audience + sent_today)
+schedule_tomorrow  = min(daily_limit, max(remaining_audience − daily_limit, 0))
+schedule_day_after = min(daily_limit, max(remaining_audience − 2·daily_limit, 0))
+```
+
+Branch S wrote `schedule_today = daily_limit − sent_today` and `schedule_tomorrow/day_after =
+daily_limit` flat. Two consequences, both invisible until somebody tried to colour the band:
+
+1. the two forward buckets were a **constant** — ~39 for every client, every day, forever;
+2. today's bucket **fell as the client sent more**, so any "higher is better" rule read backwards.
+
+Fixed 2026-08-19 to the specified formula, using the `target_count`-based remaining audience. It also
+decouples `schedule_today` from `invite_limit_remaining` — the two were assigned from one variable,
+which is what made the grid's `Inv left` column a duplicate of the Schedule `0` cell.
+
+**Every schedule value is `null` when an input is unmeasured** (no weekly cap, no ACTIVE campaign, or
+`sent_today` missing for today's bucket) rather than 0 — a client we could not measure is not a client
+who cannot send. Note the portal cannot preserve that distinction: `loadClientsMetricsSummary`
+`COALESCE`s these to 0, so an unmeasured cell renders red rather than `—`.
+
 ### Reconciling against the sheet
 
 Sum across `profile_id` **excluding `'__workspace_total__'`** — those are the

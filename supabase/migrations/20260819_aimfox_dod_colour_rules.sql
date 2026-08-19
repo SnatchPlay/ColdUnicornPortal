@@ -20,6 +20,12 @@
 -- and the numbers alone would drop a connected client the week it sends nothing — which is exactly
 -- the week somebody needs to see red.
 --
+-- ORDERING NOTE. "30 or more invites planned" is only what the Schedule cells contain after the
+-- 2026-08-19 fix to `aimfox-daily-metrics` [S] Build row. Before it, the two forward buckets were a
+-- flat `daily_limit` (~39, constant for everyone) and today's bucket was the UNUSED allowance, which
+-- falls as a client sends more — so this rule applied to the old numbers would have painted "barely
+-- started" green and "worked all day" red. Deploy the workflow before enabling these rules.
+--
 -- Branches evaluate in array order, first match wins, so the ranges are still written out in full:
 -- a master_admin reordering them in the builder must not silently change what yellow means.
 --

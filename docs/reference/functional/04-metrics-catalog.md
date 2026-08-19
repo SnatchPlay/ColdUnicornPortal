@@ -833,6 +833,41 @@ an **EmailBison-only** (`…_eb`) and **Aimfox-only** (`…_af`) column beside i
   to line up cell-for-cell with the Bison "Daily sent" band.
 - **Schedule (Aimfox)** bucket `+2/+1/0`: `SUM(schedule_day_after / schedule_tomorrow / schedule_today)`
   from each client's **latest** report_date (the 2-hourly snapshot).
+  **Thresholds** (`dod_aimfox_schedule_floor`): ≥ 30 green · < 30 red.
+
+> **What the number means, corrected 2026-08-19.** It is *how many invites this client can actually
+> send that day* — bounded by both the daily cap and the audience still loaded:
+>
+> ```
+> daily_limit        = Σ accounts limit.connect / 5        (the agency's five-day week)
+> remaining_audience = Σ ACTIVE campaigns (target_count − sent_connections)
+> schedule_today     = min(daily_limit, remaining_audience + sent_today)
+> schedule_tomorrow  = min(daily_limit, max(remaining_audience − daily_limit, 0))
+> schedule_day_after = min(daily_limit, max(remaining_audience − 2·daily_limit, 0))
+> ```
+>
+> This is what the [business process](../processes/outreach/linkedin-aimfox.md) always specified, and
+> what branch S did **not** implement until now. It used to write `schedule_today` = the *unused
+> allowance* (`daily_limit − sent_today`) and `schedule_tomorrow/day_after` = a flat `daily_limit`,
+> which made the two forward cells a constant (~39 for every client, every day) and made today's cell
+> fall as the client sent **more**. Under a "≥ 30 is good" rule that read as "green while they have
+> barely started". Per [ADR-0016](../../adr/0016-repository-as-automation-source-of-truth.md) the
+> workflow was the defect, not the doc.
+>
+> The point of the band is the two-day warning: a client with 50 prospects left and a 39/day cap
+> shows `0 = 39` green, `+1 = 11` red, `+2 = 0` red — *load more audience before Thursday*.
+>
+> **`schedule_today` is no longer the same number as `invite_limit_remaining`.** They were assigned
+> from one variable, which is why the grid's old `Inv left` column duplicated the Schedule `0` cell.
+> `invite_limit_remaining` is still written and is a genuinely distinct figure now (today's unused
+> allowance); it is deliberately **not** displayed — see §18.4.
+
+> **A client with a LinkedIn connector and no ACTIVE campaign reads red, not `—`.** All three cells
+> are `NULL` at the source in that case, and the gateway's `COALESCE(…, 0)` turns them into `0`.
+> That is the right answer to "how many can we send tomorrow" — none — but it is the *wrong* answer
+> when the cause is a failed Aimfox call rather than an empty pipeline, and the grid cannot tell the
+> two apart. The `Aimfox capacity` band shows `—` in the same situation because its metrics survive
+> as nulls all the way to the client; the inconsistency is real and known.
 
 ### 18.3 Invitation acceptance rate
 

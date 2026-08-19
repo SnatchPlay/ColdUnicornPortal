@@ -358,6 +358,11 @@ against a per-client contract number — LinkedIn has no `min_sent` equivalent.
 | Schedule (LinkedIn) | ≥ 30 | — | < 30 |
 | Daily sent (LinkedIn) | ≥ 20 | 10–19 | < 10 |
 
+**The Schedule floor depends on a workflow fix that shipped the same day.** Until 2026-08-19 the
+Schedule cells did not hold "invites we can send that day" at all — see
+[04-metrics §18.2](04-metrics-catalog.md#182-aimfox-daily-volume--schedule). Applied to the old
+numbers this rule would have read backwards, so the workflow was deployed before the rule was enabled.
+
 Both rules carry the same `base_filter`: `linkedin_connected eq true`.
 
 > **The gate is load-bearing, not cosmetic.** `loadClientsMetricsSummary` runs the Aimfox counters
