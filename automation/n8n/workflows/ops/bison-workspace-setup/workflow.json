@@ -8,7 +8,7 @@
       "typeVersion": 2,
       "position": [
         1712,
-        -152
+        -176
       ],
       "parameters": {
         "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\n// State BEFORE any write. Either returned as is, or merged with what was actually created.\nconst client = $('Resolve Client').first().json ?? {};\nconst key = $('Effective Key').first().json ?? {};\n\nconst step = (outcome, present = [], missing = [], error = null) => ({\n  outcome, present, ...(missing.length ? { missing } : {}), ...(error ? { error } : {}),\n});\n\n// Each list can arrive as several items — /api/campaigns is paginated through links.next.\nconst collect = (nodeName) => {\n  let items;\n  try { items = $(nodeName).all(); } catch (e) { return { rows: [], error: describe(e) }; }\n  const rows = [];\n  let error = null;\n  for (const item of items) {\n    const j = item.json ?? {};\n    if (j.error) { error = describe(j.message ?? j.error); continue; }\n    if (Array.isArray(j.data)) rows.push(...j.data);\n    else if (Array.isArray(j)) rows.push(...j);\n  }\n  return { rows, error };\n};\n\nconst keyStep = key.key_source === 'stored' ? step('ok', ['client_sequencers.api_key'])\n  : key.key_source === 'minted' ? step('created', ['minted and stored'])\n  : step('missing', [], ['api_key'],\n      key.mint_error ?? (isDryRun()\n        ? 'no key stored; Bison has no token-list endpoint, so nothing can be reused'\n        : 'mint did not run'));\n\nconst haveKey = Boolean(key.api_key);\n\nconst webhooks = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Webhooks');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((w) => hookKey(w.events, w.url));\n  const missing = CANON_WEBHOOKS.map((c) => hookKey(c.events, c.url)).filter((k) => !present.includes(k));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\nconst tags = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = collect('List Tags');\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  const present = rows.map((t) => String(t?.name ?? '').trim()).filter(Boolean);\n  const missing = CANON_TAGS.filter((n) => !present.includes(n));\n  return step(missing.length ? 'missing' : 'ok', present, missing);\n})();\n\n// Hoisted: steps.campaigns and campaign_targets below are two readings of the SAME vendor list,\n// and collecting it twice would let them disagree about what is there.\nconst campaignList = haveKey ? collect('List Campaigns') : { rows: [], error: null };\n\nconst campaigns = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  const { rows, error } = campaignList;\n  if (error) return step('skipped', [], [], `vendor call failed: ${error}`);\n  // The vendor status is carried into `present`, not just the name. A campaign we created is a\n  // DRAFT until a manager writes its sequence and starts it, and \"OOO automation | general\" alone\n  // reads as if it were sending. Bent Iron PL's `939 general archived` is the same problem from\n  // the other side: present, and not going to send anything either.\n  const found = rows.map((c) => ({\n    name: String(c?.name ?? '').trim(),\n    status: String(c?.status ?? 'unknown').trim() || 'unknown',\n  }));\n  // Duplicates are reported explicitly — otherwise they are visible only at the vendor.\n  const present = CANON_CAMPAIGNS\n    .map((n) => ({ n, hits: found.filter((f) => f.name === n) }))\n    .filter((x) => x.hits.length > 0)\n    .map((x) => (x.hits.length > 1\n      ? `${x.n} ×${x.hits.length} (${x.hits.map((h) => h.status).join(', ')})`\n      : `${x.n} (${x.hits[0].status})`));\n  const missing = CANON_CAMPAIGNS.filter((n) => !found.some((f) => f.name === n));\n  const dup = present.some((p) => p.includes(' ×'));\n  return step(\n    missing.length ? 'missing' : 'ok',\n    present,\n    missing,\n    dup ? 'duplicate OOO campaigns at the vendor — reported, never resolved by creating more' : null,\n  );\n})();\n\n// ── OOO routing ────────────────────────────────────────────────────────────────────────────────\n// The campaign triple is only useful once each routing key points at one of them. Creating three\n// drafts and leaving the wiring to whoever remembers is how twelve of sixteen Active clients ended\n// up with rules aimed at campaigns Bison had stopped or completed (measured 2026-08-19).\n//\n// Vendor status is mapped to public.campaign_status HERE, not in SQL: the Record statement writes\n// the enum directly and a raw vendor word would abort the whole statement. Same map as\n// bison-campaign-sync's Transform Campaigns — a deliberate duplicate, and the two must move together.\nconst STATUS_MAP = { active: 'active', launching: 'launching', draft: 'draft',\n                     paused: 'stopped', failed: 'stopped',\n                     archived: 'completed', completed: 'completed' };\nconst ROUTING_KEYS = ['male', 'female', 'general'];\n// A campaign that can be a routing target: it either sends now or becomes able to once a manager\n// writes its sequence and starts it. `completed` and `stopped` are dead objects. Shared verbatim\n// with Merge Outcomes and with the `routed` CTE's SQL predicate in Record — three restatements of\n// one rule, and they must move together. The portal's twin is OOO_ROUTABLE_STATUSES in\n// src/app/lib/ooo-health.ts.\nconst ROUTABLE = ['active', 'launching', 'draft'];\nconst routingKeyOf = (name) => {\n  const suffix = String(name).split('|').pop().trim();\n  return ROUTING_KEYS.includes(suffix) ? suffix : null;\n};\n\n// One target per canonical name that matched EXACTLY ONCE. A duplicate produces NO target: which\n// of two identically named campaigns is the live one is not a question this workflow may guess at,\n// and guessing wrong routes a client's out-of-office replies into a dead campaign. It is reported\n// on steps.routing instead — the same rule as steps.campaigns, which reports duplicates and never\n// resolves them by creating more.\nconst duplicateNames = CANON_CAMPAIGNS.filter(\n  (n) => campaignList.rows.filter((c) => String(c?.name ?? '').trim() === n).length > 1,\n);\nconst campaign_targets = CANON_CAMPAIGNS.flatMap((name) => {\n  const hits = campaignList.rows.filter((c) => String(c?.name ?? '').trim() === name);\n  if (hits.length !== 1) return [];\n  const routing_key = routingKeyOf(name);\n  const external_id = hits[0]?.id;\n  if (!routing_key || external_id == null) return [];\n  const vendor = String(hits[0]?.status ?? '').trim();\n  return [{\n    routing_key,\n    name,\n    external_id: String(external_id),\n    status: STATUS_MAP[vendor] ?? 'draft',\n    created: false,\n  }];\n});\n\nconst routing = (() => {\n  if (!haveKey) return step('skipped', [], [], 'no workspace key available');\n  if (campaignList.error) return step('skipped', [], [], `vendor call failed: ${campaignList.error}`);\n  const existing = client.existing_routing ?? {};\n  const present = [];\n  const missing = [];\n  for (const key of ROUTING_KEYS) {\n    const rule = existing[key];\n    if (!rule) { missing.push(`${key} — no rule`); continue; }\n    // An archived campaign, or one whose row is gone entirely, is never a working target — but the\n    // rule is still occupied, so it belongs in `missing` with its reason, not in `present`.\n    const status = rule.archived ? 'archived'\n      : (STATUS_MAP[String(rule.status ?? '').trim()] ?? String(rule.status ?? 'unknown'));\n    // An occupied rule is reported and LEFT ALONE even when its campaign cannot send. Re-pointing is\n    // a human decision made in the portal: the campaign has to be fixed at the vendor first, and\n    // this workflow cannot tell a campaign that stopped from one a manager stopped on purpose.\n    //\n    // ROUTABLE, not `active`: a rule this workflow filled on a previous run points at a DRAFT, and\n    // calling that `missing` would make a second check regress to amber with nothing having changed\n    // — a contract-visible flip on setup_state, reported to the drawer, caused by nothing.\n    // The draft is still named in `present` so it does not read as sending.\n    if (ROUTABLE.includes(status)) {\n      present.push(`${key} → ${rule.name ?? rule.external_id} (${status})`);\n    } else {\n      missing.push(`${key} → ${rule.name ?? rule.external_id} (${status}) — existing rule kept`);\n    }\n  }\n  return step(\n    missing.length ? 'missing' : 'ok',\n    present,\n    missing,\n    duplicateNames.length\n      ? `duplicate campaigns at the vendor, so no rule can be filled for: ${duplicateNames.join(', ')}`\n      : null,\n  );\n})();\n\nreturn [{ json: {\n  client_id: $('Input').first().json.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: isDryRun(),\n  resolved: ($('Resolve Workspace').first().json ?? {}).resolved ?? null,\n  steps: { key: keyStep, webhooks, tags, campaigns, routing },\n  // Workflow state, stripped again in Final Result — the result contract is additionalProperties:false.\n  campaign_targets,\n} }];"
@@ -21,7 +21,7 @@
       "typeVersion": 2,
       "position": [
         2608,
-        -224
+        -248
       ],
       "parameters": {
         "jsCode": "// Fold N vendor responses back into one item. n8n preserves item order, so the i-th response\n// belongs to the i-th planned element.\n// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst planned = $('Plan Writes').all().map((i) => i.json);\nconst results = $input.all().map((i) => i.json ?? {});\nconst created = [];\nconst failed = [];\nplanned.forEach((p, i) => {\n  const r = results[i] ?? {};\n  // statusCode ONLY. The status field is the vendor's, not HTTP, and Number('ok') is NaN — reading\n  // it as a code scores a failure as success.\n  const code = Number(r.statusCode ?? 0);\n  const bad = Boolean(r.error) || code >= 400;\n  if (bad) failed.push(`${p.identity} — ${describe(r.message ?? r.error) ?? 'HTTP ' + code}`);\n  else created.push(p.identity);\n});\n// A campaign's id is knowable only from its own create response, and the schedule call needs it.\n// Same index correspondence the loop above relies on. Bison answers { data: { id } }.\nconst created_ids = {};\nplanned.forEach((p, i) => {\n  if (p.kind !== 'campaign') return;\n  const r = results[i] ?? {};\n  const id = r.data?.id ?? r.id ?? null;\n  if (id) created_ids[p.identity] = String(id);\n});\n\nreturn [{ json: { created, failed, created_ids } }];"
@@ -47,7 +47,7 @@
       "typeVersion": 4.4,
       "position": [
         2384,
-        -224
+        -248
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -104,7 +104,7 @@
       "typeVersion": 2,
       "position": [
         816,
-        -152
+        -176
       ],
       "parameters": {
         "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\n// The order here is shorter than in Aimfox, and that is a vendor limit, not a simplification:\n// Bison has no GET for workspace tokens, so a key cannot be re-read. A key that was minted and\n// not stored is lost for good and can only be reissued. That is what the old canvas did:\n// it consumed data.plain_text_token inside the execution and wrote it nowhere.\nconst client = $('Resolve Client').first().json ?? {};\n\nlet minted = null;\nlet mint_error = null;\nif ($('Mint Key').isExecuted) {\n  const m = $('Mint Key').first().json ?? {};\n  minted = m.data?.plain_text_token ?? m.plain_text_token ?? m.data?.token ?? null;\n  if (!minted) mint_error = describe(m.message ?? m.error) ?? 'mint returned no token';\n}\n\nconst stored = client.api_key || null;\nconst api_key = stored ?? minted;\nconst key_source = stored ? 'stored' : minted ? 'minted' : 'none';\n\n// key_to_store is non-empty only when a key was just minted. For Bison that is not a convenience\n// but the only chance: not writing it here loses it for good.\nreturn [{ json: {\n  api_key,\n  key_source,\n  key_to_store: key_source === 'minted' ? api_key : null,\n  mint_error,\n} }];"
@@ -116,8 +116,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3280,
-        -152
+        4176,
+        -176
       ],
       "parameters": {
         "jsCode": "// n8n reports a node error as { message, error }, and error is an object. A naive String(err)\n// gives `[object Object]` — a string that says nothing.\nconst describe = (v) => {\n  if (v == null) return null;\n  if (typeof v === 'string') return v;\n  return v.message ?? v.description ?? (() => { try { return JSON.stringify(v); } catch (e) { return String(v); } })();\n};\n\nconst out = $('Merge Outcomes').first().json;\n// Named explicitly rather than read from $json: `Recover Parked` sits between this node and\n// Record, so $json is the recovery row. `recorded` is about whether the WRITE landed.\nconst rec = $('Record').first().json ?? {};\nconst failed = Boolean(rec.error);\n// Merge Outcomes PREDICTED which rules Record would fill, from the vendor's campaigns and the\n// routing that already existed. Record's `targets` CTE can still drop a target the prediction\n// counted: it additionally requires a local campaigns row for THIS client, typed ooo_followup and\n// not archived. `recorded: false` does not cover this — the statement succeeds, it just writes\n// fewer rows than predicted — so the report is reconciled here against the count it returned.\nconst reconcileRouting = (steps) => {\n  const predicted = steps?.routing?.created ?? [];\n  if (!predicted.length || failed) return steps;\n  const actual = Number(rec.routing_rows ?? 0);\n  if (actual >= predicted.length) return steps;\n  const st = { ...steps.routing };\n  const note = `predicted ${predicted.length} routing rule(s), wrote ${actual} — the rest had no usable campaign row for this client`;\n  if (actual === 0) {\n    // Nothing landed: claiming any of them would be worse than saying so, and which ones failed is\n    // not knowable from a count.\n    delete st.created;\n    st.missing = [...(st.missing ?? []), ...predicted.map((k) => `${k} — not written: no usable campaign row`)];\n    st.outcome = 'missing';\n  }\n  st.error = [st.error, note].filter(Boolean).join('; ');\n  return { ...steps, routing: st };\n};\n\nreturn [{ json: {\n  ...out,\n  steps: reconcileRouting(out.steps),\n  // Workflow state, not a result field — the contract is additionalProperties:false. Same reason\n  // aimfox-workspace-setup strips activate_campaign_id here.\n  created_campaigns: undefined,\n  campaign_targets: undefined,\n  recorded: !failed,\n  ...(failed ? { record_error: describe(rec.message ?? rec.error) } : {}),\n} }];"
@@ -130,7 +130,7 @@
       "typeVersion": 2.3,
       "position": [
         1936,
-        -152
+        -176
       ],
       "parameters": {
         "conditions": {
@@ -164,7 +164,7 @@
       "typeVersion": 2,
       "position": [
         -976,
-        -56
+        -80
       ],
       "parameters": {
         "jsCode": "// One entry point for two triggers. A webhook puts the payload in body; the sub-workflow trigger\n// puts it at the root. Without this node every $('Start') would throw on a webhook run.\nconst fromWebhook = $('Webhook').isExecuted;\nconst raw = fromWebhook ? ($('Webhook').first().json?.body ?? {}) : ($('Start').first().json ?? {});\n\n// dry_run: anything but an EXPLICIT boolean false is a dry run. The string 'false' does not count.\n// That matters more on an open webhook than in the UI: the body arrives from the network, and\n// neither a forgotten field nor a wrong type may mean \"write into the client's system\".\nreturn [{ json: {\n  client_id: raw.client_id ?? null,\n  workspace_id: raw.workspace_id ?? null,\n  dry_run: raw.dry_run === false ? false : true,\n  requested_by: raw.requested_by ?? null,\n  via: fromWebhook ? 'webhook' : 'sub-workflow',\n} }];"
@@ -177,7 +177,7 @@
       "typeVersion": 4.4,
       "position": [
         1488,
-        -152
+        -176
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -212,7 +212,7 @@
       "typeVersion": 4.4,
       "position": [
         1264,
-        -152
+        -176
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -237,7 +237,7 @@
       "typeVersion": 4.4,
       "position": [
         1040,
-        -152
+        -176
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -262,7 +262,7 @@
       "typeVersion": 4.4,
       "position": [
         -304,
-        -56
+        -80
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -279,8 +279,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2832,
-        -152
+        3728,
+        -176
       ],
       "parameters": {
         "jsCode": "// One shape for Record and for the response. Runs both after creation and around it.\nconst base = $('Build Result').first().json;\nconst steps = JSON.parse(JSON.stringify(base.steps));\n\nif ($('Collect Creates').isExecuted) {\n  const { created = [], failed = [] } = $('Collect Creates').first().json ?? {};\n  for (const name of ['webhooks', 'tags', 'campaigns']) {\n    const st = steps[name];\n    const wanted = st.missing ?? [];\n    const done = wanted.filter((k) => created.includes(k));\n    const bad = wanted.filter((k) => failed.some((f) => f.startsWith(k + ' —')));\n    if (done.length) st.created = done;\n    st.missing = wanted.filter((k) => !done.includes(k));\n    if (!st.missing.length) delete st.missing;\n    st.outcome = bad.length ? 'failed' : done.length ? 'created' : st.outcome;\n    if (bad.length) st.error = failed.filter((f) => bad.some((k) => f.startsWith(k + ' —'))).join('; ');\n  }\n  // A campaign we just made is a draft, and `present` is the only line that says so. Without this\n  // the card shows the name bare, which is how the list reads for a campaign that is actually\n  // sending — the one distinction a manager has to act on.\n  const madeNow = steps.campaigns.created ?? [];\n  if (madeNow.length) {\n    steps.campaigns.present = [...(steps.campaigns.present ?? []), ...madeNow.map((n) => `${n} (draft)`)];\n  }\n}\n\n// The schedule is a second call on the campaign's own id, so it can only fail after the campaign\n// exists. That is not a failed step: the draft is there and a manager can set the hours in the UI.\n// It is recorded as an error on the step and nothing more.\nif ($('Collect Schedules').isExecuted) {\n  const { failed: scheduleFailed = [] } = $('Collect Schedules').first().json ?? {};\n  if (scheduleFailed.length) {\n    const st = steps.campaigns;\n    st.error = [st.error, `created, schedule not set: ${scheduleFailed.join('; ')}`].filter(Boolean).join('; ');\n  }\n}\n\n// campaigns is deliberately NOT part of state, even now that it creates. A draft campaign has no\n// sequence and sends nothing, so folding it in would let `configured` mean \"ready to send\" when it\n// is not — and OOO routing pointed at a draft fails silently, which is the FortumEnergia shape.\n// The finding is not lost: it stays in steps.campaigns and shows in the portal as its own row.\nconst decided = [steps.key, steps.webhooks, steps.tags];\nconst good = (s) => s.outcome === 'ok' || s.outcome === 'created';\nconst state = decided.every(good) ? 'configured'\n  : decided.every((s) => !good(s)) ? 'missing'\n  : 'partial';\n\n// Carried to Record and stripped again in Final Result — it is workflow state, not part of the\n// result contract (which is additionalProperties:false). Empty on a dry run by construction:\n// Collect Creates cannot have run.\nconst created_campaigns = $('Collect Creates').isExecuted\n  ? Object.entries($('Collect Creates').first().json?.created_ids ?? {})\n      .map(([name, external_id]) => ({ external_id: String(external_id), name }))\n  : [];\n\n// ── Routing targets ────────────────────────────────────────────────────────────────────────────\n// Build Result saw only what was already at the vendor. A campaign this run just created is also a\n// valid routing target, and it is the whole point of provisioning a NEW client — otherwise the\n// first run leaves three drafts and no wiring, and the wiring is what everyone forgets.\n// `created: true` is what tells the Record statement to leave cataloguing to the CTE that already\n// owns it, rather than trying to seed the row a second time.\nconst ROUTING_KEYS = ['male', 'female', 'general'];\nconst routingKeyOf = (name) => {\n  const suffix = String(name).split('|').pop().trim();\n  return ROUTING_KEYS.includes(suffix) ? suffix : null;\n};\nconst campaign_targets = [...(base.campaign_targets ?? [])];\nfor (const { name, external_id } of created_campaigns) {\n  const routing_key = routingKeyOf(name);\n  if (!routing_key) continue;\n  // A name Build Result already resolved wins: it carries the vendor's real status, and a create\n  // response cannot be for a name that was present, so this only guards against a double count.\n  if (campaign_targets.some((t) => t.routing_key === routing_key)) continue;\n  campaign_targets.push({ routing_key, name, external_id: String(external_id), status: 'draft', created: true });\n}\n\n// What Record is about to fill: a target whose key has no active rule. Predicted, not observed —\n// the write happens one node downstream. `recorded: false` in Final Result is what says the whole\n// persist failed, so this never claims a rule exists while the audit row says nothing was written.\nconst existingRouting = ($('Resolve Client').first().json ?? {}).existing_routing ?? {};\nconst dryRun = base.dry_run !== false;\n// Must mirror the `routed` CTE exactly, or steps.routing claims rules the statement never wrote.\n// Same list as Build Result's ROUTABLE and as the CTE's `status not in ('completed','stopped')`.\nconst ROUTABLE = ['active', 'launching', 'draft'];\nconst isRoutable = (t) => ROUTABLE.includes(t.status);\nconst willFill = dryRun\n  ? []\n  : campaign_targets.filter((t) => !existingRouting[t.routing_key] && isRoutable(t));\nif (willFill.length) {\n  const st = steps.routing;\n  const filled = willFill.map((t) => `${t.routing_key} → ${t.name} (${t.status})`);\n  st.created = filled;\n  // Drop only the \"no rule\" entries this run answered. A key whose rule points at a stopped\n  // campaign stays in `missing`: it was not filled and must not read as if it had been.\n  st.missing = (st.missing ?? []).filter(\n    (m) => !willFill.some((t) => m === `${t.routing_key} — no rule`),\n  );\n  if (!st.missing.length) delete st.missing;\n  st.outcome = 'created';\n}\n\n// An empty rule we deliberately did NOT fill has to say why. Left bare it reads as \"no campaign\n// exists\", which sends the operator to create a fourth one instead of restarting the dead third.\nif (!dryRun) {\n  const refused = campaign_targets.filter((t) => !existingRouting[t.routing_key] && !isRoutable(t));\n  if (refused.length) {\n    const st = steps.routing;\n    st.missing = [\n      ...(st.missing ?? []).filter((m) => !refused.some((t) => m === `${t.routing_key} — no rule`)),\n      ...refused.map((t) => `${t.routing_key} — ${t.name} is ${t.status}, not routed`),\n    ];\n  }\n}\n\nreturn [{ json: { ...base, state, steps, created_campaigns, campaign_targets } }];"
@@ -293,7 +293,7 @@
       "typeVersion": 4.4,
       "position": [
         592,
-        -224
+        -248
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -315,7 +315,7 @@
       "typeVersion": 2.3,
       "position": [
         368,
-        -152
+        -176
       ],
       "parameters": {
         "conditions": {
@@ -346,10 +346,10 @@
       "id": "b2000000-0000-4000-a000-00000000000c",
       "name": "Needs Schedules?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
+      "typeVersion": 2.2,
       "position": [
         2832,
-        -224
+        -248
       ],
       "parameters": {
         "conditions": {
@@ -365,13 +365,7 @@
               },
               "rightValue": ""
             }
-          ],
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          }
+          ]
         },
         "options": {}
       }
@@ -383,7 +377,7 @@
       "typeVersion": 2,
       "position": [
         368,
-        40
+        16
       ],
       "parameters": {
         "jsCode": "const input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst resolution = $('Resolve Workspace').first().json ?? {};\n\n// A list request is not a verdict about anything: there is no client to have one. Its own state\n// keeps the portal from rendering it as a provisioning outcome.\nif (resolution.listing) {\n  return [{ json: {\n    client_id: null, client_name: null, sequencer: 'emailbison', dry_run: true,\n    resolved: null, state: 'workspace_list', reason: null,\n    candidates: resolution.candidates ?? [], steps: {},\n  } }];\n}\n\n// A client that does not exist is the caller's error, not a provisioning state. But it has to\n// be said out loud: a silent stop with status=success is how Audytel's leads disappeared.\nconst state = resolution.client_missing ? 'client_not_found' : 'needs_selection';\nconst reason = resolution.client_missing ? 'no client with that id — Resolve Client left-joins the connector, so a client without one still resolves'\n  : resolution.ambiguous ? 'more than one workspace matches the client name'\n  : resolution.list_error ? `could not list workspaces: ${resolution.list_error}`\n  : 'no workspace matches the client name';\n\nreturn [{ json: {\n  client_id: input.client_id,\n  client_name: client.client_name ?? null,\n  sequencer: 'emailbison',\n  dry_run: $('Input').first().json.dry_run !== false,\n  resolved: null,\n  state,\n  reason,\n  candidates: resolution.candidates ?? [],\n  // Every key in the contract's steps.required, or this terminal path emits a result that fails\n  // its own schema — and writes that shape into client_sequencers.setup_state for the drawer to\n  // render. Nothing ran, so every step is `skipped`.\n  steps: {\n    key: { outcome: 'skipped' }, webhooks: { outcome: 'skipped' },\n    tags: { outcome: 'skipped' }, campaigns: { outcome: 'skipped' },\n    routing: { outcome: 'skipped' },\n  },\n} }];"
@@ -409,7 +403,7 @@
       "typeVersion": 2,
       "position": [
         2160,
-        -224
+        -248
       ],
       "parameters": {
         "jsCode": "const CANON_WEBHOOKS = [\n  { name: 'Reply classification', events: ['lead_replied'],\n    url: 'https://n8n.coldunicorn.com/webhook/replies-classification' },\n  { name: 'PDCA', events: ['tag_attached', 'tag_removed'],\n    url: 'https://n8n.coldunicorn.com/webhook/bison-replies-hub' },\n];\n// preMQL and OOO are 16/16. MQL is NOT in this set: it exists in only 7 of 16, and that is not\n// a gap — an MQL in Bison is born from the built-in Interested tag (16/16), and\n// bison-lead-enrichment reads includes('interested') || includes('mql'). Creating MQL would\n// give the client a second, worse-wired route to the same qualification.\nconst CANON_TAGS = ['preMQL', 'OOO'];\nconst CANON_CAMPAIGNS = ['OOO automation | general', 'OOO automation | male', 'OOO automation | female'];\n// A webhook's identity is events + url, NEVER its name. UniTalk's is called\n// \"Reply Classification\" against \"Reply classification\" on the other fifteen.\nconst hookKey = (events, url) => `${[...(events ?? [])].map(String).sort().join('+')} ${String(url ?? '').trim()}`;\nconst isDryRun = () => $('Input').first().json.dry_run !== false;\n\n// One item per MISSING element. An empty array means Create Missing does not execute at all —\n// that, not a flag, is how dry-run safety works here.\nif (isDryRun()) return [];\n\nconst s = $json.steps ?? {};\nconst out = [];\nfor (const c of CANON_WEBHOOKS) {\n  const id = hookKey(c.events, c.url);\n  if ((s.webhooks?.missing ?? []).includes(id)) {\n    out.push({ json: { kind: 'webhook', identity: id, url: 'https://go.gheads.com/api/webhook-url',\n      body: { name: c.name, url: c.url, events: c.events } } });\n  }\n}\nfor (const name of CANON_TAGS) {\n  if ((s.tags?.missing ?? []).includes(name)) {\n    out.push({ json: { kind: 'tag', identity: name, url: 'https://go.gheads.com/api/tags', body: { name } } });\n  }\n}\n// Campaigns are created as DRAFTS: name + type, nothing else. What was blocked was never the\n// campaign, it was POST /campaigns/v1.1/{id}/sequence-steps — the copy on the old canvas is\n// byte-identical across all three, in feminine Polish, with a hardcoded {PANIEKAMILU}. That call\n// is not made here and must not be: a manager writes the sequence and starts the campaign.\n// A draft with no sequence sends nothing, so creating one cannot produce a message.\nfor (const name of CANON_CAMPAIGNS) {\n  if ((s.campaigns?.missing ?? []).includes(name)) {\n    out.push({ json: { kind: 'campaign', identity: name, url: 'https://go.gheads.com/api/campaigns',\n      body: { name, type: 'reply_followup' } } });\n  }\n}\nreturn out;"
@@ -422,7 +416,7 @@
       "typeVersion": 2.6,
       "position": [
         -528,
-        -56
+        -80
       ],
       "parameters": {
         "operation": "executeQuery",
@@ -436,8 +430,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3056,
-        -152
+        3952,
+        -176
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -476,7 +470,7 @@
       "typeVersion": 2.6,
       "position": [
         -752,
-        -56
+        -80
       ],
       "alwaysOutputData": true,
       "parameters": {
@@ -494,7 +488,7 @@
       "typeVersion": 2,
       "position": [
         -80,
-        -56
+        -80
       ],
       "parameters": {
         "jsCode": "// Resolution order: explicit id → already claimed by this client → EXACT name match → candidates.\n// The same order as aimfox-workspace-setup, for the same reason: for an established client the\n// workspace is known from the database and no name search is needed at all.\n//\n// Ambiguity is never resolved by guessing — invariant 2. In Bison that matters more than in\n// Aimfox: same-named workspaces are far more common, so candidates also carry\n// personal_team / main / parent_id — those are what let a human tell two identical rows apart.\nconst input = $('Input').first().json;\nconst client = $('Resolve Client').first().json ?? {};\nconst listRaw = $('List Workspaces').first().json ?? {};\nconst claimedRaw = $('Read Claimed').first().json ?? {};\n\nconst list = Array.isArray(listRaw.data) ? listRaw.data\n  : Array.isArray(listRaw.workspaces) ? listRaw.workspaces\n  : [];\n// A Bison id is an integer. It is kept as a string everywhere, because client_sequencers holds\n// text, and comparing 73 === '73' would silently read as \"not claimed\".\nconst idOf = (w) => String(w?.id ?? w?.workspace_id ?? '').trim();\nconst nameOf = (w) => String(w?.name ?? '').trim();\n\nconst claimed = new Set((claimedRaw.claimed ?? []).map(String));\nconst listError = listRaw.error ? String(listRaw.error?.message ?? listRaw.error) : null;\nconst base = { candidates: [], list_error: listError, workspaces_seen: list.length };\n\n// Hoisted into a function so listing mode can answer with the same list before any\n// client is known.\nconst unclaimed = () => list\n  .filter((w) => idOf(w) && !claimed.has(idOf(w)))\n  .map((w) => ({\n    workspace_id: idOf(w),\n    name: nameOf(w) || null,\n    personal_team: w?.personal_team ?? null,\n    main: w?.main ?? null,\n    parent_id: w?.parent_id ?? null,\n  }));\n\n// Listing mode: called with no client_id at all. The New client form needs the candidate list\n// before the client row exists, and this node is the only place that already holds both the\n// vendor's workspaces and the set other clients have claimed. Nothing downstream writes: the\n// `Resolved?` false branch ends at `Needs Selection`, a terminal node.\nif (!String(input.client_id ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, listing: true, candidates: unclaimed() } }];\n}\n\n// Resolve Client has alwaysOutputData, so a nonexistent client arrives as {} instead of quietly\n// ending the chain. Say it out loud — a silent success is worse than an error.\nif (!String(client.client_name ?? '').trim()) {\n  return [{ json: { ...base, resolved: null, client_missing: true } }];\n}\n\nconst find = (id) => list.find((w) => idOf(w) === id) ?? null;\nconst decorate = (id, matched_by) => {\n  const w = find(id);\n  return {\n    workspace_id: id,\n    name: w ? nameOf(w) || null : null,\n    matched_by,\n    personal_team: w?.personal_team ?? null,\n    parent_id: w?.parent_id ?? null,\n  };\n};\n\nconst explicit = String(input.workspace_id ?? '').trim();\nif (explicit) return [{ json: { ...base, resolved: decorate(explicit, 'explicit') } }];\n\nconst stored = String(client.stored_workspace_id ?? '').trim();\nif (stored) return [{ json: { ...base, resolved: decorate(stored, 'stored') } }];\n\nconst target = String(client.client_name).trim().toLowerCase();\nconst matches = list.filter((w) => nameOf(w).toLowerCase() === target);\nif (matches.length === 1) return [{ json: { ...base, resolved: decorate(idOf(matches[0]), 'name') } }];\n\n// Candidates are everything not yet claimed by any client. Offering a taken workspace would\n// invite the same wrong assignment that put GIC's workspace on Prac.Finansowa.\n\nreturn [{ json: { ...base, resolved: null, candidates: unclaimed(), ambiguous: matches.length > 1 } }];\n"
@@ -507,7 +501,7 @@
       "typeVersion": 2.3,
       "position": [
         144,
-        -56
+        -80
       ],
       "parameters": {
         "conditions": {
@@ -541,7 +535,7 @@
       "typeVersion": 1.1,
       "position": [
         -1200,
-        -152
+        -176
       ],
       "parameters": {
         "workflowInputs": {
@@ -569,7 +563,7 @@
       "typeVersion": 2,
       "position": [
         -1200,
-        40
+        16
       ],
       "parameters": {
         "httpMethod": "POST",
