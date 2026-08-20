@@ -103,7 +103,7 @@ A campaign created here would otherwise reach `public.campaigns` only through
 `reply_followup` to **`nurture`** — and `type` is not in that statement's `ON CONFLICT` update
 list, so whatever type a row is born with, it keeps. A `nurture` row is invisible to
 `updateClientOooRouting`, which requires `type = 'ooo_followup'`
-([orm-gateway/index.ts:3146](../../../../../supabase/functions/orm-gateway/index.ts#L3146)), so a
+([orm-gateway/index.ts:3325](../../../../../supabase/functions/orm-gateway/index.ts#L3325)), so a
 freshly provisioned client would end up with three campaigns its own routing editor cannot offer.
 
 The same insert-only behaviour is what makes seeding here durable: the sync keeps `name` and
@@ -250,8 +250,65 @@ cannot send a message.** What the old canvas got wrong was not creating campaign
 them *with the wrong copy already attached*, twice into `general`, unconditionally. Making the
 container and leaving the content to a manager is the opposite of that.
 
-So the handover is explicit: provisioning leaves three drafts with hours set, a manager writes the
-three sequences in Bison and starts each campaign.
+So the handover is explicit: provisioning leaves three drafts with hours set **and points the
+client's three OOO routing rules at them**, then a manager writes the three sequences in Bison and
+starts each campaign.
+
+## The routing write: fill an empty rule, never re-point a full one
+
+Three campaigns nothing routes to is still three campaigns short, and the failure is silent — a
+client with the triple and no rules records every out-of-office reply as `skipped / routing_missing`
+and looks, from the campaign list, exactly like a client that works. Since 2026-08-19 the `Record`
+statement fills the gaps, in three CTEs:
+
+| CTE | What it does | Conflict rule |
+|---|---|---|
+| `catalogued` | rows for campaigns **this run created** | `do update set type` — ours by construction |
+| `seeded` | rows for campaigns that **already existed at the vendor** and have none here | `do nothing` — classifying someone else's campaign is `bison-campaign-sync`'s business |
+| `routed` | one `client_ooo_routing` row per key with no active rule | `do nothing` on `uq_client_ooo_routing_active` |
+
+A fourth node, **`Recover Parked`**, runs immediately after and calls
+`recover_skipped_ooo_followups(client, NULL)` when — and only when — this run actually created a
+rule. It is a separate node rather than a fifth CTE for a hard reason: the function resolves routing
+through `resolve_ooo_routing`, and rows inserted by `routed` are invisible to it inside the same
+statement's snapshot, so folding it in would silently recover nothing. It exists because the portal's
+writer does exactly the same thing after every save — an invariant that holds for one writer and not
+the other is not an invariant.
+
+`seeded` is not optional. `bison-campaign-sync`'s `Get Active Clients` only walks clients whose
+status is `Active`, so for a client still in `Onboarding` nothing else would ever catalogue those
+campaigns, and the routing editor only offers rows that exist locally.
+
+**What it refuses to do, and why each refusal is load-bearing:**
+
+- **It never re-points a rule an operator set** (`WHERE NOT EXISTS … AND is_active`), whatever the
+  campaign's status. Re-pointing needs the campaign fixed at the vendor first, and no workflow can
+  tell a campaign that broke from one a manager stopped deliberately. That case — measured at 22 of
+  25 active rules across 12 of 16 Active clients on 2026-08-19 — is **reported** on
+  `steps.routing.missing` as `existing rule kept`, and reporting it is the whole point.
+- **It never fills a rule from a `completed` or `stopped` campaign.** An empty rule is honest: the
+  episode parks as `skipped / routing_missing`, which is visible and recoverable through
+  `recover_skipped_ooo_followups`. A rule pointing at a dead campaign resolves, marks the episode
+  `pending`, and gets it dropped at the vendor. Gbbc is exactly this shape — three empty rules and
+  three `completed` campaigns — and without the predicate the first run would have written three
+  rules that could never send. A `draft` **is** filled: that is the shape a new client's triple is
+  born in. The routable set is `active | launching | draft`, written once as `ROUTABLE` and used by
+  `Build Result`, `Merge Outcomes` and the `routed` CTE alike. When they disagreed, a re-check of a
+  client this workflow had just provisioned flipped `steps.routing` from `created` to `missing` with
+  nothing having changed — a contract-visible regression caused by nothing.
+- **A duplicated campaign name fills nothing** for that key, and says so in `steps.routing.error`.
+  Which of two identically named campaigns is the live one is not a question this workflow may
+  guess at, and guessing wrong routes a client's replies into a dead campaign. Same rule
+  `steps.campaigns` already applies to duplicates.
+- **A dry run writes nothing**, structurally: `$10` is `[]`, so `seeded`, `targets` and `routed`
+  each process zero rows. Same guard as `$9`.
+
+`state` still excludes routing, for the same reason it excludes campaigns: a rule pointing at a
+draft is not a working rule, and folding it in would let `configured` mean "out-of-office replies
+are being followed up" while nothing can send.
+
+The live truth is **not** this step. `setup_state` is a cache of the last look; the OOO routing
+section in the client drawer and the `OOO` column on the Clients page derive `live/routed` on read.
 
 **The status is reported, not just the name.** `steps.campaigns.present` reads
 `OOO automation | general (draft)` — the bare name is what a sending campaign looks like too, and
@@ -326,12 +383,15 @@ from 2026-04-21 are not there at all — yet `public.campaigns` still lists them
 `INSERT … ON CONFLICT DO UPDATE` with **no removal path**. A campaign deleted at the vendor keeps
 its row and its last status forever.
 
-That stale row then got used: `client_ooo_routing` has exactly three rows pointing at another
-client's campaign, and all three are **FortumEnergia → GIC** (`950`/`951`/`952`). Fortum has no OOO
-campaigns of its own, so the routing was picked from a list that was not scoped to the client.
-Eleven `pending` follow-ups for Fortum carry `routing_key = 'general'`. Nothing has been sent —
-phase A enrols from the ARM sheet, and the Supabase branch is shadow-only — so it is a loaded gun,
-not a fired one, and it goes live with phase B.
+That stale row then got used: `client_ooo_routing` had exactly three rows pointing at another
+client's campaign, all **FortumEnergia → GIC** (`950`/`951`/`952`), picked from a list that was not
+scoped to the client.
+
+**Closed since.** `client_ooo_routing_campaign_same_client_fkey FOREIGN KEY (campaign_id, client_id)
+REFERENCES campaigns(id, client_id)` makes the row uninsertable; re-measured 2026-08-19, **0
+cross-client rows**. It is why the routing writer above fills only from campaigns it has already
+matched to the client, and why the enrolment worker keeps its own `camp.client_id = cs.client_id`
+predicate.
 
 Not yet proven against a vendor: the write path, `state: needs_selection`, and
 `state: client_not_found`.

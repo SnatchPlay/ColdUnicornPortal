@@ -36,12 +36,12 @@ The gateway computes **facts** — counts, sums, `GROUP BY` rollups, top-N rows,
 
 | Action | Server-side work | Handler |
 |---|---|---|
-| `loadAdminDashboardOverview` | client/campaign counts, pipeline groups, 21-day momentum, manager capacity | [index.ts:946](../../../supabase/functions/orm-gateway/index.ts#L946) |
+| `loadAdminDashboardOverview` | client/campaign counts, pipeline groups, 21-day momentum, manager capacity | [index.ts:947](../../../supabase/functions/orm-gateway/index.ts#L947) |
 | `loadManagerDashboardOverview` | same, scoped to `manager_id`, with client/status/date filters | [index.ts:1047](../../../supabase/functions/orm-gateway/index.ts#L1047) |
-| `loadClientDashboard` | single-client stats + campaign series | [index.ts:1261](../../../supabase/functions/orm-gateway/index.ts#L1261) |
-| `loadClientsMetricsSummary` | per-client DoD/WoW/MoM input summaries | [index.ts:1491](../../../supabase/functions/orm-gateway/index.ts#L1491) |
+| `loadClientDashboard` | single-client stats + campaign series | [index.ts:1262](../../../supabase/functions/orm-gateway/index.ts#L1262) |
+| `loadClientsMetricsSummary` | per-client DoD/WoW/MoM input summaries | [index.ts:1492](../../../supabase/functions/orm-gateway/index.ts#L1492) |
 | `loadLeadsList` | WHERE filters + ORDER BY + LIMIT/OFFSET + custom-field values | [index.ts:1675](../../../supabase/functions/orm-gateway/index.ts#L1675) |
-| `loadCampaignStats` / `loadAnalyticsOverview` | windowed stat series + lead groups | [index.ts:2068](../../../supabase/functions/orm-gateway/index.ts#L2068) / [2115](../../../supabase/functions/orm-gateway/index.ts#L2115) |
+| `loadCampaignStats` / `loadAnalyticsOverview` | windowed stat series + lead groups | [index.ts:2068](../../../supabase/functions/orm-gateway/index.ts#L2068) / [2115](../../../supabase/functions/orm-gateway/index.ts#L2177) |
 
 `loadClientsOverview` / `loadClientsStats` are deliberately **split**: the ~85 KB shell paints the table, the ~1.4 MB stats payload is deferred ([view-contracts.ts:237-248](../../../src/app/types/view-contracts.ts#L237-L248)).
 
@@ -56,7 +56,7 @@ const REPLIES_WINDOW_DAYS               = 180;  // line 21
 const REPLIES_LIMIT                     = 5_000;// line 22
 ```
 
-They cap the fact tables so queries stay well inside the authenticated-role `statement_timeout` (dashboards render 21 days; 90/180 is drill-down headroom). Widening any of them requires a perf plan (§3). Dashboards additionally hard-code a 21-day window (`isoDaysAgo(21)`, [index.ts:948](../../../supabase/functions/orm-gateway/index.ts#L948) and [1055](../../../supabase/functions/orm-gateway/index.ts#L1055)).
+They cap the fact tables so queries stay well inside the authenticated-role `statement_timeout` (dashboards render 21 days; 90/180 is drill-down headroom). Widening any of them requires a perf plan (§3). Dashboards additionally hard-code a 21-day window (`isoDaysAgo(21)`, [index.ts:949](../../../supabase/functions/orm-gateway/index.ts#L949) and [1055](../../../supabase/functions/orm-gateway/index.ts#L1055)).
 
 ### 1.4 Retry policy
 
@@ -66,7 +66,7 @@ They cap the fact tables so queries stay well inside the authenticated-role `sta
 
 ### 1.5 Connection handling in the gateway
 
-The function keeps a small `postgres.js` pool against the transaction pooler (`max: 3`, `prepare: false`, `idle_timeout: 60`, [index.ts:23-32](../../../supabase/functions/orm-gateway/index.ts#L23-L32)). Cold starts and pooler reconnects cost ~1 s; that shows up as `[GATEWAY_OVERHEAD]` in the browser console (§9.4) and is **not** something to work around in page code.
+The function keeps a small `postgres.js` pool against the transaction pooler (`max: 3`, `prepare: false`, `idle_timeout: 60`, [index.ts:24-32](../../../supabase/functions/orm-gateway/index.ts#L24-L33)). Cold starts and pooler reconnects cost ~1 s; that shows up as `[GATEWAY_OVERHEAD]` in the browser console (§9.4) and is **not** something to work around in page code.
 
 ### 1.6 No realtime
 
@@ -97,7 +97,7 @@ Implemented in [`providers/auth.tsx`](../../../src/app/providers/auth.tsx).
 ### 2.1 Bootstrap sequence
 
 1. `AuthProvider` calls `supabase.auth.getSession()` on mount and subscribes to `onAuthStateChange` ([auth.tsx:220-245](../../../src/app/providers/auth.tsx#L220-L245)).
-2. If a session exists, `loadIdentity()` fires **two calls in parallel** ([auth.tsx:96-99](../../../src/app/providers/auth.tsx#L96-L99)): `repository.loadIdentity(session.user.id)` (gateway action, [index.ts:2659](../../../supabase/functions/orm-gateway/index.ts#L2659)) and `repository.isCurrentAccountActive()` (`current_account_active` RPC).
+2. If a session exists, `loadIdentity()` fires **two calls in parallel** ([auth.tsx:96-99](../../../src/app/providers/auth.tsx#L96-L99)): `repository.loadIdentity(session.user.id)` (gateway action, [index.ts:2721](../../../supabase/functions/orm-gateway/index.ts#L2721)) and `repository.isCurrentAccountActive()` (`current_account_active` RPC).
 3. In the gateway, Drizzle reads `public.users` and (for `client` role) `client_users` under RLS passthrough to resolve `clientId`.
 4. A deactivated-but-still-authenticated user is rejected with `errorCode: "account_deactivated"` ([auth.tsx:100-106](../../../src/app/providers/auth.tsx#L100-L106)).
 5. Compose `Identity`, set it on context; `ShellDataProvider` then loads the shell.
@@ -330,7 +330,7 @@ From [`docs/reference/production-release.md`](../production-release.md) (summari
 | Secret | Lives in | Never in |
 |---|---|---|
 | Publishable (anon) key | browser bundle | — (safe by design) |
-| `DATABASE_URL` (transaction pooler) | `orm-gateway` function env ([index.ts:23](../../../supabase/functions/orm-gateway/index.ts#L23)) | browser, repo |
+| `DATABASE_URL` (transaction pooler) | `orm-gateway` function env ([index.ts:24](../../../supabase/functions/orm-gateway/index.ts#L24)) | browser, repo |
 | Service role | `send-invite`, `manage-invites` function env | browser, repo |
 | Legacy-CRM publishable key | browser bundle (`VITE_LEGACY_CRM_PUBLISHABLE_KEY`) | — (publishable, read-only project) |
 
@@ -345,7 +345,7 @@ Instrumentation exists and is deliberate:
 | `_serverMs` / `_requestId` | every gateway response ([index.ts:2810-2820](../../../supabase/functions/orm-gateway/index.ts#L2810-L2820)) | `total` / `setup` / `handler` + per-query timings; `_requestId` correlates browser ↔ function logs. |
 | `[PERF][gateway]` | [repository.ts:426-450](../../../src/app/data/repository.ts#L426-L450) | Per-action fetch time, body size, server breakdown (all 14 tracked select actions). |
 | `[GATEWAY_OVERHEAD]` | [repository.ts:444-449](../../../src/app/data/repository.ts#L444-L449) | Warns when `fetchMs - serverMs.total > 1500 ms` — cold start or pooler stall. |
-| `[PERF][orm-gateway]` / `[TEMP PERF]` | function logs ([index.ts:756-763](../../../supabase/functions/orm-gateway/index.ts#L756-L763), [2805-2809](../../../supabase/functions/orm-gateway/index.ts#L2805-L2809)) | Per-action and per-query server timings; retrievable via Supabase function logs. |
+| `[PERF][orm-gateway]` / `[TEMP PERF]` | function logs ([index.ts:757-763](../../../supabase/functions/orm-gateway/index.ts#L757-L764), [2805-2809](../../../supabase/functions/orm-gateway/index.ts#L2867-L2871)) | Per-action and per-query server timings; retrievable via Supabase function logs. |
 | Payload breakdowns | `repository.loadClientsOverview` / `loadClientsStats` / `loadClientsMetricsSummary` / `loadAnalyticsOverview` (DEV only) | Per-section KB and row counts, so payload regressions are visible immediately. |
 | `perf-mark.ts` / `react-profiler-dev.tsx` | DEV only | Drawer shell-vs-content paint marks; React commit timings with interaction labels. |
 

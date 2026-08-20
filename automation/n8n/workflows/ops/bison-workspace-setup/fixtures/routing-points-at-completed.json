@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000009",
+  "workspace_id": "900009",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic, but it is the majority shape in production: on 2026-08-19, 22 of the 25 active routing rules across 12 of 16 Active clients pointed at a campaign Bison had completed or stopped. Here all three rules are set and all three targets read `completed`. Expected: NOTHING is written — the `routed` CTE's WHERE NOT EXISTS sees three occupied rules and skips them, routing_rows = 0. steps.routing.outcome=missing with all three keys listed as `<key> -> <name> (completed) — existing rule kept`. Re-pointing is a human decision: the campaign has to be re-created at the vendor first, and this workflow cannot tell a campaign that broke from one a manager stopped deliberately."
+}

@@ -295,6 +295,33 @@ workflows:
       excluded) and by executing the generated SQL twice against Postgres; type survives an update
       that moves status and both counters. Not yet deployed.
 
+  - id: bison-ooo-campaign-revive
+    name: "[OPS] Bison OOO campaigns · revive paused"
+    domain: ops
+    path: automation/n8n/workflows/ops/bison-ooo-campaign-revive
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: planned
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: null
+    lastRepositorySync: 2026-08-20
+    lastValidation: >-
+      2026-08-20 built, never executed. The Bison endpoint surface was probed (GET/OPTIONS only):
+      /resume, /pause, /archive and /duplicate exist, /unarchive and /restore return 404, and
+      /campaigns/{id} allows no PATCH.
+      2026-08-20 DRY RUN against production — the real Decide Action node over real vendor
+      responses, no PATCH sent. 21 candidates (GIC's three correctly excluded by the
+      auto_ooo_enabled guard): 3 would resume, all UniTalk and all `paused`; 18 cannot, all
+      `archived`; 0 unreadable, 0 already active. Activating it would release 368 contacts in one
+      go, and Bison will NOT pace that — both max_emails_per_day and max_new_leads_per_day are
+      1000 on all three campaigns. Still not activated; that release needs a decision of its own.
+
   - id: bison-campaign-daily-stats
     name: "Bison campaign daily stats"
     domain: ingestion

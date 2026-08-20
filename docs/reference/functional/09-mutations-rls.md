@@ -25,7 +25,7 @@ The write path is therefore:
 
 1. Page (or a small co-located handler) calls `repository.updateX(id, patch)`.
 2. `invokeOrmGatewayAction` ([repository.ts:383-510](../../../src/app/data/repository.ts#L383-L510)) attaches the access token + a `_requestId`, POSTs to `${supabaseUrl}/functions/v1/${runtimeConfig.ormGatewayFunction}`, and retries **once** on HTTP 401 after `refreshSession()`.
-3. The gateway maps the patch through a **server-side field whitelist** (`mapClientPatch`, `mapCampaignPatch`, `mapLeadPatch`, `mapDomainPatch`, `mapInvoicePatch` — [index.ts:354-472](../../../supabase/functions/orm-gateway/index.ts#L354-L472)), executes the UPDATE, and returns the row.
+3. The gateway maps the patch through a **server-side field whitelist** (`mapClientPatch`, `mapCampaignPatch`, `mapLeadPatch`, `mapDomainPatch`, `mapInvoicePatch` — [index.ts:355-472](../../../supabase/functions/orm-gateway/index.ts#L355-L473)), executes the UPDATE, and returns the row.
 4. The page updates its **own local state** (optimistically or from the returned row) or calls the page hook's `refresh()`. There is no snapshot to patch.
 
 Pages that use the draft pattern (campaigns, leads, clients, domains, invoices) surface errors as `toast.error(…)` via `sonner` and keep the user in the drawer so they can retry.
@@ -47,7 +47,7 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **RLS:** `clients_update_scoped` — production predicate allows admin and the client's assigned manager.
 - **Allowed roles:** admin, super_admin, manager (assigned).
 - **Called from:** Clients page drawer save ([clients-page.tsx:267](../../../src/app/pages/clients-page.tsx#L267)), the inline grid cells (Status, Notes, and the **satisfaction hearts** in the Client column), and the CRM integration card ([crm-integration-card.tsx:178](../../../src/app/components/crm-integration-card.tsx#L178), writes `crm_config`).
-- **Fields (whitelist `mapClientPatch`, [index.ts:354-381](../../../supabase/functions/orm-gateway/index.ts#L354-L381)):** `name`, `status`, `satisfaction`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`, `crm_config`, contract fields. `satisfaction` is range-checked (1..3 or null) in the request contract (`parseOrmGatewayRequest`) before the UPDATE, and again by the `clients_satisfaction_range` DB CHECK.
+- **Fields (whitelist `mapClientPatch`, [index.ts:355-381](../../../supabase/functions/orm-gateway/index.ts#L355-L382)):** `name`, `status`, `satisfaction`, `manager_id`, `min_daily_sent`, `inboxes_count`, `notification_emails`, `sms_phone_numbers`, `auto_ooo_enabled`, `setup_info`, `kpi_leads`, `kpi_meetings`, `crm_config`, contract fields. `satisfaction` is range-checked (1..3 or null) in the request contract (`parseOrmGatewayRequest`) before the UPDATE, and again by the `clients_satisfaction_range` DB CHECK.
 - **ADR-0012:** the credential fields (`external_workspace_id`, `external_api_key`, `linkedin_api_key`) were removed from `mapClientPatch` — sequencer credentials now go through `upsertClientSequencer` (§2.15).
 
 ### 2.2 `updateCampaign(campaignId, patch)` — [repository.ts:812-814](../../../src/app/data/repository.ts#L812-L814) · gateway [index.ts:2316](../../../supabase/functions/orm-gateway/index.ts#L2316)
@@ -58,13 +58,13 @@ Mutations are dispatched with `invokeOrmGatewayAction` (no retry — see §7.2);
 - **Called from:** Campaigns page drawer save.
 - **Fields:** `name`, `status`, `database_size`, `positive_responses`.
 
-### 2.3 `updateLead(leadId, patch)` — [repository.ts:816-818](../../../src/app/data/repository.ts#L816-L818) · gateway [index.ts:2323](../../../supabase/functions/orm-gateway/index.ts#L2323)
+### 2.3 `updateLead(leadId, patch)` — [repository.ts:816-818](../../../src/app/data/repository.ts#L816-L818) · gateway [index.ts:2385](../../../supabase/functions/orm-gateway/index.ts#L2385)
 
 - **Table:** `leads`.
 - **RLS (verified against the live DB):** `leads_update_scoped` — `using`/`with check` = `private.can_manage_client(client_id)`. The client role is therefore **write-blocked in Postgres** (ADR-0004), not merely in the UI. The drawer's `disabled={identity?.role === "client"}` and the `mapLeadPatch` whitelist are the two redundant layers above it. (The older `leads_update_visible` / `can_access_client` policy in [`supabase-production-rls.sql`](../supabase-production-rls.sql) is superseded — that file lags the live schema.)
 - **Allowed roles:** admin, super_admin, master_admin, manager (assigned).
 - **Called from:** Leads page drawer save ([leads-page.tsx:510](../../../src/app/pages/leads-page.tsx#L510)), the report highlight picker ([leads-page.tsx:697](../../../src/app/pages/leads-page.tsx#L697), optimistic with table-level rollback), and the manager dashboard lead drawer ([manager-dashboard-page.tsx:139](../../../src/app/pages/manager-dashboard-page.tsx#L139)).
-- **Fields (ADR-0004 whitelist, enforced server-side in `mapLeadPatch` — [index.ts:392-427](../../../supabase/functions/orm-gateway/index.ts#L392-L427)):**
+- **Fields (ADR-0004 whitelist, enforced server-side in `mapLeadPatch` — [index.ts:393-427](../../../supabase/functions/orm-gateway/index.ts#L393-L428)):**
   - Pipeline: `qualification`, `meeting_booked`, `meeting_held`, `offer_sent`, `won`
   - Report (Batch 4): `client_note` (renamed from `comments`), `coldunicorn_note` (internal — gateway nulls it for the client role in `loadLeadsList`), `highlight` (`green|yellow|red|null`)
   - Identity: `email`, `first_name`, `last_name`, `job_title`, `company_name`, `linkedin_url`, `phone_number`, `phone_source`, `gender`
@@ -133,34 +133,34 @@ SELECT and an UPDATE policy on `ooo_followups` even though no portal screen list
 patch cannot carry them and the old reject-guard was deleted. OOO state belongs to `ooo_followups`
 (ADR-0015).
 
-### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2330](../../../supabase/functions/orm-gateway/index.ts#L2330)
+### 2.4 `updateDomain(domainId, patch)` — [repository.ts:820-822](../../../src/app/data/repository.ts#L820-L822) · gateway [index.ts:2392](../../../supabase/functions/orm-gateway/index.ts#L2392)
 
 - **Table:** `domains`.
 - **RLS (verified live):** `domains_update_scoped` — `using`/`with check` = `private.can_manage_client(client_id)` (manager of the client + admin tier).
 - **Called from:** Domains page drawer save ([domains-page.tsx:396](../../../src/app/pages/domains-page.tsx#L396)).
 - **Fields:** `status` (the only editable field; the other legacy columns were dropped in `20260720f`). `winnr_status` and the Winnr sync columns are ingestion-only — `mapDomainPatch` rejects them.
 
-### 2.5 `updateInvoice(invoiceId, patch)` — [repository.ts:824-826](../../../src/app/data/repository.ts#L824-L826) · gateway [index.ts:2337](../../../supabase/functions/orm-gateway/index.ts#L2337)
+### 2.5 `updateInvoice(invoiceId, patch)` — [repository.ts:824-826](../../../src/app/data/repository.ts#L824-L826) · gateway [index.ts:2399](../../../supabase/functions/orm-gateway/index.ts#L2399)
 
 - **Table:** `invoices`.
 - **RLS (verified live):** `invoices_update_admin` — `using`/`with check` = `private.is_admin_user()`. **Admin-tier only.** Managers can *read* invoices (`invoices_select_scoped` = `can_access_client`) but a manager save is rejected with `42501`. INSERT/DELETE are admin-only too (and the portal exposes neither).
 - **Called from:** Invoices page drawer save ([invoices-page.tsx:163](../../../src/app/pages/invoices-page.tsx#L163)).
 - **Fields:** `issue_date`, `amount`, `status`.
 
-### 2.6 `upsertClientUserMapping(userId, clientId)` — [repository.ts:894-896](../../../src/app/data/repository.ts#L894-L896) · gateway [index.ts:2406](../../../supabase/functions/orm-gateway/index.ts#L2406)
+### 2.6 `upsertClientUserMapping(userId, clientId)` — [repository.ts:894-896](../../../src/app/data/repository.ts#L894-L896) · gateway [index.ts:2468](../../../supabase/functions/orm-gateway/index.ts#L2468)
 
 - **Table:** `client_users`.
 - **Statement:** `UPSERT ... ON CONFLICT (user_id) DO UPDATE SET client_id = :clientId`.
 - **RLS:** `client_users_insert_admin` / `update_admin` — admin only.
 - **Called from:** Clients page — client-user access management ([clients-page.tsx:297](../../../src/app/pages/clients-page.tsx#L297)).
 
-### 2.7 `deleteClientUserMapping(mappingId)` — [repository.ts:898-900](../../../src/app/data/repository.ts#L898-L900) · gateway [index.ts:2421](../../../supabase/functions/orm-gateway/index.ts#L2421)
+### 2.7 `deleteClientUserMapping(mappingId)` — [repository.ts:898-900](../../../src/app/data/repository.ts#L898-L900) · gateway [index.ts:2483](../../../supabase/functions/orm-gateway/index.ts#L2483)
 
 - **Table:** `client_users`.
 - **RLS:** admin only.
 - **Called from:** Clients page ([clients-page.tsx:319](../../../src/app/pages/clients-page.tsx#L319)).
 
-### 2.8 `upsertEmailExcludeDomain(domain)` — [repository.ts:902-904](../../../src/app/data/repository.ts#L902-L904) · gateway [index.ts:2426](../../../supabase/functions/orm-gateway/index.ts#L2426)
+### 2.8 `upsertEmailExcludeDomain(domain)` — [repository.ts:902-904](../../../src/app/data/repository.ts#L902-L904) · gateway [index.ts:2488](../../../supabase/functions/orm-gateway/index.ts#L2488)
 
 - **Table:** `email_exclude_list`.
 - **Statement:** `UPSERT ... ON CONFLICT (domain) DO NOTHING` logically (domain is the PK).
@@ -168,14 +168,14 @@ patch cannot carry them and the old reject-guard was deleted. OOO state belongs 
 - **Allowed roles:** admin, super_admin.
 - **Called from:** Blacklist page, admin mode ([blacklist-page.tsx:46](../../../src/app/pages/blacklist-page.tsx#L46)).
 
-### 2.9 `deleteEmailExcludeDomain(domain)` — [repository.ts:906-908](../../../src/app/data/repository.ts#L906-L908) · gateway [index.ts:2442](../../../supabase/functions/orm-gateway/index.ts#L2442)
+### 2.9 `deleteEmailExcludeDomain(domain)` — [repository.ts:906-908](../../../src/app/data/repository.ts#L906-L908) · gateway [index.ts:2504](../../../supabase/functions/orm-gateway/index.ts#L2504)
 
 - **Table:** `email_exclude_list`.
 - **RLS:** `email_exclude_list_delete_admin`.
 - **Allowed roles:** admin, super_admin.
 - **Called from:** Blacklist page, Remove button ([blacklist-page.tsx:57](../../../src/app/pages/blacklist-page.tsx#L57)).
 
-### 2.10 `createClient(input)` — [repository.ts:792-794](../../../src/app/data/repository.ts#L792-L794) · gateway [index.ts:2344](../../../supabase/functions/orm-gateway/index.ts#L2344)
+### 2.10 `createClient(input)` — [repository.ts:792-794](../../../src/app/data/repository.ts#L792-L794) · gateway [index.ts:2406](../../../supabase/functions/orm-gateway/index.ts#L2406)
 
 - **Table:** `clients`.
 - **Statement:** `INSERT INTO clients VALUES (<input>) RETURNING *`.
@@ -186,7 +186,7 @@ patch cannot carry them and the old reject-guard was deleted. OOO state belongs 
 - **ADR-0012:** optional `sequencerCredentials` array (`{sequencer_key, api_key?, external_workspace_id?}`) — the gateway upserts `client_sequencers` rows in the same transaction after the client insert (New-client sheet sends EmailBison workspace/key + Aimfox key this way).
 - **Update pattern:** no optimistic update; the returned row is prepended to the page's local `clients` array.
 
-### 2.11 `createCampaign(input)` — [repository.ts:796-798](../../../src/app/data/repository.ts#L796-L798) · gateway [index.ts:2354](../../../supabase/functions/orm-gateway/index.ts#L2354)
+### 2.11 `createCampaign(input)` — [repository.ts:796-798](../../../src/app/data/repository.ts#L796-L798) · gateway [index.ts:2416](../../../supabase/functions/orm-gateway/index.ts#L2416)
 
 - **Table:** `campaigns`.
 - **Statement:** `INSERT INTO campaigns VALUES (<input>) RETURNING *`.
@@ -196,7 +196,7 @@ patch cannot carry them and the old reject-guard was deleted. OOO state belongs 
 - **Fields:** `client_id`, `external_id` (required, unique in Bison), `name`, `type`, `status`, `database_size`, `start_date`, optional `sequencer_id` (omitted → DB default EmailBison; ADR-0012). `sequencer_id` is NOT in `mapCampaignPatch` — immutable via portal after creation.
 - **Update pattern:** no optimistic update; the page calls its hook's `refresh()` after the insert resolves.
 
-### 2.12 `createLead(input)` — [repository.ts:800-802](../../../src/app/data/repository.ts#L800-L802) · gateway [index.ts:2364](../../../supabase/functions/orm-gateway/index.ts#L2364)
+### 2.12 `createLead(input)` — [repository.ts:800-802](../../../src/app/data/repository.ts#L800-L802) · gateway [index.ts:2426](../../../supabase/functions/orm-gateway/index.ts#L2426)
 
 - **Table:** `leads`.
 - **Statement:** `INSERT INTO leads VALUES (<input>) RETURNING *`.
@@ -226,7 +226,7 @@ Per-client custom columns on the Leads report. Repository methods → orm-gatewa
 - **Read path:** `loadLeadsList` returns `customFields` (definitions for the page's clients) + `customValues` (values for the returned rows only) — no global fetch.
 - **UI:** internal Leads page "Manage columns" sheet (admin-only) for definitions; inline cell editing in the report for values (optimistic via `useLeadCustomColumns`).
 
-### 2.14 `loadConditionRules()` — [repository.ts:788-790](../../../src/app/data/repository.ts#L788-L790) · gateway [index.ts:2301](../../../supabase/functions/orm-gateway/index.ts#L2301)
+### 2.14 `loadConditionRules()` — [repository.ts:788-790](../../../src/app/data/repository.ts#L788-L790) · gateway [index.ts:2363](../../../supabase/functions/orm-gateway/index.ts#L2363)
 
 - **Table:** `condition_rules`.
 - **Statement:** `SELECT * FROM condition_rules ORDER BY priority ASC, created_at ASC`.
@@ -237,7 +237,7 @@ Per-client custom columns on the Leads report. Repository methods → orm-gatewa
 
 ### 2.15 `createConditionRule(input)` / `updateConditionRule(ruleId, patch)` / `deleteConditionRule(ruleId)`
 
-- **Repository:** [repository.ts:828-842](../../../src/app/data/repository.ts#L828-L842) · gateway [index.ts:2384-2405](../../../supabase/functions/orm-gateway/index.ts#L2384-L2405).
+- **Repository:** [repository.ts:828-842](../../../src/app/data/repository.ts#L828-L842) · gateway [index.ts:2446-2405](../../../supabase/functions/orm-gateway/index.ts#L2446-L2467).
 - **Table:** `condition_rules`.
 - **RLS:** `condition_rules_admin_insert` / `_admin_update` / `_admin_delete`.
 - **Allowed roles:** admin, super_admin only.
@@ -250,10 +250,10 @@ Admin-configurable Clients table, surfaced in the Settings page ([settings-page.
 
 | Repository method | Table | Gateway |
 |---|---|---|
-| `upsertColumnOverride(columnKey, patch)` | `client_table_column_overrides` | [index.ts:2447](../../../supabase/functions/orm-gateway/index.ts#L2447) |
-| `setColumnOrder(orderedKeys)` | `client_table_column_overrides` | [index.ts:2479](../../../supabase/functions/orm-gateway/index.ts#L2479) |
-| `createClientCustomField` / `updateClientCustomField` / `deleteClientCustomField` | `client_custom_fields` | [index.ts:2507-2554](../../../supabase/functions/orm-gateway/index.ts#L2507-L2554) |
-| `upsertClientCustomFieldValue(clientId, fieldId, value)` | `client_custom_field_values` | [index.ts:2555](../../../supabase/functions/orm-gateway/index.ts#L2555) |
+| `upsertColumnOverride(columnKey, patch)` | `client_table_column_overrides` | [index.ts:2509](../../../supabase/functions/orm-gateway/index.ts#L2509) |
+| `setColumnOrder(orderedKeys)` | `client_table_column_overrides` | [index.ts:2541](../../../supabase/functions/orm-gateway/index.ts#L2541) |
+| `createClientCustomField` / `updateClientCustomField` / `deleteClientCustomField` | `client_custom_fields` | [index.ts:2569-2554](../../../supabase/functions/orm-gateway/index.ts#L2569-L2616) |
+| `upsertClientCustomFieldValue(clientId, fieldId, value)` | `client_custom_field_values` | [index.ts:2617](../../../supabase/functions/orm-gateway/index.ts#L2617) |
 
 Definitions are admin-tier only; values are gated by the field's `editable_by` array. Migrations: `20260520_client_custom_fields.sql`, `20260520_client_table_overrides.sql`, `20260524_column_override_position.sql`, `20260527_custom_field_editable_by.sql`, `20260616_custom_field_link_type.sql`.
 
@@ -366,7 +366,7 @@ function is protected** (verified 2026-07-14 via `supabase functions list`):
 
 | Function | Purpose | Privileges |
 |---|---|---|
-| `orm-gateway` | The **single canonical** gateway — all runtime reads/writes (~46 actions). Drizzle + `postgres.js`, RLS passthrough. | Holds a **`DATABASE_URL` transaction-pooler credential** ([index.ts:23-32](../../../supabase/functions/orm-gateway/index.ts#L23-L32)) but never bypasses RLS: `executeAsCaller` sets `role` to the caller's JWT role inside the transaction ([index.ts:694-728](../../../supabase/functions/orm-gateway/index.ts#L694-L728), [`rls-context.ts`](../../../supabase/functions/orm-gateway/rls-context.ts)). Unknown JWT roles fall back to `authenticated`. |
+| `orm-gateway` | The **single canonical** gateway — all runtime reads/writes (~46 actions). Drizzle + `postgres.js`, RLS passthrough. | Holds a **`DATABASE_URL` transaction-pooler credential** ([index.ts:24-32](../../../supabase/functions/orm-gateway/index.ts#L24-L33)) but never bypasses RLS: `executeAsCaller` sets `role` to the caller's JWT role inside the transaction ([index.ts:694-728](../../../supabase/functions/orm-gateway/index.ts#L694-L728), [`rls-context.ts`](../../../supabase/functions/orm-gateway/rls-context.ts)). Unknown JWT roles fall back to `authenticated`. |
 | `send-invite` | Creates the auth user + `public.users` (+ `client_users` for clients) and emails the invite. | service role |
 | `manage-invites` | `list` / `resend` / `revoke`. | service role |
 
@@ -594,7 +594,7 @@ Common invariants:
 - Message contains `network`, `fetch`, `503`, `502`, `504`, `timeout` → `network`.
 - Otherwise → `unknown`.
 
-The gateway classifies independently on its side (`classifyAuthErrorCode`, [index.ts:730-754](../../../supabase/functions/orm-gateway/index.ts#L730-L754)) when composing the failure envelope.
+The gateway classifies independently on its side (`classifyAuthErrorCode`, [index.ts:731-754](../../../supabase/functions/orm-gateway/index.ts#L731-L755)) when composing the failure envelope.
 
 ### 7.2 Retry behaviour
 
@@ -617,7 +617,7 @@ The universal bulk-snapshot loader and its global data provider are **deleted** 
 
 ### 8.1 Boot
 
-`ShellDataProvider` ([`providers/shell-data.tsx`](../../../src/app/providers/shell-data.tsx)) calls `repository.loadShellData()` once per identity. The payload is three projected lists only — `usersLite`, `clientsLite`, `clientUsers` ([index.ts:894-941](../../../supabase/functions/orm-gateway/index.ts#L894-L941)) — enough for nav, ownership labels and dropdowns.
+`ShellDataProvider` ([`providers/shell-data.tsx`](../../../src/app/providers/shell-data.tsx)) calls `repository.loadShellData()` once per identity. The payload is three projected lists only — `usersLite`, `clientsLite`, `clientUsers` ([index.ts:895-941](../../../supabase/functions/orm-gateway/index.ts#L895-L942)) — enough for nav, ownership labels and dropdowns.
 
 ### 8.2 Per page
 

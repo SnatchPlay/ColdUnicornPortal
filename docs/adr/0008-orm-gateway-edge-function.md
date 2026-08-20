@@ -40,7 +40,7 @@ gateway: `supabase/functions/orm-gateway/` (Deno + Drizzle ORM + postgres.js).
 - **RLS is preserved, not bypassed.** The gateway holds a `DATABASE_URL` (transaction-pooler)
   connection, so it connects as a privileged Postgres user. It therefore re-establishes the
   caller's identity **inside every transaction**
-  ([`index.ts:710-719`](../../supabase/functions/orm-gateway/index.ts#L710)):
+  ([`index.ts:711-719`](../../supabase/functions/orm-gateway/index.ts#L711)):
 
   ```sql
   set_config('request.jwt.claims',    <claims>, true),

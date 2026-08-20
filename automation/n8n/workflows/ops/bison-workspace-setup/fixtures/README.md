@@ -28,3 +28,8 @@ client's sending system.
 | `duplicate-campaigns.json` | the Bent Iron PL shape — the OOO triple was created twice | `campaigns.present` shows `×2`, `outcome: ok`, and nothing is created to "fix" it |
 | `name-ambiguous.json` | two workspaces match the client name | `state: needs_selection`, candidates carry `personal_team` / `main` / `parent_id`, nothing written |
 | `client-not-found.json` | a `client_id` with no enabled `emailbison` connector | `state: client_not_found` with a reason — never a silent success |
+| `routing-gap-filled.json` | onboarding: triple absent, no routing rows at all | three drafts created and three rules written; `state` unaffected — a rule to a draft is not a working rule |
+| `routing-points-at-completed.json` | the production majority — all three rules point at `completed` campaigns | **nothing written**, `routing_rows = 0`, all three reported as `existing rule kept` |
+| `routing-partial-gap.json` | `general` live, `male` stopped, `female` unset | exactly one row written (`female`); `male` reported and left alone; the other two seeded by `on conflict do nothing` |
+| `routing-campaigns-dead-no-rules.json` | the Gbbc shape — no rules, and all three campaigns `completed` | **nothing routed**; a rule to a dead campaign is worse than no rule. A `draft` target would be filled |
+| `campaign-duplicate-blocks-routing.json` | `OOO automation \| male` exists twice, one active one completed | no target and no rule for `male`, named in `steps.routing.error`; the other two filled |

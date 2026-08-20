@@ -151,6 +151,7 @@ function makeClientsOverview(overrides?: Record<string, unknown>) {
     clientCustomFieldValues: [],
     sequencers: [],
     clientSequencers: [],
+    oooRoutingHealth: [],
   };
   return { ...base, ...overrides };
 }

@@ -1,0 +1,97 @@
+schemaVersion: 1
+
+id: bison-ooo-campaign-revive
+name: "[OPS] Bison OOO campaigns · revive paused"
+domain: ops
+owner: automation
+
+# Not built yet on the instance. `status: planned` until a supervised first run has been observed —
+# and the first run is not a formality here: the write releases every contact that piled up inside a
+# paused campaign, at once.
+lifecycle: managed
+status: planned
+criticality: high         # resumes a campaign, which sends real email to real people
+
+businessProcess:
+  - docs/reference/processes/outreach/ooo-followups.md
+
+architectureDecisions:
+  - docs/adr/0015-sequencer-contacts-and-ooo-followups.md
+  - docs/adr/0016-repository-as-automation-source-of-truth.md
+
+triggers:
+  - type: schedule
+    detail: >-
+      Daily at 06:40 UTC. Low frequency on purpose: a paused campaign stays paused, so checking more
+      often buys nothing and only widens the window for fighting a human who is mid-edit.
+
+reads:
+  tables:
+    - client_ooo_routing
+    - campaigns
+    - clients
+    - client_sequencers
+    - sequencers
+  external:
+    - "Bison API · GET /api/campaigns/{id} — the authoritative status. public.campaign_status collapses the vendor's `paused` into `stopped` and `archived` into `completed`, and that is exactly the line between revivable and not."
+
+# No RPC. integration_sync_runs is an audit table with no invariant an RPC would protect, and it is
+# written the same way by every other workflow here.
+writes:
+  tables:
+    - integration_sync_runs
+  tablesWritten:
+    - integration_sync_runs
+  rpcs: []
+  external:
+    - "Bison API · PATCH /api/campaigns/{id}/resume (node: Resume Campaign) — ONLY when the vendor reports `paused`."
+
+# The endpoint surface was probed with GET/OPTIONS on 2026-08-20, because Bison publishes no API
+# reference this repository can cite:
+#   /api/campaigns/{id}            GET, HEAD, DELETE   — no PATCH: status cannot be set here
+#   /api/campaigns/{id}/resume     PATCH               ✅ what this workflow uses
+#   /api/campaigns/{id}/pause      PATCH
+#   /api/campaigns/{id}/archive    PATCH
+#   /api/campaigns/{id}/duplicate  POST
+#   /api/campaigns/{id}/unarchive  404
+#   /api/campaigns/{id}/restore    404
+# The last two are the reason this workflow cannot fix most of what is broken: 19 of the 22 dead
+# routed OOO campaigns measured that day were `archived`, and archiving has no inverse in the API.
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Select Routed OOO Campaigns, Record Run"
+  # Per-client, read from client_sequencers.api_key and sent as a Bearer header — the same pattern as
+  # ooo-enrol-followups. NOT the agency master key: a workspace key only reaches its own workspace,
+  # which is what made a cross-client mistake fail loudly rather than send (defect-backlog B8).
+
+portalSurfaces:
+  - "Clients page — OOO column. Once this workflow runs, a cell that is still not green means the automation tried and could not: the campaign is archived and a human has to re-create it in Bison."
+  - "Client drawer — OOO routing section: which rule is broken and why."
+
+metrics: []
+
+idempotency:
+  key: "campaign external_id — resume is a no-op on a campaign that is already active, and the workflow only reaches the write when the VENDOR reported `paused` moments earlier"
+  notes: >-
+    Re-running the whole workflow is safe. The audit row is keyed on n8n_execution_id with
+    ON CONFLICT DO NOTHING, so the convergence that can execute Collect Outcome twice still leaves
+    one row.
+
+# OWNER DECISION, 2026-08-20 — recorded here rather than in knownViolations, which is reserved for
+# rules the offline validator actually emits:
+#
+#   This workflow sends email with no human in the loop, and that was asked for explicitly. Resuming
+#   a campaign releases everyone queued inside it at once — 150 contacts in UniTalk's `male` campaign
+#   on the day this was written, 76 in `female`. The concern was raised; the answer was "just
+#   activate automatically".
+#
+#   What makes that defensible rather than reckless is that the queue was MEASURED and it is fresh:
+#   oldest waiting contact 18 days, and only 35 of 355 past the 14-day staleness rule that
+#   ooo-enrol-followups enforces. So a resume releases timely follow-ups to people who asked to be
+#   contacted again, not a burst of absurd ones.
+#
+#   Revisit if the queue ages — if a campaign sits paused long enough for its backlog to cross that
+#   line, the release stops being timely. The lever for pacing is the campaign's own
+#   max_new_leads_per_day, never this workflow. Review by 2026-11-30.

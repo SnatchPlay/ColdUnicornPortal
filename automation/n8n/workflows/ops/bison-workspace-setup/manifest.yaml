@@ -6,9 +6,14 @@ domain: ops
 owner: automation
 
 # `managed` since 2026-08-07: the graph exists as c82kKnHaREUMvPBR and workflow.json is the export.
-# The write half landed the same day (iteration 2, 11 nodes -> 21). `status` stays `planned` until a
-# real dry_run:false run has been observed; the workflow is INACTIVE and called by hand, and has no
-# trigger of its own until ADR-0018 gives the gateway its webhook.
+# The write half landed the same day (iteration 2, 11 nodes -> 21).
+#
+# The workflow is ACTIVE on the instance and has been since the webhook went live on 2026-08-08 —
+# `pnpm n8n:inventory` is the source of truth and reports it as such. This comment claimed INACTIVE
+# until 2026-08-19 while README.md line 4 already said `active`; the repository was contradicting
+# itself about whether a workflow that mints API keys and creates webhooks was running.
+#
+# `status` stays `planned` until a real dry_run:false run has been observed end to end.
 lifecycle: managed
 status: planned
 criticality: high         # mints API keys and creates webhooks in a client's sending system
@@ -36,16 +41,20 @@ reads:
     - clients
     - sequencers
     - client_sequencers
+    # Resolve Client reads the ACTIVE routing rules with their campaigns' statuses. The workflow
+    # fills an empty rule and must be able to prove a rule was empty before it writes one.
+    - client_ooo_routing
   external:
     - "Bison API · GET /api/workspaces/v1.1 (master key) — resolve a workspace by name; returns data[].{id,name,personal_team,main,parent_id}"
     - "Bison API · GET /api/webhook-url — current webhook set, compared on url + events"
     - "Bison API · GET /api/tags — current tag set, compared on name"
     - "Bison API · GET /api/campaigns — the three OOO automation campaigns, compared on name; the vendor `status` is carried into the report so a draft is not read as a sending campaign"
 
-# Direct table writes, no RPC — confirmed against RPC_OWNED_TABLES in
-# scripts/n8n/lib/business-rules.mjs. None of the three is an ADR-0015 ingestion table, and none
-# carries a business invariant an RPC would be protecting. The two credential-sync workflows write
-# client_sequencers the same way.
+# Direct table writes — confirmed against RPC_OWNED_TABLES in scripts/n8n/lib/business-rules.mjs.
+# None of the four is an ADR-0015 ingestion table, so none of them MUST go through an RPC. That is a
+# statement about ownership, not about consequences: see the client_ooo_routing note below for the
+# one obligation that comes with writing a routing rule regardless. The two credential-sync workflows
+# write client_sequencers the same way.
 #
 # `campaigns` is a SECOND writer to a table bison-campaign-sync owns, and the split is deliberate:
 #   * this workflow seeds the row for a campaign IT created, and only `type` is its business
@@ -54,16 +63,40 @@ reads:
 #     `positive_responses`, and its ON CONFLICT list does not include `type`, so the two never
 #     fight over the same column.
 # The write is bounded to the external_ids this run created — never to a campaign it did not make.
+# The `seeded` CTE is the one exception and is bounded the other way: a campaign that already
+# existed AT THE VENDOR and has no row here gets one with `on conflict do nothing`, never
+# `do update`. It exists because a client who is not yet `Active` is skipped by
+# bison-campaign-sync's Get Active Clients, so nothing else would ever catalogue those campaigns,
+# and the routing editor only offers rows that exist locally.
+#
+# `client_ooo_routing` is NOT in RPC_OWNED_TABLES (scripts/n8n/lib/business-rules.mjs), so the direct
+# insert is sanctioned. It does NOT follow that writing it carries no obligation: the portal's writer
+# (updateClientOooRouting) inserts the rule AND THEN calls recover_skipped_ooo_followups, because a
+# rule appearing is exactly the event that unparks episodes skipped as routing_missing. An invariant
+# that holds for one writer and not the other is not an invariant, so this workflow makes the same
+# call — see the `Recover Parked` node, which has to be its own node because rows written by Record's
+# `routed` CTE are invisible to that function inside the same statement's snapshot.
+#
+# The two writers split cleanly: provisioning fills an EMPTY rule at birth (WHERE NOT EXISTS ... AND
+# is_active), the portal owns every change after that. This workflow never re-points or deactivates a
+# rule an operator set, whatever the campaign's status — that case is reported on steps.routing and
+# left for a human, which is precisely what the agency asked for. Nor does it fill a rule from a
+# `completed` or `stopped` campaign: an empty rule parks episodes visibly and recoverably, while a
+# rule aimed at a dead campaign resolves and drops them (Gbbc's shape — three empty rules and three
+# completed campaigns).
 writes:
   tables:
     - client_sequencers
     - integration_sync_runs
     - campaigns
+    - client_ooo_routing
   tablesWritten:
     - client_sequencers
     - integration_sync_runs
     - campaigns
-  rpcs: []
+    - client_ooo_routing
+  rpcs:
+    - "public.recover_skipped_ooo_followups(client_id, null) (node: Recover Parked) — only when this run actually created a routing rule. Idempotent and self-limiting: it revives only episodes whose routing now resolves, and only for clients with auto_ooo_enabled."
   external:
     - "Bison API · POST /api/workspaces/v1.1/{id}/api-tokens (node: Mint Key) — only when the connector row holds no key. Unlike Aimfox there is no token-list endpoint to fall back on, so storing the result is not a nicety: a minted key that is not written down is lost for good."
     - "Bison API · POST /api/webhook-url (node: Create Missing) — only for a url+events pair that is absent"
@@ -92,7 +125,7 @@ credentials:
     usedBy: "List Workspaces, Mint Key"
   - alias: "Postgres account"
     type: postgres
-    usedBy: "Resolve Client, Read Claimed, Record"
+    usedBy: "Resolve Client, Read Claimed, Record, Recover Parked"
   # NOT attached. The Webhook node is unauthenticated as of 2026-08-08 — see knownViolations.
   # The gateway already sends x-automation-secret, so attaching this closes the gap on its own.
   - alias: "Workspace setup webhook auth"
@@ -106,12 +139,17 @@ targetContract:
 
 portalSurfaces:
   - "Clients page — provisioning status column (client_sequencers.setup_state)"
-  - "Client drawer — Credentials & IDs section: Check (dry_run) / Set up"
+  - "Clients page — OOO column: live/routed rules per client, derived on read from client_ooo_routing + campaigns.status"
+  - "Client drawer — Credentials & IDs section: Check (dry_run) / Set up, including the OOO routing step"
+  - "Client drawer — OOO routing section: the live truth, and where a broken rule is re-pointed"
 
 metrics: []
 
 idempotency:
-  key: "(client_id, sequencer_id) for the connector row; url + events for a webhook; name for a tag"
+  key: >-
+    (client_id, sequencer_id) for the connector row; url + events for a webhook; name for a tag;
+    (client_id, routing_key) WHERE is_active for a routing rule — the partial unique index
+    uq_client_ooo_routing_active, restated as the ON CONFLICT target
   notes: >-
     Every step reads the vendor's current state before it writes and creates only what is absent, so
     a second run is a no-op. Webhooks are matched on url + events and NEVER on name — UniTalk's lead_replied webhook is

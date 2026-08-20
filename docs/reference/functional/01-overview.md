@@ -53,7 +53,7 @@ Key properties:
 - **No realtime.** Refresh is explicit: each page hook exposes `refresh()`, and mutations call it (or patch local state) themselves.
 - **Role-based route shells** (ADR-0002). Each role has its own URL prefix (`/client/*`, `/manager/*`, `/admin/*`) and its own navigation menu defined in [`app-shell.tsx`](../../../src/app/components/app-shell.tsx).
 - **Client sees outreach campaigns only** (ADR-0003). Enforced at both RLS (`campaigns_select_scoped`, `campaign_daily_stats_select_scoped`) and client-side (`scopeCampaigns`).
-- **Lead state boundaries** (ADR-0004). Editable by internal roles only; the whitelist is enforced server-side in `mapLeadPatch` ([orm-gateway/index.ts:392-427](../../../supabase/functions/orm-gateway/index.ts#L392-L427)). Replies are read-only history.
+- **Lead state boundaries** (ADR-0004). Editable by internal roles only; the whitelist is enforced server-side in `mapLeadPatch` ([orm-gateway/index.ts:393-427](../../../supabase/functions/orm-gateway/index.ts#L393-L428)). Replies are read-only history.
 
 ## Tech stack
 

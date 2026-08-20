@@ -608,7 +608,7 @@ private.is_admin_user() OR (private.current_app_role() = 'manager' AND salespers
 
 ### 2.8 Customization tables — **not in `schema.ts`**
 
-Three tables exist in migrations only; the introspected Drizzle schema does not include them, so the gateway reads/writes them with raw SQL through `safeRawSelect`, which returns `[]` when the table is absent ([index.ts:671-686](../../../supabase/functions/orm-gateway/index.ts#L671-L686)) — a portal running against an un-migrated database degrades instead of 500-ing.
+Three tables exist in migrations only; the introspected Drizzle schema does not include them, so the gateway reads/writes them with raw SQL through `safeRawSelect`, which returns `[]` when the table is absent ([index.ts:672-686](../../../supabase/functions/orm-gateway/index.ts#L672-L687)) — a portal running against an un-migrated database degrades instead of 500-ing.
 
 | Table | Migration | Shape | RLS |
 |---|---|---|---|
@@ -651,7 +651,7 @@ GROUP BY cds.report_date, c.client_id;
 
 - `security_invoker = on` — caller's RLS applies, so the view respects the same per-role visibility as `campaign_daily_stats`.
 - Hard-coded **21-day** window, matching the Admin Dashboard momentum charts.
-- **Not queried by anything today.** The `orm-gateway` computes the admin/manager dashboard rollups with its own raw SQL over `campaign_daily_stats` (`loadAdminDashboardOverview`, [index.ts:946](../../../supabase/functions/orm-gateway/index.ts#L946); `loadManagerDashboardOverview`, [index.ts:1047](../../../supabase/functions/orm-gateway/index.ts#L1047)) because those handlers need client/campaign/lead facts in the same round-trip. The view is retained for BI tools.
+- **Not queried by anything today.** The `orm-gateway` computes the admin/manager dashboard rollups with its own raw SQL over `campaign_daily_stats` (`loadAdminDashboardOverview`, [index.ts:947](../../../supabase/functions/orm-gateway/index.ts#L947); `loadManagerDashboardOverview`, [index.ts:1047](../../../supabase/functions/orm-gateway/index.ts#L1047)) because those handlers need client/campaign/lead facts in the same round-trip. The view is retained for BI tools.
 
 ---
 

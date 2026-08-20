@@ -53,7 +53,7 @@ Read windows are enforced **server-side** in the `orm-gateway` edge function ([A
 
 | Table | Write source | Read window (gateway) | Read scope |
 |-------|--------------|-----------------------|------------|
-| `replies` | n8n: insert + classify | never bulk-loaded. List/dashboard actions read **server-side aggregates only** (reply count + last reply per lead, e.g. [orm-gateway/index.ts:1807](../../../supabase/functions/orm-gateway/index.ts#L1807)); the full thread for **one** lead is fetched on demand by `loadLeadDetail` ([index.ts:1949](../../../supabase/functions/orm-gateway/index.ts#L1949), full history, no window) | scoped via RLS |
+| `replies` | n8n: insert + classify | never bulk-loaded. List/dashboard actions read **server-side aggregates only** (reply count + last reply per lead, e.g. [orm-gateway/index.ts:1931](../../../supabase/functions/orm-gateway/index.ts#L1931)); the full thread for **one** lead is fetched on demand by `loadLeadDetail` ([index.ts:2011](../../../supabase/functions/orm-gateway/index.ts#L2011), full history, no window) | scoped via RLS |
 | `campaign_daily_stats` | n8n: daily UPSERT on (`campaign_id`, `report_date`) | last **90 days** — `CAMPAIGN_DAILY_STATS_WINDOW_DAYS` ([index.ts:19](../../../supabase/functions/orm-gateway/index.ts#L19)) | scoped via set-based RLS |
 | `daily_stats` | n8n: daily UPSERT on (`client_id`, `report_date`) | last **180 days** — `DAILY_STATS_WINDOW_DAYS` ([index.ts:20](../../../supabase/functions/orm-gateway/index.ts#L20)) | scoped via RLS |
 | `sequencer_daily_stats` (ADR-0012) | **Historical rows only, from a one-off sheet backfill** — [`sheets-aimfox-metrics-backfill`](../../../automation/n8n/workflows/ops/sheets-aimfox-metrics-backfill/README.md) wrote the table's first 117 rows on 2026-07-22 (5 clients, 2026-06-18…07-22, `profile_id = '__workspace_total__'`, `invites_accepted` NULL — the sheet does not carry acceptances). **No recurring writer exists**; before that date the table had never been written at all (verified 2026-07-21). *Specified* writer: n8n `Get Metrics from Aimfox`, 2-hourly, UPSERT on (`client_id`, `sequencer_id`, `profile_id`, `report_date`) — `invites_sent`/`invites_accepted` (daily, from `/analytics/interactions` buckets), `remaining_database_size` (**deprecated 2026-08-19 — nothing reads it**; was Σ active campaigns `audience_size − sent_connections`, and `audience_size` is a fixed vendor ceiling, so it ran ~20x high. Now Σ `target_count − sent_connections`), `invite_limit` (weekly cap = Σ accounts `limit.connect`), `invite_limit_remaining` (left today), `schedule_today/tomorrow/day_after` (min(daily_limit, …) formulas), `profile_id` = Aimfox account id. The workflow computes every one of these and writes them **to the PDCA spreadsheet**; the schema was designed by reading it ([`20260705`](../../../supabase/migrations/20260705_sequencer_daily_stats_schedule.sql)) and the Supabase write was never built — no Postgres node, no Supabase URL in the graph. Closing this is phase A of [LinkedIn outreach (Aimfox)](../processes/outreach/linkedin-aimfox.md) | not read by the portal yet (phase-2 UI) | scoped via set-based RLS |
@@ -160,6 +160,74 @@ back to `pending`. There is **no** portal list or editor for the episodes themse
 ([OoS-16](13-out-of-scope.md)) — n8n owns the lifecycle end to end.
 
 The follow-up campaigns themselves have `campaigns.type = 'ooo_followup'` and are invisible to clients (ADR-0003). Managers and admins see them in the campaigns list.
+
+### Who writes a routing rule
+
+Two writers, split by whether the slot is empty:
+
+- **`bison-workspace-setup`** fills an **empty** rule when it provisions a client, from a campaign it
+  has matched to that client by name (`OOO automation | <key>`). It never re-points a rule an
+  operator set, never fills from a `completed` or `stopped` campaign, and fills nothing for a key
+  whose campaign name is duplicated at the vendor. See
+  [workspace provisioning, invariant 10](../processes/ops/workspace-provisioning.md).
+- **the portal** (`updateClientOooRouting`) owns every change after that.
+
+### Routing health, and why it is derived rather than stored
+
+A rule pointing at a campaign that is not `active` sends nothing and reads exactly like a working
+one. Measured 2026-08-19: **22 of the 25 active rules, across 12 of 16 Active clients**, pointed at a
+`completed` or `stopped` campaign, and 80 `pending` episodes were aimed at one.
+
+The rule the portal applies, in both places it surfaces — one definition, in
+[`lib/ooo-health.ts`](../../../src/app/lib/ooo-health.ts), with the SQL aggregate as its twin:
+
+```
+routed     = count(client_ooo_routing WHERE client_id = c AND is_active)          -- 0..3
+live       = of those, the ones whose campaign is `active`   and not archived
+awaiting   = of those, the ones whose campaign is `draft`/`launching` and not archived
+dead       = routed − live − awaiting
+hasGeneral = whether the `general` rule is one of them
+healthy   ⇔ hasGeneral AND live = routed
+```
+
+Three things this shape is deliberately careful about:
+
+- **Rules are counted, not campaigns.** `bison-campaign-sync` has no removal path, so a workspace can
+  hold `ooo_followup` rows for campaigns the vendor no longer has; counting campaigns would score
+  those as healthy.
+- **A rule whose campaign is archived still counts as `routed`.** The aggregate LEFT-joins and
+  filters archival inside the `FILTER`, so such a client cannot vanish from the result and render as
+  "never configured" when in fact it has three rules that cannot work. Archiving through the portal
+  deactivates the routes pointing at the campaign (migration `20260813`) and `resolve_ooo_routing`
+  filters `archived_at is null`, so the episodes park as `routing_missing` rather than being sent
+  anywhere — recoverable, but only once somebody is told the rule is dead.
+- **Coverage is a separate question from sending, and counts alone cannot answer it.** One live
+  rule is complete when it is `general` — `resolve_ooo_routing` falls back to it for every key with
+  no rule of its own — and badly incomplete when it is `male`, where female and general contacts
+  park as `routing_missing`. Both read `1/1`. Hence `hasGeneral` in the healthy test: without it a
+  client with a single `male` rule scored a green 1/1. (Note this is *coverage*, not the count 3 —
+  a client routed only through `general` is genuinely healthy.)
+- **`awaiting` is separate from `dead`.** Both read `0/3`, and they need different people: a draft
+  needs its copy written in Bison (the expected state right after provisioning), a `stopped` campaign
+  needs re-creating at the vendor and the rule re-pointing. Folding them together made a successful
+  onboarding read as a disaster. That split is the portal's twin of the `ROUTABLE` set in
+  `bison-workspace-setup` — provisioning fills a rule from a routable campaign (`active | launching |
+  draft`) and never from a dead one.
+
+`auto_ooo_enabled = false` mutes the indicator rather than reddening it — such a client routes
+nothing by design.
+
+Surfaces: the **OOO** column on the Clients page (`live/routed`) and the warnings in the drawer's
+OOO routing section. Both are computed on read, never cached into `client_sequencers.setup_state` —
+a provisioning verdict is a snapshot of the last time somebody pressed Check, and this failure
+happens months later, when a workspace's inboxes change and Bison stops the campaign.
+
+**Freshness caveat.** `campaigns.status` is refreshed hourly by `bison-campaign-sync`, whose
+`Get Active Clients` only walks clients with `status = 'Active'`. A client in `Onboarding` therefore
+shows whatever status was last observed. The grid's tooltip carries `max(campaigns.updated_at)` with
+how long ago that was; the drawer says only that statuses are synced hourly for Active clients,
+because `ClientOooRoutingPagePayload` carries no timestamp — the drawer is where the rule is
+repaired, and the campaign's status is re-read the moment provisioning runs.
 
 ---
 

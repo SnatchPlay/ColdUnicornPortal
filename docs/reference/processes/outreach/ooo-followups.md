@@ -148,7 +148,37 @@ outreach and CRM ([04-metrics-catalog](../../functional/04-metrics-catalog.md), 
 | `ooo-remove-on-tag-removed` | `ZZ0ughB302WdDJOf` | OOO tag removed → cancel the episode | managed; `[S] cancel_active_ooo_followup` runs first, sheet limb below it |
 | `ooo-enrol-followups` | `zaPkpSAuvjibUUDU` | `pending` → `claim` → attach → `submit` worker | managed; rewired to Supabase in Wave 1, 2026-08-15 |
 | `nrr-daily-stats` | `1hHbU2hYYcsktLUP` | NRR → increment a Sheets counter | **managed but never executed; `deprecated` 2026-08-15.** Unreachable by design — the classifier suppresses the NRR tag, so the HUB gate cannot fire. Not being revived ([C1](../../n8n/defect-backlog.md#c1)) |
+| `bison-ooo-campaign-revive` | — | daily: switch a paused OOO campaign back on | **built 2026-08-20, never run** — see below |
 | — | `xPzdtWQiY3lGtqI1` | HUB dispatcher | orphan |
+
+### When the follow-up campaign itself stops sending
+
+The episode machinery can be perfect and still deliver nothing, because the campaign at the far
+end quietly stops. Measured 2026-08-20: **22 of the 42 active routing rules, across 13 clients,
+pointed at a campaign that was not sending.**
+
+Contacts are not lost while that lasts. Bison **accepts** leads into a paused campaign — 355
+episodes were queued inside dead campaigns that day and exactly one had ever been rejected. The
+cost is delay, and delay becomes loss only when nobody notices for longer than the follow-up stays
+sensible (`[S] Expire stale`, 14 days).
+
+So the campaign's own state is now watched, and half of it is repaired automatically:
+
+- **`paused` → resumed**, daily, by `bison-ooo-campaign-revive`. 3 of the 22.
+- **`archived` → cannot be repaired at all.** Bison exposes `/resume`, `/pause`, `/archive` and
+  `/duplicate`, but **no `/unarchive` and no `/restore`** (both 404, probed 2026-08-20), and
+  `PATCH` is not allowed on the campaign itself. 19 of the 22. A human re-creates them.
+
+Sixteen of those nineteen held **zero leads** — they were archived while empty, not exhausted by
+sending. Whatever archives them is upstream of all of this and is not yet identified.
+
+The portal is what carries the half that cannot be automated: once the daily job runs, an `OOO`
+cell that is still not green means *the automation tried and could not*.
+
+One deliberate trade, recorded in that workflow's manifest: resuming releases **everyone queued
+inside the campaign at once** (150 contacts in UniTalk's `male` campaign that day). It runs
+unattended by owner decision, on the evidence that the queue is fresh — oldest 18 days, and only
+35 of 355 past the 14-day rule.
 
 ### Where the implementation actually is (as of 2026-08-19)
 
