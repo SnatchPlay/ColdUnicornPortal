@@ -66,9 +66,29 @@ That is the intended behaviour: those people asked to be contacted again and the
 queue was measured fresh — oldest 18 days, and only 35 of 355 past the 14-day staleness rule that
 `ooo-enrol-followups` enforces. A burst of timely follow-ups, not of absurd ones.
 
-But it should be *observed*, not assumed. The first run should be a manual execution with
-`Resume Campaign` disabled, to confirm the classification (3 `paused`, 19 `archived`) matches what
-this README claims, and only then enabled.
+### The dry run, 2026-08-20
+
+Done, against production, with no `PATCH` sent — the real `Decide Action` node fed real vendor
+responses for all 21 candidates:
+
+| | |
+|---|---|
+| would resume | **3** — UniTalk `general`, `male`, `female`, all `paused` |
+| cannot | **18** — every one `archived` |
+| unreadable / already active | 0 / 0 |
+| **contacts released on the first run** | **368** (245 + 113 + 10) |
+
+GIC's three campaigns were correctly absent: `auto_ooo_enabled` is false there, and the workflow
+leaves such clients alone.
+
+**Bison will not pace that release.** Both `max_emails_per_day` and `max_new_leads_per_day` are
+`1000` on all three campaigns, against 368 waiting contacts — so activating this sends all of them
+inside one sending window (Mon–Fri 09:00–17:00 Europe/Warsaw). Lowering the campaign's own daily cap
+before the first live run is the lever if that is not wanted; this workflow deliberately has none.
+
+Note the 368 is larger than the 236 OOO episodes our own database has marked `submitted` into those
+campaigns. The remainder are leads that reached the campaign by some other route — older enrolments
+from the Sheets era, or manual additions. Resuming releases all of them, not only ours.
 
 If a burst ever needs pacing, the lever is the campaign's own `max_new_leads_per_day` — not this
 workflow.
