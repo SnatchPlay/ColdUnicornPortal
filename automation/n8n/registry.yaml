@@ -302,7 +302,7 @@ workflows:
     businessProcess: docs/reference/processes/outreach/ooo-followups.md
     owner: automation
     lifecycle: managed
-    status: planned
+    status: active
     criticality: high
     trigger: schedule
     environments:
@@ -321,6 +321,10 @@ workflows:
       `archived`; 0 unreadable, 0 already active. Activating it would release 368 contacts in one
       go, and Bison will NOT pace that — both max_emails_per_day and max_new_leads_per_day are
       1000 on all three campaigns. Still not activated; that release needs a decision of its own.
+      2026-08-20 12:40 UTC created as 1NNq86xVXbWkEnnF (inactive, both Postgres nodes given the
+      credential of bison-workspace-setup's Record node) and ACTIVATED at the owner's direction,
+      knowing the first run releases 368 contacts at once with no vendor-side pacing. The export
+      round-tripped byte-identical. First fire: 2026-08-21 06:40 UTC — nothing runs today.
 
   - id: bison-campaign-daily-stats
     name: "Bison campaign daily stats"

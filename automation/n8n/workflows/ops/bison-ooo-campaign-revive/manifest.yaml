@@ -5,11 +5,16 @@ name: "[OPS] Bison OOO campaigns · revive paused"
 domain: ops
 owner: automation
 
-# Not built yet on the instance. `status: planned` until a supervised first run has been observed —
-# and the first run is not a formality here: the write releases every contact that piled up inside a
-# paused campaign, at once.
+# Live as 1NNq86xVXbWkEnnF since 2026-08-20. It was created inactive, then activated deliberately at
+# the owner's direction — with the dry run's number on the table, not around it: the first fire
+# resumes UniTalk's three campaigns and releases 368 queued contacts at once, and Bison will not pace
+# that (max_emails_per_day is 1000 on all three). The lever, if it is ever needed, is the campaign's
+# own daily cap; this workflow deliberately has none.
+#
+# It has still never EXECUTED. Watch the first run: integration_sync_runs where
+# sync_type = 'ooo_campaign_revive'.
 lifecycle: managed
-status: planned
+status: active            # created and ACTIVATED 2026-08-20; first fire 2026-08-21 06:40 UTC
 criticality: high         # resumes a campaign, which sends real email to real people
 
 businessProcess:
