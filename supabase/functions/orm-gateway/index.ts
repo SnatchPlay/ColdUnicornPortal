@@ -11,6 +11,7 @@ import {
 } from "../../../src/app/data/orm-gateway-contract.ts";
 import { DEFAULT_BUSINESS_DAY_CONFIG } from "../../../src/app/lib/crm/business-days.ts";
 import { MEETING_STATUS_VALUES, OFFER_STATUS_VALUES, TASK_STATUS_VALUES } from "../../../src/app/types/core.ts";
+import type { CampaignStatus } from "../../../src/app/types/core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1620,7 +1621,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     // Target payload: ~85 KB (vs ~1.4 MB for the combined load).
     const t0 = performance.now();
 
-    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows, setupStateRows] =
+    const [clientRows, usersLiteRows, clientUsersRows, conditionRuleRows, columnOverrideRows, customFieldRows, customFieldValueRows, sequencerRows, clientSequencerRows, setupStateRows, oooHealthRows] =
       await Promise.all([
         // Full client rows for the mega-table and drawer. Archived clients are excluded unless the
         // page asks for them ("Show archived"), which is the only way to reach Restore.
@@ -1692,6 +1693,73 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         safeRawSelect(tx, sql`
           SELECT id, setup_state, setup_checked_at FROM public.client_sequencers
         `),
+
+        // OOO routing health (ADR-0015) — a plain aggregate, computed on read and never cached.
+        //
+        // It answers the one question `setup_state` cannot: the provisioning report is a snapshot of
+        // the last time somebody pressed Check, and the failure this exists to catch happens months
+        // later, silently, when a workspace's inboxes change and Bison stops the campaign. On
+        // 2026-08-19 that was 22 of the 25 active rules across 12 of 16 Active clients.
+        //
+        // Rows are counted, not campaigns: bison-campaign-sync has no removal path, so a campaign
+        // deleted at the vendor keeps its last status here forever. A client with no active rule at
+        // all is absent from the result rather than a zero row — the column has to tell "never
+        // configured" apart from "configured and broken".
+        //
+        // LEFT JOIN, and archival filtered inside the FILTER rather than in the join: an inner join
+        // would drop a rule whose campaign is archived — or whose campaign row is gone entirely —
+        // out of `routed` as well as `live`, so a client whose whole triple is in that state would
+        // vanish from this result and render as "never configured" rather than as broken. The rule
+        // is still there, still active, and still occupying the slot: `setEntityArchived` deactivates
+        // the routes it archives (migration 20260813) and `resolve_ooo_routing` filters
+        // `archived_at is null`, so such a rule resolves to NULL and its episodes park as
+        // `routing_missing` — recoverable, but only once somebody is told the rule is dead.
+        //
+        // `awaiting` is separated from `live` because the two need different people: a draft needs
+        // its copy written (the expected state right after provisioning), a stopped campaign needs
+        // re-creating at the vendor. Counting them together made a successful onboarding read as a
+        // fault. The status lists are the SQL twin of OOO_LIVE_STATUSES / OOO_ROUTABLE_STATUSES in
+        // lib/ooo-health.ts, and the two must move together.
+        //
+        // safeRawSelect for the same reason as setupStateRows above: degrading to [] costs the
+        // indicator and nothing else. It runs on the same connection as the queries above rather
+        // than truly in parallel — postgres.js pipelines, Postgres still executes serially — so it
+        // sits on this action's critical path. It is sub-millisecond (≤3 rows per client, joined by
+        // primary key) and must stay that way.
+        safeRawSelect(tx, sql`
+          SELECT r.client_id::text                                       AS client_id,
+                 count(*)::int                                           AS routed,
+                 count(*) FILTER (
+                   WHERE c.status = 'active' AND c.archived_at IS NULL
+                 )::int                                                  AS live,
+                 count(*) FILTER (
+                   WHERE c.status IN ('draft', 'launching') AND c.archived_at IS NULL
+                 )::int                                                  AS awaiting,
+                 -- Coverage, which counts alone cannot express: general is the fallback
+                 -- resolve_ooo_routing uses for every key that has no rule of its own, so one live
+                 -- general rule covers a client completely while one live male rule leaves two
+                 -- thirds of their contacts parking as routing_missing. Both read 1/1.
+                 -- (No backticks in here: this SQL lives inside a JS template literal, and one
+                 --  stray backtick silently ends the literal. Nothing in this repo type-checks,
+                 --  so the first symptom is the edge runtime refusing to boot.)
+                 bool_or(r.routing_key = 'general')                       AS has_general,
+                 -- Dead, and dead in the way a human has to fix. Our enum already carries the
+                 -- distinction that decides it: bison-campaign-sync maps the vendor's paused to
+                 -- stopped, and its archived to completed. A paused campaign is switched back on by
+                 -- bison-ooo-campaign-revive the next morning; an archived one cannot be, because
+                 -- Bison has no unarchive endpoint at all, so it needs re-creating by hand.
+                 -- Without this split the two look identical in the sweep, and telling apart the
+                 -- client who needs someone TODAY is the whole point of the column.
+                 -- (No backticks: this SQL sits inside a JS template literal.)
+                 count(*) FILTER (
+                   WHERE c.status = 'completed' AND c.archived_at IS NULL
+                 )::int                                                  AS unrecoverable,
+                 max(c.updated_at)                                       AS campaigns_seen_at
+            FROM public.client_ooo_routing r
+            LEFT JOIN public.campaigns c ON c.id = r.campaign_id
+           WHERE r.is_active
+           GROUP BY r.client_id
+        `),
       ]);
 
     const durationMs = performance.now() - t0;
@@ -1701,7 +1769,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         `conditionRules=${conditionRuleRows.length}, columnOverrides=${columnOverrideRows.length}, ` +
         `customFields=${customFieldRows.length}, customFieldValues=${customFieldValueRows.length}, ` +
         `sequencers=${sequencerRows.length}, clientSequencers=${clientSequencerRows.length}, ` +
-        `setupState=${setupStateRows.length})`,
+        `setupState=${setupStateRows.length}, oooHealth=${oooHealthRows.length})`,
     );
 
     return {
@@ -1721,6 +1789,15 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
           toClientSequencerRecord(row, setupById.get(String(row.id))),
         );
       })(),
+      oooRoutingHealth: (oooHealthRows as Record<string, unknown>[]).map((row) => ({
+        client_id: String(row.client_id),
+        routed: Number(row.routed),
+        live: Number(row.live),
+        awaiting: Number(row.awaiting),
+        hasGeneral: Boolean(row.has_general),
+        unrecoverable: Number(row.unrecoverable),
+        campaigns_seen_at: toIsoString(row.campaigns_seen_at),
+      })),
     };
   }
 
@@ -3253,7 +3330,10 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         WHERE client_id = ${clientId}
         ORDER BY is_active DESC, routing_key ASC, created_at DESC
       `),
-      tx.select({ id: schema.campaigns.id, name: schema.campaigns.name })
+      // `status` is selected but never filtered on: a campaign that has stopped is still the rule's
+      // current target, and hiding it would turn a broken rule into an empty dropdown with no
+      // explanation. The editor names the status instead.
+      tx.select({ id: schema.campaigns.id, name: schema.campaigns.name, status: schema.campaigns.status })
         .from(schema.campaigns)
         .where(and(
           eq(schema.campaigns.clientId, clientId),
@@ -3275,7 +3355,11 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
         created_at: toIsoString(r.created_at) ?? "",
         updated_at: toIsoString(r.updated_at) ?? "",
       })),
-      campaigns: campaignRows.map((c) => ({ id: String(c.id), name: String(c.name) })),
+      campaigns: campaignRows.map((c) => ({
+        id: String(c.id),
+        name: String(c.name),
+        status: c.status as CampaignStatus,
+      })),
       recoveredFollowups: recovered,
     };
   }

@@ -91,6 +91,7 @@ function makeOverview(clients: unknown[]) {
     clientCustomFieldValues: [],
     sequencers: [],
     clientSequencers: [],
+    oooRoutingHealth: [],
   };
 }
 

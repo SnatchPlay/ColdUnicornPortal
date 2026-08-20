@@ -34,7 +34,7 @@ import { SEQUENCER_TITLES, WorkspacePicker, type SequencerKey } from "./workspac
 // two vendors do not agree (Aimfox has `labels`, Bison has `tags`), so reading the object's order
 // made the list reshuffle between clients — two cards side by side could not be compared row by
 // row. Anything the workflows report that is not listed here is appended, never dropped.
-const STEP_ORDER = ["key", "webhooks", "labels", "tags", "campaigns"] as const;
+const STEP_ORDER = ["key", "webhooks", "labels", "tags", "campaigns", "routing"] as const;
 
 const STEP_LABELS: Record<string, string> = {
   key: "API key",
@@ -42,6 +42,9 @@ const STEP_LABELS: Record<string, string> = {
   labels: "Labels",
   tags: "Tags",
   campaigns: "Campaigns",
+  // Reported by bison-workspace-setup, which fills an EMPTY routing rule and never re-points one an
+  // operator set. The live truth is the OOO routing section below — this is what the last run saw.
+  routing: "OOO routing",
 };
 
 // The outcome has to be readable as a word. Colour alone fails the contrast axis, fails colour
@@ -141,7 +144,7 @@ function stepTone(outcome: WorkspaceSetupStep["outcome"]): Tone {
  * exactly like a four-minute-old one — which is precisely the claim this section must not make,
  * given there is no scheduled drift check.
  */
-function describeChecked(value: string | null): { text: string; stale: boolean } | null {
+export function describeChecked(value: string | null): { text: string; stale: boolean } | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;

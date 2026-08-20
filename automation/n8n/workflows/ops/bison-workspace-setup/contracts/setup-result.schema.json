@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://coldunicorn.internal/n8n/ops/bison-workspace-setup/setup-result.schema.json",
   "title": "Bison workspace provisioning · result",
-  "description": "Response body of the webhook (responseMode: lastNode) and the return value of the sub-workflow. Also the shape persisted to client_sequencers.setup_state, minus `candidates`. Deliberately the same shape as the Aimfox result so the portal renders one component for both sequencers — the differences are `sequencer`, the id format of workspace_id, and that the tag step is called `tags` rather than `labels`. It must never contain an api_key: the gateway derives booleans and the key stays server-side (process doc, invariant 7).",
+  "description": "Response body of the webhook (responseMode: lastNode) and the return value of the sub-workflow. Also the shape persisted to client_sequencers.setup_state, minus `candidates`. Deliberately the same shape as the Aimfox result so the portal renders one component for both sequencers — the differences are `sequencer`, the id format of workspace_id, and that the tag step is called `tags` rather than `labels`. It must never contain an api_key: the gateway derives booleans and the key stays server-side (process doc, invariant 7). NOTE, pre-existing and unresolved: the LISTING response (Needs Selection's `resolution.listing` branch) does not conform to this schema and never has — it sends `client_id: null` against a `format: uuid`, `state: \"workspace_list\"` against an enum that does not contain it, and `steps: {}` against five required keys. It is a different message wearing the same envelope (WorkspaceSetupResult in view-contracts.ts admits it, this schema does not). Splitting it into its own contract is tracked separately; adding `routing` to steps.required in 2026-08 did not create the gap but does widen it.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,7 +24,7 @@
       "type": "boolean"
     },
     "state": {
-      "description": "configured = the whole canonical set is present. partial = some elements were missing (and were created unless dry_run). missing = the workspace resolved but nothing was wired. needs_selection = the workspace could not be resolved unambiguously and a human must choose. client_not_found = the client_id matched no client with an enabled connector — a caller error, reported out loud rather than allowed to end the run silently. Computed from key, webhooks and tags only, and campaigns stay out of it even though the workflow now creates them: a created campaign is a DRAFT with no sequence, so folding it in would let `configured` mean \"ready to send\" while nothing can send. OOO routing pointed at a draft fails silently — the FortumEnergia shape.",
+      "description": "configured = the whole canonical set is present. partial = some elements were missing (and were created unless dry_run). missing = the workspace resolved but nothing was wired. needs_selection = the workspace could not be resolved unambiguously and a human must choose. client_not_found = the client_id matched no client with an enabled connector — a caller error, reported out loud rather than allowed to end the run silently. Computed from key, webhooks and tags only, and campaigns stay out of it even though the workflow now creates them: a created campaign is a DRAFT with no sequence, so folding it in would let `configured` mean \"ready to send\" while nothing can send. OOO routing pointed at a draft fails silently — the FortumEnergia shape. Routing is excluded for the identical reason: a rule pointing at a draft is not a working rule, so folding it in would let `configured` mean \"out-of-office replies are being followed up\" while nothing can send.",
       "enum": [
         "configured",
         "partial",
@@ -97,7 +97,8 @@
         "key",
         "webhooks",
         "tags",
-        "campaigns"
+        "campaigns",
+        "routing"
       ],
       "properties": {
         "key": {
@@ -111,6 +112,10 @@
         },
         "campaigns": {
           "description": "The three OOO automation campaigns, created as DRAFTS (POST /api/campaigns with a name and type: reply_followup, then POST /api/campaigns/{id}/schedule). What was blocked was never the campaign — it was POST /api/campaigns/v1.1/{id}/sequence-steps, whose copy does not exist in a usable form (all three bodies on the old canvas are the same feminine-Polish text with a hardcoded {PANIEKAMILU} placeholder). That call is never made here: a manager writes the sequence and starts the campaign, and a draft with no sequence sends nothing. Each entry in `present` carries the vendor status in brackets — `OOO automation | general (draft)` — because the name alone reads identically for a campaign that is actually sending and one that never will be.",
+          "$ref": "#/$defs/step"
+        },
+        "routing": {
+          "description": "The three OOO routing rules (client_ooo_routing), one per routing_key: male, female, general. Provisioning fills an EMPTY rule and never re-points a full one — a rule aimed at a campaign Bison has stopped or completed is reported in `missing` with the note `existing rule kept`, not repaired, because re-pointing needs the campaign fixed at the vendor first and this workflow cannot tell a campaign that broke from one a manager stopped on purpose. That case is the majority in production: on 2026-08-19, 22 of the 25 active rules across 12 of 16 Active clients pointed at a campaign that could not send. A rule is only filled from a ROUTABLE campaign — active, launching or draft. `draft` counts as routable because that is the shape a new client's triple is born in; `completed` and `stopped` do not, because filling an empty rule with a dead campaign turns an honest `routing_missing` (visible, recoverable) into episodes that resolve and get dropped at the vendor. `present` uses the same routable test rather than `active`, so re-checking a client this workflow provisioned does not flip the step from `created` back to `missing` with nothing having changed. A duplicate campaign name yields NO target and blocks that key's rule — which of two identically named campaigns is live is not a question this workflow may guess at. This step is what the last run SAW; the live truth is the OOO routing section in the client drawer and the Clients grid's OOO column, both derived on read.",
           "$ref": "#/$defs/step"
         }
       }

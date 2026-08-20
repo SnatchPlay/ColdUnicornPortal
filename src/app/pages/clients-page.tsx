@@ -30,7 +30,7 @@ import type {
 } from "../types/core";
 import type { SequencerCredentialInput } from "../data/orm-gateway-contract";
 import { getCustomFieldSortValue } from "../lib/custom-field-sort";
-import type { ClientMetricsSummary, ClientsMetricsFullPayload, UserLite } from "../types/view-contracts";
+import type { ClientMetricsSummary, ClientsMetricsFullPayload, OooRoutingHealthRow, UserLite } from "../types/view-contracts";
 import {
   ClientDrawer,
   buildClientPatch,
@@ -893,6 +893,14 @@ export function ClientsPage() {
     return out;
   }, [sequencers, clientSequencers]);
 
+  // Derived OOO routing health, keyed by client (ADR-0015). The gateway omits clients with no active
+  // rule, so `get` returning undefined means "never configured" — a different state from 0/3, and
+  // the column colours them differently.
+  const oooHealthByClientId = useMemo<ReadonlyMap<string, OooRoutingHealthRow>>(
+    () => new Map((data?.oooRoutingHealth ?? []).map((row) => [row.client_id, row] as const)),
+    [data],
+  );
+
   // ── Derived per-client metrics (Phase 5C: summary path) ──────────────────────────────────────
 
   const metricsByClientId = useMemo<ReadonlyMap<string, ClientMetricsPack>>(() => {
@@ -1134,10 +1142,11 @@ export function ClientsPage() {
           metrics: projectMetricsToChannel(metrics, channelView),
           conditionPack,
           sequencerCreds: credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS,
+          oooHealth: oooHealthByClientId.get(client.id) ?? null,
         };
       }),
     );
-  }, [channelView, conditionPackByClientId, credsByClientId, managerById, metricsByClientId, scopedClients]);
+  }, [channelView, conditionPackByClientId, credsByClientId, managerById, metricsByClientId, oooHealthByClientId, scopedClients]);
 
   const customFieldById = useMemo(
     () => new Map(clientCustomFields.map((f) => [f.id, f] as const)),
@@ -1552,6 +1561,7 @@ export function ClientsPage() {
           canInviteUsers={canInviteUsers}
           canArchive={canArchiveClients}
           onArchived={() => { closeClient(); void refresh(); }}
+          onRoutingChanged={() => { void refresh(); }}
           onClose={closeClient}
           onSave={() => {
             void handleSave();

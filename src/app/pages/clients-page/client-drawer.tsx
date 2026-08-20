@@ -286,6 +286,9 @@ export interface ClientDrawerProps {
   canArchive: boolean;
   /** Called after a successful archive/restore: close the drawer and reload the page. */
   onArchived: () => void;
+  /** Re-fetch the page shell after an OOO routing rule changes — the grid's OOO column is
+   *  served by a separate aggregate and would otherwise show pre-fix counts until a reload. */
+  onRoutingChanged: () => void;
   /** The client's connector rows, already loaded by the page — carries setup_state (ADR-0018 §6). */
   sequencerCreds: ClientSequencerCreds;
   onClose: () => void;
@@ -321,6 +324,7 @@ export function ClientDrawer({
   canInviteUsers,
   canArchive,
   onArchived,
+  onRoutingChanged,
   sequencerCreds,
   onClose,
   onSave,
@@ -726,7 +730,11 @@ export function ClientDrawer({
                   `client.auto_ooo_enabled`, not `draft.autoOooEnabled`: this section writes
                   immediately while the toggle above does not, so showing the draft value would let
                   it claim rules are inactive (or active) before the client row is saved. */}
-              <OooRoutingEditor clientId={client.id} autoOooEnabled={client.auto_ooo_enabled} />
+              <OooRoutingEditor
+                clientId={client.id}
+                autoOooEnabled={client.auto_ooo_enabled}
+                onRoutingChanged={onRoutingChanged}
+              />
 
               {LOST_REASON_STATUSES.includes(draft.status) && (
                 <label className="space-y-2 md:col-span-2">

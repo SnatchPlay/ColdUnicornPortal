@@ -119,6 +119,12 @@ as blocked by the third conflated a container with its content, and the cost of 
 provisioning left every new client three campaigns short, and OOO routing had nothing of its own to
 point at — which is how FortumEnergia's routing came to point at GIC's campaigns.
 
+**And a campaign nothing routes to is still three campaigns short.** Since 2026-08-19 the same run
+also fills the client's `client_ooo_routing` rules — see [invariant 10](#invariants) — because the
+wiring is the step everyone forgets, and forgetting it is invisible: a client with three campaigns
+and no rules records every out-of-office reply as `skipped / routing_missing` and looks, from the
+campaign list, exactly like a client that is working.
+
 **The sequence copy is still not ours to author.** All three `sequence-steps` bodies on the old
 canvas are byte-identical (1931 characters each), written in feminine Polish (`Pani`, `wróciła
 Pani`), and carry a hardcoded `{PANIEKAMILU}` placeholder. So the male/female split exists in the
@@ -168,11 +174,16 @@ while [ADR-0015](../../../adr/0015-sequencer-contacts-and-ooo-followups.md) and
 OOO campaign is `ooo_followup`. `type` is **not** in the sync's `ON CONFLICT` update list, so a row
 keeps whatever type it was born with, forever. A `nurture` row is invisible to
 `updateClientOooRouting`, which requires `type = 'ooo_followup'`
-([orm-gateway/index.ts:3146](../../../../supabase/functions/orm-gateway/index.ts#L3146)) — so a
+([orm-gateway/index.ts:3241](../../../../supabase/functions/orm-gateway/index.ts#L3241)) — so a
 freshly provisioned client would have three campaigns and an empty routing dropdown.
 
 So `Record` writes them itself, in the same statement as the connector row and the audit row, typed
-`ooo_followup` and `draft`. The ownership split is explicit and the two writers never touch the same
+`ooo_followup` and `draft`. Since 2026-08-19 a second CTE, `seeded`, does the mirror job for a
+campaign that already existed **at the vendor** and has no row here — with `on conflict do nothing`,
+never `do update`, because classifying a campaign this run did not create belongs to the sync. It is
+not optional: `bison-campaign-sync`'s `Get Active Clients` only walks clients whose status is
+`Active`, so for a client still in `Onboarding` nothing else would ever catalogue those campaigns,
+and the routing editor only offers rows that exist locally. The ownership split is explicit and the two writers never touch the same
 column:
 
 | Column | Owner |
@@ -211,25 +222,25 @@ So the duplication is in our catalogue, not in the client's workspace — which 
 finding, because a stale `active` campaign is something the portal will happily show and something
 OOO routing can be pointed at. Which is exactly what happened next.
 
-### FortumEnergia's OOO routing points at GIC's campaigns
+### FortumEnergia's OOO routing pointed at GIC's campaigns — CLOSED
 
-`client_ooo_routing` has exactly three rows whose campaign belongs to a different client than the
-routing itself, and all three are FortumEnergia → GIC (`950` general, `951` male, `952` female).
+`client_ooo_routing` had exactly three rows whose campaign belonged to a different client than the
+routing itself, all FortumEnergia → GIC (`950` general, `951` male, `952` female). Fortum had no OOO
+campaigns of its own, so whoever wired the routing picked from a list that was not scoped to the
+client — the same defect family as the Aimfox token that sat on Prac.Finansowa's row.
 
-It follows directly from the row above: Fortum has no OOO campaigns of its own, so whoever wired
-the routing picked from a list that was not scoped to the client. Eleven `pending` follow-ups for
-Fortum currently carry `routing_key = 'general'`.
+**Closed structurally, not by cleanup.** The table now carries
 
-Nothing has been sent. The branch that actually enrols people in
-[`ooo-enrol-followups`](../../../../automation/n8n/workflows/outreach/ooo-enrol-followups/workflow.json)
-reads its campaign from the ARM sheet keyed by Bison workspace id, not from `client_ooo_routing`;
-the Supabase branch is shadow-only in phase A and submits nothing
-([ADR-0017](../../../adr/0017-sheets-to-supabase-dual-write-transition.md)). So this is a loaded
-gun, not a fired one — it becomes live the moment phase B makes Supabase authoritative.
+```
+client_ooo_routing_campaign_same_client_fkey
+  FOREIGN KEY (campaign_id, client_id) REFERENCES campaigns(id, client_id)
+```
 
-This is the same defect family as the Aimfox token that sat on Prac.Finansowa's row: a
-client-scoped identifier chosen from an unscoped list. It is out of scope for provisioning to fix,
-and it is in scope for provisioning to have found.
+so a routing row naming another client's campaign cannot be inserted at all. Re-measured
+2026-08-19: **0 cross-client rows.** It is left here as a closed finding because it is why the
+routing writer added in the same release fills only from campaigns it has already matched to the
+client, and why the enrolment worker still carries its own `camp.client_id = cs.client_id`
+predicate — defence in depth on a fault that was live once.
 
 ### `DNC` is not in the canonical set either
 
@@ -251,13 +262,17 @@ and a name comparison would have created a seventeenth webhook here.
 | A manager presses **Check** | portal | provisioning runs in `dry_run` — reports, writes nothing |
 | A webhook is POSTed to the workflow | n8n | same two modes, driven by the payload's `dry_run` |
 
-Creating a client does **not** trigger provisioning. It was planned to and does not: `createClient`
-never calls `requestWorkspaceSetup` (the only caller is the drawer section). A new client's
-workspace usually does not exist at the vendor yet at the moment the portal row is created, so an
-automatic run would report `needs_selection` and teach operators to ignore the verdict. Someone
-presses the button once the workspace exists.
+Creating a client **does** trigger provisioning, for every workspace the manager picked on the form:
+[`clients-page.tsx` `handleSubmit`](../../../../src/app/pages/clients-page.tsx) calls `createClient`
+and then `requestWorkspaceSetup({ dryRun: false })` once per chosen sequencer, sequentially.
 
-What the **New client** form does instead is let the manager pick the workspace, and provision it on
+*(This paragraph used to say the opposite — "`createClient` never calls `requestWorkspaceSetup`" —
+while the section immediately below already described provisioning running on save. Corrected
+2026-08-19; the reasoning it carried, that an unresolvable workspace would teach operators to ignore
+the verdict, is still why the run is driven by an explicit workspace CHOICE rather than by the mere
+existence of a client row.)*
+
+What the **New client** form does is let the manager pick the workspace, and provision it on
 save. No API keys and no ids are typed: `bison-workspace-setup` mints a token and stores it,
 `aimfox-workspace-setup` re-reads the vendor's or mints one, and both resolve the workspace. The one
 thing a human holds that the workflows cannot derive is *which* workspace is this client, and only
@@ -399,6 +414,17 @@ outcome, so a failure at step 5 still leaves steps 1–4 recorded as done.
    has no sequence. Copy is business content and comes from the client-facing source of truth —
    this is the rule the old canvas broke by shipping the same feminine-Polish body into all three
    campaigns.
+10. **Provisioning fills an EMPTY routing rule and never re-points a full one.** Added 2026-08-19,
+   appended for the same reason as 9. A `client_ooo_routing` rule an operator set is theirs,
+   whatever its campaign's status: re-pointing needs the campaign fixed at the vendor first, and no
+   workflow can tell a campaign that broke from one a manager stopped on purpose. A rule aimed at a
+   campaign that cannot send is **reported** on `steps.routing` and left alone — that report is the
+   whole feature. Two corollaries. A rule is only filled from a campaign that could plausibly send
+   (`draft`, `launching`, `active`): filling an empty rule with a `completed` campaign would convert
+   an honest "not configured" into episodes that resolve, go `pending`, and are dropped at the
+   vendor — Gbbc's shape, three empty rules and three `completed` campaigns. And a duplicated
+   campaign name fills nothing: which of two identically named campaigns is live is not a question
+   a workflow may guess at.
 
 ## Data ownership
 
@@ -408,6 +434,8 @@ outcome, so a failure at step 5 still leaves steps 1–4 recorded as done.
 | what is wired, and when we last looked | `client_sequencers.setup_state`, `setup_checked_at` |
 | who ran provisioning and what happened | `integration_sync_runs` (`sync_type = 'workspace_setup'`) |
 | webhooks and labels/tags | the vendor — we hold no mirror of them beyond `setup_state` |
+| an OOO routing rule's first value | **provisioning**, once, into an empty slot (invariant 10) |
+| every later change to a routing rule | **the portal** — `updateClientOooRouting`, the drawer's OOO routing section |
 | a created campaign's `campaigns.type` | **provisioning**, written once so OOO routing can see it |
 | that campaign's `name`, `status`, counters | `bison-campaign-sync`, hourly |
 
@@ -494,6 +522,19 @@ one token per provisioning attempt.
   `setup_state`. Deliberately quiet: an absent connector is muted, not red, because 43 of 56 clients
   are EmailBison-only and a column that is mostly red stops being read. Red is reserved for a state
   a run actually reported as broken.
+- Clients page — the **OOO** column: `live/routed` for the client's active routing rules, where
+  `live` counts the ones whose campaign is `active`. Derived on read from `client_ooo_routing` +
+  `campaigns.status`, never cached into `setup_state` — the provisioning verdict is a snapshot of
+  the last time someone pressed Check, and the failure this catches happens months later, silently,
+  when a workspace's inboxes change and Bison stops the campaign. Three-way rather than the
+  Workspaces column's two, because the middle state is the common one and is genuinely different:
+  `2/3` means two of the client's out-of-office categories are still followed up. A client with auto
+  OOO off reads `—` and is muted, not red. A fraction and not a dot for a measured reason: on
+  2026-08-19 **no** Active client scored `3/3`, and a column that is entirely red stops being read.
+  The tooltip carries `max(campaigns.updated_at)`, because only `Active` clients are synced hourly.
+- Client drawer — the **OOO routing** section shows each rule's campaign status and warns when a rule
+  cannot send. It is the live truth and the place a broken rule is repaired; the `routing` step in
+  the card above is only what the last provisioning run saw.
 - Client drawer — the **Credentials & IDs** section, first in the drawer. Credentials and the
   provisioning verdict are one section on purpose: a key being present says nothing about whether
   the workspace is wired, so the two facts have to be read together. One card per sequencer, and

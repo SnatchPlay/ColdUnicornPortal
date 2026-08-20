@@ -122,6 +122,7 @@ it.)
 | Role scoping | [`lib/selectors.ts`](../src/app/lib/selectors.ts) — `scopeClients`, `scopeCampaigns`, `scopeLeads`, `scopeReplies`, `scopeCampaignStats`, `scopeDailyStats`, `scopeDomains`, `scopeEmailAccounts` (mailboxes via `domain → client`), `scopeInvoices`, `getLeadStage`, `getRoleLabel`, `isInternalAdmin` |
 | Client KPIs / view models | [`lib/client-view-models.ts`](../src/app/lib/client-view-models.ts) — `getClientKpis`, `getDailySentSeries`, `getPipelineCounts`, `getCampaignPerformance`, `getConversionRates`, `getClientLeadRows`, `formatCompact`, `PIPELINE_STAGES` |
 | Heavy aggregations (DoD / 3-DoD / WoW / MoM) | [`lib/client-metrics.ts`](../src/app/lib/client-metrics.ts) — `createClientMetrics`, `createClientMetricsFromSummary`, `projectMetricsToChannel` (narrow a pack to EmailBison / Aimfox for the clients-grid channel switch), `sumInRange`, `valueByDayOffset`, `toRate`, `startOfWeek`, `startOfMonth` |
+| OOO routing health | [`lib/ooo-health.ts`](../src/app/lib/ooo-health.ts) — `OOO_LIVE_STATUSES`, `OOO_ROUTABLE_STATUSES`, `isOooLive`, `isOooRoutable`, `oooStatusNote`, `oooHealthRank`, `oooHealthWord`. **Never re-derive "is this OOO rule working"**: the Clients grid reads a server aggregate and the client drawer reads loaded campaigns, and the two disagreed the moment they were written separately. `live` (sending now) and `routable` (`active\|launching\|draft`, what provisioning may fill a rule from) are different questions — keep them apart. The SQL twin is the `oooRoutingHealth` aggregate in `loadClientsOverview`; the n8n twin is `ROUTABLE` in `bison-workspace-setup`. `unrecoverable` splits the dead rules by WHO fixes them — an archived campaign needs a human (Bison has no unarchive endpoint), a paused one is switched back on by `bison-ooo-campaign-revive` overnight |
 | Dashboard momentum + trend lines | [`lib/dashboard-momentum.ts`](../src/app/lib/dashboard-momentum.ts) — `linearRegression`, `DASHBOARD_CHART_TOOLTIP` |
 | Timeframes | [`lib/timeframe.ts`](../src/app/lib/timeframe.ts) — `TimeframeValue`, `TIMEFRAME_PRESETS`, `DEFAULT_TIMEFRAME_PRESET`, `createDefaultTimeframe`, `filterByTimeframe`, `resolveTimeframeBounds`, `getTimeframeLabel`, `normalizeTimeframePreset` (degrade a retired or bookmarked preset to the default — **never** switch on `timeframe.preset` yourself) |
 | Previous-period comparison range | [`pages/client-dashboard-page.tsx`](../src/app/pages/client-dashboard-page.tsx) — `makePreviousRange` (lives on the page, not in `lib/timeframe.ts`) |
@@ -167,6 +168,8 @@ Search here before writing any n8n tooling, contract or process document
   `providers/auth.tsx` — and the one documented exception, `lib/crm-integration.ts`
   ([ADR-0010](adr/0010-legacy-crm-integration.md)).
 - Re-declaring date helpers, percentage helpers, or chart tooltip styles. They exist.
+- A second answer to "is this OOO routing rule working". Use [`lib/ooo-health.ts`](../src/app/lib/ooo-health.ts);
+  the grid and the drawer already drifted apart once when each computed it inline.
 - A second lead drawer. Compose `LeadConversation` / `LeadMetaSection` / `LeadEditForm`.
 - A hard `DELETE` (or a second delete control) for clients, campaigns, leads, domains, invoices or
   mailboxes. The portal's delete is `setEntityArchived` + `archive-controls.tsx`

@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-00000000000b",
+  "workspace_id": "900011",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. `OOO automation | male` exists TWICE at the vendor, one active and one completed, while general and female exist once. Expected: no target and therefore no rule for `male` — which of the two is the live one is not a question this workflow may guess at, and guessing wrong routes a client's out-of-office replies into a dead campaign. steps.routing.error names the duplicated campaign; general and female are filled normally. This is the same rule steps.campaigns already applies: duplicates are reported, never resolved by creating more."
+}

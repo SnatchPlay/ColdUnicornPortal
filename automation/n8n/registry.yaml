@@ -295,6 +295,30 @@ workflows:
       excluded) and by executing the generated SQL twice against Postgres; type survives an update
       that moves status and both counters. Not yet deployed.
 
+  - id: bison-ooo-campaign-revive
+    name: "[OPS] Bison OOO campaigns · revive paused"
+    domain: ops
+    path: automation/n8n/workflows/ops/bison-ooo-campaign-revive
+    businessProcess: docs/reference/processes/outreach/ooo-followups.md
+    owner: automation
+    lifecycle: managed
+    status: planned
+    criticality: high
+    trigger: schedule
+    environments:
+      development:
+        remoteWorkflowId: null
+      production:
+        remoteWorkflowId: null
+    lastRepositorySync: 2026-08-20
+    lastValidation: >-
+      2026-08-20 built, never executed. The Bison endpoint surface was probed (GET/OPTIONS only):
+      /resume, /pause, /archive and /duplicate exist, /unarchive and /restore return 404, and
+      /campaigns/{id} allows no PATCH. Measured the same day: of 22 dead routed OOO campaigns, 3
+      were `paused` (revivable) and 19 `archived` (not). Needs one supervised run with
+      Resume Campaign disabled before it is activated — the write releases every contact queued
+      inside the campaign at once.
+
   - id: bison-campaign-daily-stats
     name: "Bison campaign daily stats"
     domain: ingestion

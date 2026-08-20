@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-00000000000c",
+  "workspace_id": "900012",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic, modelled on Gbbc as measured 2026-08-19: three OOO campaigns all `completed` at the vendor and NO routing rules at all. Expected: routing_rows = 0 and all three keys reported as `<key> — <name> is completed, not routed`. Filling them would be worse than leaving them empty — an empty rule parks episodes as skipped/routing_missing, which is visible and recoverable via recover_skipped_ooo_followups, whereas a rule pointing at a completed campaign resolves, marks episodes pending, and drops them at the vendor. A `draft` target IS routable: that is the shape a new client's triple is born in."
+}

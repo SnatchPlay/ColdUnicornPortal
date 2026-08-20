@@ -2,6 +2,12 @@ import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type 
 import { ExternalLink, Pencil } from "lucide-react";
 import { useDevRenderCount, useWhyDidYouRender } from "../../lib/react-profiler-dev";
 import type { SelectionStore } from "./selection-store";
+import type { OooRoutingHealthRow } from "../../types/view-contracts";
+import { oooHealthRank, oooHealthWord } from "../../lib/ooo-health";
+// Reused rather than formatDate: the stamp has to carry HOW OLD, not just a date. A six-week-old
+// status looks identical to a four-minute-old one otherwise — the argument describeChecked was
+// written for, and the same one this column has to make.
+import { describeChecked } from "./sequencer-connections";
 import type { ClientSequencerCreds } from "./client-drawer";
 import type { ClientSequencerRecord } from "../../types/core";
 import { SatisfactionHearts } from "../../components/satisfaction-hearts";
@@ -55,6 +61,8 @@ export interface ClientMegaRow {
   conditionPack: ReturnType<typeof evaluateClientConditions> | null;
   /** Connector rows for this client — carries setup_state for the provisioning column. */
   sequencerCreds: ClientSequencerCreds;
+  /** Derived OOO routing health (ADR-0015). Null when the client has no active routing rule. */
+  oooHealth: OooRoutingHealthRow | null;
 }
 
 export interface MegaSortState {
@@ -172,6 +180,18 @@ function provisioningRank(row: ClientSequencerRecord | null): number {
       return 3;
   }
 }
+
+// Indexed by oooHealthRank. Ranks 1 (auto OOO off) and 2 (never configured) are muted rather than
+// red for the reason the Workspaces column records: a deliberate configuration is not a fault, and a
+// column that is mostly red stops being read.
+const OOO_RANK_TONES = [
+  "border-emerald-400/40 bg-emerald-500/15 text-emerald-100", // 0 · covered, and every rule sending
+  "border-white/15 bg-white/5 text-white/40",                 // 1 · auto OOO off
+  "border-white/15 bg-white/5 text-white/40",                 // 2 · no rules at all
+  "border-amber-400/40 bg-amber-500/15 text-amber-100",       // 3 · setup unfinished: no general fallback, or not sending yet
+  "border-amber-400/40 bg-amber-500/15 text-amber-100",       // 4 · some rules dead
+  "border-rose-400/40 bg-rose-500/15 text-rose-100",          // 5 · nothing can send
+];
 
 function ProvisioningMark({ letter, row }: { letter: string; row: ClientSequencerRecord | null }) {
   // Two states by request: green = wired and working, muted = anything else. Note this drops the
@@ -365,6 +385,60 @@ function buildColumns(): MegaColumn[] {
     // the only reason to sort this column at all.
     sortValue: (row) =>
       provisioningRank(row.sequencerCreds.emailbison) + provisioningRank(row.sequencerCreds.aimfox),
+  });
+  out.push({
+    id: "ooo_routing",
+    group: "basic",
+    sub: "Basic",
+    label: "OOO",
+    width: 52,
+    minWidth: 40,
+    align: "center",
+    defaultDirection: "asc",
+    // The agency asked for two sweeps, and neither is served by opening 56 drawers: "are the three
+    // OOO campaigns switched on before the first regular campaign runs?" and "which clients' OOO
+    // campaigns stopped working this month?". Both are `live/routed` read down a column.
+    //
+    // Colour is three-way rather than the two ProvisioningMark settled on, because the middle state
+    // here is the common one and is genuinely different: 2/3 means two of the client's out-of-office
+    // categories still get followed up. Amber says "partly broken", not "unknown".
+    render: (row) => {
+      const health = row.oooHealth;
+      const autoOoo = Boolean(row.client.auto_ooo_enabled);
+      const rank = oooHealthRank(health, autoOoo);
+      // Tone comes off the same rank the sort uses, so "how bad is this" has one definition rather
+      // than a ternary chain that can disagree with the ordering. Three colours against six ranks is
+      // deliberate — colour answers how bad, the tooltip answers what to do about it.
+      const mark = (
+        <span
+          className={cn(
+            "inline-flex h-4 min-w-8 items-center justify-center rounded border px-[3px] text-[9px] font-bold tabular-nums",
+            OOO_RANK_TONES[rank],
+          )}
+        >
+          {health ? `${health.live}/${health.routed}` : "—"}
+        </span>
+      );
+      // A client with no rules has nothing a tooltip can add, and this table renders ~50 rows where
+      // the ui <Tooltip> self-wraps a provider (see lead-crm-table.tsx) — skipping the empty case
+      // drops two thirds of them.
+      if (!health) return mark;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{mark}</TooltipTrigger>
+          <TooltipContent>
+            <span className="text-xs">
+              {oooHealthWord(health, autoOoo)}
+              <br />
+              {/* Only Active clients are synced hourly, so the stamp is not decoration: a client
+                  still onboarding shows the statuses of whenever anyone last looked. */}
+              Campaign statuses as of {describeChecked(health.campaigns_seen_at)?.text ?? "never"}
+            </span>
+          </TooltipContent>
+        </Tooltip>
+      );
+    },
+    sortValue: (row) => oooHealthRank(row.oooHealth, Boolean(row.client.auto_ooo_enabled)),
   });
   out.push({
     id: "inboxes",

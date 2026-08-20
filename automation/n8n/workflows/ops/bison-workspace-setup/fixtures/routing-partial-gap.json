@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-00000000000a",
+  "workspace_id": "900010",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. The mixed case, and the one that proves the two halves of the rule do not interfere: `general` already routes to an active campaign, `male` routes to a stopped one, `female` has no rule at all. Expected: exactly ONE row written, for `female`. `general` is reported in steps.routing.present, `male` stays in missing as `existing rule kept` and is NOT re-pointed, `female` appears in created. All three campaigns already exist at the vendor and are seeded into public.campaigns by the `seeded` CTE with `on conflict do nothing` — provisioning did not create them, so it must not force their type either."
+}

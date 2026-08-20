@@ -1,0 +1,7 @@
+{
+  "client_id": "31111111-0000-4000-a000-000000000008",
+  "workspace_id": "900008",
+  "dry_run": false,
+  "requested_by": "22222222-0000-4000-a000-000000000001",
+  "_fixture": "Synthetic. The onboarding shape this feature exists for: the workspace resolves, the OOO triple is absent, and the client has no client_ooo_routing rows at all. Expected: three campaigns created as drafts, catalogued as ooo_followup, and three routing rules written by the Record statement's `routed` CTE — steps.routing.outcome=created, present empty, created lists all three keys pointing at a (draft) campaign. state stays `partial` or `configured` on the key/webhooks/tags trio alone: routing to a draft is not a working route, so it must not be able to turn the verdict green."
+}

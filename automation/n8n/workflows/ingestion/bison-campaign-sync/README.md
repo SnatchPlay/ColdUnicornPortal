@@ -40,7 +40,7 @@ campaign was therefore ingested misclassified, one of two ways:
 
 | Vendor `type` | Landed as | Consequence |
 |---|---|---|
-| `reply_followup` | `nurture` | invisible to the OOO routing editor, which requires `type = 'ooo_followup'` ([orm-gateway/index.ts:3146](../../../../../supabase/functions/orm-gateway/index.ts#L3146)) |
+| `reply_followup` | `nurture` | invisible to the OOO routing editor, which requires `type = 'ooo_followup'` ([orm-gateway/index.ts:3325](../../../../../supabase/functions/orm-gateway/index.ts#L3325)) |
 | `outbound`, or anything unmapped | **`outreach`** | the one type clients can see |
 
 The second is not hypothetical. **25** OOO campaigns were typed `outreach`, so nine clients could
@@ -75,7 +75,7 @@ still the wrong default for a *non*-OOO campaign of an unrecognised type.
 | 2 | the Bison fetch continues on error | one client's failure is skipped silently; nothing records which. A revoked key yields zero campaigns, which is indistinguishable from a client that has none — the run reports success either way |
 | 3 | no `integration_sync_runs` row | this workflow failed **every run for days** and nothing noticed — see the incident in the process doc |
 | 4 | `typeMap[c.type] \|\| 'outreach'` — the fallback is the **client-visible** type | an unrecognised Bison campaign type is exposed to the client by default. `statusMap` falls back to `draft`, the conservative direction; this one falls the other way. OOO campaigns no longer depend on it (they match by name first), so this is now about everything else. `nurture` is the right default |
-| 5 | `positive_responses` is overwritten hourly from `c.interested` | the metrics catalogue calls it a user-editable lifetime counter and the gateway accepts a patch for it ([orm-gateway/index.ts:395](../../../../../supabase/functions/orm-gateway/index.ts#L395)), so an edit made in the portal survives at most one hour |
+| 5 | `positive_responses` is overwritten hourly from `c.interested` | the metrics catalogue calls it a user-editable lifetime counter and the gateway accepts a patch for it ([orm-gateway/index.ts:397](../../../../../supabase/functions/orm-gateway/index.ts#L397)), so an edit made in the portal survives at most one hour |
 | 6 | `Upsert Campaigns` has no `onError` and closes the loop back to `Split in Batches` | a SQL error on one client stops the remaining clients being synced in that run |
 | 7 | no removal path | a campaign deleted at the vendor keeps its row and its last status forever — this is how Bent Iron PL showed six OOO campaigns where workspace 73 has three |
 

@@ -368,12 +368,19 @@ routing rows are still wrong and the constraint is still missing.
    the partial unique `uq_client_ooo_routing_active (client_id, routing_key) WHERE is_active` before
    ever reaching the foreign key, so the test was redone with `is_active = false`.
 
-**Still worth doing:** check that the portal's routing editor scopes its campaign list to the client.
-The constraint now makes a bad save fail loudly instead of silently succeeding, which is the
-important half — but a picker that offers another client's campaigns is still a trap.
+**~~Still worth doing~~ — checked 2026-08-19, the picker was never the trap.** The routing editor's
+campaign list comes from `loadClientOooRouting`, whose query is
+`campaigns WHERE client_id = <client> AND type = 'ooo_followup' AND archived_at IS NULL`
+([orm-gateway/index.ts:3325](../../../supabase/functions/orm-gateway/index.ts#L3325)), and the write
+path re-checks the same three predicates at the contract boundary. Whatever produced the three rows,
+it was not this editor. Re-measured the same day: 0 cross-client rows.
 
 **Still true:** FortumEnergia has no OOO campaigns of its own. Its episodes stay parked until someone
-creates them in Bison and configures routing.
+creates them in Bison and configures routing — and since 2026-08-19 provisioning creates the triple
+*and* fills the empty routing rules in one run, so that is now one button rather than two jobs. It
+will not fill a rule from a campaign that is `completed` or `stopped`, so a client in Gbbc's shape
+(three dead campaigns, no rules) stays honestly unrouted rather than gaining three rules that cannot
+send.
 
 ### B6 · `aimfox-premql-to-pdca` — 500 on blacklist — fixed 2026-08-19 {#b6}
 
@@ -646,7 +653,7 @@ only.** Of the 478 leads carrying an `origin_reply_id`:
 
 So nothing is lost and there is nothing for n8n to backfill: the body is in Supabase, linked in both
 directions, and the gateway **already** left-joins `replies` for `reply_count` / `last_reply_at` in
-all three lead queries ([orm-gateway/index.ts:2263](../../../supabase/functions/orm-gateway/index.ts#L2263)
+all three lead queries ([orm-gateway/index.ts:2387](../../../supabase/functions/orm-gateway/index.ts#L2387)
 and the two siblings). The portal already prefers `replies` and falls back to `reply_text` in every
 consumer — [client-view-models.ts:195](../../../src/app/lib/client-view-models.ts#L195),
 [leads-page.tsx:493](../../../src/app/pages/leads-page.tsx#L493),

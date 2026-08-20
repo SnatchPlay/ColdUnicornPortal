@@ -11,6 +11,7 @@
 import type {
   AppRole,
   CampaignRecord,
+  CampaignStatus,
   ClientCustomFieldRecord,
   ClientCustomFieldValueRecord,
   ClientRecord,
@@ -275,6 +276,53 @@ export interface ClientsOverviewPayload {
   sequencers: SequencerRecord[];
   /** Per-client sequencer credentials. RLS-scoped: manager-own/admin; empty for client role. */
   clientSequencers: ClientSequencerRecord[];
+  /**
+   * Derived OOO routing health, one row per client that has at least one ACTIVE routing rule
+   * (ADR-0015). A client with no rules is absent from the array, not a zero row — "never configured"
+   * and "configured and broken" are different states and the column colours them differently.
+   *
+   * Counts RULES, not campaigns: `bison-campaign-sync` has no removal path, so a workspace can hold
+   * `ooo_followup` rows for campaigns that no longer exist at the vendor (Bent Iron PL has three).
+   * Counting campaigns would score those green.
+   */
+  oooRoutingHealth: OooRoutingHealthRow[];
+}
+
+/**
+ * One client's OOO routing health, computed server-side as a plain aggregate (the FACTS/INTERPRETATION
+ * split at the top of this file: the counts are facts, the tone and the verdict are the table's).
+ */
+export interface OooRoutingHealthRow {
+  client_id: string;
+  /** Active rules — 0..3, capped by the partial unique index on (client_id, routing_key). */
+  routed: number;
+  /** Of those, the ones whose campaign is sending now. */
+  live: number;
+  /**
+   * Of those, the ones whose campaign is routable but not yet sending (`draft` / `launching`).
+   * Separated from `live` because it is the expected state right after provisioning and needs a
+   * different person than a `stopped` campaign does. `routed - live - awaiting` is the dead count.
+   */
+  awaiting: number;
+  /**
+   * Whether the `general` fallback rule is one of them. Carried because the counts cannot express
+   * coverage: `resolve_ooo_routing` falls back to `general` for every key without a rule of its own,
+   * so one live `general` rule covers a client and one live `male` rule does not — and both are 1/1.
+   */
+  hasGeneral: boolean;
+  /**
+   * Of the dead rules, the ones no automation can repair — the campaign is archived at the vendor
+   * (`completed` locally) and Bison exposes no way to unarchive it. The rest are merely paused
+   * (`stopped` locally) and `bison-ooo-campaign-revive` switches them back on the next morning.
+   * The split is the difference between "someone must act today" and "already handled".
+   */
+  unrecoverable: number;
+  /**
+   * `max(campaigns.updated_at)` over the routed campaigns — the freshness stamp. It matters because
+   * `bison-campaign-sync` only walks clients with `status = 'Active'`, so a client in `Onboarding`
+   * carries statuses nobody has refreshed. Null when the timestamp is unreadable.
+   */
+  campaigns_seen_at: string | null;
 }
 
 /**
@@ -910,8 +958,15 @@ export interface TablePreferencesPayload {
 export interface ClientOooRoutingPagePayload {
   clientId: string;
   routes: ClientOooRoutingRecord[];
-  /** `campaigns.type = 'ooo_followup'` for this client — the only valid routing targets. */
-  campaigns: Array<{ id: string; name: string }>;
+  /**
+   * `campaigns.type = 'ooo_followup'` for this client — the only valid routing targets.
+   *
+   * `status` rides along because a routing rule pointing at a campaign that is not `active` is the
+   * agency's most common OOO failure and is invisible from the name alone: 22 of the 25 active
+   * rules in production on 2026-08-19 pointed at a `completed` or `stopped` campaign, and every one
+   * of them read as correctly configured. The editor renders it; nothing routes on it.
+   */
+  campaigns: Array<{ id: string; name: string; status: CampaignStatus }>;
   /** `null` on a plain read; a count on a mutation. */
   recoveredFollowups: number | null;
 }
