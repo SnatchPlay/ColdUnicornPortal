@@ -382,6 +382,46 @@ will not fill a rule from a campaign that is `completed` or `stopped`, so a clie
 (three dead campaigns, no rules) stays honestly unrouted rather than gaining three rules that cannot
 send.
 
+### B9 · A hand-written `If` with no `conditions.options` kills the run — fixed 2026-08-21 {#b9}
+
+`bison-ooo-campaign-revive` (`1NNq86xVXbWkEnnF`) failed on its **first ever fire**, 2026-08-21
+06:40 UTC, execution 81115:
+
+```
+Needs Resume?  —  Cannot read properties of undefined (reading 'caseSensitive')
+```
+
+Not a logic bug and not a Bison problem. The `If` node's `parameters.conditions` carried
+`combinator` and `conditions` but **no `options`** — the sibling block that holds `caseSensitive`,
+`typeValidation` and the filter `version`. `IfV2` reads `options.caseSensitive` unguarded, so it
+throws on the *first item*, before any condition is evaluated. The n8n UI always writes that block;
+a workflow authored as JSON by an agent does not, and the artifact looks perfectly valid on disk —
+`pnpm n8n:validate` passed it, and so did every review.
+
+Nothing ran and nothing was written: `Resume Campaign` was never reached, `Record Run` was never
+reached, and `integration_sync_runs where sync_type = 'ooo_campaign_revive'` is empty. The
+classification upstream was correct — 21 campaigns read, 18 `archived` → `cannot`, and UniTalk's
+`606` / `607` / `608` `paused` → `resume`, 368 contacts queued, the number the manifest predicted.
+
+The same defect was live in **two** other artifacts, found by auditing every `if`/`filter`/`switch`
+in the repository:
+
+| Workflow | Node | Blast radius |
+|---|---|---|
+| `bison-blacklist-add` (`bEB3aOHEq2lEpubp`, active) | `tag != Not Interested (domain path)` | the domain limb aborted on **every** run, so `Domain Blacklist ID` was never written back to Sheets. Compounds [B2](#b2) — the same limb, a second reason to die |
+| `bison-workspace-setup` (`c82kKnHaREUMvPBR`) | `Needs Schedules?` | not yet in service |
+
+> **Deployed 2026-08-21** to both active workflows via `pnpm n8n:deploy --nodes`, one node each.
+> Drift 0 on both. `bison-workspace-setup` fixed in the artifact only.
+>
+> **Guarded.** [`scripts/n8n/validate.mjs`](../../../scripts/n8n/validate.mjs) now raises
+> `structure/filter-options` (error) for any `if`/`filter`/`switch` whose `conditions` lacks
+> `options.caseSensitive`, `switch` rule groups included. It runs in CI, so this class cannot be
+> deployed again.
+>
+> **Still owed:** the revive workflow has *still* never completed a run. The 2026-08-22 06:40 UTC
+> fire is the first real verification — watch `integration_sync_runs`.
+
 ### B6 · `aimfox-premql-to-pdca` — 500 on blacklist — fixed 2026-08-19 {#b6}
 
 `s0GqDtCzyLAvVnm1` — **12 failures / 116 runs.** `Add company to blacklist` returns

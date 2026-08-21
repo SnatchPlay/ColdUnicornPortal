@@ -11,10 +11,13 @@ owner: automation
 # that (max_emails_per_day is 1000 on all three). The lever, if it is ever needed, is the campaign's
 # own daily cap; this workflow deliberately has none.
 #
-# It has still never EXECUTED. Watch the first run: integration_sync_runs where
-# sync_type = 'ooo_campaign_revive'.
+# It has still never COMPLETED a run. The first fire, 2026-08-21 06:40 UTC (execution 81115), died at
+# `Needs Resume?` on a missing `conditions.options` — before the resume, before the audit row. The
+# node was fixed and re-deployed the same day and CI now rejects that shape
+# (defect-backlog B9), but nothing has been proved end to end yet. Watch the next run:
+# integration_sync_runs where sync_type = 'ooo_campaign_revive'.
 lifecycle: managed
-status: active            # created and ACTIVATED 2026-08-20; first fire 2026-08-21 06:40 UTC
+status: active            # created and ACTIVATED 2026-08-20; first fire 2026-08-21 06:40 UTC failed (B9)
 criticality: high         # resumes a campaign, which sends real email to real people
 
 businessProcess:

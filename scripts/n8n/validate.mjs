@@ -130,6 +130,30 @@ function validateStructure(workflow, label) {
     }
   }
 
+  // A hand-written If/Filter/Switch usually omits `conditions.options` — the UI always writes it, an
+  // agent rarely does. n8n does not default it: the node reads options.caseSensitive unguarded and
+  // dies with "Cannot read properties of undefined (reading 'caseSensitive')" on the FIRST item, so
+  // the whole workflow fails at run time while looking perfectly valid on disk.
+  // (bison-ooo-campaign-revive, execution 81115, 2026-08-21.)
+  const FILTER_NODES = new Set([
+    "n8n-nodes-base.if",
+    "n8n-nodes-base.filter",
+    "n8n-nodes-base.switch",
+  ]);
+  for (const node of workflow.nodes ?? []) {
+    if (!FILTER_NODES.has(node.type ?? "")) continue;
+    const groups = node.type === "n8n-nodes-base.switch"
+      ? (node.parameters?.rules?.values ?? []).map((rule) => rule?.conditions)
+      : [node.parameters?.conditions];
+    for (const conditions of groups) {
+      if (!conditions || typeof conditions !== "object") continue;
+      if (conditions.options?.caseSensitive === undefined) {
+        push("error", "structure/filter-options", label,
+          `Node "${node.name}" has conditions without \`conditions.options\` — n8n throws "Cannot read properties of undefined (reading 'caseSensitive')" at run time.`);
+      }
+    }
+  }
+
   const TRIGGERS = /(\.webhook|Trigger$|\.executeWorkflowTrigger|\.scheduleTrigger|\.cron|\.emailReadImap|\.formTrigger)/;
   if (!(workflow.nodes ?? []).some((node) => TRIGGERS.test(node.type ?? ""))) {
     push("warning", "structure/no-trigger", label, "No trigger node — this workflow cannot start on its own.");

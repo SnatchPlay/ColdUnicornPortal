@@ -967,7 +967,13 @@
               },
               "rightValue": "Not Interested"
             }
-          ]
+          ],
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
         },
         "options": {
           "ignoreCase": true

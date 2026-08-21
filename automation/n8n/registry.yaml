@@ -245,8 +245,13 @@ workflows:
         remoteWorkflowId: null
       production:
         remoteWorkflowId: bEB3aOHEq2lEpubp
-    lastRepositorySync: 2026-08-15
-    lastValidation: 2026-08-15 imported; scanner clean, 0 credential refs in the graph
+    lastRepositorySync: 2026-08-21
+    lastValidation: >-
+      2026-08-15 imported; scanner clean, 0 credential refs in the graph.
+      2026-08-21 `tag != Not Interested (domain path)` had no `conditions.options`, so the domain
+      limb threw on every run and `Domain Blacklist ID` was never written back to Sheets — the same
+      defect as bison-ooo-campaign-revive (defect-backlog B9), found by auditing every
+      if/filter/switch in the repository. One node re-deployed, drift 0.
 
   # Ops. Bound as settings.errorWorkflow on every managed workflow above.
   - id: automation-failure-recorder
@@ -310,7 +315,7 @@ workflows:
         remoteWorkflowId: null
       production:
         remoteWorkflowId: 1NNq86xVXbWkEnnF
-    lastRepositorySync: 2026-08-20
+    lastRepositorySync: 2026-08-21
     lastValidation: >-
       2026-08-20 built, never executed. The Bison endpoint surface was probed (GET/OPTIONS only):
       /resume, /pause, /archive and /duplicate exist, /unarchive and /restore return 404, and
@@ -325,6 +330,12 @@ workflows:
       credential of bison-workspace-setup's Record node) and ACTIVATED at the owner's direction,
       knowing the first run releases 368 contacts at once with no vendor-side pacing. The export
       round-tripped byte-identical. First fire: 2026-08-21 06:40 UTC — nothing runs today.
+      2026-08-21 that first fire FAILED (execution 81115): `Needs Resume?` carried no
+      `conditions.options`, so IfV2 threw "Cannot read properties of undefined (reading
+      'caseSensitive')" on the first item — before the resume and before the audit row, leaving
+      integration_sync_runs empty. Everything upstream was correct: 21 read, 18 archived, UniTalk's
+      606/607/608 paused with 368 queued. One node re-deployed the same day, drift 0; CI now rejects
+      the shape (structure/filter-options). Still never completed a run — see defect-backlog B9.
 
   - id: bison-campaign-daily-stats
     name: "Bison campaign daily stats"
@@ -587,4 +598,4 @@ workflows:
       production:
         remoteWorkflowId: c82kKnHaREUMvPBR
     lastRepositorySync: 2026-08-20
-    lastValidation: 2026-08-07 read path proven on production (executions 70463-70467, dry_run only) — Kaizen/Bent Iron/GIC/Audytel configured, Fortum partial (no OOO campaigns at all); canon measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16). Iteration 2 (write half) deployed the same day; not yet run with dry_run:false. 2026-08-08 gained an UNAUTHENTICATED webhook trigger at the owner's direction (knownViolations, review 2026-11-30), activated and proven live — executions 70751/70752/70753 confirmed the fail-safe default, a string 'false', and state client_not_found; after the 2026-08-08 merge a further dry run returned recorded:true 2026-08-20 the OOO routing half deployed surgically to c82kKnHaREUMvPBR (6 nodes updated, `Recover Parked` added with the Postgres credential copied from the live `Record` node, `Record` rewired through it), with post-write verification that no untargeted node, edge or failure posture moved. The artifact was re-exported afterwards, which also reconciled the long-standing `Needs Schedules?` typeVersion drift to what the instance actually runs. Still never executed with dry_run:false, so `status` stays `planned`.
+    lastValidation: 2026-08-07 read path proven on production (executions 70463-70467, dry_run only) — Kaizen/Bent Iron/GIC/Audytel configured, Fortum partial (no OOO campaigns at all); canon measured read-only across 16 Active workspaces (webhooks 16/16 both, preMQL 16/16, OOO 16/16, MQL 7/16). Iteration 2 (write half) deployed the same day; not yet run with dry_run:false. 2026-08-08 gained an UNAUTHENTICATED webhook trigger at the owner's direction (knownViolations, review 2026-11-30), activated and proven live — executions 70751/70752/70753 confirmed the fail-safe default, a string 'false', and state client_not_found; after the 2026-08-08 merge a further dry run returned recorded:true 2026-08-20 the OOO routing half deployed surgically to c82kKnHaREUMvPBR (6 nodes updated, `Recover Parked` added with the Postgres credential copied from the live `Record` node, `Record` rewired through it), with post-write verification that no untargeted node, edge or failure posture moved. The artifact was re-exported afterwards, which also reconciled the long-standing `Needs Schedules?` typeVersion drift to what the instance actually runs. Still never executed with dry_run:false, so `status` stays `planned`. 2026-08-21 `Needs Schedules?` was found to carry no `conditions.options` — the artifact was fixed but deliberately NOT deployed, because this workflow is not in service yet (defect-backlog B9).
