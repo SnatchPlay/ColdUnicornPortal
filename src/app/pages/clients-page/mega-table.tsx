@@ -110,7 +110,7 @@ interface MegaColumn {
    * lead counts (both channels have their own), "aimfoxOnly" for the daily_stats bands, which are
    * already EmailBison and are only swapped in the Aimfox view. Declared here rather than
    * re-derived from metric keys so that splitting one more metric cannot leave a cell tinted
-   * against a number it no longer shows. See `stripProjectedConditionKeys`.
+   * against a number no rule was evaluated on. See `retargetProjectedConditionKeys`.
    */
   projected?: "always" | "aimfoxOnly";
   /** Render the cell content (without condition wrapper). */
@@ -920,35 +920,26 @@ const AIMFOX_DOD_KIND: Partial<Record<DodCellKind, DodCellKind>> = {
 };
 
 /**
- * In a single-channel view a neutral metric cell shows that channel's number, while the condition
- * rules keep being evaluated on the blended pack (their thresholds — min_sent, the KPIs — are
- * contract targets on total/email volume, so re-pointing them at one channel would change what
- * every rule means). Tinting a projected cell would therefore colour a number that is not on
- * screen, so drop the per-bucket binding for every cell the projection rewrites. The plain
- * `conditionKey` path (Basic columns, custom fields) is untouched — those values never move.
+ * Point a projected cell's condition binding at the rules that judge the number it now shows.
  *
- * The one exception is the DoD band in the LinkedIn view: there the projection swaps in the Aimfox
- * numbers, and those have rules of their own on their own surfaces. Re-point rather than strip, so
- * the LinkedIn view colours the same cells the Both view's "(Aimfox)" mirror does — otherwise the
- * thresholds would exist but be invisible to anyone working in the LinkedIn view.
+ * The 3-DoD / WoW / MoM bands need nothing here: `clients-page.tsx` evaluates those three bands on
+ * the projected rows (`withChannelLeadBands`), so `td3:{bucket}:{metric}` and friends already hold
+ * the selected channel's verdict. The bucket bindings therefore survive the channel switch — until
+ * 2026-08-21 they were stripped instead, which is why the 3-DoD columns lost every colour outside
+ * the Both view.
+ *
+ * The DoD band is the one that must be re-pointed: the LinkedIn view swaps in Aimfox schedule/sent,
+ * and those have rules of their own on their own surfaces (`clients_dod_aimfox_*`) rather than the
+ * `min_sent` contract the Bison band is judged by. Re-pointing makes the LinkedIn view colour the
+ * same cells the Both view's "(Aimfox)" mirror does.
+ *
+ * The plain `conditionKey` path (Basic columns, custom fields) is untouched — those values never move.
  */
-function stripProjectedConditionKeys(col: MegaColumn, channelView: ChannelView): MegaColumn {
+function retargetProjectedConditionKeys(col: MegaColumn, channelView: ChannelView): MegaColumn {
   if (!isProjectedCell(col, channelView)) return col;
-  const next = { ...col };
-  const aimfoxKind = next.dodKind ? AIMFOX_DOD_KIND[next.dodKind] : undefined;
-  if (aimfoxKind && channelView === "aimfox") {
-    next.dodKind = aimfoxKind;
-  } else {
-    delete next.dodBucket;
-    delete next.dodKind;
-  }
-  delete next.wowBucket;
-  delete next.wowMetricKey;
-  delete next.td3Bucket;
-  delete next.td3MetricKey;
-  delete next.momBucket;
-  delete next.momMetricKey;
-  return next;
+  const aimfoxKind = col.dodKind ? AIMFOX_DOD_KIND[col.dodKind] : undefined;
+  if (aimfoxKind && channelView === "aimfox") return { ...col, dodKind: aimfoxKind };
+  return col;
 }
 
 function cellCondition(row: ClientMegaRow, col: MegaColumn): ConditionEvaluationResult | undefined {
@@ -1511,8 +1502,8 @@ function ClientsMegaTableImpl(props: ClientsMegaTableProps) {
           ? { ...withHearts, render: statusCellRender(onStatusChange) }
           : withHearts;
       const labelled = override?.label_override ? { ...editable, label: override.label_override } : editable;
-      const untinted = stripProjectedConditionKeys(labelled, channelView);
-      const homed = applySectionAssignment(untinted, overrideMap);
+      const retargeted = retargetProjectedConditionKeys(labelled, channelView);
+      const homed = applySectionAssignment(retargeted, overrideMap);
       return [{ col: homed as MegaColumn, position: override?.position ?? null, naturalOrder: defaultIdx }];
     });
 

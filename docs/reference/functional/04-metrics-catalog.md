@@ -960,13 +960,23 @@ misread as "everything". A trailing channel qualifier the admin typed into the s
 stripped first — production has `section:Schedule → "Schedule (email)"`, which in the Aimfox view
 would otherwise read "Schedule (email) · AF" over LinkedIn numbers.
 
-**Conditions:** rules are always evaluated on the **blended** pack — their thresholds (`min_sent`,
-the KPIs) are contract targets on total/email volume, and a display switch must not change what a
-rule means. Because a projected cell would then be tinted against a number that is not on screen,
-the per-bucket condition binding is dropped outside `Both` (`stripProjectedConditionKeys` in
-`mega-table.tsx`). Basic-column and custom-field tints are unaffected — those values never move. In
-the EmailBison view the DoD band and the four reply-rate bands keep their tint, because the
-projection leaves those values alone.
+**Conditions:** a cell rule judges the number that is on screen. The three lead-derived bands the
+projection rewrites — 3-DoD, WoW, MoM — are therefore evaluated on the **projected** rows
+(`withChannelLeadBands` in `clients-page.tsx`), so the same rule with the same threshold simply
+takes the channel's count as its operand and the tint follows the channel switch. Everything else
+stays blended: the DoD band (re-pointed to the `clients_dod_aimfox_*` surfaces in the LinkedIn view
+by `retargetProjectedConditionKeys` in `mega-table.tsx`), the condition **context** — whose
+row-level keys feed rules whose operands are contract totals — and the Basic-column / custom-field
+tints, whose values never move.
+
+> **What this means for a two-channel client.** `clients.kpi_leads` is a single blended contract
+> target; there is no per-channel KPI. In the EmailBison view a client whose LinkedIn carries part
+> of the load is therefore graded on its email half against the whole KPI and reads redder than it
+> is in `Both`. That is the intended reading — "email alone is not carrying the target" — and
+> `Both` remains the view that answers "is this client on target overall". Introduce per-channel
+> KPI columns the day the agency contracts them per channel; until then the blended `Both` view is
+> the contractual one. *(Chosen 2026-08-21, after the 3-DoD columns had silently lost every colour
+> outside `Both` since the channel switch shipped.)*
 
 ---
 

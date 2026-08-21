@@ -241,9 +241,11 @@ describe("clients condition surfaces", () => {
     expect(cell?.className).toContain("cond-cell-danger");
   });
 
-  // A neutral metric cell shows the selected channel's number while the rules keep running on the
-  // blended pack, so the tint would judge a value that is not on screen. It is dropped instead.
-  it("drops metric-cell tint outside the Both view but keeps the Basic-column tint", async () => {
+  // A neutral metric cell shows the selected channel's number, and the 3-DoD / WoW / MoM bands are
+  // evaluated on that same projected number — same rule, same threshold, the channel's operand. So
+  // the tint follows the channel instead of disappearing with it (the bug Natalia reported on
+  // 2026-08-21: every 3-DoD column went grey in the Email view).
+  it("tints a metric cell against the projected channel number outside the Both view", async () => {
     const td3Rule = makeConditionRule({
       key: "three_dod_total",
       name: "3-DoD TOTAL",
@@ -251,7 +253,7 @@ describe("clients condition surfaces", () => {
       metric_key: "three_dod_total",
       column_key: "three_dod_total",
       branches: [
-        { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 100 } }, label: "Too many", message: "Too many." },
+        { severity: "danger", when: { left: { metric: "value" }, op: "gte", right: { value: 70 } }, label: "Too many", message: "Too many." },
       ],
     });
     const inboxesRule = makeConditionRule({
@@ -279,12 +281,17 @@ describe("clients condition surfaces", () => {
     const tinted = (text: string) =>
       screen.getAllByText(text).some((el) => el.closest("div")?.className.includes("cond-cell-danger"));
 
-    expect(tinted("101")).toBe(true);
+    expect(tinted("101")).toBe(true); // blended 101 >= 70
     expect(tinted("8")).toBe(true); // inboxes_count = 8, a Basic column
 
+    // EB = 71, still over the threshold: the cell keeps its tint, now earned by its own number.
     fireEvent.click(screen.getByRole("radio", { name: "Email numbers only" }));
-    expect(tinted("71")).toBe(false);
+    expect(tinted("71")).toBe(true);
     expect(tinted("8")).toBe(true);
+
+    // AF = 31 is under it — the same rule, judged on the LinkedIn number, does not fire.
+    fireEvent.click(screen.getByRole("radio", { name: "LinkedIn numbers only" }));
+    expect(tinted("31")).toBe(false);
   });
 
   it("shows DoD danger highlight when value is below 80% of min sent", async () => {

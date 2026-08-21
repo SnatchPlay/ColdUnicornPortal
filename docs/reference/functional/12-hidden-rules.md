@@ -108,17 +108,23 @@ Two SECURITY DEFINER helpers exist with the same name in different schemas. RLS 
 
 [client-metrics.ts:195-202](../../../src/app/lib/client-metrics.ts#L195-L202) вЂ” `threeDodTotal` increments for `qualification в€€ {preMQL, MQL}`; `sql` (= MQL leads) increments only for `MQL`. A lead at preMQL counts toward the "total" bucket but not toward the "SQL" bucket вЂ” by design.
 
-### Clients-grid condition tint is a `Both`-view feature
+### Clients-grid condition tint is graded per channel, against a blended KPI
 
-`stripProjectedConditionKeys` in [mega-table.tsx](../../../src/app/pages/clients-page/mega-table.tsx)
-— in the EmailBison / Aimfox views the neutral metric bands render one sequencer's numbers
-(`projectMetricsToChannel`), but the condition rules are still evaluated on the **blended** pack,
-because their thresholds (`min_sent`, `kpi_leads`, `monthly_sql_kpi`) are contract targets on
-total/email volume and a display switch must not change what a rule means. Tinting a projected cell
-would therefore colour a number that is not on screen, so the per-bucket binding
-(`td3Bucket`/`wowBucket`/`momBucket`, and `dodBucket` in the Aimfox view) is dropped there. Plain
-`conditionKey` tints — Basic columns and `cf:<id>` custom fields — survive in all three views, and
-the EmailBison view keeps its DoD and reply-rate tints because those values are not projected.
+`withChannelLeadBands` in [clients-page.tsx](../../../src/app/pages/clients-page.tsx) — in the
+EmailBison / Aimfox views the neutral metric bands render one sequencer's numbers
+(`projectMetricsToChannel`), and the 3-DoD / WoW / MoM cell rules are evaluated on exactly those
+projected rows, so a tint never judges a number that is off screen. The **thresholds** do not move
+with the view: `kpi_leads` / `monthly_sql_kpi` are a single blended contract target, so in the
+EmailBison view a client whose LinkedIn carries part of the load is graded on its email half against
+the whole KPI and reads redder than it does in `Both`. `Both` is the view that answers "on target
+overall". The DoD band is the exception: it is re-pointed to the `clients_dod_aimfox_*` surfaces in
+the LinkedIn view (`retargetProjectedConditionKeys` in
+[mega-table.tsx](../../../src/app/pages/clients-page/mega-table.tsx)) and untouched in the EmailBison
+view, where `daily_stats` is already Bison. Plain `conditionKey` tints — Basic columns and `cf:<id>`
+custom fields — are identical in all three views.
+
+*(Until 2026-08-21 the per-bucket binding was dropped outside `Both` instead, which read as "the
+colour rules stopped working" to anyone whose saved view was Email or LinkedIn.)*
 
 ### `daily_stats` has no sequencer dimension — every WoW rate is EmailBison
 

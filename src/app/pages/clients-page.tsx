@@ -72,6 +72,24 @@ const CHANNEL_VIEW_CHIPS: Array<{ value: ChannelView; label: string; ariaLabel: 
   { value: "aimfox", label: "LinkedIn", ariaLabel: "LinkedIn numbers only" },
 ];
 
+/**
+ * The metrics a condition rule is evaluated against in `view`. Only the three lead-derived bands
+ * the channel projection rewrites on screen (3-DoD, WoW, MoM) are narrowed, so a cell rule always
+ * judges the number the reader can see. Everything else — the DoD band, the overview — stays
+ * blended: DoD carries its own Aimfox surfaces and the overview feeds row-level rules whose
+ * thresholds are contract totals. `both` returns the pack untouched.
+ */
+function withChannelLeadBands(metrics: ClientMetricsPack, view: ChannelView): ClientMetricsPack {
+  if (view === "both") return metrics;
+  const projected = projectMetricsToChannel(metrics, view);
+  return {
+    ...metrics,
+    threeDodRows: projected.threeDodRows,
+    wowRows: projected.wowRows,
+    momRows: projected.momRows,
+  };
+}
+
 // Radix <Select> forbids an empty-string item value, so the "no owner" choice needs a sentinel.
 // It maps to `manager_id = null` on submit.
 const UNASSIGNED_MANAGER = "__unassigned__";
@@ -1117,10 +1135,17 @@ export function ClientsPage() {
           aimfoxApiKey: credsByClientId.get(client.id)?.aimfox?.api_key ?? null,
         },
       });
-      packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, metrics, client));
+      // A cell rule must judge the number that is on screen. Outside the Both view the 3-DoD, WoW
+      // and MoM bands render one sequencer's count, so those three bands are evaluated on the
+      // projected rows — same rules, same thresholds, the channel's number as the operand.
+      // The DoD band and the context stay blended on purpose: DoD has its own Aimfox surfaces
+      // (re-pointed in mega-table), and the context feeds row-level rules whose operands are
+      // contract totals, not per-band cells.
+      const cellMetrics = withChannelLeadBands(metrics, channelView);
+      packs.set(client.id, evaluateClientConditions(context, normalizedConditionRules, cellMetrics, client));
     }
     return packs;
-  }, [metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient, credsByClientId]);
+  }, [channelView, metricsByClientId, normalizedConditionRules, scopedClients, managerById, customFieldValuesByClient, credsByClientId]);
 
   const megaRows = useMemo<ClientMegaRow[]>(() => {
     return timeSyncOp(`[perf][clients] mega-rows (${scopedClients.length} rows)`, () =>
@@ -1137,8 +1162,8 @@ export function ClientsPage() {
           // Narrow the numbers to the selected channel here, at page level, and NOT inside the
           // table: compareMega sorts through col.sortValue(row) on row.metrics, so a projection
           // applied any deeper would let the sort disagree with what is rendered. The condition
-          // packs above stay on the blended metrics on purpose — a display switch must not change
-          // what a rule means (see stripProjectedConditionKeys in mega-table).
+          // packs above narrow the same three lead bands (withChannelLeadBands), so a tint always
+          // judges the number rendered here — the rules and their thresholds are unchanged.
           metrics: projectMetricsToChannel(metrics, channelView),
           conditionPack,
           sequencerCreds: credsByClientId.get(client.id) ?? EMPTY_SEQUENCER_CREDS,

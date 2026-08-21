@@ -380,10 +380,11 @@ Both rules carry the same `base_filter`: `linkedin_connected eq true`.
 
 **Where the colours appear.** Both the "(Aimfox)" mirror bands in the **Both** view and the neutral
 Schedule / Daily sent bands in the **LinkedIn** view, which the channel projection fills with the
-same Aimfox numbers. `stripProjectedConditionKeys`
+same Aimfox numbers. `retargetProjectedConditionKeys`
 ([mega-table.tsx](../../../src/app/pages/clients-page/mega-table.tsx)) re-points the DoD binding to
-the Aimfox band in the LinkedIn view instead of dropping it; every other projected band (WoW, MoM,
-3-DoD) still drops its binding, because those have no Aimfox-specific rules to re-point to.
+the Aimfox band in the LinkedIn view. The other projected bands (3-DoD, WoW, MoM) need no
+re-pointing: they have no Aimfox-specific rules, and their cells are evaluated on the projected rows
+instead (`withChannelLeadBands` in `clients-page.tsx`), so one rule serves all three views.
 
 `mom_meetings_vs_meeting_kpi` is graded the same way against `monthly_meeting_kpi`.
 
