@@ -51,7 +51,12 @@ transition:
   authoritativeSource: supabase
   legacyStore: "Google Sheets · OOO Leads (1BGjr3EWsv…) — no longer written as of 2026-08-19"
   targetStore: "Supabase · sequencer_contacts + ooo_followups"
-  ordering: "branch S only. Branch L's six nodes remain in the graph, disabled, as the rollback path"
+  ordering: >-
+    branch S only. Branch L's six nodes remain in the graph as the rollback path, and are now off
+    two ways, not one: `disabled: true` on all six (2026-08-19, owner decision) AND the trigger edge
+    "When Called by HUB → [325] Find workspace in CS PDCA" removed from the live graph (found
+    2026-08-26, date unknown). A rollback therefore has to restore BOTH — re-enabling the six nodes
+    alone leaves them unreachable.
   goLive: >-
     Done. Migration 20260722g was applied first (42 routing rules, 14 clients enabled), then the
     workflow was published. Verified on real data from a manual run: record_ooo_followup returned

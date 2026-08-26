@@ -18,9 +18,29 @@ Reads `event.workspace_id` and `data.taggable_id`.
 ## Flow
 
 ```
-When Called by HUB ─┬─▶ [L] CS PDCA → Bison GET lead → find row in OOO Leads → DELETE row
-                    └─▶ [S] cancel_active_ooo_followup
+When Called by HUB ───▶ [S] cancel_active_ooo_followup
+
+                    ✂  [L] CS PDCA → Bison GET lead → find row in OOO Leads → DELETE row
+                       (four nodes, still enabled, no longer reachable from the trigger)
 ```
+
+> **Branch L is unplugged on live — found 2026-08-26, date of the change unknown.** The trigger edge
+> `When Called by HUB → [86] Find workspace in CS PDCA` exists in no live graph; the four branch-L
+> nodes sit in the canvas with `disabled: false` and nothing entering them. The artifact still
+> carried that edge until 2026-08-26, so this ran as **undeclared drift** for an unknown period. It
+> is the coherent follow-through of the sibling decision — `ooo-detect-and-log` branch L was disabled
+> 2026-08-19 by the owner, so nothing writes `OOO Leads` any more and deleting from it is pointless —
+> but that reasoning was never written down here, and unplugging is not how the sibling recorded it
+> (there the six nodes are `disabled: true`).
+>
+> **Evidence:** not one of the 40 most recent executions sampled (2026-08-23 → 2026-08-26) reached
+> `[86]`. The instance's execution retention is shorter than the change, and the n8n public API
+> exposes no workflow version history, so the date cannot be recovered from here.
+>
+> **This leaves the manifest saying something untrue** — `phase: A`, `authoritativeSource: sheets`,
+> while nothing writes the sheet. That is registered as a `knownViolations` entry rather than quietly
+> corrected: choosing between *"this was a deliberate phase move, record its go-live evidence"* and
+> *"the edge came out by accident, put it back"* is the owner's call, not a documentation edit.
 
 ## The two branches do different things on purpose
 
@@ -49,9 +69,14 @@ is a no-op. Branch L is also effectively idempotent — deleting an absent row d
 
 ## Failure handling
 
-`[S]` is `onError: continueRegularOutput`, so a Postgres failure cannot break the sheet path the
-business still relies on. Branch L has no error branch — a Google API failure loses the removal
-silently, which is pre-existing behaviour, not something phase A introduces.
+`[S]` is `onError: continueRegularOutput`, so a Postgres failure cannot break the sheet path — which,
+since branch L was unplugged, no longer exists downstream of it. The guard is now inert but harmless;
+it becomes meaningful again the moment branch L is reconnected.
+
+`[329] Delete row from OOO Leads` is `onError: continueRegularOutput` for the mirror reason, recorded
+here because the annotation that carried it lived in the graph and did not survive the 2026-08-26
+re-export: *"Branch-L terminal. onError so a Sheets failure cannot fail the run behind an
+already-committed Supabase cancellation (E5 / Wave 3)."*
 
 If the contact does not exist in `sequencer_contacts`, branch S returns **zero rows** and does
 nothing. That is the correct outcome — there was no episode to cancel — but it is also

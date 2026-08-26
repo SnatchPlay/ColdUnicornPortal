@@ -443,8 +443,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        414,
-        158
+        416,
+        160
       ],
       "parameters": {
         "color": 3,
@@ -459,8 +459,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        414,
-        430
+        416,
+        432
       ],
       "parameters": {
         "color": 5,
@@ -487,11 +487,6 @@
     "When Called by HUB": {
       "main": [
         [
-          {
-            "index": 0,
-            "node": "[325] Find workspace in CS PDCA",
-            "type": "main"
-          },
           {
             "index": 0,
             "node": "[S] Resolve client sequencer",

@@ -37,8 +37,7 @@ When Called by HUB ─ Merge ─ [S0] resolve client_sequencers ─┬─ CS PDC
 
 ## Branch S — the lead, through the RPC contract
 
-Five Postgres nodes, all `onError: continueRegularOutput` so a Supabase failure cannot stop the sheet
-or the CRM (ADR-0017: Supabase failure is non-fatal in phase A):
+Five Postgres nodes:
 
 ```
 [S] Resolve client sequencer      client_sequencers by external_workspace_id, emailbison
@@ -48,9 +47,62 @@ or the CRM (ADR-0017: Supabase failure is non-fatal in phase A):
 [S] promote_contact_to_lead       the lead, with the enrichment payload
 ```
 
-It hangs off `[S] Edit Fields` — branch S's own equivalent of `Edit Fields1`, built from branch S's own
-enrichment chain below, not from branch L's. **Sheets and Supabase run in parallel; neither reads from
-the other.**
+It hangs off `[S] Edit Fields` — branch S's own field assembly, built from branch S's own enrichment
+chain below.
+
+> **Two claims that used to stand here were wrong, and 2026-08-26 proved it.** They said the five
+> Postgres nodes all carry `onError: continueRegularOutput` so a Supabase failure cannot stop the
+> sheet or the CRM, and that *"Sheets and Supabase run in parallel; neither reads from the other."*
+> Measured against the live graph:
+>
+> - `[S] upsert_sequencer_contact`, `[S] upsert_reply` and `[S] promote_contact_to_lead` carry **no**
+>   `onError` at all. Only `[S] Resolve client sequencer` and `[S] Resolve campaign` do.
+> - The branches are **sequential, not parallel**. `[S] promote_contact_to_lead → Filter` is the
+>   spine, and everything branch L does hangs below that `Filter`: `[4] Check if lead already in
+>   Leads sheet`, `[189-192] Forward email to recipients`, and
+>   `Call '[HUB] CRMs Add/Update Lead Dispatcher'`.
+> - They are not independent either: `Edit Fields1` (branch L) reads
+>   `$('[S] Set phone from Lusha')` and `$('[S] Parse AI output + set phone')` — branch S nodes.
+>
+> So a failed Supabase promotion does not cost the Supabase lead. **It costs the lead everywhere:**
+> no `leads` row, no sheet row, no forwarded email, no CRM sync.
+
+### Incident 2026-08-26 — one phone number, four lost destinations
+
+Execution 85420. `[S] promote_contact_to_lead` returned
+`value too long for type character varying(50)`. The value was the phone:
+
+```
++380 44 507 29 94*303 / +380 67 311 44 55 / +380 50 394 31 13     (61 chars)
+```
+
+`[S] OpenAI: gpt-4o analyze email` is asked for `phone_number`, singular, and this signature listed
+three; it returned all of them in one string. `leads.phone_number` is `varchar(50)`, so the RPC
+refused the row — and because the node is fatal and the whole L chain sits below it, this lead
+reached **none** of its four destinations. `sequencer_contacts` and `replies` had already been
+written, so the state left behind is a contact and a reply with no lead.
+
+**Fixed by normalising at the source, not at the boundary.** `[S] Parse AI output + set phone` now
+keeps the first number: `String(ai.phone_number || "").split(/[\/,;|\n]/)[0].trim()`. That node is
+the single shared source — `[S] Edit Fields` (branch S) and `Edit Fields1` (branch L) both read it —
+so the sheet and Supabase keep the same value rather than diverging. The dead `[286]`/`[287]` copies
+are referenced by nobody and were left alone.
+
+Two deliberate non-choices, both the owner's:
+
+- **No truncation.** A single number longer than 50 characters should fail at the RPC, loudly, rather
+  than be silently cut into a wrong number that somebody then dials.
+- **The node stays fatal.** `continueRegularOutput` would let the chain finish, but a Supabase write
+  failure would then be invisible — the execution would be recorded as a success and no Slack alert
+  would fire. Losing the alert was judged worse than losing the run. The cost is the one this
+  incident shows, and it is accepted knowingly: **if this node fails again, the lead is lost in all
+  four places, and the fix is to retry the execution.**
+
+**Recovery is a retry, not a repair.** Execution 85420's lead (`info@oriongr.com`, sequencer contact
+`9e60cafb…`, reply `45ddd5c0…`) has no `leads` row. Retrying the execution from the start replays the
+RPCs — `upsert_sequencer_contact` and `upsert_reply` are idempotent by key, and
+`promote_contact_to_lead` is at most one lead per contact (ADR-0015) — and then runs the branch L
+chain that never got to run.
 
 Verified before publishing: the whole RPC chain was executed against production inside a transaction
 that was rolled back, and returned `created: true` with a real `lead_id`.

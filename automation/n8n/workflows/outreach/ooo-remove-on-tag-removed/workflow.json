@@ -47,7 +47,6 @@
         1424,
         560
       ],
-      "notes": "Branch-L terminal. onError so a Sheets failure cannot fail the run behind an already-committed Supabase cancellation (E5 / Wave 3).",
       "onError": "continueRegularOutput",
       "parameters": {
         "documentId": {
@@ -147,8 +146,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        478,
-        254
+        480,
+        256
       ],
       "parameters": {
         "color": 3,
@@ -163,8 +162,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        478,
-        510
+        480,
+        512
       ],
       "parameters": {
         "color": 5,
@@ -191,11 +190,6 @@
     "When Called by HUB": {
       "main": [
         [
-          {
-            "index": 0,
-            "node": "[86] Find workspace in CS PDCA",
-            "type": "main"
-          },
           {
             "index": 0,
             "node": "[S] cancel_active_ooo_followup",

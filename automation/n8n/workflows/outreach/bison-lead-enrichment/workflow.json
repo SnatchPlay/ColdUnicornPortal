@@ -8,9 +8,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        3472,
-        96
+        -560,
+        3200
       ],
+      "disabled": true,
       "parameters": {
         "conditions": {
           "combinator": "and",
@@ -42,9 +43,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        4048,
-        -16
+        -560,
+        960
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -73,9 +75,10 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
       "position": [
-        4496,
-        96
+        -560,
+        3648
       ],
+      "disabled": true,
       "parameters": {
         "builtInTools": {},
         "modelId": {
@@ -110,9 +113,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        5072,
-        96
+        -560,
+        4096
       ],
+      "disabled": true,
       "parameters": {
         "conditions": {
           "combinator": "and",
@@ -143,11 +147,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5296,
-        -16
+        -560,
+        1184
       ],
       "disabled": true,
-      "notes": "Disabled 2026-08-18 to stop paying Lusha twice per lead. Branch S has its own [S] Lusha call, so Supabase keeps the phone; only the sheet row loses it, and the sheet is being retired.",
       "onError": "continueRegularOutput",
       "parameters": {
         "authentication": "genericCredentialType",
@@ -179,8 +182,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        7152,
-        -336
+        7408,
+        -256
       ],
       "parameters": {
         "bodyParameters": {
@@ -228,8 +231,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        784,
-        96
+        6960,
+        416
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -264,9 +267,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4272,
-        96
+        -560,
+        3424
       ],
+      "disabled": true,
       "parameters": {
         "jsCode": "const local = $(\"[9] Snov.io: POST /v1/get-prospects-by-email (Local List)\").first().json;\nlet snovio_body = local;\ntry {\n  const globalAll = $(\"[11] Snov.io: POST /v1/get-profile-by-email (Global)\").all();\n  if (globalAll && globalAll.length > 0) {\n    snovio_body = globalAll[0].json;\n  }\n} catch (e) {}\nconst derived = $(\"[79+72+51+8+57] Compute derived values\").first().json;\nreturn [{ json: { ...derived, snovio_body } }];"
       }
@@ -277,8 +281,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        2128,
-        288
+        6960,
+        128
       ],
       "parameters": {
         "conditions": {
@@ -286,12 +290,12 @@
           "conditions": [
             {
               "id": "3192b646-85be-4d92-8d0d-f2b9a880a1c1",
-              "leftValue": "={{ $json.last_reply.data[0].from_email_address.toLowerCase().trim() }}",
+              "leftValue": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].from_email_address.toLowerCase().trim() }}",
               "operator": {
                 "operation": "equals",
                 "type": "string"
               },
-              "rightValue": "={{ $('[40] Bison: GET /leads/{taggable_id}').item.json.data.email.toLowerCase().trim() }}"
+              "rightValue": "={{ $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email.toLowerCase().trim() }}"
             }
           ],
           "options": {
@@ -312,8 +316,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2352,
-        288
+        7184,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -321,11 +325,11 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $('[2] Find workspace in CS PDCA').first().json.col_6 }}"
+              "value": "={{ \"Bearer \" + $('[S0] Resolve Bison credentials').first().json.bison_api_key }}"
             }
           ]
         },
-        "jsonBody": "={{ JSON.stringify({ email: $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address }) }}",
+        "jsonBody": "={{ JSON.stringify({ email: $('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].from_email_address }) }}",
         "method": "POST",
         "options": {},
         "sendBody": true,
@@ -340,9 +344,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4848,
-        96
+        -560,
+        3872
       ],
+      "disabled": true,
       "parameters": {
         "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\nconst phoneFromAi = (ai.phone_number || \"\").trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
       }
@@ -353,9 +358,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        5520,
-        -16
+        -560,
+        1408
       ],
+      "disabled": true,
       "parameters": {
         "assignments": {
           "assignments": [
@@ -382,8 +388,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        2576,
-        288
+        7408,
+        128
       ],
       "alwaysOutputData": true,
       "retryOnFail": true,
@@ -399,7 +405,7 @@
           "values": [
             {
               "lookupColumn": "Emails",
-              "lookupValue": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+              "lookupValue": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].from_email_address.extractDomain() }}"
             }
           ]
         },
@@ -419,8 +425,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        2800,
-        288
+        7632,
+        128
       ],
       "parameters": {
         "conditions": {
@@ -453,8 +459,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3024,
-        288
+        7856,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -462,7 +468,7 @@
           "parameters": [
             {
               "name": "domain",
-              "value": "={{ $('[45] Set last_reply (LATEST by date_received DESC)').item.json.last_reply.data[0].from_email_address.extractDomain() }}"
+              "value": "={{ $('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].from_email_address.extractDomain() }}"
             }
           ]
         },
@@ -470,7 +476,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ \"Bearer \" + $('[2] Find workspace in CS PDCA').first().json.col_6 }}"
+              "value": "={{ \"Bearer \" + $('[S0] Resolve Bison credentials').first().json.bison_api_key }}"
             }
           ]
         },
@@ -487,8 +493,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1232,
-        96
+        7184,
+        416
       ],
       "alwaysOutputData": true,
       "retryOnFail": true,
@@ -504,7 +510,7 @@
           "values": [
             {
               "lookupColumn": "E-MAIL",
-              "lookupValue": "={{ $json.data.email }}"
+              "lookupValue": "={{ $('[S] Bison: GET /leads/{taggable_id}').first().json.data.email }}"
             }
           ]
         },
@@ -522,9 +528,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1008,
-        96
+        -560,
+        1632
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -545,9 +552,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1680,
-        192
+        -560,
+        4320
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -568,9 +576,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1904,
-        192
+        -560,
+        4544
       ],
+      "disabled": true,
       "parameters": {
         "assignments": {
           "assignments": [
@@ -591,9 +600,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2352,
-        96
+        -560,
+        2080
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -614,9 +624,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        5952,
-        288
+        -560,
+        4992
       ],
+      "disabled": true,
       "parameters": {
         "conditions": {
           "combinator": "and",
@@ -648,9 +659,10 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        5744,
-        288
+        -560,
+        4768
       ],
+      "disabled": true,
       "alwaysOutputData": true,
       "retryOnFail": true,
       "maxTries": 3,
@@ -684,9 +696,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2128,
-        96
+        -560,
+        1856
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -707,9 +720,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2576,
-        96
+        -560,
+        2304
       ],
+      "disabled": true,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -730,9 +744,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2800,
-        96
+        -560,
+        2528
       ],
+      "disabled": true,
       "parameters": {
         "jsCode": "const last_reply = $('[45] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0]\nconst scheduled = $(\"[49] Bison: GET /leads/{lead_id}/scheduled-emails\").first().json.data || [];\nconst stepsResp = $input.first().json.data;\nconst sequenceSteps = stepsResp.sequence_steps|| [];\n\nconst scheduledRow = scheduled.find(s => s.id === last_reply.scheduled_email_id) || {};\nconst sequenceStepId = scheduledRow.sequence_step_id ?? null;\nconst sequenceStepRow = sequenceSteps.find(s => s.id === sequenceStepId) || {};\nconst firstEmailDateIso = scheduledRow.sent_at ?? null;\nconst subject = scheduledRow.email_subject ?? \"\";\n\nlet responseTimeHours = null;\nif (firstEmailDateIso && last_reply.date_received) {\n  responseTimeHours = (new Date(last_reply.date_received).getTime() - new Date(firstEmailDateIso).getTime()) / 1000 / 3600;\n}\n\nlet responseTimeBucket = \"another day\";\nif (responseTimeHours !== null) {\n  if (responseTimeHours < 0.25) responseTimeBucket = \"less than 15 minutes\";\n  else if (responseTimeHours < 1) responseTimeBucket = \"less than 1 hour\";\n  else if (responseTimeHours < 12) responseTimeBucket = \"less than 12 hours\";\n  else responseTimeBucket = \"another day\";\n}\n\nreturn [{ json: {\n  last_reply,\n  sequence_step_id: sequenceStepId,\n  sequence_step_order: sequenceStepRow.order ?? null,\n  first_email_date: last_reply.date_received,\n  response_time_hours: responseTimeHours,\n  response_time_bucket: responseTimeBucket,\n  subject,\n}}];"
       }
@@ -743,9 +758,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3248,
-        96
+        -560,
+        2976
       ],
+      "disabled": true,
       "parameters": {
         "bodyParameters": {
           "parameters": [
@@ -780,8 +796,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1680,
-        -112
+        7632,
+        320
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -1098,7 +1114,7 @@
             }
           ],
           "value": {
-            "QUALIFICATION": "={{ (() => {\n  try {\n    // The tag set is the lead's state; data.tag_name is only what changed just now. Reading the\n    // event meant a later preMQL tag demoted the sheet row while promote_contact_to_lead, which is\n    // upgrade-only, kept MQL — 102 leads disagreed between the two stores because of it.\n    const tags = $('[40] Bison: GET /leads/{taggable_id}').first().json?.data?.tags || [];\n    const names = tags.map(t => String(t?.name ?? t ?? '').trim().toLowerCase());\n    if (names.includes('interested') || names.includes('mql')) return 'MQL';\n    if (names.includes('premql') || names.includes('pre-mql')) return 'preMQL';\n    // No qualifying tag on the lead at all: fall back to the firing event, as before.\n    const tagName = $('When Called by HUB').first().json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  } catch (e) {\n    return '';\n  }\n})() }}",
+            "QUALIFICATION": "={{ $('[S] Qualification from tag set').first().json.qualification }}",
             "row_number": "={{ $json.row_number }}"
           }
         },
@@ -1122,8 +1138,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1456,
-        -304
+        2576,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1137,7 +1153,7 @@
         },
         "options": {},
         "sendHeaders": true,
-        "url": "={{ \"https://go.gheads.com/api/campaigns/\" + $json.last_reply.data[0].campaign_id }}"
+        "url": "={{ \"https://go.gheads.com/api/campaigns/\" + $('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].campaign_id }}"
       }
     },
     {
@@ -1146,8 +1162,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1904,
-        -304
+        3024,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1170,8 +1186,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1680,
-        -304
+        2800,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1195,9 +1211,11 @@
       "typeVersion": 4.4,
       "position": [
         784,
-        -304
+        320
       ],
-      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -1218,10 +1236,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1008,
-        -304
+        1232,
+        320
       ],
-      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "headerParameters": {
           "parameters": [
@@ -1242,8 +1262,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2128,
-        -304
+        3248,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1256,8 +1276,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        5072,
-        -304
+        6064,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1364,8 +1384,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3024,
-        -368
+        4144,
+        56
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1398,8 +1418,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2352,
-        -304
+        3472,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1427,13 +1447,66 @@
       }
     },
     {
+      "id": "s-lead-already-promoted-0001",
+      "name": "[S] Lead already promoted?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2128,
+        320
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id ] }}"
+        },
+        "query": "-- Which shape of write does this event need?\n-- promote_contact_to_lead stays the authority on identity: its Idempotency A/B paths ignore\n-- every key of p_lead except `qualification`. So for a contact that already has a lead, the\n-- whole enrichment chain is bought and thrown away. This read is what lets the graph skip it.\nselect l.id::text as lead_id\n  from public.leads l\n where l.source_sequencer_contact_id = $1::uuid\n limit 1;"
+      }
+    },
+    {
+      "id": "s-lead-exists-if-0001",
+      "name": "[S] Lead exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2352,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "lead-exists-condition",
+              "leftValue": "={{ $json.lead_id }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "b87afee2-05d5-4683-9cab-5ec95b993889",
       "name": "[S] Lusha: POST /v2/person (fallback phone)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        4560,
-        -368
+        5616,
+        56
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1466,8 +1539,8 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
       "position": [
-        3696,
-        -304
+        4816,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1504,12 +1577,12 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4048,
-        -304
+        5168,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
-        "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\nconst phoneFromAi = (ai.phone_number || \"\").trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
+        "jsCode": "const aiRaw = $input.first().json.output[0].content[0].text;\nlet ai = aiRaw;\n\n// A signature often lists several numbers (\"+380 44 ... / +380 67 ... / +380 50 ...\").\n// leads.phone_number is varchar(50) and the portal renders it as a tel: link, so the contract is\n// ONE dialable number: keep the first. Deliberately no truncation - a single number longer than 50\n// should fail loudly at the RPC rather than be silently mangled into a wrong number.\nconst phoneFromAi = String(ai.phone_number || \"\").split(/[\\/,;|\\n]/)[0].trim();\nreturn [{ json: {\n  ai,\n  phoneNumber: phoneFromAi,\n  phoneSource: phoneFromAi ? \"EmailText\" : \"\",\n}}];"
       }
     },
     {
@@ -1518,8 +1591,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        4272,
-        -304
+        5392,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1552,8 +1625,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3472,
-        -304
+        4592,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1566,16 +1639,39 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        6192,
-        -304
+        6512,
+        128
       ],
-      "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps), (() => { const tags = $('[S] Bison: GET /leads/{taggable_id}').first().json?.data?.tags || []; const names = tags.map(t => String(t?.name ?? t ?? '').trim().toLowerCase()); if (names.includes('interested') || names.includes('mql')) return 'MQL'; if (names.includes('premql') || names.includes('pre-mql')) return 'preMQL'; return String($('When Called by HUB').first().json.data?.tag_name || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL'; })(), String(e.linkedin_url || ''), String(e.industry || ''), String(e.headcount_range || ''), String(e.country || ''), String(e.message_title || ''), String(e.message_number ?? ''), String(e.response_time_hours ?? ''), String(e.response_time_label || '') ]; })() }}"
+          "queryReplacement": "={{ (() => { const e = $('[S] Edit Fields').item.json; let ps = ''; try { ps = $('[S] Set phone from Lusha').isExecuted ? 'Lusha' : ($('[S] Parse AI output + set phone').first().json.phoneSource || ''); } catch (err) { ps = ''; } return [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, String($json.campaign_id || ''), String(e.email || ''), String(e.firstname || ''), String(e.lastname || ''), String(e.position || ''), String(e.company || ''), String(e.website || ''), String(e.phone || ''), String(ps), $('[S] Qualification from tag set').first().json.qualification, String(e.linkedin_url || ''), String(e.industry || ''), String(e.headcount_range || ''), String(e.country || ''), String(e.message_title || ''), String(e.message_number ?? ''), String(e.response_time_hours ?? ''), String(e.response_time_label || '') ]; })() }}"
         },
         "query": "select public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, nullif($3, '')::uuid,\n         jsonb_strip_nulls(jsonb_build_object(\n           'email',        nullif($4, ''),\n           'first_name',   nullif($5, ''),\n           'last_name',    nullif($6, ''),\n           'job_title',    nullif($7, ''),\n           'company_name', nullif($8, ''),\n           'website',      nullif($9, ''),\n           'phone_number', nullif($10, ''),\n           'phone_source', nullif($11, ''),\n           'qualification', nullif($12, ''),\n           'linkedin_url',  nullif($13, ''),\n           'industry',      nullif($14, ''),\n           'headcount_range', nullif($15, ''),\n           'country',       nullif($16, ''),\n           'message_title', nullif($17, ''),\n           'message_number', nullif($18, ''),\n           'response_time_hours', nullif($19, ''),\n           'response_time_label', nullif($20, '')\n         ))) as result;"
+      }
+    },
+    {
+      "id": "s-qualification-tagset-0001",
+      "name": "[S] Qualification from tag set",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1008,
+        320
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "qualification-from-tag-set",
+              "name": "qualification",
+              "type": "string",
+              "value": "={{ (() => { const tags = $('[S] Bison: GET /leads/{taggable_id}').first().json?.data?.tags || []; const names = tags.map(t => String(t?.name ?? t ?? '').trim().toLowerCase()); if (names.includes('interested') || names.includes('mql')) return 'MQL'; if (names.includes('premql') || names.includes('pre-mql')) return 'preMQL'; return String($('When Called by HUB').first().json.data?.tag_name || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL'; })() }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
       }
     },
     {
@@ -1584,14 +1680,15 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5968,
-        -304
+        6288,
+        128
       ],
+      "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [ String($('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].campaign_id), $('[S] Resolve client sequencer').first().json.client_sequencer_id ] }}"
+          "queryReplacement": "={{ [ String($('[S] Set last_reply (LATEST by date_received DESC)').first().json.last_reply.data[0].campaign_id), $('[S0] Resolve Bison credentials').first().json.client_sequencer_id ] }}"
         },
         "query": "select c.id::text as campaign_id\nfrom public.campaigns c\njoin public.client_sequencers cs on cs.client_id = c.client_id and cs.id = $2::uuid\nwhere c.external_id = $1\nlimit 1;"
       }
@@ -1602,9 +1699,10 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5296,
-        -304
+        -560,
+        -672
       ],
+      "disabled": true,
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
@@ -1620,8 +1718,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1232,
-        -304
+        1456,
+        320
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1644,8 +1742,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4848,
-        -368
+        5840,
+        56
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1674,8 +1772,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        2800,
-        -304
+        3920,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1709,8 +1807,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3248,
-        -368
+        4368,
+        56
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1741,8 +1839,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2576,
-        -304
+        3696,
+        128
       ],
       "onError": "continueRegularOutput",
       "parameters": {
@@ -1774,15 +1872,31 @@
       }
     },
     {
+      "id": "s-sync-qualification-0001",
+      "name": "[S] Sync qualification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        6736,
+        464
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ [ $('[S] upsert_sequencer_contact').first().json.sequencer_contact_id, $('[S] upsert_reply').first().json.reply_id, $('[S] Qualification from tag set').first().json.qualification ] }}"
+        },
+        "query": "-- The contact already has a lead, so this call lands on Idempotency A/B: it links this reply\n-- to the existing lead and syncs qualification both ways (20260805), and touches nothing else.\n-- Passing the enrichment here would mean paying Snov.io + OpenAI + four Bison calls for a\n-- payload the function discards — which is exactly what every re-tag did until 2026-08-19.\nselect public.promote_contact_to_lead(\n         $1::uuid, $2::uuid, null,\n         jsonb_build_object('qualification', $3)) as result;"
+      }
+    },
+    {
       "id": "069b013f-5311-4ab8-9286-268a69e007fa",
       "name": "[S] upsert_reply",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5744,
-        -304
+        1904,
+        320
       ],
-      "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
@@ -1797,14 +1911,13 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5520,
-        -304
+        1680,
+        320
       ],
-      "onError": "continueRegularOutput",
       "parameters": {
         "operation": "executeQuery",
         "options": {
-          "queryReplacement": "={{ [ $json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Edit Fields').item.json.email || null, $('[S] Edit Fields').item.json.firstname || null, $('[S] Edit Fields').item.json.lastname || null ] }}"
+          "queryReplacement": "={{ [ $('[S0] Resolve Bison credentials').first().json.client_sequencer_id, String($('When Called by HUB').first().json.data.taggable_id), $('[S] Bison: GET /leads/{taggable_id}').first().json.data?.email || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data?.first_name || null, $('[S] Bison: GET /leads/{taggable_id}').first().json.data?.last_name || null ] }}"
         },
         "query": "select public.upsert_sequencer_contact($1::uuid, $2, $3, $4, $5, null, null)::text as sequencer_contact_id;"
       }
@@ -1816,7 +1929,7 @@
       "typeVersion": 2.6,
       "position": [
         560,
-        -16
+        320
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -1834,8 +1947,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        7168,
-        -16
+        7408,
+        -64
       ],
       "parameters": {
         "options": {
@@ -1864,12 +1977,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5968,
-        96
+        8080,
+        512
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
-        "jsonBody": "={{ (() => {\n  const safe = (fn, fallback = '') => {\n    try {\n      const value = fn();\n      return value === undefined || value === null ? fallback : value;\n    } catch (e) {\n      return fallback;\n    }\n  };\n\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const str = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value);\n  };\n\n  // Converts JS Date / ISO date string to Google Sheets serial date number.\n  // Google Sheets stores dates as numbers: 1970-01-01 = 25569.\n  const toGoogleSheetsDateSerial = (value) => {\n    if (value === undefined || value === null || value === '') return null;\n\n    const d = new Date(value);\n    if (Number.isNaN(d.getTime())) return null;\n\n    // Date only, no time component.\n    return Math.floor(d.getTime() / 86400000) + 25569;\n  };\n\n  const makeCell = (value, index) => {\n    // Column index 8 = LEAD RECEIVED\n    // Send it as a real Google Sheets date, not as text.\n    if (index === 8) {\n      const serial = toGoogleSheetsDateSerial(value);\n\n      if (serial === null) {\n        return {\n          userEnteredValue: { stringValue: '' }\n        };\n      }\n\n      return {\n        userEnteredValue: {\n          numberValue: serial\n        },\n        userEnteredFormat: {\n          numberFormat: {\n            type: 'DATE',\n            pattern: 'mm/dd/yyyy'\n          }\n        }\n      };\n    }\n\n    return {\n      userEnteredValue: {\n        stringValue: str(value)\n      }\n    };\n  };\n\n  const sheet = safe(\n    () => $json.sheets.find(sheet => sheet.properties?.title === 'Leads'),\n    null\n  );\n  if (!sheet) throw new Error('Sheet \"Leads\" not found');\n\nconst table = safe(\n  () =>\n    (sheet.tables || []).find(table => table.name === 'Leads') ||\n    (sheet.tables || []).find(table => table.name === 'Table3') ||\n    (sheet.tables || [])[0],\n  null\n);\n\nif (!table) {\n  throw new Error('No table found inside sheet \"Leads\"');\n}\n\n  // --- Sources ---\n  const snovProspect = () => $('[226+227+228] Pick Snovio output body').item.json.snovio_body?.data?.[0];\n  const ai           = () => $('[286] Parse AI output + set phone').item.json.ai || {};\n  const bisonLead    = () => $('[40] Bison: GET /leads/{taggable_id}').item.json.data || {};\n  const pickedReply  = () => $('[226+227+228] Pick Snovio output body').item.json.last_reply || {};\n\n  // --- Phone (Lusha → AI extraction; tracked via phoneSource) ---\n  const phoneNumber = safe(() => {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha').item.json.phoneNumber;\n    }\n    return $('[286] Parse AI output + set phone').item.json.phoneNumber;\n  });\n\n  const phoneSource = safe(() => {\n    if ($('[287] Set phone from Lusha').isExecuted) {\n      return $('[287] Set phone from Lusha').item.json.phoneSource;\n    }\n    return $('[286] Parse AI output + set phone').item.json.phoneSource;\n  });\n\n  // --- Cascaded fields: Snov.io → AI → Bison ---\n  const fullName = pick(\n    () => `${snovProspect()?.firstName || ''} ${snovProspect()?.lastName || ''}`.trim(),\n    () => `${ai().first_name || ''} ${ai().last_name || ''}`.trim(),\n    () => `${bisonLead().first_name || ''} ${bisonLead().last_name || ''}`.trim(),\n  );\n\n  const jobTitle = pick(\n    () => snovProspect()?.currentJob?.[0]?.position,\n    () => ai().lead_position,\n    () => bisonLead().title,\n  );\n\n  const companyName = pick(\n    () => snovProspect()?.currentJob?.[0]?.companyName,\n    () => ai().company_name,\n    () => bisonLead().company,\n  );\n\n  const industry = pick(\n    () => snovProspect()?.industry,\n    () => ai().company_industry,\n  );\n\n  const headcount = pick(\n    () => snovProspect()?.currentJob?.[0]?.size,\n    () => ai().company_size,\n  );\n\n  const linkedinUrl = pick(\n    () => (snovProspect()?.social || []).find(s => s.type === 'linkedinProfile')?.link,\n    () => ai().person_linkedin,\n  );\n\n  const country = pick(\n    () => snovProspect()?.country,\n  );\n\n  // E-MAIL — Bison is canonical (lead identifier); reply email as fallback\n  const email = pick(\n    () => bisonLead().email,\n    () => pickedReply().from_email_address,\n  );\n\n  const website = pick(\n    () => {\n      const e = bisonLead().email;\n      return e ? e.extractDomain() : '';\n    },\n    () => ai().company_website,\n  );\n\n  // --- Other fields (single source) ---\n  // Keep raw ISO/date value here. Do NOT format to 'MM/dd/yyyy' string.\n  // Formatting is handled in makeCell() via Google Sheets numberFormat.\n  const leadReceived = safe(() => {\n    return $('[226+227+228] Pick Snovio output body').item.json.first_email_date;\n  });\n\n  const campaignName  = safe(() => $('[52] Bison: GET /campaigns/{id}').item.json.data?.name);\n  const messageTitle  = safe(() => $('[226+227+228] Pick Snovio output body').item.json.subject);\n  const messageNumber = safe(() => $('[226+227+228] Pick Snovio output body').item.json.sequence_step_order);\n  const responseTime  = safe(() => $('[226+227+228] Pick Snovio output body').item.json.response_time_bucket);\n\n  const qualification = safe(() => {\n    const tagName = $('When Called by HUB').item.json.data?.tag_name;\n    return String(tagName || '').toLowerCase() === 'interested' ? 'MQL' : 'preMQL';\n  });\n\n  const emailText = safe(() => pickedReply().text_body);\n  const campaignId = safe(() => pickedReply().campaign_id);\n\n  const values = [\n    fullName,        // 0  FULL NAME\n    jobTitle,        // 1  JOB TITLE\n    email,           // 2  E-MAIL\n    phoneNumber,     // 3  Phone Number\n    phoneSource,     // 4  Phone Source\n    companyName,     // 5  COMPANY NAME\n    industry,        // 6  INDUSTRY\n    headcount,       // 7  HEADCOUNT\n    leadReceived,    // 8  LEAD RECEIVED — real Sheet date\n    campaignName,    // 9  CAMPAIGN NAME\n    messageTitle,    // 10 MESSAGE TITLE\n    messageNumber,   // 11 MESSAGE #\n    website,         // 12 WEBSITE\n    qualification,   // 13 QUALIFICATION\n    responseTime,    // 14 LEAD RESPONSE TIME\n    '',              // 15\n    '',              // 16\n    '',              // 17\n    '',              // 18\n    '',              // 19\n    '',              // 20\n    emailText,       // 21 Mail from lead\n    '',              // 22\n    '',              // 23\n    campaignId,      // 24 Campaign ID\n    '',              // 25\n    '',              // 26\n    linkedinUrl,     // 27 LinkedIn URL\n    country,         // 28 Country\n  ];\n\n  return JSON.stringify({\n    requests: [\n      {\n        appendCells: {\n          sheetId: Number(sheet.properties.sheetId),\n          tableId: String(table.tableId),\n          rows: [\n            {\n              values: values.map((value, index) => makeCell(value, index))\n            }\n          ],\n          fields: 'userEnteredValue,userEnteredFormat.numberFormat'\n        }\n      }\n    ]\n  });\n})() }}\n",
+        "jsonBody": "={{ (() => {\n  const safe = (fn, fallback = '') => {\n    try {\n      const value = fn();\n      return value === undefined || value === null ? fallback : value;\n    } catch (e) {\n      return fallback;\n    }\n  };\n\n  const pick = (...sources) => {\n    for (const fn of sources) {\n      try {\n        const v = fn();\n        if (v !== undefined && v !== null && v !== '') return v;\n      } catch (e) {}\n    }\n    return '';\n  };\n\n  const str = (value) => {\n    if (value === undefined || value === null) return '';\n    return String(value);\n  };\n\n  // Converts JS Date / ISO date string to Google Sheets serial date number.\n  // Google Sheets stores dates as numbers: 1970-01-01 = 25569.\n  const toGoogleSheetsDateSerial = (value) => {\n    if (value === undefined || value === null || value === '') return null;\n\n    const d = new Date(value);\n    if (Number.isNaN(d.getTime())) return null;\n\n    // Date only, no time component.\n    return Math.floor(d.getTime() / 86400000) + 25569;\n  };\n\n  const makeCell = (value, index) => {\n    // Column index 8 = LEAD RECEIVED\n    // Send it as a real Google Sheets date, not as text.\n    if (index === 8) {\n      const serial = toGoogleSheetsDateSerial(value);\n\n      if (serial === null) {\n        return {\n          userEnteredValue: { stringValue: '' }\n        };\n      }\n\n      return {\n        userEnteredValue: {\n          numberValue: serial\n        },\n        userEnteredFormat: {\n          numberFormat: {\n            type: 'DATE',\n            pattern: 'mm/dd/yyyy'\n          }\n        }\n      };\n    }\n\n    return {\n      userEnteredValue: {\n        stringValue: str(value)\n      }\n    };\n  };\n\n  const sheet = safe(\n    () => $json.sheets.find(sheet => sheet.properties?.title === 'Leads'),\n    null\n  );\n  if (!sheet) throw new Error('Sheet \"Leads\" not found');\n\nconst table = safe(\n  () =>\n    (sheet.tables || []).find(table => table.name === 'Leads') ||\n    (sheet.tables || []).find(table => table.name === 'Table3') ||\n    (sheet.tables || [])[0],\n  null\n);\n\nif (!table) {\n  throw new Error('No table found inside sheet \"Leads\"');\n}\n\n  // --- Sources ---\n  const snovProspect = () => $('[S] Pick Snovio output body').item.json.snovio_body?.data?.[0];\n  const ai           = () => $('[S] Parse AI output + set phone').item.json.ai || {};\n  const bisonLead    = () => $('[S] Bison: GET /leads/{taggable_id}').item.json.data || {};\n  const pickedReply  = () => $('[S] Pick Snovio output body').item.json.last_reply || {};\n\n  // --- Phone (Lusha → AI extraction; tracked via phoneSource) ---\n  const phoneNumber = safe(() => {\n    if ($('[S] Set phone from Lusha').isExecuted) {\n      return $('[S] Set phone from Lusha').item.json.phoneNumber;\n    }\n    return $('[S] Parse AI output + set phone').item.json.phoneNumber;\n  });\n\n  const phoneSource = safe(() => {\n    if ($('[S] Set phone from Lusha').isExecuted) {\n      return $('[S] Set phone from Lusha').item.json.phoneSource;\n    }\n    return $('[S] Parse AI output + set phone').item.json.phoneSource;\n  });\n\n  // --- Cascaded fields: Snov.io → AI → Bison ---\n  const fullName = pick(\n    () => `${snovProspect()?.firstName || ''} ${snovProspect()?.lastName || ''}`.trim(),\n    () => `${ai().first_name || ''} ${ai().last_name || ''}`.trim(),\n    () => `${bisonLead().first_name || ''} ${bisonLead().last_name || ''}`.trim(),\n  );\n\n  const jobTitle = pick(\n    () => snovProspect()?.currentJob?.[0]?.position,\n    () => ai().lead_position,\n    () => bisonLead().title,\n  );\n\n  const companyName = pick(\n    () => snovProspect()?.currentJob?.[0]?.companyName,\n    () => ai().company_name,\n    () => bisonLead().company,\n  );\n\n  const industry = pick(\n    () => snovProspect()?.industry,\n    () => ai().company_industry,\n  );\n\n  const headcount = pick(\n    () => snovProspect()?.currentJob?.[0]?.size,\n    () => ai().company_size,\n  );\n\n  const linkedinUrl = pick(\n    () => (snovProspect()?.social || []).find(s => s.type === 'linkedinProfile')?.link,\n    () => ai().person_linkedin,\n  );\n\n  const country = pick(\n    () => snovProspect()?.country,\n  );\n\n  // E-MAIL — Bison is canonical (lead identifier); reply email as fallback\n  const email = pick(\n    () => bisonLead().email,\n    () => pickedReply().from_email_address,\n  );\n\n  const website = pick(\n    () => {\n      const e = bisonLead().email;\n      return e ? e.extractDomain() : '';\n    },\n    () => ai().company_website,\n  );\n\n  // --- Other fields (single source) ---\n  // Keep raw ISO/date value here. Do NOT format to 'MM/dd/yyyy' string.\n  // Formatting is handled in makeCell() via Google Sheets numberFormat.\n  const leadReceived = safe(() => {\n    return $('[S] Pick Snovio output body').item.json.first_email_date;\n  });\n\n  const campaignName  = safe(() => $('[S] Bison: GET /campaigns/{id}').item.json.data?.name);\n  const messageTitle  = safe(() => $('[S] Pick Snovio output body').item.json.subject);\n  const messageNumber = safe(() => $('[S] Pick Snovio output body').item.json.sequence_step_order);\n  const responseTime  = safe(() => $('[S] Pick Snovio output body').item.json.response_time_bucket);\n\n  const qualification = safe(() => $('[S] Qualification from tag set').first().json.qualification);\n\n  const emailText = safe(() => pickedReply().text_body);\n  const campaignId = safe(() => pickedReply().campaign_id);\n\n  const values = [\n    fullName,        // 0  FULL NAME\n    jobTitle,        // 1  JOB TITLE\n    email,           // 2  E-MAIL\n    phoneNumber,     // 3  Phone Number\n    phoneSource,     // 4  Phone Source\n    companyName,     // 5  COMPANY NAME\n    industry,        // 6  INDUSTRY\n    headcount,       // 7  HEADCOUNT\n    leadReceived,    // 8  LEAD RECEIVED — real Sheet date\n    campaignName,    // 9  CAMPAIGN NAME\n    messageTitle,    // 10 MESSAGE TITLE\n    messageNumber,   // 11 MESSAGE #\n    website,         // 12 WEBSITE\n    qualification,   // 13 QUALIFICATION\n    responseTime,    // 14 LEAD RESPONSE TIME\n    '',              // 15\n    '',              // 16\n    '',              // 17\n    '',              // 18\n    '',              // 19\n    '',              // 20\n    emailText,       // 21 Mail from lead\n    '',              // 22\n    '',              // 23\n    campaignId,      // 24 Campaign ID\n    '',              // 25\n    '',              // 26\n    linkedinUrl,     // 27 LinkedIn URL\n    country,         // 28 Country\n  ];\n\n  return JSON.stringify({\n    requests: [\n      {\n        appendCells: {\n          sheetId: Number(sheet.properties.sheetId),\n          tableId: String(table.tableId),\n          rows: [\n            {\n              values: values.map((value, index) => makeCell(value, index))\n            }\n          ],\n          fields: 'userEnteredValue,userEnteredFormat.numberFormat'\n        }\n      }\n    ]\n  });\n})() }}\n",
         "method": "POST",
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {},
@@ -1884,8 +1997,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        6912,
-        -672
+        7184,
+        -448
       ],
       "parameters": {
         "assignments": {
@@ -1907,8 +2020,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        6944,
-        -16
+        7184,
+        -64
       ],
       "parameters": {
         "assignments": {
@@ -2027,7 +2140,7 @@
       "typeVersion": 3.4,
       "position": [
         -112,
-        64
+        392
       ],
       "parameters": {
         "assignments": {
@@ -2049,8 +2162,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        6928,
-        -320
+        7184,
+        -256
       ],
       "parameters": {
         "conditions": {
@@ -2077,13 +2190,47 @@
       }
     },
     {
+      "id": "sheet-append-guard-0001",
+      "name": "Enriched this run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7632,
+        512
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "enriched-this-run",
+              "leftValue": "={{ $('[S] Edit Fields').isExecuted }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "0831d567-6593-47db-b096-305227280aa1",
       "name": "Execution Data",
       "type": "n8n-nodes-base.executionData",
       "typeVersion": 1.1,
       "position": [
         -336,
-        64
+        392
       ],
       "parameters": {
         "dataToSave": {
@@ -2110,8 +2257,8 @@
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.3,
       "position": [
-        6400,
-        -304
+        6736,
+        128
       ],
       "parameters": {
         "conditions": {
@@ -2143,9 +2290,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3760,
-        -16
+        -560,
+        736
       ],
+      "disabled": true,
       "parameters": {
         "bodyParameters": {
           "parameters": [
@@ -2176,9 +2324,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3024,
-        96
+        -560,
+        2752
       ],
+      "disabled": true,
       "parameters": {
         "bodyParameters": {
           "parameters": [
@@ -2209,8 +2358,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        5744,
-        96
+        7856,
+        512
       ],
       "parameters": {
         "authentication": "predefinedCredentialType",
@@ -2225,8 +2374,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        7360,
-        -672
+        7632,
+        -448
       ],
       "parameters": {
         "authentication": "genericCredentialType",
@@ -2259,8 +2408,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1456,
-        96
+        7408,
+        416
       ],
       "parameters": {
         "conditions": {
@@ -2294,7 +2443,7 @@
       "typeVersion": 3.2,
       "position": [
         336,
-        -16
+        320
       ],
       "parameters": {
         "mode": "chooseBranch"
@@ -2306,8 +2455,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        6608,
-        -304
+        6960,
+        -256
       ],
       "parameters": {
         "operation": "select",
@@ -2340,12 +2489,28 @@
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        7136,
-        -672
+        7408,
+        -448
       ],
       "parameters": {
         "fieldToSplitOut": "phones",
         "options": {}
+      }
+    },
+    {
+      "id": "sticky-dead-branch-l-0001",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2848,
+        4304
+      ],
+      "parameters": {
+        "color": 3,
+        "content": "## DEAD — branch L's own enrichment, disconnected 2026-08-19 (phase B)\n\nDisabled and with no inbound edge. The client's Leads sheet is written from branch S now — after Postgres, after the notifications — so this second copy of the Bison / Snov.io / OpenAI chain has no consumer left, and the sheet can no longer disagree with Supabase about a lead it never saw.\n\nDeleted at phase C, together with the sheet write itself. ADR-0017 · README “Phase B — one enrichment chain, Supabase first”.",
+        "height": 400,
+        "width": 4800
       }
     },
     {
@@ -2355,7 +2520,7 @@
       "typeVersion": 1.1,
       "position": [
         112,
-        64
+        392
       ],
       "parameters": {
         "amount": "={{ $json.time }}"
@@ -2368,7 +2533,7 @@
       "typeVersion": 1.1,
       "position": [
         -560,
-        -16
+        320
       ],
       "parameters": {
         "inputSource": "passthrough"
@@ -2425,6 +2590,18 @@
         ]
       ]
     },
+    "Enriched this run?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get Table ID",
+            "type": "main"
+          }
+        ],
+        []
+      ]
+    },
     "Execution Data": {
       "main": [
         [
@@ -2443,27 +2620,15 @@
             "index": 0,
             "node": "Select rows from a table",
             "type": "main"
-          }
-        ]
-      ]
-    },
-    "Get Snov.io Access Token (Global)": {
-      "main": [
-        [
+          },
           {
             "index": 0,
-            "node": "[11] Snov.io: POST /v1/get-profile-by-email (Global)",
+            "node": "[283] Lead email == Reply email?",
             "type": "main"
-          }
-        ]
-      ]
-    },
-    "Get Snov.io Access Token (Local)": {
-      "main": [
-        [
+          },
           {
             "index": 0,
-            "node": "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)",
+            "node": "[2] Find workspace in CS PDCA",
             "type": "main"
           }
         ]
@@ -2492,7 +2657,7 @@
         [
           {
             "index": 0,
-            "node": "[43] Bison: GET /leads/{taggable_id}/replies",
+            "node": "Enriched this run?",
             "type": "main"
           }
         ]
@@ -2568,86 +2733,6 @@
         ]
       ]
     },
-    "[10] Snov.io Local empty?": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "Get Snov.io Access Token (Global)",
-            "type": "main"
-          }
-        ],
-        [
-          {
-            "index": 0,
-            "node": "[226+227+228] Pick Snovio output body",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[11] Snov.io: POST /v1/get-profile-by-email (Global)": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[226+227+228] Pick Snovio output body",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[180] Phone number missing?": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[181] Lusha: POST /v2/person (fallback phone)",
-            "type": "main"
-          }
-        ],
-        [
-          {
-            "index": 0,
-            "node": "[4b] Re-check lead in Leads sheet",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[181] Lusha: POST /v2/person (fallback phone)": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[287] Set phone from Lusha",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[18] OpenAI: gpt-4o analyze email": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[286] Parse AI output + set phone",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[226+227+228] Pick Snovio output body": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[18] OpenAI: gpt-4o analyze email",
-            "type": "main"
-          }
-        ]
-      ]
-    },
     "[283] Lead email == Reply email?": {
       "main": [
         [],
@@ -2671,34 +2756,12 @@
         ]
       ]
     },
-    "[286] Parse AI output + set phone": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[180] Phone number missing?",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[287] Set phone from Lusha": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[4b] Re-check lead in Leads sheet",
-            "type": "main"
-          }
-        ]
-      ]
-    },
     "[2] Find workspace in CS PDCA": {
       "main": [
         [
           {
             "index": 0,
-            "node": "[40] Bison: GET /leads/{taggable_id}",
+            "node": "[4] Check if lead already in Leads sheet",
             "type": "main"
           }
         ]
@@ -2726,55 +2789,6 @@
         ]
       ]
     },
-    "[40] Bison: GET /leads/{taggable_id}": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[4] Check if lead already in Leads sheet",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[43] Bison: GET /leads/{taggable_id}/replies": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[45] Set last_reply (LATEST by date_received DESC)",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[45] Set last_reply (LATEST by date_received DESC)": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[283] Lead email == Reply email?",
-            "type": "main"
-          },
-          {
-            "index": 0,
-            "node": "[52] Bison: GET /campaigns/{id}",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[49] Bison: GET /leads/{lead_id}/scheduled-emails": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)",
-            "type": "main"
-          }
-        ]
-      ]
-    },
     "[4] Check if lead already in Leads sheet": {
       "main": [
         [
@@ -2783,85 +2797,12 @@
             "node": "Lead already exists?",
             "type": "main"
           }
-        ],
-        []
-      ]
-    },
-    "[4b] Duplicate appeared mid-run?": {
-      "main": [
-        [],
-        [
-          {
-            "index": 0,
-            "node": "Get Table ID",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[4b] Re-check lead in Leads sheet": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[4b] Duplicate appeared mid-run?",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[52] Bison: GET /campaigns/{id}": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[49] Bison: GET /leads/{lead_id}/scheduled-emails",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[69] Bison: GET /campaigns/v1.1/{id}/sequence-steps (hardcoded token)": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[79+72+51+8+57] Compute derived values",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[79+72+51+8+57] Compute derived values": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "Get Snov.io Access Token (Local)",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "[9] Snov.io: POST /v1/get-prospects-by-email (Local List)": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[10] Snov.io Local empty?",
-            "type": "main"
-          }
         ]
       ]
     },
     "[S0] Resolve Bison credentials": {
       "main": [
         [
-          {
-            "index": 0,
-            "node": "[2] Find workspace in CS PDCA",
-            "type": "main"
-          },
           {
             "index": 0,
             "node": "[S] Bison: GET /leads/{taggable_id}",
@@ -2908,7 +2849,7 @@
         [
           {
             "index": 0,
-            "node": "[S] Bison: GET /leads/{taggable_id}/replies",
+            "node": "[S] Qualification from tag set",
             "type": "main"
           }
         ]
@@ -2941,7 +2882,7 @@
         [
           {
             "index": 0,
-            "node": "[S] Resolve client sequencer",
+            "node": "[S] Resolve campaign",
             "type": "main"
           }
         ]
@@ -2964,6 +2905,35 @@
           {
             "index": 0,
             "node": "[S] Snov.io: POST /v1/get-prospects-by-email (Local List)",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Lead already promoted?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Lead exists?",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[S] Lead exists?": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Sync qualification",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /campaigns/{id}",
             "type": "main"
           }
         ]
@@ -3031,6 +3001,17 @@
         ]
       ]
     },
+    "[S] Qualification from tag set": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[S] Bison: GET /leads/{taggable_id}/replies",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "[S] Resolve campaign": {
       "main": [
         [
@@ -3042,23 +3023,12 @@
         ]
       ]
     },
-    "[S] Resolve client sequencer": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "[S] upsert_sequencer_contact",
-            "type": "main"
-          }
-        ]
-      ]
-    },
     "[S] Set last_reply (LATEST by date_received DESC)": {
       "main": [
         [
           {
             "index": 0,
-            "node": "[S] Bison: GET /campaigns/{id}",
+            "node": "[S] upsert_sequencer_contact",
             "type": "main"
           }
         ]
@@ -3115,6 +3085,17 @@
         ]
       ]
     },
+    "[S] Sync qualification": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[2] Find workspace in CS PDCA",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "[S] promote_contact_to_lead": {
       "main": [
         [
@@ -3131,7 +3112,7 @@
         [
           {
             "index": 0,
-            "node": "[S] Resolve campaign",
+            "node": "[S] Lead already promoted?",
             "type": "main"
           }
         ]

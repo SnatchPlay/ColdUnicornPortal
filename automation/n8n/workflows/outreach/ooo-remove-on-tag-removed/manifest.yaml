@@ -43,6 +43,15 @@ transition:
     SEMANTIC GAP, not a mapping detail: the sheet DELETES the row, cancel_active_ooo_followup
     CANCELS and keeps the episode. ADR-0015 keeps history so a past absence stays explainable.
     Reconciliation must compare ACTIVE rows only, or every cancellation reads as divergence.
+  ordering: >-
+    DECLARED "sheets first, supabase second". WHAT ACTUALLY RUNS, since an unknown date before
+    2026-08-26: branch S only. The trigger edge into "[86] Find workspace in CS PDCA" is absent from
+    the live graph, so all four branch-L nodes are unreachable and nothing writes or deletes the
+    OOO Leads sheet. That makes `authoritativeSource: sheets` above untrue as written. It is left
+    standing rather than quietly corrected, because the correction is a decision: either this was a
+    deliberate follow-through of the 2026-08-19 branch-L-off decision on ooo-detect-and-log — in
+    which case the phase moves to C and ADR-0017 §5 wants go-live evidence recorded — or the edge
+    came out by accident and belongs back. See defect-backlog F1 and the README.
   reconciliation: null
   parityEvidence: null
 

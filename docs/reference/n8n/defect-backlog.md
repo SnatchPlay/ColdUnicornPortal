@@ -31,6 +31,7 @@ coverage via `SUPABASE_DB_URL` against production. Every claim below is measured
 | ~~[B3](#b3)~~ | ~~Zoho OAuth token expired — 100% failure, silent~~ | — | **fixed 2026-08-26** | diagnosis was wrong: the token was healthy, `[103]` was broken three ways |
 | ~~[B8](#b8)~~ | ~~FortumEnergia's OOO routing points at GIC's campaigns~~ | — | **fixed 2026-08-15** | rows deleted, 95 episodes parked, composite FK applied |
 | ~~[B10](#b10)~~ | ~~Bison switched to cursor pagination — daily stats dead, campaign inboxes zeroed~~ | — | **fixed 2026-08-26** | one unrepairable day; `ooo_count` NOT NULL asymmetry still open |
+| ~~[B11](#b11)~~ | ~~one phone number too long cost a lead all four of its destinations~~ | — | **fixed 2026-08-26** | execution 85420 still needs a retry; the fatal-node cost is accepted |
 | [B5](#b5)–[B7](#b7) | credential/quota/transient failures | medium | varies | data completeness |
 | ~~[E5](#e5)~~ | ~~Sheets-first branch ordering makes Sheets failures fatal~~ | — | **fixed 2026-08-18** | 4 workflows reordered, terminals guarded |
 | [E2](#e2)–[E4](#e4) | systemic hardening | medium | varies | reliability |
@@ -520,6 +521,61 @@ paginated), `campaigns/sending-schedules` (still length-aware by default, and no
 6 scheduled campaigns against a page size of 15), `/campaigns` (moved to cursor, but
 `bison-campaign-sync` and `bison-workspace-setup` walk `links.next`, which cursor mode still emits —
 47 Bison campaigns, 47 rows refreshed in 24h).
+
+### B11 · `[child-1]` — a 61-character phone number cost a lead all four destinations — fixed 2026-08-26 {#b11}
+
+`lBOyL8ZPA3SZSvDW`, execution 85420. `[S] promote_contact_to_lead` returned `value too long for type
+character varying(50)`. The offending value was a phone:
+
+```
++380 44 507 29 94*303 / +380 67 311 44 55 / +380 50 394 31 13     (61 chars)
+```
+
+The AI extraction is asked for `phone_number`, singular; the signature listed three and it returned
+all three in one string. `leads.phone_number` is `varchar(50)`.
+
+**The interesting part is not the overflow — it is what the overflow cost.** The node is fatal
+(no `onError`), and under `executionOrder: v1` the entire branch-L chain hangs *below* it:
+`[S] promote_contact_to_lead → Filter →` `[4] Check if lead already in Leads sheet`,
+`[189-192] Forward email to recipients`, `Call '[HUB] CRMs Add/Update Lead Dispatcher'`. So one
+oversized string cost this lead **four** destinations: the `leads` row, the Leads sheet row, the
+forwarded email, and the CRM sync. `sequencer_contacts` and `replies` were already written, leaving a
+contact and a reply with no lead.
+
+This also falsified two claims that the artifact README had been making since July — that all five
+branch-S Postgres nodes carry `onError: continueRegularOutput`, and that *"Sheets and Supabase run in
+parallel; neither reads from the other."* Neither is true of the live graph: three of the five have no
+`onError`, the branches are sequential, and branch L's `Edit Fields1` reads two branch-S nodes. Both
+claims are corrected in the artifact README.
+
+**Fixed 2026-08-26** in `[S] Parse AI output + set phone` — the single shared source that both
+branches read, so the sheet and Supabase keep the same value:
+
+```js
+const phoneFromAi = String(ai.phone_number || "").split(/[\/,;|\n]/)[0].trim();
+```
+
+**Two owner decisions, recorded so they are not quietly reversed:**
+
+1. **First number in the string**, not "first mobile". Simple and predictable; it matches signature
+   order. In this case it yields the office number with its extension.
+2. **The node stays fatal, and no truncation.** `continueRegularOutput` would have let the chain
+   finish, but the Supabase failure would then be silent — a green execution and no Slack alert.
+   Truncating to 50 would store a wrong, dialable-looking number. Both were rejected in favour of
+   failing loudly. **The cost is accepted knowingly:** if this node fails again, the lead is lost in
+   all four places and the recovery is a retry.
+
+**Still open — execution 85420 needs retrying.** `info@oriongr.com` has a `sequencer_contacts` row
+(`9e60cafb…`) and a `replies` row (`45ddd5c0…`) but no `leads` row. A retry from the start is safe:
+both RPCs are idempotent by key and `promote_contact_to_lead` is at most one lead per contact
+([ADR-0015](../../adr/0015-sequencer-contacts-and-ooo-followups.md)).
+
+**Also found, and separately worth acting on.** The artifact was **stale**: re-exporting to make this
+change pulled in six nodes that had been added in the UI and never exported (`[S] Lead exists?`,
+`[S] Lead already promoted?`, `[S] Qualification from tag set`, `[S] Sync qualification`,
+`Enriched this run?`, a sticky note) and corrected the failure posture of five more. A UI edit that
+never becomes an artifact is the same class of problem as [A1](#a1) — the repository stopped being
+the record of what runs, which is exactly how a README keeps asserting guards that are not there.
 
 ### B6 · `aimfox-premql-to-pdca` — 500 on blacklist — fixed 2026-08-19 {#b6}
 
@@ -1165,13 +1221,60 @@ Classified by execution order (n8n runs fan-out branches top-to-bottom by Y-posi
 | `[HUB] CRMs Add/Update Lead Dispatcher` | 1 read — resolves the client from CS PDCA |
 | `Bison Replies Classification` | 1 read — "Sheets Primary" is in its name |
 
+### F1 · Both OOO workflows had their Sheets branch unplugged, and the repository did not know {#f1}
+
+Found 2026-08-26 by `pnpm n8n:check-drift`, which reported `connections changed` on
+`ooo-detect-and-log` (`O4DqMEu1Z9LcxikE`) and `ooo-remove-on-tag-removed` (`ZZ0ughB302WdDJOf`). The
+diff is one edge each, and it is the same edge:
+
+```
+When Called by HUB → [325] Find workspace in CS PDCA     (ooo-detect-and-log)
+When Called by HUB → [86]  Find workspace in CS PDCA     (ooo-remove-on-tag-removed)
+```
+
+Both exist in the committed artifact and in neither live graph. Branch L — the whole Google Sheets
+limb — is therefore unreachable in both. **Exported and committed 2026-08-26**, so the repository
+now records what runs; drift 0.
+
+**For `ooo-detect-and-log` this is consistent.** Its six branch-L nodes are already `disabled: true`
+by the owner's 2026-08-19 decision, declared in the manifest, and phase C is recorded with go-live
+evidence. Pulling the trigger edge on top of that changes nothing about what executes. The one thing
+it does change is the rollback: re-enabling the six nodes is no longer enough, the edge has to come
+back too. That is now written into `transition.ordering`.
+
+**For `ooo-remove-on-tag-removed` it is not consistent, and this is the part that needs a decision.**
+Its four branch-L nodes are **not** disabled — they are simply orphaned — and its manifest still
+declares `phase: A` with `authoritativeSource: sheets`. Nothing writes or deletes the `OOO Leads`
+sheet. The manifest describes a dual-write that does not exist.
+
+Two readings, and only the owner can choose:
+
+1. **Deliberate** — the coherent follow-through of 2026-08-19. If `ooo-detect-and-log` no longer
+   appends rows to `OOO Leads`, deleting from it is pointless. Then the phase moves to C and
+   [ADR-0017 §5](../../adr/0017-sheets-to-supabase-dual-write-transition.md) wants the go-live
+   evidence recorded, as its sibling did.
+2. **Accidental** — an edge dragged loose in the UI. Then it belongs back, and the fact that nobody
+   noticed for at least three days is the more interesting finding.
+
+Until then the contradiction is registered in the manifest's `transition.ordering` and the README,
+not silently corrected. **It is deliberately NOT a `knownViolations` entry** — that list suppresses
+validator findings and `validate.mjs` rejects an entry no rule reports.
+
+**The date is unrecoverable from here**, and that is its own small finding. Not one of the 40 most
+recent executions of either workflow (2026-08-23 → 2026-08-26) reached the CS PDCA node; the
+instance's execution retention is shorter than the change, and the n8n public REST API exposes no
+workflow version history. A UI edit that never becomes an artifact leaves no trace anyone can date
+later — the same class of problem as [A1](#a1) and as the stale `bison-lead-enrichment` artifact in
+[B11](#b11). Three instances in one day is a pattern, not an accident: nothing on this instance makes
+a UI edit end in an export.
+
 **Sheets-first — Postgres present, branch L runs first (6):**
 
 | Workflow | Sheets Y | Postgres Y | Branch-S RPCs |
 |---|---|---|---|
 | `[child-2]` NRR daily stats | 208 | 640 | `upsert_sequencer_contact`, `upsert_reply` |
-| `[child-3]` OOO detect | 208 | 480 | + `record_ooo_followup` |
-| `[child-7]` OOO remove | 304 | 560 | `cancel_active_ooo_followup` |
+| ~~`[child-3]` OOO detect~~ | — | 480 | + `record_ooo_followup` — **branch L off since 2026-08-19**, and unplugged from the trigger too ([F1](#f1)) |
+| ~~`[child-7]` OOO remove~~ | — | 560 | `cancel_active_ooo_followup` — **branch L unplugged**, date unknown ([F1](#f1)) |
 | `Add OOO Leads` | 256 | below | — |
 | `AimFox Leads Processing` | above | below | 5 nodes |
 | `Get Metrics from Aimfox` | above | below | 2 nodes |
