@@ -42,7 +42,7 @@
           "timeout": 30000
         },
         "sendHeaders": true,
-        "url": "https://go.gheads.com/api/replies?status=automated_reply&folder=inbox"
+        "url": "https://go.gheads.com/api/replies?status=automated_reply&folder=inbox&page=1"
       }
     },
     {
@@ -69,7 +69,7 @@
           "timeout": 30000
         },
         "sendHeaders": true,
-        "url": "https://go.gheads.com/api/replies?status=not_automated_reply&folder=inbox"
+        "url": "https://go.gheads.com/api/replies?status=not_automated_reply&folder=inbox&page=1"
       }
     },
     {
@@ -96,7 +96,7 @@
           "timeout": 30000
         },
         "sendHeaders": true,
-        "url": "={{ 'https://go.gheads.com/api/leads?filters%5Bcreated_at%5D%5Bcriteria%5D=%3E%3D&filters%5Bcreated_at%5D%5Bvalue%5D=' + $('Start').first().json.firstDayOfMonth_firstItem }}"
+        "url": "={{ 'https://go.gheads.com/api/leads?filters%5Bcreated_at%5D%5Bcriteria%5D=%3E%3D&filters%5Bcreated_at%5D%5Bvalue%5D=' + $('Start').first().json.firstDayOfMonth_firstItem + '&page=1' }}"
       }
     },
     {
@@ -231,7 +231,7 @@
           "timeout": 30000
         },
         "sendHeaders": true,
-        "url": "https://go.gheads.com/api/sender-emails"
+        "url": "https://go.gheads.com/api/sender-emails?page=1"
       }
     },
     {

@@ -1,0 +1,77 @@
+schemaVersion: 1
+
+id: zoho-upsert-account-and-lead
+name: "[CRM child] Zoho · Upsert Account + Lead"
+domain: crm
+owner: automation
+lifecycle: managed
+status: active
+criticality: medium
+
+businessProcess:
+  # No dedicated CRM process document exists yet — the boundary is described in the functional
+  # reference. Writing docs/reference/processes/crm/lead-handoff.md is owed; see README "What is
+  # still owed".
+  - docs/reference/functional/11-integrations.md
+
+architectureDecisions:
+  - docs/adr/0010-legacy-crm-integration.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[HUB] CRMs Add/Update Lead Dispatcher"
+    detail: >-
+      Fires once per positive-reply lead whose client has authorised Zoho. The dispatcher supplies
+      both the lead and the client's Zoho OAuth material in the trigger payload.
+
+# ── What it actually touches TODAY (as imported 2026-08-26) ──────────────────────────────────
+reads:
+  external:
+    - "Zoho accounts · POST /oauth/v2/token (refresh_token grant)"
+  tables: []
+
+writes:
+  external:
+    - "Zoho CRM · POST /crm/v8/Accounts/upsert"
+    - "Zoho CRM · POST /crm/v8/Leads/upsert"
+    - "Zoho CRM · POST /crm/v8/Leads/{id}/actions/associate_email"
+  tables: []
+  rpcs: []
+  tablesWritten: []
+
+credentials:
+  # No n8n credential object. The client's Zoho client_id / client_secret / refresh_token arrive in
+  # the trigger payload as `crm.*` and are exchanged for an access token by "[35] Zoho: refresh
+  # access_token" on every run. Nothing is stored in the graph — which is why export sanitized
+  # 0 credential refs — but it does mean execution data is credential-bearing.
+  - alias: "(none — OAuth material arrives in the trigger payload)"
+    type: none
+    usedBy: "[35] Zoho: refresh access_token"
+
+transition:
+  phase: C
+  phaseState: live
+  authoritativeSource: zoho
+  legacyStore: null
+  targetStore: "Zoho CRM (the client's own tenant)"
+  design: docs/reference/functional/11-integrations.md
+  notes: >-
+    Not a Sheets→Supabase path at all. The portal stores CRM status only (ADR-0010); the record of
+    truth for a synced lead is the client's Zoho tenant. Declared for completeness.
+  reconciliation: null
+  parityEvidence: null
+
+idempotency:
+  key: "Zoho upsert on duplicate_check_fields: [Email], for both Accounts and Leads"
+  notes: >-
+    The two upserts are idempotent per email. The third call — associate_email — is NOT: replaying a
+    run associates the same reply with the lead twice. There is no dedupe key on that endpoint, so a
+    retry of the whole workflow duplicates the email on the record.
+
+retryPolicy:
+  notes: >-
+    No retryOnFail anywhere, and no onError. A failure at any node ends the run and the lead's reply
+    context is never associated. Not bound to [ERR] Automation failure recorder — see defect-backlog
+    E1 — so failures are invisible outside the execution list.
+
+knownViolations: []

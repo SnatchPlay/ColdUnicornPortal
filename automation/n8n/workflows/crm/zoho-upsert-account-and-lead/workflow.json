@@ -1,0 +1,220 @@
+{
+  "name": "[CRM child] Zoho · Upsert Account + Lead",
+  "description": "Zoho CRM child: refresh OAuth access_token, then parallel upsert Account (by Website) + upsert Lead (by Email) using Zoho's native upsert with duplicate_check_fields.",
+  "nodes": [
+    {
+      "id": "52934149-37b9-4bac-a52a-191eee01c473",
+      "name": "[101] Zoho: Upsert Account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        288
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Zoho-oauthtoken \" + $json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ data: [{ Account_Name: $(\"Edit Fields\").first().json.lead.company || $(\"Edit Fields\").first().json.lead.website, Website: $(\"Edit Fields\").first().json.lead.website, Phone: $(\"Edit Fields\").first().json.lead.phone }], duplicate_check_fields: [\"Website\"] }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{ \"https://www.zohoapis.\" + $('Edit Fields').item.json.crm.domain + \"/crm/v8/Accounts/upsert\" }}"
+      }
+    },
+    {
+      "id": "9001b851-13b4-4af2-855c-148254363e6b",
+      "name": "[102] Zoho: Upsert Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        528
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Zoho-oauthtoken \" + $json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ data: [{ Last_Name: $(\"Edit Fields\").first().json.lead.lastname, First_Name: $(\"Edit Fields\").first().json.lead.firstname, Company: $(\"Edit Fields\").first().json.lead.company || $(\"Edit Fields\").first().json.lead.website, Email: $(\"Edit Fields\").first().json.lead.email, Phone: $(\"Edit Fields\").first().json.lead.phone, Title: $(\"Edit Fields\").first().json.lead.position, Website: $(\"Edit Fields\").first().json.lead.website, Lead_Source: \"Gheads Agency\" }], duplicate_check_fields: [\"Email\"], trigger: [\"approval\", \"workflow\", \"blueprint\"] }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{ \"https://www.zohoapis.\" + $(\"Edit Fields\").first().json.crm.domain + \"/crm/v8/Leads/upsert\" }}"
+      }
+    },
+    {
+      "id": "23286ab2-29a3-45e4-85bc-37eaf56e8e15",
+      "name": "[103] Zoho: Add email to lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1232,
+        528
+      ],
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Zoho-oauthtoken \" + $(\"[35] Zoho: refresh access_token\").first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ Emails: [{ from: { user_name: $(\"Edit Fields\").first().json.lead.firstname + \" \" + $(\"Edit Fields\").first().json.lead.lastname, email: $(\"Edit Fields\").first().json.lead.email }, to: [{ user_name: $(\"Edit Fields\").first().json.lead.last_reply_to_name, email: $(\"Edit Fields\").first().json.lead.last_reply_to_email }], subject: $(\"Edit Fields\").first().json.lead.last_reply_subject, content: $(\"Edit Fields\").first().json.lead.last_reply_html, date_time: DateTime.fromISO($(\"Edit Fields\").first().json.lead.last_reply_created_at, { zone: \"utc\" }).toISO({ suppressMilliseconds: true }).replace(\"Z\", \"+00:00\"), sent: true, original_message_id: $(\"Edit Fields\").first().json.lead.last_reply_message_id, mail_format: \"html\" }] }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "={{ \"https://www.zohoapis.\" + $(\"Edit Fields\").first().json.crm.domain + \"/crm/v8/Leads/\" + $json.data[0].details.id + \"/actions/associate_email\" }}"
+      }
+    },
+    {
+      "id": "7d3b61f5-265c-4bcc-84db-7402b5ce8a5e",
+      "name": "[35] Zoho: refresh access_token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        736,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "options": {},
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "refresh_token",
+              "value": "={{ $json.crm.refresh_token }}"
+            },
+            {
+              "name": "client_id",
+              "value": "={{ $json.crm.client_id }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $json.crm.client_secret }}"
+            },
+            {
+              "name": "grant_type",
+              "value": "refresh_token"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "url": "={{ \"https://accounts.zoho.\" + $json.crm.domain + \"/oauth/v2/token\" }}"
+      }
+    },
+    {
+      "id": "e452b13b-268d-4684-a46e-16f4fe81df32",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        400
+      ],
+      "parameters": {
+        "jsonOutput": "={{ $json }}",
+        "mode": "raw",
+        "options": {}
+      }
+    },
+    {
+      "id": "b620511c-fb9b-4e0c-a51c-988f31572e63",
+      "name": "When Called by Dispatcher",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[35] Zoho: refresh access_token",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "When Called by Dispatcher": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Edit Fields",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[102] Zoho: Upsert Lead": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[103] Zoho: Add email to lead",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "[35] Zoho: refresh access_token": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "[101] Zoho: Upsert Account",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "[102] Zoho: Upsert Lead",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "Pmz0JjRRuJNdNpSE",
+    "executionOrder": "v1"
+  }
+}

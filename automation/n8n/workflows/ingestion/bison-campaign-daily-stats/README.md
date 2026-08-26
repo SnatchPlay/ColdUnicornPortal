@@ -27,6 +27,23 @@ Schedule (30m) ─ Set Report Date ─ Get Active Campaigns (client_sequencers, 
 | 1 | both Bison calls are `onError: continueRegularOutput` | a failed fetch yields **0**, stored indistinguishably from a real zero. A campaign that sent 400 emails can be recorded as having sent none |
 | 2 | the day's row is matched by an exact `reportDate` string against the API's `dates` array | a timezone or format change on Bison's side silently produces zeroes rather than an error |
 | 3 | no `integration_sync_runs` row | failures are invisible |
+| 4 | `inboxes_active` reads `meta.total` from `campaigns/{id}/sender-emails`, which Bison serves only when `page` is passed explicitly | defect 1 turned this into a silent estate-wide zero on 2026-08-25 — see below |
+
+### 2026-08-25 — defect 1 firing for real, and the hole it left
+
+Bison made cursor pagination the default at ~`2026-08-25T21:00Z`, so `meta.total` disappeared from
+`campaigns/{id}/sender-emails` (full contract:
+[bison-daily-stats-process](../bison-daily-stats-process/README.md#the-pagination-contract-learned-the-hard-way-2026-08-26)).
+The 21:30 run reported **success** and wrote `inboxes_active = 0` on **501 rows of 501** — the
+baseline is ~198 genuine zeros. Nothing alerted, because nothing failed.
+
+`HTTP Campaign Inboxes` now sends `&page=1` (verified: `total: 75` on campaign 1068).
+
+**The 2026-08-25 rows are not repairable.** This workflow has no backfill input — `Set Report Date`
+always uses today (UTC) — and `sender-emails` reports current state, not history, so nobody can know
+what that day's count was. Carrying 2026-08-24 forward would be invented data. The day stays zero and
+is a visible dip in `admin_dashboard_daily` until it rolls out of the view's 21-day window
+(~2026-09-15).
 
 Defect 1 is the one that matters: it violates invariant 3 of the process doc — a silent zero is a lie.
 Any future change here should record the failure and leave the row alone.

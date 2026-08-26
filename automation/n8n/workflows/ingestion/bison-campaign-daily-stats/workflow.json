@@ -37,7 +37,7 @@
         },
         "options": {},
         "sendHeaders": true,
-        "url": "={{ 'https://go.gheads.com/api/campaigns/' + $('Split in Batches').item.json.campaign_external_id + '/sender-emails?limit=1' }}"
+        "url": "={{ 'https://go.gheads.com/api/campaigns/' + $('Split in Batches').item.json.campaign_external_id + '/sender-emails?limit=1&page=1' }}"
       }
     },
     {

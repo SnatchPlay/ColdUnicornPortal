@@ -28,8 +28,9 @@ coverage via `SUPABASE_DB_URL` against production. Every claim below is measured
 | [E1](#e1) | 15 of 33 active workflows report failures nowhere | high | 15 settings | all observability |
 | [C1](#c1) | `[child-2]` NRR — zero executions, still declared phase A | medium | investigation | honest migration state |
 | ~~[D5](#d5)~~ | ~~336 leads written before the fixes stay empty~~ | — | **won't fix 2026-08-18** | blanks are permanent and expected |
-| [B3](#b3) | Zoho OAuth token expired — 100% failure, silent | high | credential reissue | **parked by decision** |
+| ~~[B3](#b3)~~ | ~~Zoho OAuth token expired — 100% failure, silent~~ | — | **fixed 2026-08-26** | diagnosis was wrong: the token was healthy, `[103]` was broken three ways |
 | ~~[B8](#b8)~~ | ~~FortumEnergia's OOO routing points at GIC's campaigns~~ | — | **fixed 2026-08-15** | rows deleted, 95 episodes parked, composite FK applied |
+| ~~[B10](#b10)~~ | ~~Bison switched to cursor pagination — daily stats dead, campaign inboxes zeroed~~ | — | **fixed 2026-08-26** | one unrepairable day; `ooo_count` NOT NULL asymmetry still open |
 | [B5](#b5)–[B7](#b7) | credential/quota/transient failures | medium | varies | data completeness |
 | ~~[E5](#e5)~~ | ~~Sheets-first branch ordering makes Sheets failures fatal~~ | — | **fixed 2026-08-18** | 4 workflows reordered, terminals guarded |
 | [E2](#e2)–[E4](#e4) | systemic hardening | medium | varies | reliability |
@@ -219,14 +220,59 @@ failure is still distinguishable from "already blacklisted".
 > single point of failure for every later limb. Guarding one is not a fix; guarding the limb is.
 > Hence [E3b](#e3b).
 
-### B3 · Zoho CRM child — expired OAuth token, 100% failure, invisible {#b3}
+### B3 · Zoho CRM child — ~~expired OAuth token~~ a three-way broken node — fixed 2026-08-26 {#b3}
 
-`am3gYNrZSTbrkRFa` — **16 failures / 16 runs.** `[103] Zoho: Add email to lead` returns
-`401 invalid oauth token` on every execution in the window, so the token has been dead for at least
-16 days. The workflow is an orphan with no `errorWorkflow`, so nothing reports it. No lead has
-reached Zoho in that time.
+`am3gYNrZSTbrkRFa` — **20 failures / 20 runs**, oldest retained 2026-08-14. The failure count was
+right. **The diagnosis was wrong, and it was wrong in the direction that costs the most: it read a
+vendor error message instead of the execution data.**
 
-**Fix.** Reissue the Zoho OAuth credential; bind the workflow to the failure recorder ([E1](#e1)).
+This entry originally said *"`[103] Zoho: Add email to lead` returns `401 invalid oauth token` on
+every execution, so the token has been dead for at least 16 days … No lead has reached Zoho in that
+time."* Reading a failing execution node by node (84919, 2026-08-25):
+
+| Node | Result |
+|---|---|
+| `[35] Zoho: refresh access_token` | ✅ returns a token, `scope: ZohoCRM.modules.ALL` |
+| `[101] Zoho: Upsert Account` | ✅ `code: SUCCESS`, record created |
+| `[102] Zoho: Upsert Lead` | ✅ `code: SUCCESS`, record created |
+| `[103] Zoho: Add email to lead` | ❌ `401 invalid oauth token` |
+
+The credential was never expired. Leads **were** reaching Zoho throughout; what never arrived was the
+reply attached to them. Three independent bugs, all in `[103]`:
+
+1. **The token came from the wrong node.** `[103]`'s input is `[102]`, so `$json` is the upsert
+   response, which has no `access_token`. The header was literally `Zoho-oauthtoken undefined` —
+   Zoho's "invalid oauth token" was precisely accurate, and reading it as a credential problem is
+   what parked this for eleven days.
+2. **Two expressions were never expressions.** URL and JSON body embedded `$json…` / `$('…')` inside
+   JavaScript string literals, so n8n sent the source text:
+   `POST /crm/v8/Leads/$json.data[0].details.id/actions/associate_email`.
+3. **Three field errors underneath** — `lead.last_reply_body_html` does not exist in the dispatcher
+   payload (it is `last_reply_html`); `sent: True` is Python capitalisation, which n8n resolves to
+   `undefined` and `JSON.stringify` then **drops silently**, so the flag never once reached Zoho; and
+   `date_time` was passed as `2026-08-25T14:27:35.000000Z`, six-digit microseconds that Zoho's
+   ISO-8601 parser rejects.
+
+**Fixed 2026-08-26.** One node re-deployed, drift 0. The workflow was also **imported under
+repository control** in the same change — `crm/zoho-upsert-account-and-lead`, the first artifact in
+the `crm` domain. It being an orphan is most of why a three-line bug survived eleven days.
+
+**Behavioural proof still owed.** It writes to the client's own Zoho tenant, so there is no safe
+synthetic run: the next real positive reply for a Zoho-authorised client is the test. Check that
+`[103]` returns `code: SUCCESS` and that the reply is visible on the Lead.
+
+**Two things this leaves open.**
+
+- **`sent: true` is unconfirmed semantics.** `from` is the lead and `to` is our sender, so by Zoho's
+  definition the message is *received*, not sent. The flag has never reached Zoho, so there is no
+  behaviour to preserve and nothing to migrate — but somebody who reads these records should decide
+  it rather than inherit the original author's `True`.
+- **The four sibling CRM children and the dispatcher are still orphans.** The graphs were copied, so
+  bugs 1–3 are plausibly theirs too. Audit before the next client authorises a CRM.
+
+**The lesson worth keeping.** A vendor's error string is a hypothesis, not a diagnosis. Two nodes on
+the same credential succeeding in the same execution falsifies "the credential is dead" in one glance
+at the run data.
 
 ### B4 · `[child-1]` — Lusha credit limit exhausted {#b4}
 
@@ -421,6 +467,59 @@ in the repository:
 >
 > **Still owed:** the revive workflow has *still* never completed a run. The 2026-08-22 06:40 UTC
 > fire is the first real verification — watch `integration_sync_runs`.
+
+### B10 · Bison made cursor pagination the default — `meta.total` vanished — fixed 2026-08-26 {#b10}
+
+Not a defect we wrote: a **vendor contract change**, at roughly `2026-08-25T21:00Z`. Bison flipped
+`/replies`, `/leads`, `/sender-emails` and `campaigns/{id}/sender-emails` from Laravel length-aware
+pagination to cursor pagination by default. `meta.total` disappeared. Length-aware mode — and with it
+`total` — survives behind an explicit `page` parameter.
+
+Two workflows read `meta.total`, and they failed in opposite ways.
+
+**`Daily Stats Process` (`BQbFKHUaIcEKPc01`) — loud.** All nine HTTP calls kept returning 200 with
+`executionStatus: success`; six counters silently became `null`. `ooo_count` is the only `NOT NULL`
+column among them, so the INSERT died:
+`null value in column "ooo_count" of relation "daily_stats" violates not-null constraint`.
+**102 failures**, first `2026-08-25T21:26Z`, 100% of runs after that, **0 rows for 2026-08-26** across
+all 17 clients.
+
+**`Bison campaign daily stats` (`AEgpCGoSpiZ7PA90`) — silent.** `onError: continueRegularOutput`
+([B-README defect 1](../../../automation/n8n/workflows/ingestion/bison-campaign-daily-stats/README.md))
+absorbed the missing field, so the 21:30 run reported success and wrote `inboxes_active = 0` on
+**501 rows of 501** (baseline ~198 real zeros). No alert fired. This is the more dangerous half.
+
+**Fix, deployed 2026-08-26.** `&page=1` on five nodes — `HTTP Automated Replies1`,
+`HTTP Human Replies1`, `HTTP Leads1`, `HTTP Sender Emails1`, `HTTP Campaign Inboxes`. Restored totals
+match the last good row byte-for-byte (UniTalk: 3820 / 2401 / 4891 / 125). Drift 0 on both.
+
+**Still open, and deliberately not bundled into this fix:**
+
+1. **`ooo_count` stays `NOT NULL` — decided 2026-08-26, by the owner.** The obvious reading is that
+   the asymmetry is the defect: align the nullability and a degraded fetch degrades the row instead
+   of killing the run. The owner rejected that, and correctly. **That constraint was the only alarm
+   in the system.** Relax it and the identical vendor change writes six `null` counters into every
+   client's row, every two hours, with a green execution list — exactly what
+   `bison-campaign-daily-stats` did on the same day and nobody noticed for a day.
+   The constraint is not a good alarm; it is an accidental one, and it fires as a total outage. The
+   fix is therefore **additive, not subtractive**: assert the response shape at the source (an
+   `integration_sync_runs` row and a check that `meta.total` is a number) so the failure is loud
+   *and* scoped. Until that exists, `NOT NULL` stays.
+2. **The 2026-08-25 campaign zeros are unrepairable.** No backfill input on that workflow, and
+   `sender-emails` reports current state, not history. Reconstructing them would be invented data
+   ([ADR-0017](../../adr/0017-sheets-to-supabase-dual-write-transition.md) discipline). They dip
+   `admin_dashboard_daily` until ~2026-09-15.
+3. **`page=1` is a reprieve, not a contract.** Bison chose cursor as its default; the compatibility
+   parameter can go next. The durable fix is to stop deriving per-day counters from undated lifetime
+   totals — [`bison-daily-stats-process` defect 4](../../../automation/n8n/workflows/ingestion/bison-daily-stats-process/README.md).
+4. **Nothing watches the vendor contract.** Both workflows would have caught this on the first run
+   with an `integration_sync_runs` row and a shape assertion; neither has one ([E4](#e4)).
+
+Verified unaffected: `workspaces/v1.1/line-area-chart-stats` and `workspaces/v1.1/stats` (not
+paginated), `campaigns/sending-schedules` (still length-aware by default, and no client exceeds
+6 scheduled campaigns against a page size of 15), `/campaigns` (moved to cursor, but
+`bison-campaign-sync` and `bison-workspace-setup` walk `links.next`, which cursor mode still emits —
+47 Bison campaigns, 47 rows refreshed in 24h).
 
 ### B6 · `aimfox-premql-to-pdca` — 500 on blacklist — fixed 2026-08-19 {#b6}
 
@@ -800,7 +899,7 @@ fixing the forward path; fix [D1](#d1)/[D2](#d2) first so the backlog stops grow
 Not bound to `[ERR] Automation failure recorder` (`Pmz0JjRRuJNdNpSE`):
 
 `[HUB] Bison Replies Dispatcher` · `[HUB] CRMs Add/Update Lead Dispatcher` · `[child-4]` · `[child-5]` ·
-`[child-6]` · CRM children Salesforce / HubSpot / Pipedrive / Zoho / LiveSpace ·
+`[child-6]` · CRM children Salesforce / HubSpot / Pipedrive / ~~Zoho~~ / LiveSpace ·
 `Bison Replies Classification` · `[CRED] CS PDCA edit` · `Winnr Sync - Error Handler` ·
 `[ERR] Automation failure recorder` itself · `Winnr Daily Sync` (bound to the Winnr handler instead).
 
@@ -883,7 +982,11 @@ not a flag:
   0/2055 failures but it is the root of the entire Bison reply fan-out), `[child-5]`
   (`FZSFz5bcgigUneQZ`), `[child-6]` (`wJZbg0cRsdF58ylE`), `Bison Replies Classification 401 fallback`
   (`XdTMd1KJX0cRmF9u`). The last three are already Wave 5 targets, so their manifests are owed anyway.
-- **Parked with Zoho by decision** — the CRMs dispatcher and the five CRM children.
+- **~~Parked with Zoho by decision~~** — the CRMs dispatcher and four of the five CRM children.
+  **Zoho was bound 2026-08-26** when [B3](#b3) was reopened and fixed: 20 consecutive failures
+  reporting nowhere is most of why a three-line bug survived eleven days. The other four children
+  and the dispatcher remain unbound, and are now the strongest candidates in this list — the
+  graphs were copied from each other, so B3's bugs are plausibly theirs too.
 - **Deliberately unbound** — `[ERR] Automation failure recorder` itself (binding it to itself is a
   loop; if the recorder breaks, nothing catches it, which is worth knowing but is not fixed by a
   self-reference) and `Winnr Sync - Error Handler`, which is another estate's error handler.

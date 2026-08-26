@@ -39,6 +39,43 @@ first.
 | 3 | the API key still arrives as a field named `external_api_key` | harmless, but it is the last echo of the pre-ADR-0012 shape; kept deliberately so the repair changed one node and nothing else |
 | 4 | `human_replies_count` / `ooo_count` are deltas of an **undated** lifetime total (`replies?…&folder=inbox`), while `emails_sent` / `response_count` are true per-day values | one row mixes two time semantics. `human + ooo` routinely exceeds `response_count`; the total is non-monotonic (archiving a reply lowers it) and the `max(…,0)` clamp discards the drop without resetting the baseline |
 | 5 | `ooo_count` is not OOO — it is the automated-replies delta, byte-identical to `automated_replies_count` | see the accepted deviation below |
+| 6 | the four count endpoints depend on `meta.total`, which Bison serves **only when `page` is passed explicitly** | see the pagination contract below — it cost every client a day of stats on 2026-08-26 |
+| 7 | `ooo_count` is `NOT NULL` while every sibling counter (`human_replies_count`, `automated_replies_*`, `prospects_*`, `inboxes_count`, `ooo_count_total`) is nullable | a partial Bison fetch does not degrade the row, it **kills the whole upsert** — defect 1's "row with zeroes" is optimistic, the real outcome is no row at all |
+
+### The pagination contract (learned the hard way, 2026-08-26)
+
+Bison serves two pagination modes on the same endpoints, and **the default changed under us** at
+roughly `2026-08-25T21:00Z`:
+
+| Request | `meta` |
+|---|---|
+| `/replies?status=automated_reply&folder=inbox` | `per_page`, `next_cursor`, `prev_cursor` — **no `total`** |
+| `/replies?status=automated_reply&folder=inbox&page=1` | `current_page`, `last_page`, `to`, **`total`** |
+
+Cursor pagination became the default; length-aware pagination survives behind an explicit `page`
+parameter. `per_page` is ignored in both modes (always 15), so `page=1` costs nothing extra.
+
+`Transform Metrics1` reads `meta.total` on four nodes — `HTTP Automated Replies1`,
+`HTTP Human Replies1`, `HTTP Leads1`, `HTTP Sender Emails1`. All four kept returning HTTP 200 and
+`executionStatus: success`; only the field vanished. Six counters went `null`, and because
+`ooo_count` is the one `NOT NULL` column among them (defect 7), Postgres rejected the whole INSERT:
+
+```
+null value in column "ooo_count" of relation "daily_stats" violates not-null constraint
+```
+
+**102 failed runs** (17 clients × 6 schedules), zero rows for `2026-08-26` until the fix. The four
+URLs now carry `&page=1`; measured against UniTalk, the restored totals match the last good row
+byte-for-byte (3820 / 2401 / 4891 / 125).
+
+**Treat `page=1` as a reprieve, not a contract.** Bison chose cursor as its default; the compatibility
+parameter can disappear next. The durable answer is defect 4 — stop deriving per-day counters from
+undated lifetime totals.
+
+Not affected, and verified so: `workspaces/v1.1/line-area-chart-stats` and `workspaces/v1.1/stats`
+are not paginated; `campaigns/sending-schedules` is still length-aware by default; `/campaigns` went
+to cursor but `bison-campaign-sync` walks `links.next`, which cursor mode still provides (47 Bison
+campaigns, 47 rows refreshed).
 
 ### Accepted deviation — `ooo_count` (decided 2026-07-27, review by 2026-10-31)
 
