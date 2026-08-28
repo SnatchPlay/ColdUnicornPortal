@@ -267,6 +267,12 @@ Treated as a **credential move**, not a Sheets data migration — the same carve
 the RPC against today's Code-node output across all nine workspaces, not by a dual-read window: the
 dispatcher only fires on a positive reply, so waiting for traffic would take months.
 
+**Done 2026-08-28.** Migrations `20260828`/`b`/`c` are on production, all nine connections are seeded
+(ws 77 parked), and the dispatcher now resolves from Postgres — five nodes collapsed into one RPC
+call, plus a Switch fallback so an unroutable lead fails loudly. What remains for this group: the
+credential **intake** webhook (a client connecting a CRM still posts to Make.com), erasing the sheet's
+credential columns, and rotating the keys.
+
 Three defects surfaced while planning it, all recorded in
 [defect-backlog §G](defect-backlog.md#g--crm-dispatch-drops-leads-without-saying-so-found-2026-08-28):
 the Switch has no fallback output, TouchlessFreaks' Salesforce has never fired, and the hub cannot see

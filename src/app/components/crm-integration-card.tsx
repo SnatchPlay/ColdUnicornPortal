@@ -18,7 +18,7 @@ import type { ClientRecord } from "../types/core";
  *
  * IT NO LONGER MIRRORS STATUS INTO OUR DATABASE. It used to write `clients.crm_config` on every
  * connect, disconnect and failure — a full-object replace. That column turned out to hold PDCA /
- * Sheets metadata for 46 of 63 clients, so the mirror was doing two wrong things at once: the badge
+ * Sheets metadata for 47 clients, so the mirror was doing two wrong things at once: the badge
  * never rendered (the shape it required was never there), and the first successful connect would
  * have destroyed that client's spreadsheet_id, report_link and growth_head. The column is gone
  * (ADR-0019); the record of a CRM connection now lives in `client_crm_connections`, written by n8n

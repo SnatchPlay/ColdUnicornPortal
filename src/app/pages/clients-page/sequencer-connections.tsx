@@ -739,7 +739,7 @@ export function SequencerConnections({
       </div>
 
       {/* No CRM status line here any more. It read `clients.crm_config`, which held PDCA/Sheets
-          metadata for 46 of 63 clients — so it announced "Connected" for every client that had a
+          metadata for 47 clients — so it announced "Connected" for every client that had a
           spreadsheet_id and stayed blank for the ones with a real CRM. A truthful badge needs a
           credential-free view over client_crm_connections (ADR-0019); until that exists, showing
           nothing beats showing the opposite of the truth. */}

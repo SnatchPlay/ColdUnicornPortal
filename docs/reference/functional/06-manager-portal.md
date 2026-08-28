@@ -236,7 +236,7 @@ Editable fields — **Credentials & IDs** section:
 
 > **The CRM status badge was removed on 2026-08-28.** It read
 > `!!client.crm_config && Object.keys(client.crm_config).length > 0`, and `crm_config` held
-> PDCA/Sheets metadata for 46 of 63 clients — so it announced "Connected" for every client that had a
+> PDCA/Sheets metadata for 47 clients — so it announced "Connected" for every client that had a
 > `spreadsheet_id` and stayed blank for the ones with a real CRM. The connection record now lives in
 > `client_crm_connections`, which is RLS-enabled with no policies and unreadable from the portal
 > ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md)). A truthful badge needs a

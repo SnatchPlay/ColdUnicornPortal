@@ -1,0 +1,106 @@
+schemaVersion: 1
+
+id: crms-lead-dispatcher
+name: "[HUB] CRMs Add/Update Lead Dispatcher"
+domain: crm
+owner: automation
+lifecycle: managed
+status: active
+criticality: high        # it is the only path a positive-reply lead takes into a client's own CRM
+
+businessProcess:
+  # docs/reference/processes/crm/lead-handoff.md is still owed — see README "What is still owed".
+  - docs/reference/functional/11-integrations.md
+
+architectureDecisions:
+  - docs/adr/0019-crm-connections-in-postgres.md
+  - docs/adr/0010-legacy-crm-integration.md
+  - docs/adr/0012-multi-sequencer-model.md
+
+triggers:
+  - type: sub-workflow
+    calledBy: "[child-1] TAG_ATTACHED · Interested/PreMQL · Full enrichment; AimFox Leads Processing"
+    detail: >-
+      Fires once per positive-reply lead. The caller supplies the normalised lead plus the Bison
+      workspace_id, which is the only client identity in the payload.
+
+# ── What it touches (rewired to Postgres 2026-08-28, ADR-0019) ────────────────────────────────
+reads:
+  tables:
+    - client_crm_connections
+    - client_sequencers
+    - sequencers
+  rpcs:
+    - resolve_crm_connection
+  external: []
+  # The Google Sheets and Data Table nodes are STILL IN THE GRAPH but have no incoming edge, so they
+  # never execute. Left in place deliberately: reverting is one edge, and the deploy tool cannot
+  # delete nodes. Remove them in a follow-up once this has run on real traffic.
+
+writes:
+  tables: []
+  tablesWritten: []
+  rpcs: []
+  external: []          # it dispatches; the five children do the CRM writes
+
+credentials:
+  - alias: "Postgres account"
+    type: postgres
+    usedBy: "Resolve CRM connection"
+  - alias: "Google Sheets account"
+    type: googleApi
+    usedBy: "Lookup CRM Config (unreachable since 2026-08-28)"
+  # The clients' CRM secrets still travel to the children inside the trigger payload, so execution
+  # data remains credential-bearing. Moving the store did not change that — security finding 13
+  # closes only when the sheet is erased and the keys rotated.
+
+transition:
+  phase: C
+  phaseState: live
+  authoritativeSource: supabase
+  legacyStore: "Google Sheets · CS PDCA tab `Client CRM Details` + n8n Data Table `OAuth2 Tokens`"
+  targetStore: "Supabase · public.client_crm_connections"
+  design: docs/adr/0019-crm-connections-in-postgres.md
+  notes: >-
+    A CREDENTIAL move, not a data migration — the same carve-out sheets-credential-sync-on-edit got
+    for the Bison/Aimfox keys. Postgres side is live as of 2026-08-28: the table, the four RPCs and
+    all nine connections are seeded (ws 77 parked, enabled=false). This workflow has NOT been rewired yet, so the sheet is still
+    what it reads.
+  reconciliation: >-
+    select cs.external_workspace_id, (public.resolve_crm_connection('emailbison', cs.external_workspace_id)) ->> 'type'
+    from public.client_sequencers cs
+    join public.sequencers s on s.id = cs.sequencer_id and s.key = 'emailbison'
+    where cs.external_workspace_id is not null;
+    Compare field by field against the object the `Build { lead, crm } payload` node builds today.
+  parityEvidence: >-
+    The RPC returns the Code node's object key for key — proven on a local restore of the production
+    schema (2026-08-28) and read-only against production for all nine live workspace ids: 8 resolve
+    with the right type and a non-empty api_token, ws 77 resolves NULL because it is parked. Two of
+    the nine are strictly BETTER than the sheet ever produced: LiveSpace now carries `salt` and
+    `subdomain`, which the sheet could not supply at all (defect G4). Post-deploy the graph was
+    re-exported and verified: 11 nodes reachable from the trigger, the 4 old nodes dead, the Postgres
+    credential bound, active=true. NOT yet exercised by a real positive reply — that is the remaining
+    proof.
+
+idempotency:
+  key: "none — the hub has no dedupe; each invocation dispatches once per item"
+  notes: >-
+    Re-running the caller re-dispatches. The children's own upserts are keyed on email, so a replay is
+    mostly harmless there; the exception is the Zoho child's associate_email call, which is not
+    idempotent (see that workflow's manifest).
+
+retryPolicy:
+  notes: >-
+    No retryOnFail, no onError, and still no errorWorkflow binding. All five `Execute child-crm-*`
+    nodes set waitForSubWorkflow:false, so the hub reports success the instant it hands off and cannot
+    see a child fail — defect-backlog G3, unchanged by this rewire. What DID change: a lead that
+    resolves no CRM now hits `Unroutable — record and fail` and the execution fails visibly, instead
+    of falling off a Switch with no fallback output.
+
+knownViolations: []
+# NOTE: this list suppresses findings the VALIDATOR raises; it is not a journal of contradictions.
+# The two live ones are recorded where they are actionable instead:
+#   * still reads the sheet + data table instead of client_crm_connections (ADR-0019 §1)
+#     -> transition.phaseState above, README "Migration", migration-backlog §4
+#   * `Route by CRM type` drops a lead that resolves no CRM (ADR-0019 §5)
+#     -> defect-backlog G1, README "Known defects"

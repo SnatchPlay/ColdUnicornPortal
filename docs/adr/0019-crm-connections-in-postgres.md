@@ -33,7 +33,7 @@ Four things were wrong with this, and they compound:
    (workspace 77) has a complete Salesforce OAuth set from 2026-05-22 and no sheet row: its
    integration has never fired and nothing anywhere said so. `Route by CRM type` has no fallback
    output either, so an unknown provider disappears the same way.
-4. **`clients.crm_config` was never the status mirror it was documented as.** In 46 of 63 rows it
+4. **`clients.crm_config` was never the status mirror it was documented as.** In 47 of the 64 rows it
    held PDCA/Sheets bookkeeping (`spreadsheet_id`, `report_link`, `growth_head`, …). The badge that
    read it therefore never rendered, and the card that wrote it did a whole-object replace — so the
    first successful CRM connection would have destroyed that client's spreadsheet metadata.

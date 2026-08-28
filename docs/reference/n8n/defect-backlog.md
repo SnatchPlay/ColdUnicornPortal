@@ -1290,14 +1290,17 @@ All three found while planning [ADR-0019](../../adr/0019-crm-connections-in-post
 a cause: `[HUB] CRMs Add/Update Lead Dispatcher` (`mfmMYQqK73Nsx6uO`) has no path on which a lead
 that fails to route produces a record.
 
-### G1 · `Route by CRM type` has no fallback output {#g1}
+### G1 · `Route by CRM type` had no fallback output — FIXED 2026-08-28 {#g1}
 
-The Switch has five rules and no fallback. A `crm.type` that is empty or unrecognised matches nothing
-and the item is discarded — no error, no failed execution, nothing in `integration_sync_runs`. Every
-other defect in this section is invisible **because** of this one.
+The Switch had five rules and no fallback. A `crm.type` that was empty or unrecognised matched nothing
+and the item was discarded — no error, no failed execution, nothing in `integration_sync_runs`. Every
+other defect in this section was invisible **because** of this one.
 
-**Fix:** a fallback output that records `no_connection` / `disabled` / `unknown_provider`. Part of the
-ADR-0019 dispatcher rewire.
+Fixed with the ADR-0019 rewire: `options.fallbackOutput: "extra"` adds a sixth output wired to
+`Unroutable — record and fail`, whose message names the workspace, the lead's email and exactly what
+`resolve_crm_connection` returned. A lead that resolves no CRM now fails the execution instead of
+evaporating. Binding the workflow to `[ERR] Automation failure recorder` so it also lands in
+`integration_sync_runs` is still owed ([E1](#e1)).
 
 ### G2 · TouchlessFreaks' Salesforce has never fired {#g2}
 
@@ -1320,6 +1323,47 @@ outside the execution list.
 
 **Out of scope for the ADR-0019 rewire** (that change is about where the config lives), recorded here
 so it is not lost.
+
+---
+
+### G4 · LiveSpace receives neither `salt` nor `subdomain` {#g4}
+
+The LiveSpace child consumes `crm.api_key`, `crm.salt` and `crm.subdomain` (read off the graph
+2026-08-28). The hub's Code node maps the last two from `sheetRow['Salt']` and `sheetRow['Subdomain']`.
+
+The `Client CRM Details` tab **has no `Salt` column at all**, and its `Subdomain` column is empty for
+both LiveSpace rows — the host-looking values (`izodom.livespace.io` for ws 54, `flamb-inc` for ws 99)
+sit in a trailing column with **no header**, which the Code node cannot address by name. So both
+LiveSpace clients dispatch with two of their three required fields blank.
+
+**Resolved 2026-08-28 by reading the child, not by guessing.** `subdomain` is interpolated as
+`"https://" + subdomain.replace(".livespace.io","") + ".livespace.io/api/…"`, and the two values in the
+unnamed column (`izodom.livespace.io`, `flamb-inc`) fit that shape exactly — the `.replace()` exists
+because some entries carry the full host and some do not. `salt` goes into
+`sha1(api_key + token + salt)`, LiveSpace's `_api_sha`, and `API Secret` is the only candidate in the
+sheet. Both are now seeded under their consumed names in `client_crm_connections`, so the rewire fixes
+this defect rather than carrying it across.
+
+### G5 · Salesforce `login_url` — investigated, NOT a defect {#g5}
+
+**This entry was wrong when first written on 2026-08-28 and is kept, corrected, because the wrong
+version was cited elsewhere.** The original claim was that Salesforce "can never receive `login_url`"
+because the Code node maps it from a sheet column while the instance URL sits in the data table's
+`domain`.
+
+Reading the child settles it. The node `[121] Salesforce: refresh access_token` uses:
+
+```
+{{ ($json.crm.login_url || "https://login.salesforce.com") + "/services/oauth2/token" }}
+```
+
+`login_url` is the **OAuth host**, not the instance URL, and it has a correct default for a production
+org — `test.salesforce.com` would only be needed for a sandbox. An empty `login_url` is therefore
+right, not broken. The data table's `domain` is the instance URL and the child does not consume it at
+all; Salesforce returns `instance_url` in the token response.
+
+So ws 77 needs only `client_id`, `client_secret` and `refresh_token`, all of which exist. It is now
+seeded, parked at `enabled = false` / `status = 'pending'` at the owner's direction ([G2](#g2)).
 
 ---
 

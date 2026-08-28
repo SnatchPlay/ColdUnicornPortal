@@ -252,7 +252,7 @@ Component: [`CrmIntegrationCard`](../../../src/app/components/crm-integration-ca
 
 **Why there is no status badge.** The card used to mirror a `CrmIntegrationConfig` into
 `clients.crm_config`. That column actually held PDCA/Sheets metadata (`spreadsheet_id`,
-`report_link`, `growth_head`, …) for 46 of 63 clients, so the badge's precondition — a `provider` and
+`report_link`, `growth_head`, …) for 47 clients, so the badge's precondition — a `provider` and
 a `status` — was never met and it never rendered. Worse, the write was a whole-object replace, so the
 first successful connection would have destroyed that client's spreadsheet metadata. The column was
 emptied and dropped in 2026-08-28 ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md)).

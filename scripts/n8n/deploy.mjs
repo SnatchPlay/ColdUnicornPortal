@@ -14,6 +14,9 @@
 //   --rewire            replace the outgoing connections of existing nodes
 //   --credentials-from  give an --added node the credential block of a named LIVE node
 //   --create            POST a brand-new workflow from the artifact (no live counterpart yet)
+//   --sep <char>        separator for every list argument above (default ","). Needed because a node
+//                       name may contain a comma — "Build { lead, crm } payload" is unaddressable
+//                       otherwise, which is how a node can become impossible to deploy to.
 //   --settings          also push the artifact's `settings` (otherwise settings are never touched)
 //   --activate          switch the workflow ON  (its schedule fires, its webhook answers)
 //   --deactivate        switch the workflow OFF (nothing it is wired to will run again)
@@ -222,6 +225,7 @@ async function main() {
   const nodeSettingsArg = arg("node-settings");
   const positionsArg = arg("positions");
   const credentialsArg = arg("credentials-from");
+  const SEP = arg("sep") ?? ",";
   const create = process.argv.includes("--create");
   if (!logicalId) throw new Error("Pass --id <logical-id>.");
   const toggling = process.argv.includes("--activate") || process.argv.includes("--deactivate");
@@ -280,17 +284,17 @@ async function main() {
     await createFromArtifact(logicalId, environment, apply, credentialsArg);
     return;
   }
-  const nodeNames = (nodesArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const addNames = (addArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const rewireNames = (rewireArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const settingNames = (nodeSettingsArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const positionNames = (positionsArg ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const nodeNames = (nodesArg ?? "").split(SEP).map((s) => s.trim()).filter(Boolean);
+  const addNames = (addArg ?? "").split(SEP).map((s) => s.trim()).filter(Boolean);
+  const rewireNames = (rewireArg ?? "").split(SEP).map((s) => s.trim()).filter(Boolean);
+  const settingNames = (nodeSettingsArg ?? "").split(SEP).map((s) => s.trim()).filter(Boolean);
+  const positionNames = (positionsArg ?? "").split(SEP).map((s) => s.trim()).filter(Boolean);
 
   // "New Node=Live Node" pairs. The donor is read from LIVE, never from the artifact — the artifact
   // is credential-sanitised, so this is the only way an added node can end up authenticated, and no
   // credential id or value ever has to be written down in the repository.
   const credentialPairs = (credentialsArg ?? "")
-    .split(",")
+    .split(SEP)
     .map((s) => s.trim())
     .filter(Boolean)
     .map((pair) => {

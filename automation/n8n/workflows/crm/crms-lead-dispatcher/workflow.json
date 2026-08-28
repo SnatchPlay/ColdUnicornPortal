@@ -1,0 +1,601 @@
+{
+  "name": "[HUB] CRMs Add/Update Lead Dispatcher",
+  "description": "CRMs Dispatcher HUB: normalize input with fallbacks (firstname/lastname/company/website derived from email if empty), lookup CRM config by workspace_id, route to one of 5 CRM children via Switch.",
+  "nodes": [
+    {
+      "id": "6f0e37b9-597f-47b4-8bf0-af093cb57696",
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        592
+      ],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      }
+    },
+    {
+      "id": "cceb7c79-5654-445c-8343-512a5aaf8e87",
+      "name": "Build { lead, crm } payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1568,
+        592
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "lead",
+              "name": "lead",
+              "type": "object",
+              "value": "={{ $('Normalize Input (with fallbacks)').first().json.lead }}"
+            },
+            {
+              "id": "crm",
+              "name": "crm",
+              "type": "object",
+              "value": "={{ $json.crm ?? {} }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "20e4099a-458e-4e27-8844-e696375868b9",
+      "name": "Execute child-crm-hubspot",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        208
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mqReFD2sIBP7MsVJ"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "crm": "={{ $json.crm }}",
+            "lead": "={{ $json.lead }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "4ab23cd6-dfc9-4750-a7e8-e632519eda53",
+      "name": "Execute child-crm-livespace",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        976
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eljNaDBmHqDSMkm9"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "crm": "={{ $json.crm }}",
+            "lead": "={{ $json.lead }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "6d1156fe-dcbb-4a8b-89e8-11aa136401ce",
+      "name": "Execute child-crm-pipedrive",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        400
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "S33uaGcmtIjcE1bw"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "crm": "={{ $json.crm }}",
+            "lead": "={{ $json.lead }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "bd92c341-a546-4fcc-9997-9dfc4dc1e8c3",
+      "name": "Execute child-crm-salesforce",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        784
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Lisejns90BSzGfUi"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "crm": "={{ $json.crm }}",
+            "lead": "={{ $json.lead }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "32fa23d4-0576-4391-881f-caba27702ed8",
+      "name": "Execute child-crm-zoho",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        592
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": false
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "am3gYNrZSTbrkRFa"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "crm": "={{ $json.crm }}",
+            "lead": "={{ $json.lead }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "5737f7f7-f750-49c8-9089-d336ff08ab09",
+      "name": "Get row(s)",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        912,
+        672
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "OAuth2 Tokens",
+          "cachedResultUrl": "/projects/b6AT0geRHnn38ytz/datatables/gV9hy9WDXZf3PMaa",
+          "mode": "list",
+          "value": "gV9hy9WDXZf3PMaa"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "workspace_id",
+              "keyValue": "={{ $json.WorkspaceID }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "operation": "get"
+      }
+    },
+    {
+      "id": "640b4b93-5048-4d35-b990-71b5eabeec66",
+      "name": "Lookup CRM Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        688,
+        592
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "17cdj8ex6Tz2yjNYdsFMxKfGpJh_1nt9PJ03iKiyLUKM"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "WorkspaceID",
+              "lookupValue": "={{ $json.lead.workspace_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Client CRM Details"
+        }
+      }
+    },
+    {
+      "id": "7adaa163-2ecd-4e0d-8b62-cd323f0ad6b0",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1136,
+        592
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "eb54a9e5-34db-436e-b227-54f34ce63fbd",
+      "name": "Normalize Input (with fallbacks)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        592
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\n\nconst pick = (...vals) => {\n  for (const v of vals) {\n    if (v !== undefined && v !== null && String(v).trim() !== \"\") return String(v).trim();\n  }\n  return \"\";\n};\n\nconst capWords = (s) => (s || \"\").split(/[\\s\\-_.]+/).filter(Boolean)\n  .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(\" \");\n\nconst stripUrl = (raw) => !raw ? \"\" :\n  String(raw).replace(/^https?:\\/\\//, \"\").replace(/^www\\./, \"\").split(\"/\")[0];\n\nconst stripTLD = (host) => {\n  if (!host) return \"\";\n  const parts = String(host).split(\".\");\n  return parts.length > 1 ? parts.slice(0, -1).join(\"-\") : host;\n};\n\nconst email = pick(input.email);\nconst [emailLocal, emailDomainRaw] = email.includes(\"@\") ? email.split(\"@\") : [\"\", \"\"];\nconst emailDomain = emailDomainRaw.toLowerCase();\nconst localParts = emailLocal.split(/[._-]+/).filter(Boolean);\n\nlet derivedFirst = \"\", derivedLast = \"\";\nif (localParts.length >= 2) {\n  derivedFirst = capWords(localParts[0]);\n  derivedLast = capWords(localParts.slice(1).join(\" \"));\n} else if (localParts.length === 1) {\n  derivedFirst = capWords(localParts[0]);\n}\n\nconst firstname = pick(input.firstname, derivedFirst, \"(Unknown)\");\nconst lastname  = pick(input.lastname, derivedLast, capWords(stripTLD(emailDomain)), \"(Unknown)\");\nconst phone     = pick(input.phone);\nconst website   = pick(input.website, emailDomain ? `https://${emailDomain}` : \"\");\nconst company   = pick(\n  input.company,\n  capWords(stripTLD(stripUrl(input.website))),\n  capWords(stripTLD(emailDomain)),\n  \"(Unknown)\"\n);\nconst position  = pick(input.position);\nconst notes     = pick(input.notes);\nconst title     = pick(\n  input.title,\n  `${firstname} ${lastname}`.trim() + (company ? \" @ \" + company : \"\"),\n  \"New Lead\"\n);\nconst created_at  = pick(input.created_at, new Date().toISOString());\nconst workspace_id = pick(input.workspace_id);\nconst last_reply_subject=pick(input.last_reply_subject);\nconst last_reply_body=pick(input.last_reply_body);\nconst last_reply_html=pick(input.last_reply_body_html);\nconst last_reply_created_at=pick(input.last_reply_created_at);\nconst last_reply_to_name=pick(input.last_reply_to_name);\nconst last_reply_to_email=pick(input.last_reply_to_email);\nconst last_reply_message_id=pick(input.last_reply_message_id);\n\nreturn [{ json: { lead: {\n  email, firstname, lastname, phone, company, position, website, notes, title, created_at, workspace_id, last_reply_subject,last_reply_body,last_reply_html,last_reply_created_at,last_reply_to_name,last_reply_to_email,last_reply_message_id\n}}}];"
+      }
+    },
+    {
+      "id": "c0000000-0000-4000-a000-00000000c001",
+      "name": "Resolve CRM connection",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        688,
+        592
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "options": {
+          "queryReplacement": "={{ $json.lead.workspace_id }}"
+        },
+        "query": "select public.resolve_crm_connection('emailbison', $1) as crm;"
+      }
+    },
+    {
+      "id": "575f2758-7ea2-40e4-9579-352bb6ba306a",
+      "name": "Route by CRM type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1792,
+        544
+      ],
+      "parameters": {
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "ignoreCase": true
+        },
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "baae7fe6-2ab6-4bd1-9c7d-f1325f02fd90",
+                    "leftValue": "={{ $json.crm.type }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "Hubspot"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                }
+              },
+              "outputKey": "Hubspot",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "381a3b37-68df-43a2-ae8a-b2a80947e8e6",
+                    "leftValue": "={{ $json.crm.type }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "Pipedrive"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                }
+              },
+              "outputKey": "Pipedrive",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "58218923-743c-4b64-8478-1f7a54666e96",
+                    "leftValue": "={{ $json.crm.type }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "Zoho"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                }
+              },
+              "outputKey": "Zoho",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "0ff57e8c-6060-4f51-8abb-be480fda8b47",
+                    "leftValue": "={{ $json.crm.type }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "Salesforce"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                }
+              },
+              "outputKey": "Salesforce",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "3df4c53d-b036-45c4-8913-d01e60b960b7",
+                    "leftValue": "={{ $json.crm.type }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "LiveSpace"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                }
+              },
+              "outputKey": "LiveSpace",
+              "renameOutput": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c0000000-0000-4000-a000-00000000c002",
+      "name": "Unroutable — record and fail",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        1168
+      ],
+      "parameters": {
+        "errorMessage": "=No CRM dispatch for workspace {{ $('Normalize Input (with fallbacks)').first().json.lead.workspace_id }} ({{ $('Normalize Input (with fallbacks)').first().json.lead.email }}): resolve_crm_connection returned {{ JSON.stringify($('Resolve CRM connection').first().json.crm) }}. Either the workspace has no client_crm_connections row, the row is disabled, or its provider is not one of the five children."
+      }
+    },
+    {
+      "id": "f5ef32cf-16be-408a-8183-fb915923fbeb",
+      "name": "When Called (from child-1 [315])",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        592
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build { lead, crm } payload",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Build { lead, crm } payload": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Route by CRM type",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Get row(s)": {
+      "main": [
+        [
+          {
+            "index": 1,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Lookup CRM Config": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Get row(s)",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "Merge",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Aggregate",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Normalize Input (with fallbacks)": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Resolve CRM connection",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Resolve CRM connection": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Build { lead, crm } payload",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Route by CRM type": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Execute child-crm-hubspot",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Execute child-crm-pipedrive",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Execute child-crm-zoho",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Execute child-crm-salesforce",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Execute child-crm-livespace",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Unroutable — record and fail",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "When Called (from child-1 [315])": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Normalize Input (with fallbacks)",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  }
+}

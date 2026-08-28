@@ -324,7 +324,7 @@ Client portal (this repo)          Legacy CRM project           Our Postgres
 
 **The card does not write to our database.** It has no status badge and no Disconnect button: it used
 to mirror `CrmIntegrationConfig` into `clients.crm_config`, a column that actually held PDCA/Sheets
-metadata for 46 of 63 clients. The badge therefore never rendered, and a successful connect would
+metadata for 47 clients. The badge therefore never rendered, and a successful connect would
 have destroyed that client's `spreadsheet_id` / `report_link` / `growth_head`. The column is gone.
 
 ### `client_crm_connections`

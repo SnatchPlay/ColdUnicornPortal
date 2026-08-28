@@ -2,7 +2,7 @@
 --
 -- WHAT WAS IN THERE, AND WHY IT IS WRONG: the column's declared contract is CrmIntegrationConfig —
 -- a status mirror of the client's CRM connection (docs/reference/functional/11-integrations.md).
--- What production actually held, in 46 of 63 rows, was `{"pdca": {...}}`: spreadsheet_id,
+-- What production actually held, in 47 rows, was `{"pdca": {...}}`: spreadsheet_id,
 -- report_link, growth_head, dod_schedule, dod_daily_sent, cold_emails, setup_exchange,
 -- smartlead_id, folder_link — Google Sheets bookkeeping that has nothing to do with a CRM.
 --
