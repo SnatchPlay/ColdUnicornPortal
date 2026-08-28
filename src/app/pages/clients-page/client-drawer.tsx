@@ -434,7 +434,6 @@ export function ClientDrawer({
           <SequencerConnections
             clientId={client.id}
             creds={sequencerCreds}
-            crmConnected={!!client.crm_config && Object.keys(client.crm_config).length > 0}
             externalWorkspaceId={draft.externalWorkspaceId}
             externalApiKey={draft.externalApiKey}
             linkedinApiKey={draft.linkedinApiKey}

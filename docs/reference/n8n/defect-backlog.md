@@ -1284,6 +1284,45 @@ a UI edit end in an export.
 **Supabase-only (19):** the Bison and Aimfox ingestion family, the five CRM children, the HUB
 dispatcher, SETUP/SHADOW, Winnr.
 
+## G · CRM dispatch drops leads without saying so (found 2026-08-28)
+
+All three found while planning [ADR-0019](../../adr/0019-crm-connections-in-postgres.md). They share
+a cause: `[HUB] CRMs Add/Update Lead Dispatcher` (`mfmMYQqK73Nsx6uO`) has no path on which a lead
+that fails to route produces a record.
+
+### G1 · `Route by CRM type` has no fallback output {#g1}
+
+The Switch has five rules and no fallback. A `crm.type` that is empty or unrecognised matches nothing
+and the item is discarded — no error, no failed execution, nothing in `integration_sync_runs`. Every
+other defect in this section is invisible **because** of this one.
+
+**Fix:** a fallback output that records `no_connection` / `disabled` / `unknown_provider`. Part of the
+ADR-0019 dispatcher rewire.
+
+### G2 · TouchlessFreaks' Salesforce has never fired {#g2}
+
+Workspace 77 has a complete Salesforce OAuth set in the `OAuth2 Tokens` Data Table, dated 2026-05-22,
+and **no row** in the `Client CRM Details` sheet. The dispatcher reads the sheet first
+(`Lookup CRM Config`, `returnFirstMatch`), gets zero items, and the branch ends before `Get row(s)`
+runs — so the tokens have never been used and G1 ensured nobody heard about it.
+
+Not a data-entry slip to be quietly corrected: the client may or may not still want the integration.
+Seeded into `client_crm_connections` with `enabled = false` at the owner's direction (2026-08-28), to
+be switched on deliberately after the refresh token is confirmed still valid.
+
+### G3 · The hub cannot see its children fail {#g3}
+
+All five `Execute child-crm-*` nodes set `waitForSubWorkflow: false`. The hub reports success the
+moment it hands off, so a child that fails — auth, rate limit, a 4xx from the CRM — is invisible to
+the hub and to the hub's error workflow. Combined with `zoho-upsert-account-and-lead` not being bound
+to [`automation-failure-recorder`](#e1) at all, a lead can fail to reach a client's CRM with no trace
+outside the execution list.
+
+**Out of scope for the ADR-0019 rewire** (that change is about where the config lives), recorded here
+so it is not lost.
+
+---
+
 ---
 
 ## Rules that apply to every fix here

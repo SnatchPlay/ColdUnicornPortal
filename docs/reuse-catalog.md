@@ -96,6 +96,16 @@ shadcn MCP registry first, then add it deliberately.
 
 There is **no** `useCoreData()` and no global snapshot. Both were deleted.
 
+**Per-client CRM connections are not reachable from the portal at all.**
+`public.client_crm_connections` is RLS-enabled with **no policies and no grants** for `anon` /
+`authenticated` — `service_role` (n8n) only. There
+is no repository method and there must not be one; the table holds clients' CRM API keys and OAuth
+refresh tokens. n8n reaches it through `resolve_crm_connection` / `upsert_client_crm_connection` /
+`resolve_client_for_crm_intake` / `store_crm_oauth_tokens`
+([ADR-0019](adr/0019-crm-connections-in-postgres.md),
+[20260828b](../supabase/migrations/20260828b_client_crm_connections.sql)). If a CRM **status** badge
+is ever needed, add a view that omits `credentials` — never a SELECT policy on the table.
+
 **The gateway makes exactly one kind of outbound call**: `requestWorkspaceSetup` triggers an n8n
 provisioning workflow, to a URL from a closed server-side list, with a shared secret
 ([ADR-0018](adr/0018-gateway-outbound-automation-trigger.md)). It never calls a vendor — n8n holds
@@ -175,6 +185,10 @@ Search here before writing any n8n tooling, contract or process document
   mailboxes. The portal's delete is `setEntityArchived` + `archive-controls.tsx`
   ([09 §2.19](reference/functional/09-mutations-rls.md#219-setentityarchivedentity-id-archived--the-portals-delete-migration-20260813_entity_archival)).
 - Service-role keys or `DATABASE_URL` anywhere the browser can reach them.
+- A SELECT policy on `client_crm_connections`, or any gateway action that returns its `credentials`.
+  The table is deliberately unreadable by `authenticated` ([ADR-0019](adr/0019-crm-connections-in-postgres.md)).
+- A second store for a client's CRM configuration. The Google Sheet tab `Client CRM Details` and the
+  n8n Data Table `OAuth2 Tokens` are being retired, not joined by a third.
 - A second n8n client, sanitizer or secret scanner — extend `scripts/n8n/lib/`.
 - Credentials, `pinData` or real personal data in a committed workflow artifact or fixture.
 - A database invariant reimplemented inside an n8n workflow. Where an ingestion RPC exists

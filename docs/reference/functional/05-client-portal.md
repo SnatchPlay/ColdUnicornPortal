@@ -221,7 +221,7 @@ File: [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.t
 | Profile name | `displayName` text input | "Update name" | `updateProfileName(normalizedName)` |
 | Change password | `password`, `confirmPassword` | "Update password" | `updatePassword(password)` |
 | Sign out | _(button)_ | "Sign out" | `signOut()` |
-| **CRM integration** | provider select + dynamic credentials form | "Connect with OAuth" / "Submit credentials" / "Disconnect" | `repository.updateClient(client.id, { crm_config })` called directly from [`crm-integration-card.tsx:178`](../../../src/app/components/crm-integration-card.tsx#L178) (disconnect: `{ crm_config: null }`, [:355](../../../src/app/components/crm-integration-card.tsx#L355)) — status only; credentials forwarded to legacy CRM Supabase project edge functions ([see 11 · Integrations §CRM Integration](./11-integrations.md#crm-integration)) |
+| **CRM integration** | provider select + dynamic credentials form | "Connect with OAuth" / "Submit credentials" | **Writes nothing to our database.** Credentials go to the legacy CRM project's edge functions, which post them onward to the n8n connect webhook; that webhook is what writes `client_crm_connections` ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md), [11 · Integrations §CRM](./11-integrations.md#crm-integration)) |
 
 ### 5.2 Sections hidden from client
 
@@ -248,24 +248,21 @@ Component: [`CrmIntegrationCard`](../../../src/app/components/crm-integration-ca
    - `submit-crm-credentials` (API-key providers)
    - `salesforce-oauth/init` + `/callback` (Salesforce server-side PKCE flow)
    - `zoho-token-exchange` (Zoho user-redirect flow)
-3. Mirrors connection status into our project's `clients.crm_config` (JSON) via `updateClient` so the portal can render badge + last-connected timestamp without re-querying the legacy project.
+3. Stops there. The card mirrors **nothing** into our database, so it shows no status badge and has no Disconnect button.
 
-**`clients.crm_config` shape** (mirrors `CrmIntegrationConfig` from [`types/core.ts`](../../../src/app/types/core.ts)):
+**Why there is no status badge.** The card used to mirror a `CrmIntegrationConfig` into
+`clients.crm_config`. That column actually held PDCA/Sheets metadata (`spreadsheet_id`,
+`report_link`, `growth_head`, …) for 46 of 63 clients, so the badge's precondition — a `provider` and
+a `status` — was never met and it never rendered. Worse, the write was a whole-object replace, so the
+first successful connection would have destroyed that client's spreadsheet metadata. The column was
+emptied and dropped in 2026-08-28 ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md)).
 
-```jsonc
-{
-  "provider": "salesforce",
-  "display_name": "Salesforce",
-  "auth_type": "oauth2",
-  "status": "connected",        // pending | connected | failed | disconnected
-  "connected_at": "2026-05-03T18:22:04Z",
-  "updated_at": "2026-05-03T18:22:04Z",
-  "last_error": null,
-  "metadata": { "env": "production" }
-}
-```
+A truthful badge is possible again once a credential-free view over `client_crm_connections` exists —
+that table is RLS-enabled with **no policies**, so the portal cannot read it directly and must not be
+given a policy that would let it.
 
-**Disconnect** clears `crm_config` to `null`. Secrets/tokens never reach our project — they live only in the legacy `client_crm_credentials` / `salesforce_integrations` tables and the n8n/Make webhook downstream.
+**Where the secrets are.** In our Postgres, in `client_crm_connections.credentials`, written by n8n
+and readable only by `service_role`. They still never reach a browser.
 
 ### 5.6 Planned: client self-service notification preferences
 

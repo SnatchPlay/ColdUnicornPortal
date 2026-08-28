@@ -72,7 +72,7 @@ function makeClient(overrides?: Record<string, unknown>) {
     id: "client-1", created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01",
     name: "Acme", status: "Active", manager_id: "manager-1",
     kpi_leads: null, kpi_meetings: null, contracted_amount: null, contract_due_date: null,
-    min_daily_sent: 20, inboxes_count: 3, crm_config: null,
+    min_daily_sent: 20, inboxes_count: 3,
     sms_phone_numbers: [], notification_emails: [], auto_ooo_enabled: false,
     prospects_signed: 0, prospects_added: 0, setup_info: null, bi_setup_done: false,
     lost_reason: null, notes: null,

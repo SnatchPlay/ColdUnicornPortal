@@ -292,6 +292,33 @@ OpenAI. Moving it out of the graph does not un-leak it. Owner action.
 
 Do not paste this workflow's node parameters or execution data into a document, an issue or a chat.
 
+### 13. Clients' own CRM API keys and OAuth tokens live in a Google Sheet and an n8n Data Table — **high, open**
+
+Found 2026-08-28 while planning [ADR-0019](../../adr/0019-crm-connections-in-postgres.md). Distinct
+from finding 1: those are *our* vendor keys for the agency's sending tools. These are the **clients'
+own CRM credentials**, and misuse of one reaches into that client's business, not ours.
+
+Two stores, both read live by `[HUB] CRMs Add/Update Lead Dispatcher` (`mfmMYQqK73Nsx6uO`):
+
+- **CS PDCA → tab `Client CRM Details`** — plaintext `API Key` / `API Secret` / `Subdomain` for
+  LiveSpace, Pipedrive and HubSpot across 8 rows. Google-Docs sharing is the only access control, and
+  the whole CS team can open the book for unrelated reasons.
+- **n8n Data Table `OAuth2 Tokens`** (`gV9hy9WDXZf3PMaa`) — Zoho and Salesforce `refresh_token`,
+  `client_id`, `client_secret`, `access_token`. A refresh token is a long-lived grant: whoever holds
+  it holds the CRM until the client revokes it.
+
+Neither is n8n's credential store, so neither is encrypted at rest by n8n, rotatable from one place,
+or covered by `scan.mjs` (the secrets are in a spreadsheet and a data table, not in workflow JSON).
+Execution data is credential-bearing on top of that — the children receive the whole `crm` object in
+their trigger payload.
+
+**Fix in flight.** [ADR-0019](../../adr/0019-crm-connections-in-postgres.md) moves both into
+`public.client_crm_connections` (RLS enabled, no policies, `service_role` only). Migrating does not
+close this finding on its own: it closes when the Sheets fallback branch is removed, the sheet's
+credential columns are **erased**, the `OAuth2 Tokens` rows are deleted, and the keys are **rotated**
+— because everything currently in that sheet must be assumed exposed. Rotation is an owner action,
+same as findings 7/8/12.
+
 ## Reviewing a workflow
 
 - [ ] `pnpm n8n:validate` passes

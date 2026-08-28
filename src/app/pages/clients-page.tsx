@@ -604,7 +604,6 @@ const CreateClientSheet = memo(function CreateClientSheet({
           contract_due_date: draft.contractDueDate || null,
           min_daily_sent: 0,
           inboxes_count: 0,
-          crm_config: null,
           sms_phone_numbers: null,
           notification_emails: null,
           auto_ooo_enabled: false,

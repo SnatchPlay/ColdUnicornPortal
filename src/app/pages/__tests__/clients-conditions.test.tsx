@@ -98,7 +98,6 @@ function makeClientsOverview({
         status: "Active",
         min_daily_sent: minDailySent,
         inboxes_count: 8,
-        crm_config: null,
         sms_phone_numbers: [],
         notification_emails: [],
         auto_ooo_enabled: false,

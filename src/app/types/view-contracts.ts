@@ -757,7 +757,7 @@ export interface AnalyticsDailyStatInput {
 
 /**
  * Lite client shape for the Analytics overview — only what InternalStatisticsPage reads.
- * Drops: min_daily_sent, inboxes_count, crm_config, sms_phone_numbers, notification_emails,
+ * Drops: min_daily_sent, inboxes_count, sms_phone_numbers, notification_emails,
  * auto_ooo_enabled, prospects_signed, prospects_added, setup_info, bi_setup_done, lost_reason,
  * notes, and audit timestamps. (Sequencer credentials live in client_sequencers — ADR-0012.)
  */

@@ -122,7 +122,6 @@ The business entity whose outreach we run.
 | `status` | `client_status` not null | Drives filters and dashboard "non-active clients" surface (formerly "at-risk"). |
 | `min_daily_sent` | smallint default 0 | Shown in `ClientsPage` Overview column "Schedule". |
 | `inboxes_count` | smallint default 0 | |
-| `crm_config` | jsonb default `{}` | Reserved for per-client CRM integration settings. |
 | `sms_phone_numbers` | text[] | Notification targets. |
 | `notification_emails` | text[] | Notification targets. |
 | `auto_ooo_enabled` | boolean default false | Whether OOO auto-routing is on. |

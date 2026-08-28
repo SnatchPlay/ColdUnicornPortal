@@ -122,7 +122,6 @@ function makeClient(overrides?: Record<string, unknown>) {
     contract_due_date: "2026-12-01",
     min_daily_sent: 20,
     inboxes_count: 3,
-    crm_config: null,
     sms_phone_numbers: ["+48123456789"],
     notification_emails: ["ops@acme.test"],
     auto_ooo_enabled: true,

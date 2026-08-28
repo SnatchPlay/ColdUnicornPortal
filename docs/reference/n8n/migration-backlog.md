@@ -255,6 +255,23 @@ inactive).
 
 A clean dispatcher + per-provider-child pattern; likely the best-structured group on the instance.
 
+**Re-scoped 2026-08-28 by [ADR-0019](../../adr/0019-crm-connections-in-postgres.md).** The dispatcher
+does not read Supabase at all — it resolves each client's CRM from the CS PDCA sheet's
+`Client CRM Details` tab plus the n8n Data Table `OAuth2 Tokens`, stitched together in an 80-line Code
+node. Both move into `public.client_crm_connections`, and the five nodes collapse into one call to
+`resolve_crm_connection('emailbison', workspace_id)`; the join key,
+`client_sequencers.external_workspace_id`, already resolves all nine workspace ids in use.
+
+Treated as a **credential move**, not a Sheets data migration — the same carve-out
+`sheets-credential-sync-on-edit` got (cross-cutting §2). Cutover is proven by a field-by-field diff of
+the RPC against today's Code-node output across all nine workspaces, not by a dual-read window: the
+dispatcher only fires on a positive reply, so waiting for traffic would take months.
+
+Three defects surfaced while planning it, all recorded in
+[defect-backlog §G](defect-backlog.md#g--crm-dispatch-drops-leads-without-saying-so-found-2026-08-28):
+the Switch has no fallback output, TouchlessFreaks' Salesforce has never fired, and the hub cannot see
+its children fail.
+
 ---
 
 ## 5 · Aimfox / LinkedIn

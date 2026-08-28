@@ -80,7 +80,21 @@ Team-member-level performance is not a portal-level metric. Manager capacity sur
 
 ### OoS-11 вЂ” CRM platform plug-ins
 
-The `crm_config` JSONB column on `clients` exists for future integration with the agency's own CRM stack. Multi-CRM with first-class config tables is **deferred**. If pushed live later, prefer extending the JSONB column over creating a new normalised table.
+**Superseded 2026-08-28 by [ADR-0019](../../adr/0019-crm-connections-in-postgres.md).** This entry
+used to say: *"The `crm_config` JSONB column on `clients` exists for future integration … prefer
+extending the JSONB column over creating a new normalised table."* That advice was written when the
+column was empty and CRM credentials were somebody else's problem, and following it would have been a
+mistake: `crm_config` is returned to the browser inside `ClientRecord`, so extending it with API keys
+and OAuth tokens would have shipped every client's CRM secrets to every internal user's browser.
+
+Multi-CRM is now **in scope and built**: `client_crm_connections`, RLS-enabled with no policies,
+written by n8n from the connect webhook and read through `resolve_crm_connection`. The `crm_config`
+column has been dropped.
+
+What remains out of scope: a **portal UI for editing CRM credentials**. The client connects through
+the legacy project's flow, n8n stores the result, and no portal screen reads the table. A read-only
+status badge is a possible future addition and needs a credential-free view — never a SELECT policy
+on `client_crm_connections`.
 
 ### OoS-12 вЂ” Bison API sync from portal
 

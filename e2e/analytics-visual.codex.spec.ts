@@ -32,7 +32,6 @@ function snapshot() {
       contract_due_date: null,
       min_daily_sent: 20,
       inboxes_count: 3,
-      crm_config: null,
       sms_phone_numbers: [],
       notification_emails: [],
       auto_ooo_enabled: false,

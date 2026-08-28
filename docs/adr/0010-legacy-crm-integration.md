@@ -5,6 +5,13 @@
 Accepted 2026-07-14 (records an exception already shipped; written retroactively to stop it being
 mistaken for a violation).
 
+**Partially superseded by [ADR-0019](0019-crm-connections-in-postgres.md) on 2026-08-28.** The read
+path described here — the provider catalog and the OAuth consent flows on the legacy project — still
+stands. What no longer holds is the corollary stated in
+[11-integrations §CRM](../reference/functional/11-integrations.md): client CRM credentials and OAuth
+tokens now live in **our** project, in `public.client_crm_connections`, because the alternative was a
+Google Sheet full of live API keys. They still never reach a browser.
+
 ## Context
 
 [ADR-0001](0001-live-supabase-source-of-truth.md) says Supabase project `bnetnuzxynmdftiadwef` is

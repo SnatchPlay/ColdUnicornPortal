@@ -225,7 +225,6 @@ export const clients = pgTable("clients", {
 	status: clientStatus().notNull(),
 	minDailySent: smallint("min_daily_sent").default(0).notNull(),
 	inboxesCount: smallint("inboxes_count").default(0).notNull(),
-	crmConfig: jsonb("crm_config").default({}),
 	smsPhoneNumbers: text("sms_phone_numbers").array(),
 	notificationEmails: text("notification_emails").array(),
 	autoOooEnabled: boolean("auto_ooo_enabled").default(false).notNull(),

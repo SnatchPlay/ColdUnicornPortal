@@ -215,7 +215,7 @@ Opens on row click. Draft pattern: local `draft` state deviates from `selectedCl
 Sections (top → bottom):
 
 1. **Header** — name, status pill, manager, contract amount + due.
-2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): per-vendor workspace ID (picked from the vendor's own list or typed) + API key; CRM status from `crm_config` (read-only badge).
+2. **Credentials & IDs** — per-sequencer connection settings from `client_sequencers` (ADR-0012): per-vendor workspace ID (picked from the vendor's own list or typed) + API key. **No CRM status line** — see the note below the field table.
 3. **Client configuration** — editable form (includes the **Customer satisfaction** hearts, §2.7).
 4. **Contacts** — `notification_emails` + `sms_phone_numbers` via `StringListEditor`.
 5. **User access management** — invite + map client portal users.
@@ -233,7 +233,14 @@ Editable fields — **Credentials & IDs** section:
 | EmailBison API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (emailbison row) | manager + admin |
 | Aimfox workspace ID | **From list** / **Type it**, same control | `client_sequencers.external_workspace_id` (aimfox row) | manager + admin |
 | Aimfox API key | `SecretInput` (show/hide) | `client_sequencers.api_key` (aimfox row) | manager + admin |
-| CRM status | read-only badge | `clients.crm_config` | — |
+
+> **The CRM status badge was removed on 2026-08-28.** It read
+> `!!client.crm_config && Object.keys(client.crm_config).length > 0`, and `crm_config` held
+> PDCA/Sheets metadata for 46 of 63 clients — so it announced "Connected" for every client that had a
+> `spreadsheet_id` and stayed blank for the ones with a real CRM. The connection record now lives in
+> `client_crm_connections`, which is RLS-enabled with no policies and unreadable from the portal
+> ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md)). A truthful badge needs a
+> credential-free view first; showing nothing beats showing the opposite of the truth.
 
 Editable fields — **Contract & KPIs** section (admin only, hidden for manager):
 
@@ -593,7 +600,7 @@ Visible to internal users per `email_exclude_list_select_internal` RLS policy (`
 
 ## 8.5 Planned ecosystem fields
 
-The manager drawer on Clients page now covers all `clients` columns except `crm_config` (read-only badge). Remaining backlog:
+The manager drawer on Clients page now covers every `clients` column. Remaining backlog:
 
 - **BL-2** OOO routing rows (`client_ooo_routing`) — manager/admin UI to configure per-client follow-up campaigns. `auto_ooo_enabled` toggle exists; the per-gender routing table does not.
 - **BL-4** Workshops / harmonogramy / cold-Ads ecosystem fields — schema columns + drawer UI both pending.

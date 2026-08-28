@@ -638,7 +638,6 @@ function RunNotes({
 export function SequencerConnections({
   clientId,
   creds,
-  crmConnected,
   externalWorkspaceId,
   externalApiKey,
   linkedinApiKey,
@@ -647,7 +646,6 @@ export function SequencerConnections({
 }: {
   clientId: string;
   creds: ClientSequencerCreds;
-  crmConnected: boolean;
   externalWorkspaceId: string;
   externalApiKey: string;
   linkedinApiKey: string;
@@ -740,9 +738,11 @@ export function SequencerConnections({
         />
       </div>
 
-      {/* Client-level, not per sequencer: the legacy CRM connection is one config blob for the
-          whole client (ADR-0010), so it sits under both cards rather than inside either. */}
-      <MaskedField label="CRM status" value={crmConnected ? "Connected" : null} />
+      {/* No CRM status line here any more. It read `clients.crm_config`, which held PDCA/Sheets
+          metadata for 46 of 63 clients — so it announced "Connected" for every client that had a
+          spreadsheet_id and stayed blank for the ones with a real CRM. A truthful badge needs a
+          credential-free view over client_crm_connections (ADR-0019); until that exists, showing
+          nothing beats showing the opposite of the truth. */}
     </section>
   );
 }

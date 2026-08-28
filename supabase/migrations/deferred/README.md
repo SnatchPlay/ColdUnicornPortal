@@ -31,3 +31,4 @@ production — see [CLAUDE.md §2](../../../CLAUDE.md) and
 | File | Blocked on |
 |---|---|
 | `20260722z_drop_legacy_ooo_columns.sql` | n8n cutover to the OOO RPCs (`20260722e`): it must stop writing `leads.qualification = 'OOO'/'NRR'`, `expected_return_date`, `added_to_ooo_campaign` and `contact_disposition`. Full preconditions are in the file header. |
+| `20260828z_drop_clients_crm_config.sql` | The orm-gateway redeploy that stops mapping `crmConfig` (drizzle schema + `toClientRecord` / `mapClientPatch` / `mapClientInsert`). Until that is live, dropping the column makes every clients read fail with 42703. Full preconditions are in the file header. |

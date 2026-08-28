@@ -296,67 +296,82 @@ If integration breaks, the portal should keep working in read-only mode using wh
 
 ## CRM integration
 
-Lets a client authorize their own CRM (Salesforce / Zoho / API-key providers like HubSpot, Pipedrive, monday) so n8n can sync meetings, replies, and won deals downstream.
+Lets a client authorize their own CRM (Salesforce / Zoho / HubSpot / Pipedrive / LiveSpace) so n8n can
+push a positive-reply lead into it. **The record of a client's CRM connection lives in our Postgres**
+— `public.client_crm_connections` ([ADR-0019](../../adr/0019-crm-connections-in-postgres.md)).
 
-**Two-Supabase architecture.** The CRM provider catalog (`crm_providers`, `crm_provider_fields`) and OAuth/credentials edge functions live on a **separate Supabase project** (the legacy CRM project, `ykrwrrwuqbtffovhwqjg`). Our project (`bnetnuzxynmdftiadwef`) only stores **status mirror** in `clients.crm_config`. Tokens and secrets never reach our project.
+### The path a credential takes
 
 ```
-Client portal (this repo)                Legacy CRM Supabase project
-─────────────────────                    ───────────────────────────
-/client/settings                         crm_providers (catalog)
-   ↓ CrmIntegrationCard                  crm_provider_fields
-   ↓ select provider, fill form          oauth_sessions (PKCE state)
-   ├─ API-key  ──fetch──▶  submit-crm-credentials
-   │                            ↓
-   │                       client_crm_credentials
-   │                            ↓ POST
-   │                       Make / n8n webhook
-   │                            ↓
-   │                       n8n connects to CRM
-   ├─ Salesforce OAuth ──▶ salesforce-oauth/init  ──redirect──▶ login.salesforce.com
-   │                                                              ↓ user consents
-   │                       salesforce-oauth/callback  ◀──redirect──┘
-   │                            ↓
-   │                       salesforce_integrations + Make webhook
-   │                            ↓ redirect back to portal with ?status=connected
-   │                       /client/settings  ──updateClient(crm_config)──▶ our DB
-   └─ Zoho OAuth ──▶ accounts.zoho.{region}/oauth/v2/auth  ──redirect─┐
-                                                                        ↓
-                       /client/settings  (code in URL)  ──fetch──▶ zoho-token-exchange
-                                                                        ↓
-                                                                Make webhook + our DB
+Client portal (this repo)          Legacy CRM project           Our Postgres
+─────────────────────              ──────────────────           ────────────
+/client/settings
+  CrmIntegrationCard               crm_providers (catalog)
+  ├─ API key ─────fetch──▶  submit-crm-credentials
+  ├─ Salesforce ──────────▶  salesforce-oauth/init → callback
+  └─ Zoho ────────────────▶  zoho-token-exchange
+                                        │
+                                        ▼  POST crm_providers.webhook_url
+                                   n8n · crm-credential-intake
+                                        │  resolve_client_for_crm_intake(clientName)
+                                        ▼  upsert_client_crm_connection(...)
+                                                              client_crm_connections
+                                                                       │
+                                   n8n · [HUB] CRMs Dispatcher ◀────────┘
+                                        resolve_crm_connection('emailbison', workspace_id)
+                                        └─▶ one of five per-provider children
 ```
 
-**`clients.crm_config`** (JSON, mirror only — see [`CrmIntegrationConfig`](../../../src/app/types/core.ts)):
+**The card does not write to our database.** It has no status badge and no Disconnect button: it used
+to mirror `CrmIntegrationConfig` into `clients.crm_config`, a column that actually held PDCA/Sheets
+metadata for 46 of 63 clients. The badge therefore never rendered, and a successful connect would
+have destroyed that client's `spreadsheet_id` / `report_link` / `growth_head`. The column is gone.
 
-```jsonc
-{
-  "provider": "salesforce",
-  "display_name": "Salesforce",
-  "auth_type": "oauth2",
-  "status": "connected",        // pending | connected | failed | disconnected
-  "connected_at": "2026-05-03T18:22:04Z",
-  "updated_at": "2026-05-03T18:22:04Z",
-  "last_error": null,
-  "metadata": { "env": "production" }
-}
-```
+### `client_crm_connections`
 
-**Env vars.** `VITE_LEGACY_CRM_SUPABASE_URL` + `VITE_LEGACY_CRM_PUBLISHABLE_KEY`. If either is blank the CRM card hides itself with an inline notice — no other code paths require them.
+One row per `(client_id, provider)`. `credentials` is a jsonb bag of the provider's own fields
+(`api_key`, `api_secret`, `subdomain`, `salt`, `login_url`, `client_id`, `client_secret`,
+`refresh_token`, `access_token`, `domain`, `expires_at`).
 
-**Files.**
-- [`src/app/lib/crm-integration.ts`](../../../src/app/lib/crm-integration.ts) — separate Supabase client, provider fetcher, edge-function callers.
-- [`src/app/components/crm-integration-card.tsx`](../../../src/app/components/crm-integration-card.tsx) — UI + status persistence to `clients.crm_config`.
-- [`src/app/pages/settings-page.tsx`](../../../src/app/pages/settings-page.tsx) — renders the card when `identity.role === "client"`.
+**RLS is enabled with no policies, and the table grants are revoked.** `service_role` (n8n) bypasses
+RLS; `anon` and `authenticated` hold no privilege at all. The revoke is not belt-and-braces: Supabase's
+default privileges grant every new `public` table to `anon`/`authenticated`, and `TRUNCATE` is a
+privilege check RLS does not filter — so "RLS on, no policies" alone would leave the table truncatable
+with the anon key. Verified locally 2026-08-28: `select` and `truncate` both fail with *permission
+denied* for `authenticated` and `anon`, and so do all four functions. This is a deliberate departure from `client_sequencers`, whose
+`api_key` the gateway does return to a manager's browser — that trade was acceptable for the agency's
+own vendor keys, not for a client's CRM. If a status badge is ever wanted it gets a view that omits
+`credentials`; never a policy on this table.
 
-**Security boundary invariants:**
-- The legacy publishable key in our `.env` is the **anon** key for the legacy project. It only grants access to the policies on `crm_providers` (read) + the verify-jwt-disabled edge functions. It does **not** unlock token tables.
-- The portal **never** receives access tokens. Token storage is in the legacy project's `salesforce_integrations` / `client_crm_credentials` and from there forwarded to the Make/n8n webhook.
-- Disconnect (`updateClient(clientId, { crm_config: null })`) only clears our status mirror. Cleanup on the legacy side is a manual / n8n responsibility — flag this if/when it becomes a real concern.
+### The four functions
 
-**Why two projects?** The CRM-integration form shipped first as a standalone tool on its own Supabase project. Re-pointing the edge functions + secrets at our project means migrating Salesforce App callback URLs, `MAKE_WEBHOOK_URL`, and re-doing the security review. Cheaper to call across projects until that work is justified.
+All `SECURITY DEFINER`, `service_role` only, `set search_path = ''`
+([20260828b](../../../supabase/migrations/20260828b_client_crm_connections.sql)):
 
-**Backlog (Phase 2).** Move `crm_providers` + edge functions into our project so `crm_config` and tokens are co-located, with proper RLS gating reads to the owning client. Tracked in [BUSINESS_LOGIC §11](../../BUSINESS_LOGIC.md#11-open-backlog-planned-not-built).
+| Function | Called by | Notes |
+|---|---|---|
+| `resolve_crm_connection(sequencer_key, workspace_id)` | dispatcher | Returns the `crm` object key-for-key as the old Code node built it, so the cutover is a field-by-field diff. Missing values are `''`, not null — the children's expressions are written against that. `auth_mode` is **derived** from which secret is present; the column records how the connection was *established*. |
+| `upsert_client_crm_connection(...)` | intake webhook | Credentials **merge**, blanks are stripped: a re-connect carrying only a refreshed token cannot drop the `api_secret` the first connect set. `p_enabled = NULL` keeps the current value, so a parked connection never silently revives. |
+| `resolve_client_for_crm_intake(name)` | intake webhook | The webhook carries a client **name** and no id, and production has duplicate names — `SalesBook` and `Testing` each match two non-archived clients (measured 2026-08-28). Raises on 0 or >1 — a credential written against the wrong client sends that client's leads into a stranger's CRM. |
+| `store_crm_oauth_tokens(...)` | Zoho/Salesforce children | Persists a refreshed access token so the children stop re-exchanging the refresh_token on every run. |
+
+### NULL is an outcome
+
+`resolve_crm_connection` returns NULL for an unknown workspace, a client with no connection, or
+`enabled = false`. The dispatcher must record that as `no_connection` / `disabled` /
+`unknown_provider`. This is not decoration: `Route by CRM type` has no fallback output, and that is
+how TouchlessFreaks' Salesforce sat dead from 2026-05-22 — a full OAuth set in the Data Table, no row
+in the sheet, so the Sheets lookup returned nothing and the branch ended before anything was read.
+
+### What still lives on the legacy project
+
+The provider catalog (`crm_providers`, `crm_provider_fields`) and the OAuth consent flows — ADR-0010's
+read path is unchanged. `VITE_LEGACY_CRM_SUPABASE_URL` + `VITE_LEGACY_CRM_PUBLISHABLE_KEY`; if either
+is blank the card hides itself. Retiring that project entirely is a separate decision.
+
+Files:
+- [`src/app/lib/crm-integration.ts`](../../../src/app/lib/crm-integration.ts) — legacy client, provider fetcher, edge-function callers.
+- [`src/app/components/crm-integration-card.tsx`](../../../src/app/components/crm-integration-card.tsx) — connect UI only.
 
 ---
 

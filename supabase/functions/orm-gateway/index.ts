@@ -162,7 +162,6 @@ function toClientRecord(row: typeof schema.clients.$inferSelect) {
     status: row.status,
     min_daily_sent: row.minDailySent,
     inboxes_count: row.inboxesCount,
-    crm_config: row.crmConfig,
     sms_phone_numbers: row.smsPhoneNumbers,
     notification_emails: row.notificationEmails,
     auto_ooo_enabled: row.autoOooEnabled,
@@ -373,7 +372,6 @@ function mapClientPatch(patch: Record<string, unknown>) {
   if ("status" in patch) mapped.status = patch.status;
   if ("min_daily_sent" in patch) mapped.minDailySent = patch.min_daily_sent;
   if ("inboxes_count" in patch) mapped.inboxesCount = patch.inboxes_count;
-  if ("crm_config" in patch) mapped.crmConfig = patch.crm_config;
   if ("sms_phone_numbers" in patch) mapped.smsPhoneNumbers = patch.sms_phone_numbers;
   if ("notification_emails" in patch) mapped.notificationEmails = patch.notification_emails;
   if ("auto_ooo_enabled" in patch) mapped.autoOooEnabled = patch.auto_ooo_enabled;
@@ -637,7 +635,6 @@ function mapClientInsert(input: Record<string, unknown>) {
     contractDueDate: input.contract_due_date ?? null,
     minDailySent: input.min_daily_sent ?? 0,
     inboxesCount: input.inboxes_count ?? 0,
-    crmConfig: input.crm_config ?? null,
     smsPhoneNumbers: input.sms_phone_numbers ?? null,
     notificationEmails: input.notification_emails ?? null,
     autoOooEnabled: input.auto_ooo_enabled ?? false,
@@ -3043,7 +3040,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
       }).from(schema.users).orderBy(desc(schema.users.createdAt)),
 
       // Client lite — only the 7 fields read by InternalStatisticsPage.
-      // Full ClientRecord (25+ fields including crm_config, notes, etc.) is not needed.
+      // Full ClientRecord (24+ fields including notes, setup_info, etc.) is not needed.
       tx.select({
         id: schema.clients.id,
         name: schema.clients.name,

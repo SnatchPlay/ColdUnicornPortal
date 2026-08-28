@@ -10,9 +10,24 @@ import {
   type CrmProvider,
 } from "../lib/crm-integration";
 import { runtimeConfig } from "../lib/env";
-import { repository } from "../data/repository";
-import type { ClientRecord, CrmIntegrationConfig, CrmIntegrationStatus } from "../types/core";
+import type { ClientRecord } from "../types/core";
 
+/**
+ * The client-facing "connect your CRM" card. It forwards credentials to the legacy CRM Supabase
+ * project (ADR-0010), which posts them onward to the connect webhook.
+ *
+ * IT NO LONGER MIRRORS STATUS INTO OUR DATABASE. It used to write `clients.crm_config` on every
+ * connect, disconnect and failure — a full-object replace. That column turned out to hold PDCA /
+ * Sheets metadata for 46 of 63 clients, so the mirror was doing two wrong things at once: the badge
+ * never rendered (the shape it required was never there), and the first successful connect would
+ * have destroyed that client's spreadsheet_id, report_link and growth_head. The column is gone
+ * (ADR-0019); the record of a CRM connection now lives in `client_crm_connections`, written by n8n
+ * from the webhook, and the portal does not read it.
+ *
+ * Consequence, stated plainly: there is no connected/disconnect UI here any more. Submitting
+ * credentials still works and is still the only way a client connects a CRM. A status badge can
+ * come back when a credential-free view over client_crm_connections exists.
+ */
 interface CrmIntegrationCardProps {
   client: ClientRecord | null;
 }
@@ -25,40 +40,8 @@ interface ProvidersState {
 
 const ZOHO_OAUTH_STORAGE_KEY = "crm_oauth_data";
 
-function readCrmConfig(client: ClientRecord | null): CrmIntegrationConfig | null {
-  if (!client?.crm_config) return null;
-  const raw = client.crm_config as Partial<CrmIntegrationConfig>;
-  if (!raw.provider || !raw.status) return null;
-  return raw as CrmIntegrationConfig;
-}
 
-function statusBadgeClasses(status: CrmIntegrationStatus) {
-  switch (status) {
-    case "connected":
-      return "border-emerald-400/40 bg-emerald-500/10 text-emerald-100";
-    case "pending":
-      return "border-amber-400/40 bg-amber-500/10 text-amber-100";
-    case "failed":
-      return "border-red-400/40 bg-red-500/10 text-red-100";
-    case "disconnected":
-    default:
-      return "border-border bg-black/10 text-muted-foreground";
-  }
-}
 
-function statusLabel(status: CrmIntegrationStatus) {
-  switch (status) {
-    case "connected":
-      return "Connected";
-    case "pending":
-      return "Pending verification";
-    case "failed":
-      return "Connection failed";
-    case "disconnected":
-    default:
-      return "Disconnected";
-  }
-}
 
 export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
   const [providersState, setProvidersState] = useState<ProvidersState>({
@@ -73,7 +56,6 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
   const [isProcessingOAuth, setIsProcessingOAuth] = useState(false);
 
   const legacyConfigured = runtimeConfig.legacyCrmConfigured;
-  const existingConfig = useMemo(() => readCrmConfig(client), [client]);
 
   useEffect(() => {
     if (!legacyConfigured) {
@@ -135,27 +117,11 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
 
     if (status === "connected" && provider) {
       const providerName = decodeURIComponent(provider);
-      void persistCrmStatus({
-        provider: providerName,
-        display_name: providerName,
-        auth_type: "oauth2",
-        status: "connected",
-        connected_at: new Date().toISOString(),
-        last_error: null,
-      });
       toast.success(`Connected to ${providerName}. You can close this tab if it was opened in a new window.`);
       cleanOAuthParams();
     } else if (status === "error" && provider) {
       const providerName = decodeURIComponent(provider);
       const errorMessage = message ? decodeURIComponent(message) : "OAuth failed";
-      void persistCrmStatus({
-        provider: providerName,
-        display_name: providerName,
-        auth_type: "oauth2",
-        status: "failed",
-        connected_at: existingConfig?.connected_at ?? null,
-        last_error: errorMessage,
-      });
       toast.error(`${providerName}: ${errorMessage}`);
       cleanOAuthParams();
     }
@@ -168,18 +134,6 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client?.id]);
 
-  async function persistCrmStatus(next: Omit<CrmIntegrationConfig, "updated_at">) {
-    if (!client) return;
-    const payload: CrmIntegrationConfig = {
-      ...next,
-      updated_at: new Date().toISOString(),
-    };
-    try {
-      await repository.updateClient(client.id, { crm_config: payload as unknown as Record<string, unknown> });
-    } catch {
-      // updateClient already surfaces an error toast.
-    }
-  }
 
   function cleanOAuthParams() {
     const url = new URL(window.location.href);
@@ -211,25 +165,9 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
         webhookUrl: session.webhookUrl,
         providerId: session.providerId,
       });
-      await persistCrmStatus({
-        provider: "zoho",
-        display_name: "Zoho",
-        auth_type: "oauth2",
-        status: "connected",
-        connected_at: new Date().toISOString(),
-        last_error: null,
-      });
       toast.success("Zoho CRM connected.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Zoho OAuth failed";
-      await persistCrmStatus({
-        provider: "zoho",
-        display_name: "Zoho",
-        auth_type: "oauth2",
-        status: "failed",
-        connected_at: existingConfig?.connected_at ?? null,
-        last_error: message,
-      });
       toast.error(message);
     } finally {
       window.localStorage.removeItem(ZOHO_OAUTH_STORAGE_KEY);
@@ -269,15 +207,6 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
             env: salesforceEnv,
             frontendUrl: window.location.origin + window.location.pathname,
           });
-          await persistCrmStatus({
-            provider: "salesforce",
-            display_name: selectedProvider.display_name,
-            auth_type: "oauth2",
-            status: "pending",
-            connected_at: existingConfig?.connected_at ?? null,
-            last_error: null,
-            metadata: { env: salesforceEnv },
-          });
           window.location.href = authorizeUrl;
           return;
         }
@@ -294,15 +223,6 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
           providerId: selectedProvider.id,
         };
         window.localStorage.setItem(ZOHO_OAUTH_STORAGE_KEY, JSON.stringify(session));
-        await persistCrmStatus({
-          provider: "zoho",
-          display_name: selectedProvider.display_name,
-          auth_type: "oauth2",
-          status: "pending",
-          connected_at: existingConfig?.connected_at ?? null,
-          last_error: null,
-          metadata: { region },
-        });
         const authUrl = new URL(`https://accounts.zoho.${region}/oauth/v2/auth`);
         authUrl.searchParams.append("response_type", "code");
         authUrl.searchParams.append("client_id", formValues.clientId);
@@ -320,27 +240,11 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
         provider: selectedProvider,
         values: formValues,
       });
-      await persistCrmStatus({
-        provider: selectedProvider.name,
-        display_name: selectedProvider.display_name,
-        auth_type: "api_key",
-        status: "connected",
-        connected_at: new Date().toISOString(),
-        last_error: null,
-      });
       toast.success(`${selectedProvider.display_name} credentials submitted.`);
       setSelectedProviderId("");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Submission failed";
       if (selectedProvider) {
-        await persistCrmStatus({
-          provider: selectedProvider.name,
-          display_name: selectedProvider.display_name,
-          auth_type: selectedProvider.auth_type,
-          status: "failed",
-          connected_at: existingConfig?.connected_at ?? null,
-          last_error: message,
-        });
       }
       toast.error(message);
     } finally {
@@ -348,16 +252,6 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
     }
   }
 
-  async function handleDisconnect() {
-    if (!client) return;
-    setIsSubmitting(true);
-    try {
-      await repository.updateClient(client.id, { crm_config: null });
-      toast.success("CRM integration disconnected.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
 
   if (!legacyConfigured) {
     return (
@@ -391,41 +285,9 @@ export function CrmIntegrationCard({ client }: CrmIntegrationCardProps) {
       subtitle="Authorize your CRM so meetings, replies, and won deals can be synced automatically."
     >
       <div className="space-y-5">
-        {existingConfig ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-black/10 p-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{existingConfig.display_name}</span>
-                <span
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-xs",
-                    statusBadgeClasses(existingConfig.status),
-                  )}
-                >
-                  {statusLabel(existingConfig.status)}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {existingConfig.connected_at
-                  ? `Connected ${new Date(existingConfig.connected_at).toLocaleString()}`
-                  : "Awaiting confirmation from CRM."}
-                {existingConfig.last_error ? ` - ${existingConfig.last_error}` : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleDisconnect()}
-              disabled={isSubmitting}
-              className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:border-red-400/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Disconnect
-            </button>
-          </div>
-        ) : null}
-
         <form className="space-y-4 rounded-2xl border border-border bg-black/10 p-4" onSubmit={handleSubmit}>
           <div className="space-y-1">
-            <p className="text-sm">{existingConfig ? "Reconnect or switch CRM provider" : "Connect a CRM provider"}</p>
+            <p className="text-sm">Connect a CRM provider</p>
             <p className="text-xs text-muted-foreground">
               We forward credentials securely to our automation backend; nothing is stored in plain text in your portal.
             </p>
