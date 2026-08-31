@@ -24,9 +24,9 @@ wrong. A failing workflow should become a row.
 
 ```
 Error Trigger ─ Normalize Failure ─┬─ Record Failed Run   (UPSERT integration_sync_runs,
-                (derive provider    │                      keyed on n8n_execution_id)
-                 from workflow name)│
-                                    └─ Notify Slack       (#coldunicorn-errors)
+                (derive provider,   │                      keyed on n8n_execution_id)
+                 unwrap the vendor  │
+                 error)             └─ Notify Slack       (#coldunicorn-errors)
 ```
 
 **Both limbs hang off `Normalize Failure`, not off each other**, and both carry
@@ -64,8 +64,36 @@ instead cost one deploy, changed no binding, and turned alerting on for every bo
 | `sync_type` | `workflow_failure` |
 | `n8n_execution_id` | the failed execution, and the UNIQUE key |
 | `status` | `failed` |
-| `error_message` | truncated to 4000 chars |
-| `metadata` | `workflow_id`, `workflow_name`, `last_node`, `error_stack` |
+| `error_message` | the **vendor's** sentence when there is one, else n8n's generic wording |
+| `metadata` | `workflow_id`, `workflow_name`, `last_node`, `error_summary`, `error_codes`, `error_stack` |
+
+## Why the vendor's own text, and not `error.message`
+
+`error.message` is n8n's own wording **for the status code**, not the vendor's for the fault. Every
+OpenAI 429 arrives as *"The service is receiving too many requests from you"* whether the account is
+genuinely being throttled or has simply run out of credits — two failures with opposite fixes, one
+indistinguishable row and one indistinguishable alert. On 2026-08-31 that cost real time: 30+ rows of
+"too many requests" while the actual fault was `credit_balance_exhausted` on the OpenAI billing
+account, which nothing in the row or the Slack message said.
+
+`Normalize Failure` now unwraps three more fields off the Error Trigger payload:
+
+| Field | Source | Example |
+|---|---|---|
+| `error_detail` | `error.description`, else the vendor body inside `error.messages[]`, else `error.cause` | `You have no credits remaining. Add credits to continue using the API at …` |
+| `error_codes` | `error.httpCode` + the vendor's `type` / `code`, de-duplicated | `HTTP 429 · insufficient_quota · credit_balance_exhausted` |
+| `error_summary` (metadata) | the old generic `error.message`, kept so nothing is lost | `The service is receiving too many requests from you` |
+
+`error.messages[]` is the only place the machine-readable code survives — it holds the raw response,
+shaped `429 - "{ \"error\": { \"message\", \"type\", \"code\" } }"`, double-encoded, hence the
+two-pass parse.
+
+**Two fields are read deliberately never**: `error.context.request` (the whole outbound request body —
+classification prompts and lead PII) and `error.node` (node parameters). Neither belongs in an ops
+channel or in a durable row. `error_detail` is also capped at 500 chars with an ellipsis, because a
+Postgres failure puts the *entire* failed statement in `description` — the `Bison campaign sync`
+failure of 2026-08-30 would otherwise have pushed 19 rows of client data into Slack. The full text
+stays one click away behind the execution URL.
 
 `provider` is derived rather than hardcoded on purpose. The pre-existing `Winnr Sync - Error Handler`
 (`oF6fP3ea2zglhAop`) writes `provider='winnr'`, `sync_type='daily'` literally, so binding *that* one
@@ -91,11 +119,15 @@ deleted afterwards.
 select started_at, provider, n8n_execution_id,
        metadata->>'workflow_name' as workflow,
        metadata->>'last_node'     as node,
+       metadata->>'error_codes'   as codes,
        error_message
 from public.integration_sync_runs
 where sync_type = 'workflow_failure'
 order by started_at desc;
 ```
+
+Rows written before 2026-08-31 carry n8n's generic wording in `error_message` and have no
+`error_codes`; from that date on `error_message` is the vendor's own sentence where one exists.
 
 **Watch this query.** An empty result means either everything is healthy or nothing is bound — those
 look identical, which is the one weakness of this design.

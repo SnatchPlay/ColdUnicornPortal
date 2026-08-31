@@ -52,6 +52,15 @@ transition:
     provider=n8n, sync_type=workflow_failure, status=failed, with the workflow name, the failing node
     and the message. The synthetic row was then deleted.
 
+    2026-08-31: the alert carried n8n's wording for the STATUS CODE, not the vendor's for the fault —
+    30+ OpenAI failures all read "The service is receiving too many requests from you" while the real
+    cause was an exhausted OpenAI credit balance. Normalize Failure now also unwraps
+    error.description, the vendor body inside error.messages[] and error.cause into error_detail /
+    error_codes; error_message becomes the vendor's sentence when there is one, with n8n's wording
+    kept in metadata.error_summary. error.context.request and error.node are deliberately not read
+    (request bodies carry prompts and lead PII). Verified by replaying the last 40 real Error Trigger
+    payloads from the instance through the new node code offline — see the README.
+
 idempotency:
   key: "integration_sync_runs UNIQUE (n8n_execution_id) with ON CONFLICT DO UPDATE"
   notes: >-

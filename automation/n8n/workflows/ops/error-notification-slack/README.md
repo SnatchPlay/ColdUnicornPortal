@@ -2,7 +2,8 @@
 
 Remote: `4jIUZMYNgKtb9fmi` (production). Adopted 2026-08-18.
 
-Two nodes: an `Error Trigger` and a Slack message to **#coldunicorn-errors**.
+Three nodes: an `Error Trigger`, a `Format Alert` Code node that unwraps the vendor's real error, and
+a Slack message to **#coldunicorn-errors**.
 
 ## Why it is separate from the recorder
 
@@ -26,14 +27,37 @@ shape to fall back to if the merged version ever needs unpicking.
 ## What it sends
 
 Read from the Error Trigger payload
-(`{ workflow: {id,name}, execution: {id,url,lastNodeExecuted,error{message,stack}} }`):
+(`{ workflow: {id,name}, execution: {id,url,lastNodeExecuted,error{message,description,httpCode,messages,stack}} }`):
 
 ```
 🔴 *<workflow name>* failed
-*Node:* <last node executed>
-*Error:* <error message, truncated to 800 chars>
+*Node:*  <last node executed>
+*Error:* <n8n's message for the status code, truncated to 300 chars>
+*Why:*   <the vendor's own sentence, truncated to 500 chars — omitted when it adds nothing>
+*Code:*  <HTTP status · vendor type · vendor code — omitted when there is none>
 *Execution:* <execution url>
 ```
+
+Worked example — an OpenAI failure on 2026-08-31, replayed from the real payload:
+
+```
+🔴 *AimFox Classification* failed
+*Node:* OpenAI - Classify Email
+*Error:* The service is receiving too many requests from you
+*Why:* You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.
+*Code:* HTTP 429 · insufficient_quota · credit_balance_exhausted
+*Execution:* https://n8n.coldunicorn.com/workflow/JnvRBXtRNar7ejeM/executions/89096
+```
+
+The `*Error:*` line alone — which is all this workflow sent before 2026-08-31 — cannot tell a genuine
+rate limit apart from an empty billing account. See
+[the recorder's README](../automation-failure-recorder/README.md#why-the-vendors-own-text-and-not-errormessage)
+for where each field comes from and for the two fields (`error.context.request`, `error.node`) that
+are deliberately never read.
+
+**`Format Alert` is a hand-kept copy of the recorder's `Normalize Failure` extraction.** n8n has no
+shared library, and this workflow only earns its keep by being a drop-in replacement for that one, so
+the two blocks must stay identical. Change one, change the other.
 
 `includeLinkToWorkflow` is off on purpose: n8n's own link points at the *workflow*, while the
 execution URL in the body points at the *failed run*, which is what anyone reading the alert wants.

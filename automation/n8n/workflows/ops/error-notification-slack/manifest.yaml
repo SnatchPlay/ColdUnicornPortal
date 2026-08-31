@@ -49,8 +49,13 @@ transition:
 
     The Slack node needed fixing before it was worth binding to anything: it was a stub that posted
     the literal string "Test", with messageType "block" and no blocks configured. It now sends the
-    workflow name, the node that failed, the error message (truncated to 800 chars) and the execution
-    URL, all read from the Error Trigger payload.
+    workflow name, the node that failed, the error message and the execution URL, all read from the
+    Error Trigger payload.
+
+    2026-08-31: gained a `Format Alert` Code node — a hand-kept copy of the recorder's
+    `Normalize Failure` extraction — so the standalone notifier stays a true drop-in replacement.
+    The message now carries the vendor's own error text and codes, not only n8n's generic wording
+    for the status code.
 
     ONE ERROR WORKFLOW PER WORKFLOW. n8n's `settings.errorWorkflow` is a single id, so a workflow
     cannot both record and notify by binding two. The estate resolves this by keeping

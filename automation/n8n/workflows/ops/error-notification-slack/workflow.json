@@ -13,12 +13,26 @@
       "parameters": {}
     },
     {
+      "id": "b7a41c92-3f68-4d05-9c1a-6e0f5b8d2a44",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "notes": "Same extraction as automation-failure-recorder's Normalize Failure. Kept in sync by hand: n8n has no shared library, and this workflow exists to be a drop-in replacement for that one.",
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst execution = input?.execution ?? {};\nconst workflow = input?.workflow ?? {};\nconst error = execution?.error ?? input?.error ?? {};\n\n// `error.message` is n8n's OWN wording for the status code, never the vendor's. Every OpenAI 429\n// reads \"The service is receiving too many requests from you\" whether we are genuinely rate-limited\n// or simply out of credits — two failures with opposite fixes, one indistinguishable alert.\n// The vendor's sentence lives in `description`; its machine-readable code survives only in the raw\n// `messages[]` entry, shaped `429 - \"{ \\\"error\\\": { \\\"message\\\", \\\"type\\\", \\\"code\\\" } }\"`.\n// Deliberately NOT read: `error.context.request` (the whole request body — prompts and lead PII) and\n// `error.node` (node parameters). Neither belongs in Slack or in a durable row.\nconst clean = (value) => String(value).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n\n/** `429 - \"{…}\"` → the parsed body. n8n double-encodes it, hence the second parse. */\nfunction parseVendorBody(text) {\n  let candidate = String(text).replace(/^\\s*\\d{3}\\s*-\\s*/, '').trim();\n  for (let attempt = 0; attempt < 2; attempt += 1) {\n    let parsed;\n    try {\n      parsed = JSON.parse(candidate);\n    } catch (e) {\n      return null;\n    }\n    if (typeof parsed === 'string') { candidate = parsed; continue; }\n    return parsed && typeof parsed === 'object' ? parsed : null;\n  }\n  return null;\n}\n\nlet httpCode = error?.httpCode != null ? String(error.httpCode) : '';\nlet detail = error?.description ? clean(error.description) : '';\nlet vendorType = '';\nlet vendorCode = '';\n\nfor (const raw of Array.isArray(error?.messages) ? error.messages : []) {\n  const text = String(raw);\n  if (!httpCode) httpCode = (text.match(/^\\s*(\\d{3})\\s*-/) ?? [])[1] ?? '';\n  const body = parseVendorBody(text);\n  const vendor = (body && typeof body.error === 'object' && body.error) || body;\n  if (vendor && typeof vendor === 'object') {\n    if (!vendorType && vendor.type) vendorType = clean(vendor.type);\n    if (!vendorCode && vendor.code) vendorCode = clean(vendor.code);\n    if (!detail && vendor.message) detail = clean(vendor.message);\n  } else if (!detail) {\n    detail = clean(text);\n  }\n}\n\n// Postgres, Google and other non-HTTP nodes hang the real cause off `cause` instead.\nif (!detail) detail = clean(error?.cause?.error?.message ?? error?.cause?.message ?? '');\n\nconst message = String(error?.message ?? input?.message ?? 'Unknown workflow failure');\n\n// A detail identical to the generic message adds a line and no information. The cap is not\n// cosmetic: a Postgres failure puts the ENTIRE failed statement in `description`, which would push\n// hundreds of rows of client data into an ops channel. 500 chars keeps the cause readable; the full\n// text stays one click away behind the execution URL.\nconst capped = detail.length > 500 ? detail.slice(0, 500) + '…' : detail;\nconst errorDetail = detail && detail !== message ? capped : '';\n\n// The vendor often repeats the status code as its own `type` or `code`. \"HTTP 500 · 500\" is noise.\nconst errorCodes = [\n  httpCode ? 'HTTP ' + httpCode : '',\n  vendorType && vendorType !== httpCode ? vendorType : '',\n  vendorCode && vendorCode !== httpCode && vendorCode !== vendorType ? vendorCode : '',\n].filter(Boolean).join(' · ');\n\nreturn [{ json: {\n  workflow_name: String(workflow?.name ?? input?.workflowName ?? 'unknown workflow'),\n  last_node: String(execution?.lastNodeExecuted ?? ''),\n  error_message: message,\n  error_detail: errorDetail,\n  error_codes: errorCodes,\n  execution_url: String(execution?.url || (execution?.id ? 'id ' + execution.id : 'no id')),\n} }];"
+      }
+    },
+    {
       "id": "40dde0f2-250b-4146-9033-2a0c0a2c04a9",
       "name": "Send a message",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.4,
       "position": [
-        208,
+        416,
         0
       ],
       "parameters": {
@@ -33,12 +47,23 @@
           "sendAsUser": "ColdUnicorn Error Notification"
         },
         "select": "channel",
-        "text": "={{ [\n  ':red_circle: *' + ($json.workflow?.name || 'unknown workflow') + '* failed',\n  '*Node:* ' + ($json.execution?.lastNodeExecuted || 'unknown'),\n  '*Error:* ' + String($json.execution?.error?.message || 'no message').slice(0, 800),\n  '*Execution:* ' + ($json.execution?.url || ($json.execution?.id ? 'id ' + $json.execution.id : 'no id')),\n].join('\\n') }}"
+        "text": "={{ [\n  ':red_circle: *' + $json.workflow_name + '* failed',\n  '*Node:* ' + ($json.last_node || 'unknown'),\n  '*Error:* ' + String($json.error_message).slice(0, 300),\n  $json.error_detail ? '*Why:* ' + $json.error_detail : '',\n  $json.error_codes ? '*Code:* ' + $json.error_codes : '',\n  '*Execution:* ' + $json.execution_url + ($json.provider ? '  (' + $json.provider + ')' : ''),\n].filter(Boolean).join('\\n') }}"
       }
     }
   ],
   "connections": {
     "Error Trigger": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Format Alert",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Format Alert": {
       "main": [
         [
           {
