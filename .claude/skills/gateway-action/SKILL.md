@@ -42,6 +42,12 @@ In [`supabase/functions/orm-gateway/index.ts`](../../../supabase/functions/orm-g
 - Respect the window constants at the top of the file — `CAMPAIGN_DAILY_STATS_WINDOW_DAYS = 90`,
   `DAILY_STATS_WINDOW_DAYS = 180`, `REPLIES_WINDOW_DAYS = 180`. Widening one is a perf decision,
   not a detail: justify it and record it.
+- **A conditional `sql` fragment carries its own leading space.** Drizzle joins the static chunks
+  of a template with no separator, so `IS NULL${cond()}` where `cond()` is `` sql`AND …` `` renders
+  as `IS NULLAND …` — a 500 that no type, lint or test in this repo can see. Write
+  `` sql` AND camp.status = ${x}` ``. Guarded by
+  [`orm-gateway-sql-fragments.test.ts`](../../../src/app/data/__tests__/orm-gateway-sql-fragments.test.ts).
+
 - **Aggregate server-side.** The gateway computes *facts* (counts, buckets, series, filtered +
   paginated lists). The client computes *formulas* (ratios, view models) in
   `lib/client-view-models.ts` / `lib/client-metrics.ts`. Don't ship raw rows so the browser can
@@ -93,6 +99,7 @@ authentication step. See [ADR-0008](../../../docs/adr/0008-orm-gateway-edge-func
 - [ ] Contract: payload interface + union member + response-map entry + `parseOrmGatewayRequest` branch
 - [ ] `ORM_ACTION_META` entry
 - [ ] Handler queries via Drizzle; no hand-rolled row scoping; windows respected
+- [ ] Every conditional `sql` fragment starts with a space (no `IS NULLAND`)
 - [ ] `Repository` interface + implementation
 - [ ] Consumed by a per-page hook with `loadIdRef`
 - [ ] Exercised end-to-end on the **local Supabase stack** (`supabase functions serve`) before deploy

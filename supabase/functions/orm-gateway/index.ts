@@ -1303,7 +1303,7 @@ async function handleAction(tx: any, payload: OrmGatewayRequest, perf?: PerfCont
     const scopedClientIds = () => clientFilter
       ? sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND id = ${clientFilter} AND archived_at IS NULL`
       : sql`SELECT id FROM clients WHERE manager_id = ${managerId} AND archived_at IS NULL`;
-    const campStatusCond = () => statusFilter ? sql`AND camp.status = ${statusFilter}` : sql``;
+    const campStatusCond = () => statusFilter ? sql` AND camp.status = ${statusFilter}` : sql``;
     // Date-range conditions. `column` is the timestamp/date expression to compare (e.g. created_at, cds.report_date).
     const dateCond = (column: string) => {
       let f = sql``;
