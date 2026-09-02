@@ -111,8 +111,14 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
+            # Never block on a credential prompt: without this git waits for a username on a TTY that
+            # does not exist and the step fails with the unhelpful "could not read Username".
+            export GIT_TERMINAL_PROMPT=0
             cd /opt/data/portal
-            git fetch --all --prune
+            # `origin`, not `--all`: --all walks EVERY remote, so one stray or unauthenticated remote
+            # takes the whole deploy down even though origin is fine (2026-09-02 incident). The server
+            # clone authenticates with a read-only GitHub deploy key over SSH — no PAT to expire.
+            git fetch origin --prune
             # Mirror the remote instead of merging into the server's clone. The checkout is a
             # deploy artefact with no history worth preserving, and `git pull --ff-only` aborts
             # outright whenever main is rewritten (a force-push leaves no common ancestor to
