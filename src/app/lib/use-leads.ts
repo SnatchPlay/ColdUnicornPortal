@@ -17,35 +17,71 @@ export function mapLeadsError(reason: unknown): string {
 /** Fetches a server-paginated/filtered leads list. Re-fetches whenever params change. */
 export function useLeadsList(params: LeadsListParams, options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
-  const [data, setData] = useState<LeadsListResponse | null>(null);
+  // Response + the params key that produced it — see the twin comment in `useLeadCrmList`.
+  const [entry, setEntry] = useState<{ key: string; value: LeadsListResponse } | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   // Serialize params to avoid effect identity issues.
   const paramsKey = JSON.stringify(params);
+  // ADR-0009 stale guard: with `enabled` toggling (the leads view switcher) two loads can overlap,
+  // and without this counter a slow earlier response overwrites a newer one.
+  const loadIdRef = useRef(0);
+  // Which params produced the response currently in `data`, and whether this loader was on last time.
+  // Together they let a switched-off loader keep a still-valid cache (instant switch back) while a
+  // cache that went stale during the off period is dropped before it can paint.
+  const dataKeyRef = useRef<string | null>(null);
+  const wasEnabledRef = useRef(enabled);
 
   const load = useCallback(async (p: LeadsListParams) => {
+    const id = ++loadIdRef.current;
+    const key = JSON.stringify(p);
     setLoading(true);
     try {
       const result = await repository.loadLeadsList(p);
-      setData(result);
+      if (id !== loadIdRef.current) return; // stale — discard
+      dataKeyRef.current = key;
+      setEntry({ key, value: result });
       setError(null);
     } catch (reason) {
+      if (id !== loadIdRef.current) return;
       setError(mapLeadsError(reason));
     } finally {
-      setLoading(false);
+      if (id === loadIdRef.current) setLoading(false);
     }
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!enabled) { setLoading(false); return; }
+    const justEnabled = enabled && !wasEnabledRef.current;
+    wasEnabledRef.current = enabled;
+    if (!enabled) {
+      // Switched off (the other view mode is on screen). Cancel any in-flight load and drop the error
+      // — a failure from the previous visit must not paint before the re-fetch has even started. The
+      // response itself is KEPT: if the params are still the same on the way back it is valid, and
+      // re-rendering it beats a second of empty table.
+      //
+      // `loading` stays TRUE: nothing reads a disabled loader's flags (the composed
+      // `useLeadViewModeList` reads only the active half), and it is the honest value for "will fetch
+      // the moment I am switched on" — the render that flips `enabled` would otherwise paint one
+      // frame of the empty state before this effect runs.
+      loadIdRef.current += 1;
+      setError(null);
+      setLoading(true);
+      return;
+    }
+    // Back on: the filters may have moved while this loader was off, and that cache would be rows and
+    // counts for a query nobody asked for. Only then is it dropped.
+    if (justEnabled && dataKeyRef.current !== paramsKey) {
+      dataKeyRef.current = null;
+      setEntry(null);
+    }
     void load(params);
   }, [paramsKey, enabled]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const refresh = useCallback(() => { void load(params); }, [load, paramsKey]);
 
-  return { data, loading, error, refresh };
+  return { data: entry?.value ?? null, isDataCurrent: entry?.key === paramsKey, loading, error, refresh };
 }
 
 /**

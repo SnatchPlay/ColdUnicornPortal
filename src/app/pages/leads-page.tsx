@@ -32,14 +32,16 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
-import { useLeadsList, useLeadDetail, useLeadTasks, useLeadsFilterOptions } from "../lib/use-leads";
-import { useLeadCrmList } from "../lib/use-lead-crm";
+import { useLeadDetail, useLeadTasks, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadViewModeList } from "../lib/use-lead-crm";
 import { getFullName } from "../lib/format";
-import { buildLeadReportColumns, type LeadReportColumn } from "../lib/lead-report-columns";
-import { buildLeadCrmColumns, type LeadCrmColumn } from "../lib/lead-crm-columns";
+import { buildLeadReportColumns } from "../lib/lead-report-columns";
+import { buildLeadColumnsForViewMode, type LeadCrmColumn } from "../lib/lead-crm-columns";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
 import { LeadReportTable } from "../components/lead-report-table";
 import { LeadCrmTable } from "../components/lead-crm-table";
+import { LeadViewModeSwitcher } from "../components/lead-view-mode-switcher";
+import type { LeadViewMode } from "../lib/crm/lead-view-mode";
 import type { LeadCrmRow } from "../types/view-contracts";
 import { LeadCustomColumnsManager } from "../components/lead-custom-columns-manager";
 import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export";
@@ -124,42 +126,6 @@ function writeTimeframeToParams(params: URLSearchParams, timeframe: TimeframeVal
 // ── CreateLeadSheetHost ────────────────────────────────────────────────────────────────────────
 // Owns the "is sheet open" boolean so that opening/closing New Lead does NOT re-render
 // InternalLeadsPage or the lead list. Receives only stable props.
-
-type LeadViewMode = "pdca" | "crm" | "combined";
-
-const LEAD_VIEW_MODES = [
-  { key: "pdca", label: "PDCA" },
-  { key: "crm", label: "CRM" },
-  { key: "combined", label: "Combined" },
-] as const;
-
-/** Which of the three lead tables is on screen. Active option: `.rainbow-active` (theme.css §rainbow). */
-function ViewModeSwitcher({
-  value,
-  onChange,
-}: {
-  value: LeadViewMode;
-  onChange: (next: LeadViewMode) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1 rounded-xl border border-border bg-[#0b0b0b] p-1 text-xs">
-      {LEAD_VIEW_MODES.map((mode) => (
-        <button
-          key={mode.key}
-          type="button"
-          onClick={() => onChange(mode.key)}
-          aria-pressed={value === mode.key}
-          className={cn(
-            "rounded-lg px-3 py-1.5 transition",
-            value === mode.key ? "rainbow-active" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {mode.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 interface CreateLeadSheetHostProps {
   clientsLite: Array<{ id: string; name: string }>;
@@ -368,14 +334,11 @@ function InternalLeadsPage() {
   }), [clientFilter, campaignFilter, stageFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, currentPage, showArchived]);
 
   // View switcher (ADR-0013): PDCA = existing report; CRM = banded CRM table; combined = union, calm.
-  const isCrmView = viewMode !== "pdca";
-  const pdca = useLeadsList(listParams, { enabled: !isCrmView });
-  const crmView = useLeadCrmList(listParams, { enabled: isCrmView });
-  // Re-bind the shared names to the active mode so all downstream derivations work unchanged.
-  const data = isCrmView ? crmView.data : pdca.data;
-  const loading = isCrmView ? crmView.loading : pdca.loading;
-  const error = isCrmView ? crmView.error : pdca.error;
-  const refresh = isCrmView ? crmView.refresh : pdca.refresh;
+  // One loader owns the mode→action rule; `data` and friends read the same in every mode.
+  const { isCrmView, data, loading, error, refresh, asOf: crmAsOf, businessDays: crmBusinessDays, healthContext: crmHealthContext } =
+    useLeadViewModeList(listParams, viewMode);
+  // Sticky across mode switches: once any mode has rendered a list, the shell stays on screen.
+  const hasLoadedOnceRef = useRef(false);
   const { data: filterOptions } = useLeadsFilterOptions();
   const { replies: selectedReplies, loading: loadingDetail } = useLeadDetail(selectedLeadId);
   // Tasks are a lazy per-lead list, loaded only for the pure CRM drawer (ADR-0013, Phase 5.3) — the
@@ -394,36 +357,16 @@ function InternalLeadsPage() {
   const customValues = useMemo(() => data?.customValues ?? [], [data]);
   const customColumns = useLeadCustomColumns({ role: identity?.role, fields: customFields, values: customValues });
   const reportColumns = useMemo(() => [...baseReportColumns, ...customColumns], [baseReportColumns, customColumns]);
-  // CRM view columns. Combined mode unions the PDCA report columns (as the Lead band) with the CRM
-  // stage columns, dropping the CRM lead-stage duplicates (spec B.3 — a calm union).
-  const crmAsOf = crmView.data?.asOf;
-  const crmBusinessDays = crmView.data?.businessDays;
-  // Per-cell health colours (CRM mode only). The context object is memoised so LeadCrmTable's
-  // per-row evaluation memo stays stable across unrelated re-renders.
-  const crmHealthContext = useMemo(
-    () => (crmView.data ? { asOf: crmView.data.asOf, businessDays: crmView.data.businessDays } : undefined),
-    [crmView.data],
-  );
-  const crmColumns = useMemo<LeadCrmColumn[]>(() => {
-    const base = buildLeadCrmColumns({
-      role: identity?.role,
-      showClient: showClientColumn,
-      asOf: crmAsOf,
-      businessDays: crmBusinessDays,
-      includeProcessIssues: viewMode === "crm",
-    });
-    if (viewMode !== "combined") return base;
-    const pdcaAsCrm: LeadCrmColumn[] = reportColumns.map((c: LeadReportColumn) => ({
-      id: `pdca:${c.id}`, label: c.label, stage: "lead", width: c.width, minWidth: c.minWidth, align: c.align,
-      value: c.value, render: c.render,
-    }));
-    // Drop the PDCA (getLeadStage) Status and keep the CRM (resolveCrmStatus) Status so the taxonomy is
-    // consistent across CRM and combined modes.
-    return [
-      ...pdcaAsCrm.filter((c) => c.id !== "pdca:status"),
-      ...base.filter((c) => c.stage !== "lead" || c.id === "status"),
-    ];
-  }, [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf, crmBusinessDays]);
+  // CRM view columns (none in PDCA mode — that table never renders there).
+  const crmColumns = useMemo<LeadCrmColumn[]>(() => buildLeadColumnsForViewMode({
+    viewMode,
+    reportColumns,
+    role: identity?.role,
+    showClient: showClientColumn,
+    asOf: crmAsOf,
+    businessDays: crmBusinessDays,
+    includeProcessIssues: true,
+  }), [identity?.role, showClientColumn, viewMode, reportColumns, crmAsOf, crmBusinessDays]);
   const defaultColumnWidths = useMemo(() => reportColumns.map((c) => c.width), [reportColumns]);
   const minColumnWidths = useMemo(() => reportColumns.map((c) => c.minWidth), [reportColumns]);
   const leadColumns = useResizableColumns({
@@ -711,7 +654,11 @@ function InternalLeadsPage() {
   function handleTimeframeChange(value: TimeframeValue) { setTimeframe(value); setCurrentPage(1); }
   function handleQueryChange(value: string) { setQuery(value); setCurrentPage(1); }
 
-  if (loading && !data) return <LoadingState />;
+  // Full-page loading is for the FIRST load only. A view-mode switch also arrives here as
+  // `loading && !data` (the loader being switched on has no response yet), and blanking the page
+  // would take the switcher and the whole toolbar off screen mid-interaction.
+  if (data) hasLoadedOnceRef.current = true;
+  if (loading && !data && !hasLoadedOnceRef.current) return <LoadingState />;
 
   if (error) {
     return (
@@ -754,7 +701,7 @@ function InternalLeadsPage() {
       <Surface className="p-3 sm:p-4">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <ViewModeSwitcher value={viewMode} onChange={setViewMode} />
+            <LeadViewModeSwitcher value={viewMode} onChange={setViewMode} />
 
             <div className="relative min-w-[200px] flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />

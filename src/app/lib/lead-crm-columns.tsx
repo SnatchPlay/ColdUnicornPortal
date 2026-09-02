@@ -5,6 +5,8 @@ import { resolveCrmStatus } from "./crm/lead-status";
 import { calendarDaysBetween, workingDaysToContact, DEFAULT_BUSINESS_DAY_CONFIG, type BusinessDayConfig } from "./crm/business-days";
 import { CRM_PROCESS_ISSUES_ENABLED, CRM_PROCESS_ISSUES_PENDING_LABEL } from "./crm/crm-features";
 import { LEAD_CRM_REGISTRY, type LeadCrmRegistryEntry, type LeadCrmColumnId } from "./crm/lead-crm-registry";
+import type { LeadReportColumn } from "./lead-report-columns";
+import type { LeadViewMode } from "./crm/lead-view-mode";
 import { formatDate, getFullName } from "./format";
 
 /**
@@ -354,4 +356,33 @@ export function buildLeadCrmColumns(options: BuildLeadCrmColumnsOptions): LeadCr
   }
 
   return withMeta(columns);
+}
+
+const NO_CRM_COLUMNS: LeadCrmColumn[] = [];
+
+/**
+ * The CRM table's columns for a given view mode (ADR-0013) — the whole mode→columns rule in one place,
+ * so the internal Leads page and the client My Pipeline page cannot drift:
+ *
+ * - `pdca` renders `LeadReportTable`, never this table → no columns are built at all.
+ * - `crm` is the banded CRM set (`includeProcessIssues` is honoured for internal roles only).
+ * - `combined` (spec B.3) unions the PDCA report columns — carried as the Lead band — with the CRM
+ *   stage columns, dropping the CRM lead-band duplicates. The PDCA (`getLeadStage`) Status is dropped
+ *   and the CRM (`resolveCrmStatus`) Status kept, so the status taxonomy is the same in both CRM modes.
+ */
+export function buildLeadColumnsForViewMode(
+  options: BuildLeadCrmColumnsOptions & { viewMode: LeadViewMode; reportColumns: LeadReportColumn[] },
+): LeadCrmColumn[] {
+  const { viewMode, reportColumns, ...crmOptions } = options;
+  if (viewMode === "pdca") return NO_CRM_COLUMNS;
+  const crmColumns = buildLeadCrmColumns({ ...crmOptions, includeProcessIssues: viewMode === "crm" && crmOptions.includeProcessIssues });
+  if (viewMode === "crm") return crmColumns;
+  const pdcaAsCrm: LeadCrmColumn[] = reportColumns.map((c) => ({
+    id: `pdca:${c.id}`, label: c.label, stage: "lead", width: c.width, minWidth: c.minWidth, align: c.align,
+    value: c.value, render: c.render,
+  }));
+  return [
+    ...pdcaAsCrm.filter((c) => c.id !== "pdca:status"),
+    ...crmColumns.filter((c) => c.stage !== "lead" || c.id === "status"),
+  ];
 }

@@ -12,23 +12,32 @@ import {
   type LeadDrawerData,
 } from "../components/portal-ui";
 import { LeadReportTable } from "../components/lead-report-table";
+import { LeadCrmTable } from "../components/lead-crm-table";
+import { LeadViewModeSwitcher } from "../components/lead-view-mode-switcher";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { buildLeadReportColumns } from "../lib/lead-report-columns";
+import { buildLeadColumnsForViewMode, type LeadCrmColumn } from "../lib/lead-crm-columns";
+import { isCrmViewMode, type LeadViewMode } from "../lib/crm/lead-view-mode";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
 import { downloadLeadReport } from "../lib/lead-report-export";
 import { createDefaultTimeframe, getTimeframeLabel, resolveTimeframeBounds } from "../lib/timeframe";
 import { formatNumber, getFullName } from "../lib/format";
 import { getLeadStage } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
-import { useLeadsList, useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadDetail, useLeadsFilterOptions } from "../lib/use-leads";
+import { useLeadViewModeList } from "../lib/use-lead-crm";
 import { useAuth } from "../providers/auth";
-import type { LeadsListParams, LeadsListRow } from "../types/view-contracts";
+import type { LeadCrmRow, LeadsListParams, LeadsListRow } from "../types/view-contracts";
 import type { TimeframeValue } from "../lib/timeframe";
 
 type SortDirection = "asc" | "desc";
 
 const PAGE_SIZE = 50;
+
+/** Stable empties: a fresh `[]` per render would churn every memo downstream of the buffer. */
+const EMPTY_ROWS: LeadsListRow[] = [];
+const EMPTY_CUSTOM_VALUES: Array<{ lead_id: string; field_id: string; value: string | null }> = [];
 
 /** Derive a LeadDrawerData-compatible row from a LeadsListRow + lazy replies. */
 function toDrawerData(row: LeadsListRow, replies: ReturnType<typeof useLeadDetail>["replies"]): LeadDrawerData {
@@ -61,18 +70,39 @@ export function ClientLeadsPage() {
     return () => clearTimeout(timer);
   }, [query]);
   const [stageFilter, setStageFilter] = useState<PipelineStage | "all">("all");
+  // Which of the three lead tables is on screen (ADR-0013) — the same switcher the internal Leads
+  // page carries. Local state, not part of any URL contract.
+  const [viewMode, setViewMode] = useState<LeadViewMode>("pdca");
   const [campaignFilter, setCampaignFilter] = useState("all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<TimeframeValue>(() => createDefaultTimeframe());
-  // Load-more pagination: accumulates rows across pages.
   const [loadPage, setLoadPage] = useState(1);
-  const [accumulatedRows, setAccumulatedRows] = useState<LeadsListRow[]>([]);
-  const [accumulatedCustomValues, setAccumulatedCustomValues] = useState<Array<{ lead_id: string; field_id: string; value: string | null }>>([]);
   const [leadSort, setLeadSort] = useState<{ key: string; direction: SortDirection }>({ key: "created", direction: "desc" });
 
   // resolveTimeframeBounds returns { start, end } (end is end-of-day); send full ISO so the
   // final day is included inclusively.
   const { start: timeframeFrom, end: timeframeTo } = useMemo(() => resolveTimeframeBounds(timeframe), [timeframe]);
+
+  // The identity of the current result set. `isCrmViewMode`, not `viewMode`: CRM and Combined render
+  // the SAME response through different columns, so switching between them must not discard rows.
+  const isCrmView = isCrmViewMode(viewMode);
+  const filterKey = JSON.stringify({ campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, isCrmView });
+
+  // Load-more pagination. The buffer carries the `filterKey` that produced it, so a stale buffer is
+  // never rendered through the new mode's table and never counted as a loaded page: on the render that
+  // changes the key the reset effect has not run yet, and rows of the other shape would paint a screen
+  // of em-dashes (and re-fetch the old page number) before it does.
+  const [accumulated, setAccumulated] = useState<{
+    key: string;
+    rows: LeadsListRow[];
+    customValues: Array<{ lead_id: string; field_id: string; value: string | null }>;
+  }>(() => ({ key: filterKey, rows: [], customValues: [] }));
+  const isBufferCurrent = accumulated.key === filterKey;
+  const accumulatedRows = isBufferCurrent ? accumulated.rows : EMPTY_ROWS;
+  const accumulatedCustomValues = isBufferCurrent ? accumulated.customValues : EMPTY_CUSTOM_VALUES;
+  // A dropped buffer is back at page 1 — never re-request the page number the previous result set was
+  // paginated to (`loadLeadCrmList` is the heaviest query in the app).
+  const page = isBufferCurrent ? loadPage : 1;
 
   const listParams = useMemo<LeadsListParams>(() => ({
     campaignId: campaignFilter !== "all" ? campaignFilter : undefined,
@@ -81,33 +111,32 @@ export function ClientLeadsPage() {
     search: committedSearch || undefined,
     sortField: leadSort.key,
     sortDir: leadSort.direction,
-    page: loadPage,
+    page,
     pageSize: PAGE_SIZE,
-  }), [campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, loadPage]);
+  }), [campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort, page]);
 
-  const { data, loading, error, refresh } = useLeadsList(listParams);
+  // View switcher (ADR-0013), same loader as the internal page: PDCA = the report table; CRM = the
+  // banded CRM table; combined = the calm union. Only the active mode's action is fetched. The gateway
+  // nulls internal-only CRM fields for the client role, and the column builder drops those columns.
+  const { data, isDataCurrent, loading, error, refresh, asOf: crmAsOf, businessDays: crmBusinessDays, healthContext: crmHealthContext } =
+    useLeadViewModeList(listParams, viewMode);
   const { data: filterOptions } = useLeadsFilterOptions();
 
-  // Reset accumulation when any filter changes (loadPage goes back to 1).
-  const filterKey = JSON.stringify({ campaignFilter, timeframeFrom, timeframeTo, committedSearch, leadSort });
   useEffect(() => {
     setLoadPage(1);
-    setAccumulatedRows([]);
-    setAccumulatedCustomValues([]);
+    setAccumulated({ key: filterKey, rows: [], customValues: [] });
   }, [filterKey]);
 
-  // Append new rows + custom values to accumulation (or reset on page 1).
+  // Append the new page to the buffer (or seed it on page 1), stamped with the key it belongs to.
+  // `isDataCurrent` is the guard that makes the stamp trustworthy: this effect runs after the render
+  // that changed the filters or the mode, when the loader may still be holding the previous response.
   useEffect(() => {
-    if (!data) return;
-    if (loadPage === 1) {
-      setAccumulatedRows(data.rows);
-      setAccumulatedCustomValues(data.customValues ?? []);
-    } else {
-      setAccumulatedRows((prev) => [...prev, ...data.rows]);
-      setAccumulatedCustomValues((prev) => [...prev, ...(data.customValues ?? [])]);
-    }
+    if (!data || !isDataCurrent) return;
+    setAccumulated((prev) => (page === 1 || prev.key !== filterKey
+      ? { key: filterKey, rows: data.rows, customValues: data.customValues ?? [] }
+      : { key: filterKey, rows: [...prev.rows, ...data.rows], customValues: [...prev.customValues, ...(data.customValues ?? [])] }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, isDataCurrent]);
 
   const stageCounts = data?.stageCounts ?? {};
   const totalCount = data?.totalCount ?? 0;
@@ -131,13 +160,26 @@ export function ClientLeadsPage() {
     minWidths,
   });
 
+  // CRM view columns (none in PDCA mode). The builder already omits the internal-only columns for the
+  // client role — the gateway nulls those fields too — and the process-issue rollup is internal-only.
+  const crmColumns = useMemo<LeadCrmColumn[]>(() => buildLeadColumnsForViewMode({
+    viewMode,
+    reportColumns: columns,
+    role: identity?.role,
+    showClient: false,
+    asOf: crmAsOf,
+    businessDays: crmBusinessDays,
+  }), [identity?.role, viewMode, columns, crmAsOf, crmBusinessDays]);
+  // Stage strip + health colours are the CRM mode's chrome; combined is deliberately calm (spec B.3).
+  const showCrmChrome = viewMode === "crm";
+
   // Stage filter applied client-side to accumulated rows.
   const stageFilteredRows = useMemo(
     () => stageFilter === "all" ? accumulatedRows : accumulatedRows.filter((r) => getLeadStage(r) === stageFilter),
     [accumulatedRows, stageFilter],
   );
 
-  const hasMoreRows = data ? (loadPage * PAGE_SIZE) < totalCount : false;
+  const hasMoreRows = data && isBufferCurrent ? (page * PAGE_SIZE) < totalCount : false;
 
   const selectedRow = stageFilteredRows.find((r) => r.id === selectedLeadId) ?? null;
   const { replies: selectedReplies } = useLeadDetail(selectedLeadId);
@@ -169,14 +211,6 @@ export function ClientLeadsPage() {
     }
   }
 
-  if (loading && accumulatedRows.length === 0) {
-    return <PortalLoadingState title="Loading leads" description="Syncing leads, replies, and campaign context." />;
-  }
-
-  if (error && accumulatedRows.length === 0) {
-    return <PortalErrorState title="Leads data is unavailable" description={error} onRetry={() => void refresh()} />;
-  }
-
   return (
     <div className="space-y-7">
       <PortalPageHeader
@@ -205,7 +239,9 @@ export function ClientLeadsPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <LeadViewModeSwitcher value={viewMode} onChange={setViewMode} />
+        <span aria-hidden className="hidden h-5 w-px bg-white/10 sm:block" />
         <FilterChip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
           All <span className="ml-1 text-neutral-500">{totalCount}</span>
         </FilterChip>
@@ -232,21 +268,43 @@ export function ClientLeadsPage() {
         </Select>
       </div>
 
-      {stageFilteredRows.length === 0 && !loading ? (
-        <EmptyPortalState title="No leads match the current filters" description={`${clientName} has no leads in this view.`} />
+      {/* States render INSIDE the layout, never as an early return: the switcher has to stay on screen
+          or a failing mode would strand the client with no way back. They also only replace the table
+          when there is nothing to replace — a failed `Load more` must not blow away the loaded rows. */}
+      {stageFilteredRows.length > 0 ? null : loading ? (
+        <PortalLoadingState title="Loading leads" description="Syncing leads, replies, and campaign context." />
+      ) : error ? (
+        <PortalErrorState title="Leads data is unavailable" description={error} onRetry={() => void refresh()} />
       ) : (
+        <EmptyPortalState title="No leads match the current filters" description={`${clientName} has no leads in this view.`} />
+      )}
+
+      {stageFilteredRows.length > 0 && (
         <div className="overflow-hidden rounded-2xl border border-[#242424] bg-[#050505]">
-          <LeadReportTable
-            rows={stageFilteredRows}
-            columns={columns}
-            template={leadColumns.template}
-            getResizeMouseDown={leadColumns.getResizeMouseDown}
-            sort={leadSort}
-            onSortChange={handleSortChange}
-            onRowClick={(row) => setSelectedLeadId(row.id)}
-            selectedId={selectedLeadId}
-            rowAriaLabel={(row) => `Open lead details for ${getFullName(row.first_name, row.last_name)}`}
-          />
+          {isCrmView ? (
+            <LeadCrmTable
+              rows={stageFilteredRows as LeadCrmRow[]}
+              columns={crmColumns}
+              onRowClick={(row) => setSelectedLeadId(row.id)}
+              selectedId={selectedLeadId}
+              rowAriaLabel={(row) => `Open lead details for ${getFullName(row.first_name, row.last_name)}`}
+              showStageStrip={showCrmChrome}
+              showHealth={showCrmChrome}
+              healthContext={crmHealthContext}
+            />
+          ) : (
+            <LeadReportTable
+              rows={stageFilteredRows}
+              columns={columns}
+              template={leadColumns.template}
+              getResizeMouseDown={leadColumns.getResizeMouseDown}
+              sort={leadSort}
+              onSortChange={handleSortChange}
+              onRowClick={(row) => setSelectedLeadId(row.id)}
+              selectedId={selectedLeadId}
+              rowAriaLabel={(row) => `Open lead details for ${getFullName(row.first_name, row.last_name)}`}
+            />
+          )}
 
           {hasMoreRows && (
             <div className="border-t border-[#1f1f1f] px-5 py-4">
@@ -255,7 +313,7 @@ export function ClientLeadsPage() {
                 disabled={loading}
                 className="inline-flex items-center gap-2 rounded-xl border border-[#2d2d2d] px-4 py-2 text-sm text-neutral-200 transition hover:border-[#3f3f3f] disabled:opacity-50"
               >
-                {loading ? "Loading…" : `Load more (${formatNumber(totalCount - (loadPage * PAGE_SIZE))} remaining)`}
+                {loading ? "Loading…" : `Load more (${formatNumber(totalCount - (page * PAGE_SIZE))} remaining)`}
               </button>
             </div>
           )}

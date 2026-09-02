@@ -155,3 +155,12 @@ no-op (nothing to migrate / unchanged function code redeploys harmlessly).
 - **Verified end-to-end (2026-07-15):** `supabase start` + `scripts/supabase-local-reset.sh` +
   `supabase functions serve` + `pnpm dev` → sign in with a real account and the Clients grid loads
   from the local DB through the locally-served gateway.
+- **Re-verified (2026-09-02, CLI v2.114.0)** on the `IS NULLAND` gateway fix. A bare `supabase start`
+  fails exactly as described above (`relation "public.campaign_daily_stats" does not exist`, then it
+  stops the containers) — go straight to `CLOUD_DB_URL=… ./scripts/supabase-local-reset.sh`. Verified
+  without the browser by signing in through `/auth/v1/token?grant_type=password` with a role account
+  from `.env.test.local` and POSTing `{action, …payload}` to `/functions/v1/orm-gateway`; the same
+  script runs against prod by swapping the URL + publishable key. Reintroducing the bug locally
+  reproduced the 500, which is what makes the local loop worth trusting.
+- **`supabase/.temp/cli-latest` is tracked** and the CLI rewrites it with the latest released
+  version — revert it before committing.

@@ -37,6 +37,14 @@ action.**
 - **One page, one action, one hook.** Each page has a hook (`src/app/lib/use-*.ts`, or co-located
   when it serves a single page) that owns `data`/`loading`/`error`/`refresh` and calls one
   `repository.loadXPage(...)` action.
+
+  *One sanctioned exception — a **view switch**, not a second data source.* Both leads pages render
+  the same scoped rows through a PDCA or a CRM table ([ADR-0013](0013-lead-crm-view-and-status-taxonomy.md)),
+  and the two shapes come from two actions. `useLeadViewModeList`
+  ([`lib/use-lead-crm.ts`](../../src/app/lib/use-lead-crm.ts)) composes the two hooks behind an
+  `enabled` flag and still returns **one** `data`/`loading`/`error`/`refresh` set: only the active
+  mode fetches, and the page body never learns there are two. A new exception needs the same shape —
+  one composed hook in `lib/`, never a second `data` binding in a page body.
 - **Mandatory stale-response guard.** Every such hook uses a `loadIdRef` counter so a slow
   in-flight response can never overwrite state from a newer request:
 

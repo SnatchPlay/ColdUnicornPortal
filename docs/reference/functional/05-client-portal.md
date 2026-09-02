@@ -87,6 +87,10 @@ Client's lead workspace. Read-only (ADR-0004 + UI also disables edits). Full rep
 ### 2.2 Header controls
 
 - `PortalPageHeader` with title and subtitle.
+- **PDCA / CRM / Combined view switcher** (`LeadViewModeSwitcher`, added 2026-09-02) at the head of the
+  stage-chip row — the same control the internal Leads page carries
+  ([06 §3.2](./06-manager-portal.md#32-toolbar-and-filters)). Local state, deliberately not in a URL
+  contract. See §2.3a.
 - `PortalSearch` — full-text search across `first_name + last_name`, `email`, `company_name`, `job_title`.
 - Campaign filter: `Select` listing scoped campaigns.
 - Pipeline stage chips (`FilterChip`): "All" + one chip per `PIPELINE_STAGES` entry (see [04-metrics §4](./04-metrics-catalog.md#4-lead-stage-lifecycle)) with counts.
@@ -103,6 +107,38 @@ As of Batch 4 this is the dense, spreadsheet-style **report table** (`LeadReport
 Columns (client view): Full name, Job title, Email, Phone, Phone source, Company, Industry, Headcount, Lead received, Campaign, Message title, Msg #, Website (link), Qualification, Response time, **Status** (read-only badge from `getLeadStage`), Replies, Last reply, Mail from lead (preview), **Client note**, LinkedIn, then any **per-client custom columns** ([ADR-0007](../../adr/0007-per-client-lead-custom-fields.md)). The internal **ColdUnicorn note** column is **never** shown to the client (gateway nulls it). Sort is server-side on base columns that map to a `serverSortField`.
 
 Pagination: lazy "Load more" (`PAGE_SIZE` 50); rows + custom values accumulate across pages. **Export:** CSV / XLSX of all rows matching the current filters/sort (paged server-side); excludes the internal note.
+
+### 2.3a CRM and Combined views (ADR-0013)
+
+The switcher chooses which of three tables renders the same scoped rows:
+
+| Mode | Loader | Table | Notes |
+|---|---|---|---|
+| **PDCA** (default) | `loadLeadsList` / `useLeadsList` | `LeadReportTable` | §2.3, unchanged |
+| **CRM** | `loadLeadCrmList` / `useLeadCrmList` | `LeadCrmTable` | Banded stage strip + per-cell health colours, evaluated against the server `asOf` + `businessDays` from the response |
+| **Combined** | `loadLeadCrmList` | `LeadCrmTable` | The PDCA columns as the Lead band plus the CRM stage columns; no stage strip, no health colours (spec B.3) |
+
+Both the loader (`useLeadViewModeList`) and the column builder (`buildLeadColumnsForViewMode`) are
+shared with the internal page — only the active mode's gateway action is fetched. Client columns are
+role-filtered twice: the gateway nulls internal-only CRM fields for the `client` role
+([ADR-0013 §6](../../adr/0013-lead-crm-view-and-status-taxonomy.md)), and the builder drops those
+columns plus the internal `Process issues` rollup. The client CRM column set is: Company, Name,
+Phone, Email, Msg history, LinkedIn invite, Status, Lead received, Contact made, Days to contact,
+Meeting set, Offer date, Next-step date, Next steps, 1st/2nd value date + values + sent, Negotiation
+start, Days in negotiation, Notes, Conclusion. Clients stay **read-only** on CRM data — the row click
+opens the same read-only `LeadDrawer`, never the internal CRM editors.
+
+**Export is unaffected by the mode**: CSV / XLSX always serialise the PDCA report columns
+(`downloadLeadReport(columns, …)`), exactly as on the internal page.
+
+The `Load more` buffer carries the filter/loader key it was built from, and is only fed by a response
+the loader reports as current (`isDataCurrent`) — a stale buffer renders as empty, never as the other
+mode's rows, and a dropped buffer re-requests page 1 instead of the page number the previous result set
+was paginated to. CRM and Combined share one response, so switching between them re-renders columns
+without a re-fetch; PDCA ↔ CRM keeps each loader's response while its params still match, so a switch
+back with unchanged filters is instant. Loading, error and empty states render **inside** the page and
+only when there is nothing to show, so a failing mode never takes the switcher off screen and a failed
+`Load more` never discards the loaded rows.
 
 ### 2.4 Lead drawer
 

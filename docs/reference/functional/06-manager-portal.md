@@ -368,6 +368,13 @@ carries the house rainbow (`.rainbow-active`, [`theme.css`](../../../src/styles/
 than a tint: the choice changes which table the page renders, and a 15%-alpha fill read as
 decoration next to the ordinary filter chips.
 
+The switcher itself is
+[`LeadViewModeSwitcher`](../../../src/app/components/lead-view-mode-switcher.tsx) — since 2026-09-02
+the client's My Pipeline page carries the same control ([05 §2.3a](./05-client-portal.md#23a-crm-and-combined-views-adr-0013)),
+so the mode taxonomy ([`lib/crm/lead-view-mode.ts`](../../../src/app/lib/crm/lead-view-mode.ts)), the
+loader (`useLeadViewModeList`) and the mode→columns rule (`buildLeadColumnsForViewMode`) live in shared
+modules rather than on this page.
+
 
 - URL state contract: `q`, `campaign`, `stage`, `sort`, `dir`, `range`, `from`, `to`, `page`.
 - **Show archived** toggle (next to the stage chips, internal roles only). It is a server param
