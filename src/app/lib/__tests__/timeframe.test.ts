@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TIMEFRAME_PRESET,
+  LEADS_DEFAULT_TIMEFRAME_PRESET,
   TIMEFRAME_PRESETS,
   createDefaultTimeframe,
   getTimeframeLabel,
@@ -109,6 +110,25 @@ describe("retired presets", () => {
 
   it("defaults new sessions to the current month", () => {
     expect(createDefaultTimeframe()).toEqual({ preset: "mtd", customStart: null, customEnd: null });
+  });
+});
+
+describe("the leads default", () => {
+  it("opens the leads tab on all time, leaving the app-wide default alone", () => {
+    expect(LEADS_DEFAULT_TIMEFRAME_PRESET).toBe("all");
+    expect(DEFAULT_TIMEFRAME_PRESET).toBe("mtd");
+    expect(createDefaultTimeframe(LEADS_DEFAULT_TIMEFRAME_PRESET))
+      .toEqual({ preset: "all", customStart: null, customEnd: null });
+    expect(resolveTimeframeBounds(createDefaultTimeframe(LEADS_DEFAULT_TIMEFRAME_PRESET)))
+      .toEqual({ start: null, end: null });
+  });
+
+  it("degrades a missing or retired ?range on leads to all time, not to the current month", () => {
+    for (const value of [null, undefined, "", "30d", "garbage"]) {
+      expect(normalizeTimeframePreset(value, LEADS_DEFAULT_TIMEFRAME_PRESET)).toBe("all");
+    }
+    // An explicit preset still wins over the fallback.
+    expect(normalizeTimeframePreset("last_month", LEADS_DEFAULT_TIMEFRAME_PRESET)).toBe("last_month");
   });
 });
 

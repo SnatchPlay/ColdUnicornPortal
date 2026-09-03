@@ -21,6 +21,14 @@ export interface TimeframeValue {
 // range without the dates that only a TimeframeValue carries.
 export const DEFAULT_TIMEFRAME_PRESET: Exclude<TimeframePreset, "custom"> = "mtd";
 
+/**
+ * The Leads tab is the exception: it opens on **all time**, for every role. A leads list is a working
+ * CRM surface, not a period report — a lead created two months ago is still the lead someone has to
+ * call today, and a month-shaped default hid it behind a filter nobody had set. Dashboards and
+ * statistics keep `DEFAULT_TIMEFRAME_PRESET`, where a period is the point.
+ */
+export const LEADS_DEFAULT_TIMEFRAME_PRESET: Exclude<TimeframePreset, "custom"> = "all";
+
 // `mtd` / `qtd` / `ytd` keep their keys — only their labels moved from "… to Date" to "Current …",
 // so nothing persisted and no shared link changes meaning. The rolling `21d` / `30d` / `90d` presets
 // were retired on 2026-08-14; see normalizeTimeframePreset for what happens to the stragglers.
@@ -45,12 +53,15 @@ export const TIMEFRAME_PRESETS: Array<{ key: Exclude<TimeframePreset, "custom">;
  * Call this wherever a preset enters the app from outside — URL params, stored layouts — rather than
  * comparing `timeframe.preset` yourself.
  */
-export function normalizeTimeframePreset(value: unknown): TimeframePreset {
+export function normalizeTimeframePreset(
+  value: unknown,
+  fallback: Exclude<TimeframePreset, "custom"> = DEFAULT_TIMEFRAME_PRESET,
+): TimeframePreset {
   if (value === "custom") return "custom";
   if (typeof value === "string" && TIMEFRAME_PRESETS.some((preset) => preset.key === value)) {
     return value as TimeframePreset;
   }
-  return DEFAULT_TIMEFRAME_PRESET;
+  return fallback;
 }
 
 function toStartOfDay(value: Date) {
@@ -125,9 +136,11 @@ function getPresetBounds(
   }
 }
 
-export function createDefaultTimeframe(): TimeframeValue {
+export function createDefaultTimeframe(
+  preset: Exclude<TimeframePreset, "custom"> = DEFAULT_TIMEFRAME_PRESET,
+): TimeframeValue {
   return {
-    preset: DEFAULT_TIMEFRAME_PRESET,
+    preset,
     customStart: null,
     customEnd: null,
   };

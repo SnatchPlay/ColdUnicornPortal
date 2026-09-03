@@ -21,7 +21,7 @@ import { buildLeadColumnsForViewMode, type LeadCrmColumn } from "../lib/lead-crm
 import { isCrmViewMode, type LeadViewMode } from "../lib/crm/lead-view-mode";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
 import { downloadLeadReport } from "../lib/lead-report-export";
-import { createDefaultTimeframe, getTimeframeLabel, resolveTimeframeBounds } from "../lib/timeframe";
+import { createDefaultTimeframe, getTimeframeLabel, LEADS_DEFAULT_TIMEFRAME_PRESET, resolveTimeframeBounds } from "../lib/timeframe";
 import { formatNumber, getFullName } from "../lib/format";
 import { getLeadStage } from "../lib/selectors";
 import { useResizableColumns } from "../lib/use-resizable-columns";
@@ -75,7 +75,9 @@ export function ClientLeadsPage() {
   const [viewMode, setViewMode] = useState<LeadViewMode>("pdca");
   const [campaignFilter, setCampaignFilter] = useState("all");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [timeframe, setTimeframe] = useState<TimeframeValue>(() => createDefaultTimeframe());
+  // All time, not the app-wide current-month default: the leads list is a working CRM surface, so an
+  // older lead must not be hidden behind a filter the client never set (LEADS_DEFAULT_TIMEFRAME_PRESET).
+  const [timeframe, setTimeframe] = useState<TimeframeValue>(() => createDefaultTimeframe(LEADS_DEFAULT_TIMEFRAME_PRESET));
   const [loadPage, setLoadPage] = useState(1);
   const [leadSort, setLeadSort] = useState<{ key: string; direction: SortDirection }>({ key: "created", direction: "desc" });
 

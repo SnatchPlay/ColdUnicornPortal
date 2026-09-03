@@ -377,6 +377,11 @@ modules rather than on this page.
 
 
 - URL state contract: `q`, `campaign`, `stage`, `sort`, `dir`, `range`, `from`, `to`, `page`.
+- **Timeframe default = `All time`** (`LEADS_DEFAULT_TIMEFRAME_PRESET`,
+  [`lib/timeframe.ts`](../../../src/app/lib/timeframe.ts)), for every role and unlike every other page,
+  which default to `Current month`. The leads list is a working CRM surface: a month-shaped default hid
+  older open leads behind a filter nobody had set. Consequently a missing, junk or retired (`?range=30d`)
+  preset degrades to All time **here**, not to the current month.
 - **Show archived** toggle (next to the stage chips, internal roles only). It is a server param
   (`LeadsListParams.includeArchived`), so the stage counts move with it — an archived lead is out of
   both the page and its stage badge. The drawer carries the Archive/Restore button.

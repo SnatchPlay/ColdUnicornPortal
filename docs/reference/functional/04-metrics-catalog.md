@@ -65,7 +65,7 @@ export function getClientKpis(clients, campaigns, leads, stats) {
 - **Formula:** `count(leads WHERE qualification = 'MQL')`.
 - **Source:** `leads.qualification`.
 - **File:line:** [client-view-models.ts:37](../../../src/app/lib/client-view-models.ts#L37).
-- **Time window:** the current timeframe filter on leads. Leads list itself is pre-scoped by `scopeLeads` and then filtered by the chosen timeframe (`createDefaultTimeframe()` = last 30 days, or custom range).
+- **Time window:** the current timeframe filter on leads. Leads list itself is pre-scoped by `scopeLeads` and then filtered by the chosen timeframe (the Leads tab defaults to **All time** — `LEADS_DEFAULT_TIMEFRAME_PRESET` — so the unfiltered view is every lead; any preset or custom range narrows it).
 - **Edge cases:** a lead whose flags roll forward (e.g. `won=true` with `qualification='MQL'`) **still counts** as MQL here вЂ” `getClientKpis` reads `qualification` directly, it does not call `getLeadStage()`. Contrast with [В§4 Lead stage lifecycle](#4-lead-stage-lifecycle).
 - **Visible to:** Client, Manager (manager views the same data through `scopeLeads`), Admin.
 

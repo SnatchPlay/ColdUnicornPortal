@@ -48,6 +48,7 @@ import { fetchAllLeadRows, downloadLeadReport } from "../lib/lead-report-export"
 import { getLeadStage, isInternalAdmin } from "../lib/selectors";
 import {
   getTimeframeLabel,
+  LEADS_DEFAULT_TIMEFRAME_PRESET,
   normalizeTimeframePreset,
   resolveTimeframeBounds,
   type TimeframeValue,
@@ -105,10 +106,10 @@ function buildPageWindow(currentPage: number, totalPages: number) {
 }
 
 function parseTimeframeFromParams(searchParams: URLSearchParams): TimeframeValue {
-  // A missing, retired (`?range=30d`) or junk preset lands on the default — see
-  // normalizeTimeframePreset. The URL is rewritten from state afterwards, so the stale value does
-  // not survive the visit.
-  const preset = normalizeTimeframePreset(searchParams.get("range"));
+  // A missing, retired (`?range=30d`) or junk preset lands on the leads default — All time, not the
+  // app-wide current-month default (LEADS_DEFAULT_TIMEFRAME_PRESET). The URL is rewritten from state
+  // afterwards, so the stale value does not survive the visit.
+  const preset = normalizeTimeframePreset(searchParams.get("range"), LEADS_DEFAULT_TIMEFRAME_PRESET);
   if (preset === "custom") {
     return { preset, customStart: searchParams.get("from"), customEnd: searchParams.get("to") };
   }

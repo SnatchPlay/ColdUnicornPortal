@@ -91,6 +91,10 @@ Client's lead workspace. Read-only (ADR-0004 + UI also disables edits). Full rep
   stage-chip row — the same control the internal Leads page carries
   ([06 §3.2](./06-manager-portal.md#32-toolbar-and-filters)). Local state, deliberately not in a URL
   contract. See §2.3a.
+- `DateRangeButton` — filters on `leads.created_at`, server-side. Default = **All time**
+  (`LEADS_DEFAULT_TIMEFRAME_PRESET`, [`timeframe.ts`](../../../src/app/lib/timeframe.ts)), not the app-wide
+  current month: the pipeline is a working list, so an older open lead must not be hidden behind a filter
+  the client never set.
 - `PortalSearch` — full-text search across `first_name + last_name`, `email`, `company_name`, `job_title`.
 - Campaign filter: `Select` listing scoped campaigns.
 - Pipeline stage chips (`FilterChip`): "All" + one chip per `PIPELINE_STAGES` entry (see [04-metrics §4](./04-metrics-catalog.md#4-lead-stage-lifecycle)) with counts.
