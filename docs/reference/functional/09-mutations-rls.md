@@ -392,13 +392,21 @@ function is protected** (verified 2026-07-14 via `supabase functions list`):
 - **Returns:** `{ ok: true, invites: InviteRecord[] }`.
 - **Authorized role:** admin / super_admin.
 
-### 3.4 `resendInvite(inviteId)` — [repository.ts:870-881](../../../src/app/data/repository.ts#L870-L881)
+### 3.4 `resendInvite(inviteId)` — [repository.ts:1023-1034](../../../src/app/data/repository.ts#L1023-L1034)
 
 - **Function:** `manage-invites`, body `{ action: "resend", inviteId }`.
-- **Server action:** regenerate magic link, extend expiry, re-email.
+- **Server action:** regenerate magic link, extend expiry, re-email. A resend **recreates** the auth
+  user (delete + re-invite), so the name has to be carried across explicitly. The profile read that
+  supplies it **fails closed**: a read error aborts the resend with a 500 *before* anything is
+  deleted, because treating it as "no profile" would silently restore the stale metadata name.
+  Precedence:
+  **`public.users` first**, then the old invite metadata, then the email local part — a name an
+  admin corrected in Team users (`admin_set_user_name`, §3.6) must survive the resend, and once the
+  profile carries a name it is the authority for *both* halves so a deliberately cleared surname is
+  not resurrected from the metadata.
 - **Returns:** `{ ok: true, invite: InviteRecord }`.
 
-### 3.5 `revokeInvite(inviteId)` — [repository.ts:883-892](../../../src/app/data/repository.ts#L883-L892)
+### 3.5 `revokeInvite(inviteId)` — [repository.ts:1036-1047](../../../src/app/data/repository.ts#L1036-L1047)
 
 - **Function:** `manage-invites`, body `{ action: "revoke", inviteId }`.
 - **Server action:** invalidates pending invite.
@@ -406,9 +414,9 @@ function is protected** (verified 2026-07-14 via `supabase functions list`):
 
 ### 3.6 Admin user management — Postgres RPCs (not the gateway)
 
-User-management writes (2B/2C) call **SECURITY DEFINER functions** directly via `supabase.rpc(...)` from `repository.ts` — deliberately **not** the `orm-gateway` edge function. This keeps the entire feature deployable through a migration alone (no edge redeploy) while enforcing every permission rule in SQL. Shared error wrapper: `invokeUserRpc` ([repository.ts:240-248](../../../src/app/data/repository.ts#L240-L248)); methods at [repository.ts:924-953](../../../src/app/data/repository.ts#L924-L953). Migration: [`20260618_user_management_and_custom_field_types.sql`](../../../supabase/migrations/20260618_user_management_and_custom_field_types.sql).
+User-management writes (2B/2C) call **SECURITY DEFINER functions** directly via `supabase.rpc(...)` from `repository.ts` — deliberately **not** the `orm-gateway` edge function. This keeps the entire feature deployable through a migration alone (no edge redeploy) while enforcing every permission rule in SQL. Shared error wrapper: `invokeUserRpc` ([repository.ts:281-294](../../../src/app/data/repository.ts#L281-L294)); methods at [repository.ts:1089-1127](../../../src/app/data/repository.ts#L1089-L1127). Migration: [`20260618_user_management_and_custom_field_types.sql`](../../../supabase/migrations/20260618_user_management_and_custom_field_types.sql).
 
-These five RPCs plus Supabase Auth, Storage and the legacy-CRM client are the **only** places `supabase-js` is used at runtime ([`lib/supabase.ts`](../../../src/app/lib/supabase.ts) is imported by exactly two files: `providers/auth.tsx` and `data/repository.ts`; `lib/avatar-storage.ts` re-uses the same client).
+These six RPCs plus Supabase Auth, Storage and the legacy-CRM client are the **only** places `supabase-js` is used at runtime ([`lib/supabase.ts`](../../../src/app/lib/supabase.ts) is imported by exactly two files: `providers/auth.tsx` and `data/repository.ts`; `lib/avatar-storage.ts` re-uses the same client).
 
 | Repository method | RPC | Enforced server-side |
 |-------------------|-----|----------------------|
@@ -416,7 +424,8 @@ These five RPCs plus Supabase Auth, Storage and the legacy-CRM client are the **
 | `updateUserRole(userId, role)` | `public.admin_update_user_role(target, new_role)` | Internal-admin only · cannot change own role · only `super_admin` may assign/modify `super_admin` · last-admin guard (can't demote the last active admin-tier user). |
 | `setUserActive(userId, active)` | `public.admin_set_user_active(target, active)` | Internal-admin only · cannot deactivate self · only `super_admin` may toggle a `super_admin` · last-admin guard. Sets `deactivated_at`/`deactivated_by`. |
 | `setUserAvatar(userId, avatarPath)` | `public.admin_set_user_avatar(target, new_avatar_path)` | Internal-admin only. Sets/clears another user's `avatar_path` (+ `avatar_updated_at`). Migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql). Self avatar edits do **not** use this — they go through the gateway `updateProfileAvatar` action under `users_update_self`. |
-| `isCurrentAccountActive()` | `public.current_account_active()` | Auth gate — `loadIdentity` runs it in parallel with `repository.loadIdentity` and blocks a deactivated user with `errorCode: "account_deactivated"` ([auth.tsx:96-106](../../../src/app/providers/auth.tsx#L96-L106)). **Fails open** on RPC error ([repository.ts:948-953](../../../src/app/data/repository.ts#L948-L953)). |
+| `setUserName(userId, firstName, lastName)` | `public.admin_set_user_name(target, new_first_name, new_last_name)` | Internal-admin only · only `super_admin` may edit a `super_admin` · both names trimmed, and a blank pair is rejected (`22023`). Migration [`20260903_admin_set_user_name.sql`](../../../supabase/migrations/20260903_admin_set_user_name.sql). Self name edits do **not** use this — the page disables the fields on your own row and points at Settings, which uses the gateway `updateProfileName` action under `users_update_self` (that path also refreshes the signed-in identity). |
+| `isCurrentAccountActive()` | `public.current_account_active()` | Auth gate — `loadIdentity` runs it in parallel with `repository.loadIdentity` and blocks a deactivated user with `errorCode: "account_deactivated"` ([auth.tsx:96-106](../../../src/app/providers/auth.tsx#L96-L106)). **Fails open** on RPC error ([repository.ts:1122-1127](../../../src/app/data/repository.ts#L1122-L1127)). |
 
 All admin user-management RPCs are `revoke all from public; grant execute to authenticated`. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
 

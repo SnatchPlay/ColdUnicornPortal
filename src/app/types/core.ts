@@ -546,6 +546,9 @@ export interface InviteRequest {
   email: string;
   role: InviteRole;
   clientId?: string;
+  /** Typed by the inviter. Blank falls back to the email local part (`send-invite`). */
+  firstName?: string;
+  lastName?: string;
 }
 
 export interface InviteRecord {

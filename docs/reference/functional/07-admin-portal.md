@@ -74,11 +74,20 @@ Invite-based lifecycle for agency users (`admin` / `manager`) and client users (
 
 ### 2.2 Send invite form
 
+**Create invitation is the first section on the page** (above Team users) — it is the reason an
+operator opens this route.
+
 | Field | Control | Validation |
 |-------|---------|------------|
+| `firstName` | text input | required (trimmed) |
+| `lastName` | text input | required (trimmed) |
 | `email` | text input | RFC-ish regex `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` |
 | `role` | Select (`admin` / `manager` / `client`) | must pick one |
-| `client` | Select, **shown only when `role === "client"`** | required when role is `client`; options from `clients` |
+| `client` | [`SearchableSelect`](../../../src/app/components/searchable-select.tsx) combobox, **shown only when `role === "client"`** | required when role is `client`; options from `clientsLite`, sorted **A→Z** by the shared `sortClientsAlpha`. **The trigger itself becomes the search field** when opened (autofocused; ↑/↓ + Enter to pick, Escape to close) — no second input row is added, and the closed field reads like any other. It renders the selected client from `value`, never from the filtered list, so a narrow search cannot blank it |
+
+`firstName` / `lastName` are sent to `send-invite`, which prefers them over its
+`deriveNameFromEmail(email)` fallback — so the profile carries the name as typed, capitalisation
+included, instead of a lowercase email prefix.
 
 Submit button is disabled while `isSendingInvite`, and the label flips to "Sending...". Validation errors display in a `Banner`.
 
@@ -113,20 +122,59 @@ Status badge palette:
 
 Row actions:
 
-- **Resend** в†’ `repository.resendInvite(id)` в†’ new expiry; Supabase sends a new email.
+- **Resend** → `repository.resendInvite(id)` → new expiry; Supabase sends a new email. The invitee's
+  name comes from their `public.users` row first, so a correction made in Team users is preserved.
 - **Revoke** в†’ `repository.revokeInvite(id)` в†’ marks the invite revoked; removes from pending.
 
 List data comes from `repository.listInvites()` on mount and after each mutation.
 
 ### 2.4 Mapping to `client_users`
 
-When a `client` invitation is accepted, the backend edge function creates both the `users` row and the `client_users` mapping. `AdminUserManagementPage` doesn't directly manage mappings in the common flow, but `repository.upsertClientUserMapping(userId, clientId)` ([repository.ts:894](../../../src/app/data/repository.ts#L894)) is available for programmatic reassignment if ever needed.
+When a `client` invitation is accepted, the backend edge function creates both the `users` row and the `client_users` mapping. `AdminUserManagementPage` doesn't directly manage mappings in the common flow, but `repository.upsertClientUserMapping(userId, clientId)` ([repository.ts:1059](../../../src/app/data/repository.ts#L1059)) is available for programmatic reassignment if ever needed.
 
-### 2.5 Avatars (photos)
+### 2.5 Team users list
+
+All portal users from `admin_list_users()` (ordered `is_active desc, created_at desc` server-side).
+Rows are compact single-line cards. Above the list:
+
+- **Search** (`aria-label="Search team users"`) — substring match over first name, last name, full
+  name, email and role label.
+- **Show deactivated** checkbox, with the deactivated count.
+
+The filtered list is paginated client-side, `USERS_PAGE_SIZE = 15`, `clampPage` from
+[`lib/pagination.ts`](../../../src/app/lib/pagination.ts) plus the shared
+[`ListPagination`](../../../src/app/components/list-pagination.tsx) control (also used by the leads
+grid). Changing the search or the
+deactivated toggle resets to page 1.
+
+Per row: avatar + email, **editable first / last name**, role Select, status badge, Deactivate /
+Reactivate.
+
+**Name editing.** The two name inputs are a `UserNameFields` row component that owns its own draft (the row is
+the only writer of these two columns), committed on Enter or when focus leaves the pair — tabbing
+between the fields is one edit, so it is one RPC — via
+`repository.setUserName(userId, first, last)` → `public.admin_set_user_name` RPC
+([09 §3.6](./09-mutations-rls.md#36-admin-user-management--postgres-rpcs-not-the-gateway),
+migration [`20260903_admin_set_user_name.sql`](../../../supabase/migrations/20260903_admin_set_user_name.sql)).
+An unchanged value does not call the RPC; a blank pair is refused client-side and server-side; a
+failed save leaves the row's draft in place so nothing typed is lost. Inputs are disabled on a `super_admin` row
+unless the actor is a `super_admin` — the same guard the RPC enforces — and on **your own** row,
+which points at Settings instead: that path (`updateProfileName`) also refreshes the signed-in
+identity, so the sidebar does not keep showing the old name.
+
+Row writes (name, role, status) carry a per-user sequence number, so a slow response from a
+superseded save can never repaint the row — the name fields stay editable during a save, so two
+writes on one row can overlap.
+
+A name corrected here survives a **resend** of a still-pending invitation
+([09 §3.4](./09-mutations-rls.md#34-resendinviteinviteid--repositoryts1023-1034)) — the resend reads
+`public.users` before it falls back to the original invite metadata.
+
+### 2.6 Avatars (photos)
 
 Each row in the Team users list shows a [`UserAvatar`](../../../src/app/components/ui/user-avatar.tsx) (photo or initials fallback) with a camera overlay button. Admin/master_admin/super_admin can **upload/replace** any user's photo (validated to jpeg/png/webp ≤ 5 MB) and **Remove photo** to revert to initials. Image bytes go to the public `user-avatars` Storage bucket; the path is persisted via the `admin_set_user_avatar` RPC. See [09-mutations-rls.md §3.6/§3.7](./09-mutations-rls.md). Users edit their own photo in Settings.
 
-### 2.6 Feature availability
+### 2.7 Feature availability
 
 - Admin and super_admin can invite `admin`, `manager`, `client`.
 - Invitations for `super_admin` are **not** offered вЂ” that role must be promoted directly in SQL.

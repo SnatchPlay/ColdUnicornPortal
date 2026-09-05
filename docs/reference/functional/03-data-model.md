@@ -76,7 +76,7 @@ RLS:
 - `users_select_internal` — visible to internal users (admin/manager) for dropdowns and attribution. The policy body is `to ["authenticated"]` without an explicit `using` in the Drizzle declaration; actual predicate lives in the SQL migration at `docs/reference/supabase-production-rls.sql`.
 - `users_update_self` — `auth.uid() = id` for both `using` and `with check`; supports profile-name **and self avatar** updates through `orm-gateway`.
 
-No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-service updates go through `users_update_self`; **admin role changes, deactivation, and avatar edits on other users go through SECURITY DEFINER RPCs** (`admin_update_user_role`, `admin_set_user_active`, `admin_set_user_avatar`) that enforce their own permission checks and bypass the self-only UPDATE policy. See [09-mutations-rls.md](09-mutations-rls.md).
+No INSERT/DELETE policies — row creation remains invite/auth-owned. Self-service updates go through `users_update_self`; **admin role changes, deactivation, name and avatar edits on other users go through SECURITY DEFINER RPCs** (`admin_update_user_role`, `admin_set_user_active`, `admin_set_user_avatar`, `admin_set_user_name`) that enforce their own permission checks and bypass the self-only UPDATE policy. See [09-mutations-rls.md](09-mutations-rls.md).
 
 #### `user-avatars` storage bucket — migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql)
 

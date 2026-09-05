@@ -217,7 +217,11 @@ Deno.serve(async (request) => {
     return jsonResponse(405, { ok: false, error: "Method not allowed." });
   }
 
-  const supabaseUrl = new URL(request.url).origin;
+  // Prefer the injected SUPABASE_URL, exactly as `send-invite` does. In production the two are
+  // the same; under `supabase functions serve` the request origin is the edge runtime's own
+  // port, so the request-origin form makes this function untestable locally.
+  const envSupabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
+  const supabaseUrl = envSupabaseUrl || new URL(request.url).origin;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const anonKey =
     Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
@@ -407,9 +411,34 @@ Deno.serve(async (request) => {
       return jsonResponse(400, { ok: false, error: "Client invites require a client assignment." });
     }
 
+    // Resend recreates the auth user, so the name has to be carried over. The profile row wins
+    // over the invite metadata: an admin may have corrected a typo in Team users
+    // (`admin_set_user_name`), and that correction must survive a resend — it is the reason the
+    // editor exists. Metadata, then the email local part, are the fallbacks.
+    const { data: existingProfile, error: existingProfileError } = await adminClient
+      .from("users")
+      .select("first_name, last_name")
+      .eq("id", targetUser.id)
+      .maybeSingle<{ first_name: string | null; last_name: string | null }>();
+
+    // A failed read is NOT "no profile": treating it as one would silently fall back to the stale
+    // metadata name — the exact regression this lookup exists to prevent. Bail out now, while the
+    // resend has not yet deleted anything.
+    if (existingProfileError) {
+      return jsonResponse(500, {
+        ok: false,
+        error: `Could not read the invitee's profile, so the invite was not resent: ${existingProfileError.message}`,
+      });
+    }
+
     const fallbackName = deriveNameFromEmail(email);
-    const firstName = metadata.first_name?.trim() || fallbackName.firstName;
-    const lastName = metadata.last_name?.trim() || fallbackName.lastName;
+    const profileFirst = existingProfile?.first_name?.trim() ?? "";
+    const profileLast = existingProfile?.last_name?.trim() ?? "";
+    // Once the profile carries a name it is the authority for BOTH halves — otherwise clearing a
+    // wrong surname in Team users would see it resurrected from the metadata on the next resend.
+    const hasProfileName = Boolean(profileFirst || profileLast);
+    const firstName = hasProfileName ? profileFirst : metadata.first_name?.trim() || fallbackName.firstName;
+    const lastName = hasProfileName ? profileLast : metadata.last_name?.trim() || fallbackName.lastName;
 
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(targetUser.id);
     if (deleteError) {
