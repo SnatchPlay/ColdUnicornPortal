@@ -29,6 +29,43 @@ Already converted: `leads`, `campaigns`, `replies` (`20260601b`), `campaign_dail
 `daily_stats` (`20260421`). Still unaudited: `domains`, `invoices`, `condition_rules`,
 `client_custom_field_values` — if you touch one, audit it.
 
+## Hard rule: `revoke ... from public, anon, authenticated`
+
+Supabase ships `alter default privileges in schema public grant execute on functions to anon,
+authenticated, service_role`. **Every `create function` in `public` therefore hands `anon` a direct
+EXECUTE grant**, and `revoke all ... from public` does *not* take it back — `PUBLIC` and `anon` are
+different grantees. A `SECURITY DEFINER` function bypasses RLS, so the grant is the only thing
+standing between the internet and the function body.
+
+```sql
+-- WRONG: anon keeps the default grant and can call this without signing in
+revoke all on function public.f(uuid) from public;
+grant execute on function public.f(uuid) to service_role;
+
+-- CORRECT: name every grantee you are taking it away from
+revoke all on function public.f(uuid) from public, anon, authenticated;
+grant execute on function public.f(uuid) to service_role;
+```
+
+This was not hypothetical: `mark_linkedin_invited` (`20260810`) wrote the first form, and until
+`20260905` any holder of the publishable key could stamp `leads.linkedin_invitation_sent_at` —
+proven against a local copy of production. The `admin_*` RPCs had the same grant and were saved
+only by their own `private.current_app_role()` check.
+
+**Verify, don't assume** — the ACL is the truth, not the migration text:
+
+```sql
+select proname, proacl from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.prosecdef;
+```
+
+`mcp__supabase__get_advisors(type: "security")` flags the same thing as
+`anon_security_definer_function_executable` — run it after any migration that adds a function.
+
+The one deliberate exception is `public.public_lead_stats()`
+([ADR-0014](../../../docs/adr/0014-public-marketing-stats-rpc.md)), which the marketing site calls
+anonymously. A second anon-callable function needs an ADR, not a grant.
+
 ## The gate: EXPLAIN as the authenticated role — never as superuser
 
 **Superuser bypasses RLS and gives a false baseline.** Use
@@ -77,9 +114,15 @@ variant.
 - Put row scoping in the gateway's `WHERE` clause instead of in RLS. The gateway's SQL is about
   *what the page needs*; RLS is about *what the caller may see*.
 - Put a service-role key or `DATABASE_URL` anywhere the browser can reach.
+- Write `revoke all ... from public` and think the function is closed. Name `anon` and
+  `authenticated` explicitly, then read `proacl` back.
 
 ## Checklist
 
+- [ ] New/changed function: `revoke all ... from public, anon, authenticated` + an explicit grant,
+      and `proacl` read back to confirm `anon` is gone
+- [ ] `get_advisors(type: "security")` clean of new
+      `anon_security_definer_function_executable` entries
 - [ ] EXPLAIN (ANALYZE, BUFFERS) as `authenticated`, **before**
 - [ ] Set-based predicate (no per-row `private.*` on hot tables)
 - [ ] EXPLAIN **after** → SubPlan/InitPlan confirmed

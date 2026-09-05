@@ -427,7 +427,7 @@ These six RPCs plus Supabase Auth, Storage and the legacy-CRM client are the **o
 | `setUserName(userId, firstName, lastName)` | `public.admin_set_user_name(target, new_first_name, new_last_name)` | Internal-admin only · only `super_admin` may edit a `super_admin` · both names trimmed, and a blank pair is rejected (`22023`). Migration [`20260903_admin_set_user_name.sql`](../../../supabase/migrations/20260903_admin_set_user_name.sql). Self name edits do **not** use this — the page disables the fields on your own row and points at Settings, which uses the gateway `updateProfileName` action under `users_update_self` (that path also refreshes the signed-in identity). |
 | `isCurrentAccountActive()` | `public.current_account_active()` | Auth gate — `loadIdentity` runs it in parallel with `repository.loadIdentity` and blocks a deactivated user with `errorCode: "account_deactivated"` ([auth.tsx:96-106](../../../src/app/providers/auth.tsx#L96-L106)). **Fails open** on RPC error ([repository.ts:1122-1127](../../../src/app/data/repository.ts#L1122-L1127)). |
 
-All admin user-management RPCs are `revoke all from public; grant execute to authenticated`. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
+All admin user-management RPCs are `revoke all from public, anon; grant execute to authenticated`, and they share one guard in two halves — **`private.assert_user_admin_tier()`** runs *before* the row lookup (so a non-admin gets `42501` whether or not the id exists) and **`private.assert_can_manage_user(target)`** runs after it (only a `super_admin` may modify a `super_admin`). Neither is granted to `authenticated`: they are called from inside a `SECURITY DEFINER` body, and `authenticated` has no `USAGE` on schema `private` anyway. The per-RPC rules (self-demotion, self-deactivation, last-admin) stay in their own function. Migration [`20260905_lock_down_definer_rpc_grants.sql`](../../../supabase/migrations/20260905_lock_down_definer_rpc_grants.sql) introduced it and closed two gaps: `admin_set_user_avatar` had **no** super_admin guard at all (a plain admin could replace a super_admin's photo), and every one of these functions was still callable by `anon`, because `revoke ... from public` never removes the `anon` grant that Supabase's default privileges hand out at `create function` time. They were protected only by their own `current_app_role()` check. Violations `raise exception ... using errcode = '42501'` → surfaced as `RepositoryError` (kind `permission`). The deactivation lockout is reinforced at the data layer: `private.current_app_role()` returns NULL for a deactivated user, so all role-gated RLS denies them even with a still-valid JWT.
 
 ### 3.7 Avatars — gateway action + storage writes (Batch 10D)
 
@@ -436,6 +436,29 @@ Self-service avatar updates use the `orm-gateway` action **`updateProfileAvatar(
 The image bytes are written to the **public** `user-avatars` Storage bucket from the browser via the publishable client ([avatar-storage.ts](../../../src/app/lib/avatar-storage.ts)) — never the DB. The upload flow is transactional-enough: upload object → write DB → best-effort delete the previous object; if the DB write fails, the just-uploaded object is removed. `storage.objects` RLS restricts writes to the caller's own `avatars/{uid}/…` folder (or `private.is_admin_user()`).
 
 **Why public bucket (not private + signed URLs):** avatars are low-sensitivity face photos with unguessable UUID object names; public read removes per-render signing latency and list-batching complexity, and the DB stores only the object path. Decision logged in [BUSINESS_LOGIC.md](../../BUSINESS_LOGIC.md). Migration [`20260619_user_avatars.sql`](../../../supabase/migrations/20260619_user_avatars.sql).
+
+### 3.7b Function grants — why `from public` is not enough
+
+Supabase ships `alter default privileges in schema public grant execute on functions to anon,
+authenticated, service_role`, so **every** `create function` in `public` gives `anon` a direct
+EXECUTE grant. `revoke all ... from public` does not remove it: `PUBLIC` and `anon` are different
+grantees. Since a `SECURITY DEFINER` function bypasses RLS, that grant is the whole boundary.
+
+Audited 2026-09-05 (migration
+[`20260905`](../../../supabase/migrations/20260905_lock_down_definer_rpc_grants.sql)):
+
+| Function | Was | Now | Why it mattered |
+|---|---|---|---|
+| `mark_linkedin_invited(uuid[])` | `anon`, `authenticated`, `service_role` | `service_role` | **Real hole.** No caller check, and it writes `leads`. Proven on a local production copy: with only the publishable key, `select` on `leads` returned `[]` (RLS held) but the RPC returned `1` and stamped the row. Migration `20260810` intended service_role and said so; the grant did not match |
+| `admin_list_users`, `admin_update_user_role`, `admin_set_user_active`, `admin_set_user_avatar`, `admin_set_user_name` | + `anon` | `authenticated` | Defence in depth — each re-checks the caller, and `private.current_app_role()` is NULL for anon, so calls failed `42501` |
+| `current_account_active`, `is_admin_user`, `is_internal_user` | + `anon` (the `is_*` pair also `PUBLIC`) | `authenticated` | Only ever report on the caller. The `authenticated` grant must stay: `client_table_column_overrides.column_overrides_select` calls `public.is_admin_user()` — the only live policy that does (`ccf_select` in the same migration was later rewritten to inline `private.current_app_role()`, so read `pg_policies`, not the migration text). `pg_policies` renders that as a bare `is_admin_user()` (because `public` is in the search_path), so grepping for `public\.` makes these look unused — they are not, and a `drop ... cascade` would take that policy with them |
+| `public_lead_stats()` | `anon` | **unchanged** | Deliberate ([ADR-0014](../../adr/0014-public-marketing-stats-rpc.md)) — see §3.8 |
+
+The `20260722e` / `20260828b` migrations already used the correct
+`revoke all ... from public, anon, authenticated`, which is why the OOO/CRM RPCs were never exposed.
+The rule now lives in the `rls-migration` skill, and
+`get_advisors(type: "security")` reports the same class as
+`anon_security_definer_function_executable`.
 
 ### 3.8 `public_lead_stats()` — the one anon-callable RPC (ADR-0014)
 
