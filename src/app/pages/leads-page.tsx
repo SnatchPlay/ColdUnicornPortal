@@ -20,21 +20,14 @@ import { LeadOfferEditor } from "../components/lead-offer-editor";
 import { LeadValueDeliveriesEditor } from "../components/lead-value-deliveries-editor";
 import { LeadTasksEditor } from "../components/lead-tasks-editor";
 import { LightweightSheet } from "../components/ui/lightweight-sheet";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "../components/ui/pagination";
+import { ListPagination } from "../components/list-pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { repository } from "../data/repository";
 import { PIPELINE_STAGES, type PipelineStage } from "../lib/client-view-models";
 import { useLeadDetail, useLeadTasks, useLeadsFilterOptions } from "../lib/use-leads";
 import { useLeadViewModeList } from "../lib/use-lead-crm";
 import { getFullName } from "../lib/format";
+import { clampPage } from "../lib/pagination";
 import { buildLeadReportColumns } from "../lib/lead-report-columns";
 import { buildLeadColumnsForViewMode, type LeadCrmColumn } from "../lib/lead-crm-columns";
 import { useLeadCustomColumns } from "../lib/use-lead-custom-columns";
@@ -74,35 +67,16 @@ interface CreateLeadDraft {
 
 const ALL_FILTER_VALUE = "__all__";
 const PAGE_SIZE = 50;
-const MAX_PAGE_LINKS = 5;
 
 type SortDirection = "asc" | "desc";
 // Server sort fields supported by loadLeadsList (see orm-gateway orderClause).
 const LEAD_SORT_KEYS = ["lead", "client", "company", "campaign", "step", "status", "replies", "lastReply", "created"] as const;
 type LeadSortKey = (typeof LEAD_SORT_KEYS)[number];
 
-function clampPage(page: number, totalPages: number) {
-  if (totalPages <= 0) return 1;
-  return Math.min(Math.max(page, 1), totalPages);
-}
-
 function parsePage(value: string | null) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) return 1;
   return parsed;
-}
-
-function buildPageWindow(currentPage: number, totalPages: number) {
-  if (totalPages <= MAX_PAGE_LINKS) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
-  const radius = Math.floor(MAX_PAGE_LINKS / 2);
-  let start = Math.max(1, currentPage - radius);
-  let end = Math.min(totalPages, start + MAX_PAGE_LINKS - 1);
-  start = Math.max(1, end - MAX_PAGE_LINKS + 1);
-  const pages: number[] = [];
-  for (let page = start; page <= end; page += 1) pages.push(page);
-  return pages;
 }
 
 function parseTimeframeFromParams(searchParams: URLSearchParams): TimeframeValue {
@@ -394,7 +368,6 @@ function InternalLeadsPage() {
 
   const totalPages = Math.max(1, Math.ceil(scopedCount / PAGE_SIZE));
   const safeCurrentPage = clampPage(currentPage, totalPages);
-  const pageWindow = useMemo(() => buildPageWindow(safeCurrentPage, totalPages), [safeCurrentPage, totalPages]);
   const timeframeLabel = getTimeframeLabel(timeframe);
 
   const selectedLead = useMemo(() => rows.find((r) => r.id === selectedLeadId) ?? null, [rows, selectedLeadId]);
@@ -854,33 +827,7 @@ function InternalLeadsPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">Page {safeCurrentPage} of {totalPages}</p>
-            <Pagination className="mx-0 w-auto justify-start">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (safeCurrentPage > 1) setCurrentPage(safeCurrentPage - 1); }} className={safeCurrentPage <= 1 ? "pointer-events-none opacity-40" : ""} />
-                </PaginationItem>
-                {pageWindow[0] && pageWindow[0] > 1 ? (
-                  <>
-                    <PaginationItem><PaginationLink href="#" onClick={(e) => { e.preventDefault(); setCurrentPage(1); }}>1</PaginationLink></PaginationItem>
-                    {pageWindow[0] > 2 ? <PaginationItem><PaginationEllipsis /></PaginationItem> : null}
-                  </>
-                ) : null}
-                {pageWindow.map((page) => (
-                  <PaginationItem key={page}>
-                    <PaginationLink href="#" isActive={page === safeCurrentPage} onClick={(e) => { e.preventDefault(); setCurrentPage(page); }}>{page}</PaginationLink>
-                  </PaginationItem>
-                ))}
-                {pageWindow[pageWindow.length - 1] && pageWindow[pageWindow.length - 1] < totalPages ? (
-                  <>
-                    {pageWindow[pageWindow.length - 1] < totalPages - 1 ? <PaginationItem><PaginationEllipsis /></PaginationItem> : null}
-                    <PaginationItem><PaginationLink href="#" onClick={(e) => { e.preventDefault(); setCurrentPage(totalPages); }}>{totalPages}</PaginationLink></PaginationItem>
-                  </>
-                ) : null}
-                <PaginationItem>
-                  <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (safeCurrentPage < totalPages) setCurrentPage(safeCurrentPage + 1); }} className={safeCurrentPage >= totalPages ? "pointer-events-none opacity-40" : ""} />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
+            <ListPagination page={safeCurrentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
           </div>
         </Surface>
       )}

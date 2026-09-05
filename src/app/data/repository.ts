@@ -279,7 +279,12 @@ function mapRepositoryError(reason: unknown, table: string, operation: Repositor
 // Shared envelope for the admin user-management RPCs (SECURITY DEFINER functions
 // called directly, not via the gateway). Throws a RepositoryError on failure.
 async function invokeUserRpc(
-  fn: "admin_list_users" | "admin_update_user_role" | "admin_set_user_active" | "admin_set_user_avatar",
+  fn:
+    | "admin_list_users"
+    | "admin_update_user_role"
+    | "admin_set_user_active"
+    | "admin_set_user_avatar"
+    | "admin_set_user_name",
   params: Record<string, unknown>,
   operation: RepositoryOperation,
 ): Promise<unknown> {
@@ -673,6 +678,8 @@ export interface Repository {
   setUserActive(userId: string, active: boolean): Promise<ManagedUserRecord>;
   /** Admin-tier only: set/clear another user's avatar path (admin_set_user_avatar RPC). */
   setUserAvatar(userId: string, avatarPath: string | null): Promise<ManagedUserRecord>;
+  /** Admin-side name correction for another user (self-service goes through `updateProfileName`). */
+  setUserName(userId: string, firstName: string, lastName: string): Promise<ManagedUserRecord>;
   /** True when the *current* signed-in account is still active (not deactivated). */
   isCurrentAccountActive(): Promise<boolean>;
   upsertColumnOverride(
@@ -1098,6 +1105,15 @@ export const repository: Repository = {
     const data = await invokeUserRpc(
       "admin_set_user_avatar",
       { target_user_id: userId, new_avatar_path: avatarPath },
+      "update",
+    );
+    return toManagedUserRecord(data as Record<string, unknown>);
+  },
+
+  async setUserName(userId, firstName, lastName) {
+    const data = await invokeUserRpc(
+      "admin_set_user_name",
+      { target_user_id: userId, new_first_name: firstName, new_last_name: lastName },
       "update",
     );
     return toManagedUserRecord(data as Record<string, unknown>);
